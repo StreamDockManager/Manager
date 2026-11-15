@@ -1,0 +1,1256 @@
+<div
+    x-data="keyboardSettings"
+    @keyboard-device-settings.window="keyboard.refreshDeviceSettings()"
+    @keyboard-settings-open.window="keyboard.refreshDeviceSettings()"
+>
+    <section
+        class="device-output-settings"
+        x-data="deviceOutput"
+        aria-label="Device output settings"
+        x-show="supportsOutput"
+    >
+        <div class="device-output-overview">
+            <div>
+                <h2 x-text="heading"></h2>
+                <p class="field-help" x-text="outputSummary"></p>
+                <p
+                    class="field-help"
+                    role="status"
+                    x-show="imageOutputWarning"
+                    x-text="imageOutputWarning"
+                ></p>
+            </div>
+            <button
+                type="button"
+                class="button"
+                aria-label="Adjust device output"
+                aria-haspopup="dialog"
+                @click="showOutput"
+            >
+                Device settings
+                <svg
+                    class="workspace-icon"
+                    viewBox="0 0 24 24"
+                    fill="none"
+                    stroke="currentColor"
+                    stroke-width="1.8"
+                    stroke-linecap="round"
+                    aria-hidden="true"
+                >
+                    <path d="M4 7h5m4 0h7M4 17h9m4 0h3M9 4v6m4 4v6" />
+                </svg>
+            </button>
+        </div>
+        <dialog
+            x-ref="output"
+            class="feature-dialog device-output-dialog"
+            :class="outputTab === 'keyboard' ? 'keyboard-controls-dialog' : ''"
+            aria-label="Device output settings"
+            @cancel.prevent="closeOutput"
+        >
+            <header class="picker-header">
+                <div>
+                    <h2 x-text="heading"></h2>
+                    <p x-text="app.device ? app.device.name : ''"></p>
+                </div>
+                <button
+                    type="button"
+                    class="icon-button"
+                    aria-label="Close device output settings"
+                    @click="closeOutput"
+                    autofocus
+                >
+                    ×
+                </button>
+            </header>
+            <div
+                class="catalog-tabs device-output-tabs"
+                role="tablist"
+                aria-label="Device settings"
+                @keydown="navigateOutputTabs"
+            >
+                <button
+                    type="button"
+                    role="tab"
+                    id="device-output-tab-display"
+                    aria-controls="device-output-display"
+                    x-show="hasDisplaySettings"
+                    :aria-selected="outputTab === 'display'"
+                    :tabindex="outputTab === 'display' ? 0 : -1"
+                    @click="selectOutputTab('display')"
+                >
+                    Display
+                </button>
+                <button
+                    type="button"
+                    role="tab"
+                    id="device-output-tab-keyboard"
+                    aria-controls="device-output-keyboard"
+                    x-show="hasKeyboardSettings"
+                    :aria-selected="outputTab === 'keyboard'"
+                    :tabindex="outputTab === 'keyboard' ? 0 : -1"
+                    @click="selectOutputTab('keyboard')"
+                >
+                    Keyboard
+                </button>
+                <button
+                    type="button"
+                    role="tab"
+                    id="device-output-tab-behavior"
+                    aria-controls="device-output-behavior"
+                    :aria-selected="outputTab === 'behavior'"
+                    :tabindex="outputTab === 'behavior' ? 0 : -1"
+                    @click="selectOutputTab('behavior')"
+                >
+                    Behavior
+                </button>
+                <button
+                    type="button"
+                    role="tab"
+                    id="device-output-tab-firmware"
+                    aria-controls="device-output-firmware"
+                    :aria-selected="outputTab === 'firmware'"
+                    :tabindex="outputTab === 'firmware' ? 0 : -1"
+                    @click="selectOutputTab('firmware')"
+                >
+                    Firmware
+                </button>
+            </div>
+            <div class="feature-body device-output-body" x-ref="outputBody">
+                <p class="field-help" x-show="app.simulated">
+                    Simulator · Changes are saved for this device.
+                </p>
+                <p
+                    class="field-help"
+                    x-show="outputTab !== 'keyboard' && app.deviceUnavailableReason"
+                    x-text="app.deviceUnavailableReason"
+                ></p>
+                <div
+                    class="device-sleep"
+                    x-show="app.device && app.device.manifest.capabilities.sleep"
+                >
+                    <span
+                        x-text="app.effectiveDeviceOutput.sleeping ? 'Device is sleeping' : 'Device is awake'"
+                    ></span>
+                    <button
+                        type="button"
+                        class="button"
+                        @click="toggleSleep"
+                        :disabled="app.busy"
+                        x-text="app.effectiveDeviceOutput.sleeping ? 'Wake device' : 'Sleep device'"
+                    ></button>
+                </div>
+                <div
+                    id="device-output-keyboard"
+                    role="tabpanel"
+                    aria-labelledby="device-output-tab-keyboard"
+                    class="device-output-panel"
+                    x-show="outputTab === 'keyboard'"
+                    tabindex="0"
+                >
+                    <section
+                        class="settings-section keyboard-settings-panel"
+                        data-keyboard-settings
+                        @discard-keyboard="keyboard.discardEvent($event)"
+                        aria-label="Keyboard settings"
+                    >
+                        <div class="keyboard-lighting-section">
+                            <h3>Lighting</h3>
+                            <fieldset
+                                class="keyboard-lighting-fields"
+                                :disabled="!keyboard.supported || keyboard.saving || !keyboard.connected"
+                                aria-label="Keyboard changes"
+                            >
+                                <div class="field-group keyboard-brightness">
+                                    <label>
+                                        <span class="range-label">
+                                            Brightness
+                                            <output
+                                                x-text="keyboard.brightness === '' ? 'Not set' : keyboard.brightness + '%'"
+                                            ></output>
+                                        </span>
+                                        <input
+                                            aria-label="Keyboard brightness"
+                                            type="range"
+                                            min="0"
+                                            :max="keyboard.brightnessMax"
+                                            step="1"
+                                            :value="keyboard.brightnessValue"
+                                            @input="keyboard.brightnessChanged($event)"
+                                        />
+                                    </label>
+                                </div>
+                                <div class="settings-form-grid keyboard-effect-fields">
+                                    <div class="field-group">
+                                        <label :for="keyboard.effectsId">Effect</label>
+                                        <select
+                                            :id="keyboard.effectsId"
+                                            aria-label="Keyboard effects"
+                                            x-model="keyboard.effect"
+                                            @change="keyboard.previewChanged()"
+                                            :disabled="!keyboard.hasEffects || keyboard.saving || !keyboard.connected"
+                                        >
+                                            <template x-if="keyboard.effect === ''">
+                                                <option value="" disabled>Not reported</option>
+                                            </template>
+                                            <template
+                                                x-for="effect in keyboard.effectOptions"
+                                                :key="effect.value"
+                                            >
+                                                <option
+                                                    :value="effect.value"
+                                                    x-text="effect.label"
+                                                ></option>
+                                            </template>
+                                        </select>
+                                    </div>
+                                    <div class="field-group">
+                                        <label :for="keyboard.speedId">Speed</label>
+                                        <select
+                                            :id="keyboard.speedId"
+                                            aria-label="Effect speed"
+                                            x-model="keyboard.speed"
+                                            @change="keyboard.previewChanged()"
+                                            :disabled="!keyboard.hasSpeed || keyboard.saving || !keyboard.connected"
+                                        >
+                                            <template x-if="keyboard.speed === ''">
+                                                <option value="" disabled>Not reported</option>
+                                            </template>
+                                            <template
+                                                x-for="speed in keyboard.speedOptions"
+                                                :key="speed"
+                                            >
+                                                <option :value="speed" x-text="speed"></option>
+                                            </template>
+                                        </select>
+                                    </div>
+                                </div>
+                                <div class="keyboard-mode-row" x-show="keyboard.hasGlobalRgb">
+                                    <label class="keyboard-color-switch">
+                                        <span>Custom colors</span>
+                                        <input
+                                            type="checkbox"
+                                            role="switch"
+                                            aria-label="Custom colors"
+                                            x-model="keyboard.customColor"
+                                            @change="keyboard.customColorChanged()"
+                                        />
+                                        <span
+                                            class="keyboard-switch-track"
+                                            aria-hidden="true"
+                                        ></span>
+                                    </label>
+                                    <span
+                                        class="keyboard-mode-caption"
+                                        x-text="keyboard.customColorLabel"
+                                    ></span>
+                                </div>
+                                <div class="settings-form-grid keyboard-color-fields">
+                                    <div class="field-group" x-show="keyboard.hasGlobalRgb">
+                                        <label :for="keyboard.colorId">Effect color</label>
+                                        <div>
+                                            <span class="color-field keyboard-color-control">
+                                                <input
+                                                    aria-label="Global RGB color picker"
+                                                    :disabled="!keyboard.customColor"
+                                                    type="color"
+                                                    :value="keyboard.colorValue"
+                                                    @input="keyboard.colorChanged($event)"
+                                                    @change="keyboard.colorChanged($event)"
+                                                />
+                                                <input
+                                                    :id="keyboard.colorId"
+                                                    aria-label="Global RGB color"
+                                                    :disabled="!keyboard.customColor"
+                                                    type="text"
+                                                    x-model="keyboard.color"
+                                                    @change="keyboard.previewChanged()"
+                                                    placeholder="#RRGGBB"
+                                                    maxlength="7"
+                                                    spellcheck="false"
+                                                />
+                                            </span>
+                                        </div>
+                                    </div>
+                                    <div
+                                        class="field-group"
+                                        x-show="keyboard.supportsBackgroundColor"
+                                    >
+                                        <div class="keyboard-field-heading">
+                                            <label :for="keyboard.backgroundColorId">
+                                                Background
+                                            </label>
+                                            <button
+                                                type="button"
+                                                class="icon-button keyboard-help"
+                                                aria-label="About background color"
+                                                data-tooltip="Available for Ripple (background). Supports hue and saturation at full brightness."
+                                            >
+                                                <svg
+                                                    viewBox="0 0 24 24"
+                                                    fill="none"
+                                                    stroke="currentColor"
+                                                    stroke-width="1.8"
+                                                    aria-hidden="true"
+                                                >
+                                                    <circle cx="12" cy="12" r="9" />
+                                                    <path d="M12 11v6m0-10v1" />
+                                                </svg>
+                                            </button>
+                                        </div>
+                                        <div
+                                            class="color-field keyboard-color-control keyboard-background-control"
+                                        >
+                                            <input
+                                                :id="keyboard.backgroundColorId"
+                                                aria-label="Ripple background color picker"
+                                                :disabled="!keyboard.hasBackgroundColor"
+                                                type="color"
+                                                :value="keyboard.backgroundColorValue"
+                                                @input="keyboard.backgroundChanged($event)"
+                                                @change="keyboard.backgroundChanged($event)"
+                                            />
+                                            <output
+                                                x-text="keyboard.backgroundColor || 'Not set'"
+                                            ></output>
+                                        </div>
+                                    </div>
+                                </div>
+                            </fieldset>
+                        </div>
+                        <div class="keyboard-layout-section">
+                            <div class="field-group">
+                                <label :for="keyboard.osModeId">Keyboard layout</label>
+                                <select
+                                    :id="keyboard.osModeId"
+                                    aria-label="Keyboard OS mode"
+                                    data-tooltip="Auto matches your OS. Linux uses Windows mode."
+                                    x-model="keyboard.osMode"
+                                    @change="keyboard.osModeChanged()"
+                                    :disabled="keyboard.saving || !keyboard.connected"
+                                >
+                                    <template x-if="keyboard.osMode === ''">
+                                        <option value="" disabled>Not reported</option>
+                                    </template>
+                                    <option value="auto">Auto</option>
+                                    <template x-for="mode in keyboard.osModes" :key="mode">
+                                        <option
+                                            :value="mode"
+                                            x-text="mode === 'macos' ? 'macOS' : 'Windows'"
+                                        ></option>
+                                    </template>
+                                </select>
+                            </div>
+                            <div class="field-group" x-show="keyboard.hasSleepTimer">
+                                <label :for="keyboard.sleepTimeoutId">Sleep after</label>
+                                <select
+                                    :id="keyboard.sleepTimeoutId"
+                                    aria-label="Keyboard sleep timer"
+                                    data-tooltip="Device idle timer. Applied when you choose Apply; never previewed."
+                                    x-model="keyboard.sleepTimeout"
+                                    @change="keyboard.sleepTimeoutChanged()"
+                                    :disabled="keyboard.unavailableReason !== ''"
+                                >
+                                    <option value="" disabled>Not set</option>
+                                    <template
+                                        x-for="option in keyboard.sleepTimeoutOptions"
+                                        :key="option.value"
+                                    >
+                                        <option
+                                            :value="option.value"
+                                            x-text="option.label"
+                                        ></option>
+                                    </template>
+                                </select>
+                            </div>
+                        </div>
+                        <div
+                            class="keyboard-status-slot"
+                            role="region"
+                            aria-label="Keyboard status"
+                            tabindex="0"
+                        >
+                            <p
+                                class="danger-text"
+                                role="alert"
+                                x-show="keyboard.error"
+                                x-text="keyboard.error"
+                            ></p>
+                            <p
+                                class="field-help"
+                                role="status"
+                                x-show="!keyboard.error"
+                                x-text="keyboard.feedback"
+                            ></p>
+                        </div>
+                        <div class="keyboard-utilities">
+                            <button
+                                type="button"
+                                class="button"
+                                @click="keyboard.reapply()"
+                                :disabled="!keyboard.canPrepare"
+                            >
+                                Reapply saved settings
+                            </button>
+                            <button
+                                type="button"
+                                class="button"
+                                x-show="keyboard.hasFactoryReset"
+                                :disabled="!keyboard.canFactoryReset"
+                                @click="requestFactoryReset"
+                                aria-haspopup="dialog"
+                            >
+                                Factory Default
+                            </button>
+                            <button
+                                type="button"
+                                class="icon-button keyboard-help"
+                                aria-label="About keyboard settings"
+                                :data-tooltip="keyboard.detailsHelp"
+                            >
+                                <svg
+                                    viewBox="0 0 24 24"
+                                    fill="none"
+                                    stroke="currentColor"
+                                    stroke-width="1.8"
+                                    aria-hidden="true"
+                                >
+                                    <circle cx="12" cy="12" r="9" />
+                                    <path d="M12 11v6m0-10v1" />
+                                </svg>
+                            </button>
+                        </div>
+                    </section>
+                </div>
+                <div
+                    id="device-output-display"
+                    role="tabpanel"
+                    aria-labelledby="device-output-tab-display"
+                    class="device-output-panel"
+                    x-show="outputTab === 'display'"
+                    tabindex="0"
+                >
+                    <section
+                        class="settings-section"
+                        x-show="app.device && (app.device.manifest.capabilities.brightness || channels.length)"
+                    >
+                        <h3>Brightness</h3>
+                        <fieldset
+                            class="device-output-fields"
+                            aria-label="Device brightness levels"
+                            :disabled="!app.device || app.busy"
+                        >
+                            <label
+                                x-show="app.device && app.device.manifest.capabilities.brightness"
+                            >
+                                <span class="range-label">
+                                    Device brightness
+                                    <output x-text="brightness + '%'"></output>
+                                </span>
+                                <input
+                                    aria-label="Device brightness"
+                                    type="range"
+                                    min="0"
+                                    max="100"
+                                    step="1"
+                                    x-model="brightness"
+                                    @change="save"
+                                />
+                            </label>
+                            <label x-show="channels.length">
+                                <span class="range-label">
+                                    Lighting brightness
+                                    <output x-text="lightingBrightness + '%'"></output>
+                                </span>
+                                <input
+                                    aria-label="Lighting brightness"
+                                    type="range"
+                                    min="0"
+                                    max="100"
+                                    step="1"
+                                    x-model="lightingBrightness"
+                                    @change="save"
+                                />
+                            </label>
+                        </fieldset>
+                    </section>
+                    <section class="settings-section" x-show="channels.length">
+                        <h3>Lighting colors</h3>
+                        <fieldset
+                            class="dial-colors"
+                            aria-label="Lighting colors"
+                            :disabled="!app.device || app.busy"
+                        >
+                            <template x-for="(channel, index) in channels" :key="channel">
+                                <label>
+                                    <span x-text="channelName(channel)"></span>
+                                    <span class="color-field">
+                                        <input
+                                            type="color"
+                                            :aria-label="channelName(channel) + ' RGB color'"
+                                            :value="colors[index]"
+                                            :data-index="index"
+                                            @change="colorChanged"
+                                        />
+                                        <output x-text="colors[index]"></output>
+                                    </span>
+                                </label>
+                            </template>
+                        </fieldset>
+                    </section>
+                    <section
+                        x-data="bootLogo"
+                        x-show="supported"
+                        class="settings-section device-output-logo"
+                        aria-label="Startup logo"
+                    >
+                        <div class="device-output-row">
+                            <div>
+                                <h3>Startup logo</h3>
+                                <p class="field-help">
+                                    A PNG or JPEG shown when the device starts.
+                                </p>
+                            </div>
+                            <div class="button-row">
+                                <button
+                                    type="button"
+                                    class="button"
+                                    @click="show"
+                                    aria-haspopup="dialog"
+                                    :disabled="!app.device || !app.device.connected"
+                                >
+                                    Choose startup logo
+                                </button>
+                            </div>
+                        </div>
+                        <dialog
+                            x-ref="logo"
+                            class="feature-dialog"
+                            aria-label="Device startup logo"
+                            @cancel.prevent="close"
+                            @close="closed"
+                        >
+                            <header class="picker-header">
+                                <h2>Device startup logo</h2>
+                                <button
+                                    type="button"
+                                    class="icon-button"
+                                    aria-label="Close startup logo"
+                                    @click="close"
+                                    :disabled="saving"
+                                >
+                                    ×
+                                </button>
+                            </header>
+                            <div class="feature-body settings-section">
+                                <p class="field-help">
+                                    The image is resized to
+                                    <span x-text="dimensions"></span>
+                                    pixels. Applying replaces the device’s saved startup image.
+                                </p>
+                                <p class="field-help" x-show="app.simulated">
+                                    Simulator preview uses a sample image and sends no device data.
+                                </p>
+                                <div class="settings-form-grid">
+                                    <label class="settings-field">
+                                        <span>Image sizing</span>
+                                        <select
+                                            x-model="fit"
+                                            @change="changeFit"
+                                            :disabled="preparing || saving"
+                                        >
+                                            <option value="contain">Fit entire image</option>
+                                            <option value="cover">Fill and crop</option>
+                                        </select>
+                                    </label>
+                                    <div class="settings-field">
+                                        <span>Source image</span>
+                                        <button
+                                            type="button"
+                                            class="button"
+                                            @click="choose"
+                                            :disabled="preparing || saving"
+                                        >
+                                            Choose image
+                                        </button>
+                                    </div>
+                                </div>
+                                <p role="status" x-show="preparing">Preparing startup logo…</p>
+                                <template x-if="preview">
+                                    <figure class="boot-logo-preview">
+                                        <img
+                                            :src="preview.image"
+                                            :width="preview.size[0]"
+                                            :height="preview.size[1]"
+                                            alt="Prepared startup logo"
+                                        />
+                                        <figcaption
+                                            class="field-help"
+                                            x-text="preview.file_name"
+                                        ></figcaption>
+                                    </figure>
+                                </template>
+                                <p class="field-help">
+                                    Keep the device connected until the transfer finishes. Restart
+                                    it to check the startup screen. Devices with a Boot video option
+                                    may need that option enabled in device configuration.
+                                </p>
+                                <p role="status" x-show="saving">Sending startup logo…</p>
+                                <p
+                                    role="alert"
+                                    class="danger-text"
+                                    x-show="error"
+                                    x-text="error"
+                                ></p>
+                            </div>
+                            <footer class="feature-footer button-row">
+                                <button
+                                    type="button"
+                                    class="button"
+                                    @click="close"
+                                    :disabled="saving"
+                                >
+                                    Cancel
+                                </button>
+                                <button
+                                    type="button"
+                                    class="button primary"
+                                    @click="save"
+                                    :disabled="!canApply"
+                                    x-text="saving ? 'Sending…' : 'Apply startup logo'"
+                                ></button>
+                            </footer>
+                        </dialog>
+                    </section>
+                </div>
+                <div
+                    id="device-output-behavior"
+                    role="tabpanel"
+                    aria-labelledby="device-output-tab-behavior"
+                    class="device-output-panel"
+                    x-show="outputTab === 'behavior'"
+                    tabindex="0"
+                >
+                    <section class="settings-section">
+                        <div class="device-output-actions">
+                            <div
+                                x-data="framePolicy"
+                                class="device-output-action"
+                                x-show="supported"
+                            >
+                                <div class="device-output-row">
+                                    <div>
+                                        <h3>Rendering</h3>
+                                        <p class="field-help" x-text="summary"></p>
+                                    </div>
+                                    <button
+                                        class="button"
+                                        type="button"
+                                        @click="show"
+                                        aria-label="Rendering method"
+                                        aria-haspopup="dialog"
+                                        :disabled="app.busy"
+                                    >
+                                        Change…
+                                    </button>
+                                </div>
+                                <dialog
+                                    x-ref="framePolicy"
+                                    class="feature-dialog"
+                                    aria-label="Rendering method"
+                                    @cancel.prevent="close"
+                                >
+                                    <header class="picker-header">
+                                        <h2>Rendering method</h2>
+                                        <button
+                                            class="icon-button"
+                                            type="button"
+                                            aria-label="Close rendering method"
+                                            @click="close"
+                                            :disabled="saving"
+                                        >
+                                            ×
+                                        </button>
+                                    </header>
+                                    <div class="feature-body settings-section">
+                                        <label class="settings-field">
+                                            <span>Rendering method</span>
+                                            <select
+                                                aria-label="Rendering method"
+                                                x-model="mode"
+                                                :disabled="saving"
+                                            >
+                                                <option value="individual_updates">
+                                                    Individual updates
+                                                </option>
+                                                <option value="frame_scheduling">
+                                                    Frame scheduling
+                                                </option>
+                                                <option
+                                                    value="grouped_key_updates"
+                                                    :disabled="!groupedSupported"
+                                                >
+                                                    Grouped key updates
+                                                </option>
+                                            </select>
+                                        </label>
+                                        <p class="field-help">
+                                            Individual updates sends each image as it changes. Frame
+                                            scheduling collects changed displays into scheduled
+                                            cycles. Grouped key updates shares a refresh between key
+                                            images in a cycle. Actual throughput depends on the
+                                            device.
+                                        </p>
+                                        <p
+                                            class="danger-text"
+                                            role="alert"
+                                            x-show="error"
+                                            x-text="error"
+                                        ></p>
+                                    </div>
+                                    <footer class="picker-footer button-row">
+                                        <button
+                                            class="button"
+                                            type="button"
+                                            @click="close"
+                                            :disabled="saving"
+                                        >
+                                            Cancel
+                                        </button>
+                                        <button
+                                            class="button primary"
+                                            type="button"
+                                            @click="save"
+                                            :disabled="!canSave"
+                                        >
+                                            Apply rendering method
+                                        </button>
+                                    </footer>
+                                </dialog>
+                            </div>
+                            <div x-data="devicePower" class="device-output-action">
+                                <div class="device-output-row">
+                                    <div>
+                                        <h3>Automatic power</h3>
+                                        <p
+                                            class="field-help"
+                                            role="status"
+                                            x-text="app.powerDescription"
+                                        ></p>
+                                    </div>
+                                    <button
+                                        type="button"
+                                        class="button"
+                                        @click="show"
+                                        aria-label="Automatic power settings"
+                                        aria-haspopup="dialog"
+                                        :disabled="!app.device || app.busy"
+                                    >
+                                        Configure…
+                                    </button>
+                                </div>
+                                <dialog
+                                    x-ref="power"
+                                    class="feature-dialog"
+                                    aria-label="Automatic device power"
+                                    @cancel.prevent="close"
+                                >
+                                    <header class="picker-header">
+                                        <h2>Automatic device power</h2>
+                                        <button
+                                            type="button"
+                                            class="icon-button"
+                                            aria-label="Close power settings"
+                                            @click="close"
+                                        >
+                                            ×
+                                        </button>
+                                    </header>
+                                    <div class="feature-body">
+                                        <p class="field-help">
+                                            Policies run while the editor is closed. Manual
+                                            brightness and sleep remain your baseline. Wake
+                                            overrides current conditions until they clear.
+                                        </p>
+                                        <p role="status" x-show="loading">
+                                            Loading power settings…
+                                        </p>
+                                        <p
+                                            class="danger-text"
+                                            role="alert"
+                                            x-show="error"
+                                            x-text="error"
+                                        ></p>
+                                        <template x-if="settings">
+                                            <div class="settings-section">
+                                                <label class="preference-toggle">
+                                                    <input
+                                                        type="checkbox"
+                                                        x-model="policy.enabled"
+                                                        :disabled="saving"
+                                                    />
+                                                    <span>
+                                                        Enable automatic power for this device
+                                                    </span>
+                                                </label>
+                                                <fieldset
+                                                    class="settings-section"
+                                                    :disabled="!policy.enabled || saving"
+                                                >
+                                                    <div class="settings-form-grid">
+                                                        <label class="settings-field">
+                                                            <span>When idle</span>
+                                                            <select x-model="policy.idle_action">
+                                                                <option value="off">Off</option>
+                                                                <option
+                                                                    value="dim"
+                                                                    :disabled="!capabilities.platform.idle || !capabilities.dim"
+                                                                >
+                                                                    Dim
+                                                                </option>
+                                                                <option
+                                                                    value="sleep"
+                                                                    :disabled="!capabilities.platform.idle || !capabilities.sleep"
+                                                                >
+                                                                    Sleep
+                                                                </option>
+                                                            </select>
+                                                        </label>
+                                                        <label class="settings-field">
+                                                            <span>Idle delay (minutes)</span>
+                                                            <input
+                                                                type="number"
+                                                                min="1"
+                                                                max="1440"
+                                                                x-model="policy.idle_minutes"
+                                                            />
+                                                        </label>
+                                                    </div>
+                                                    <p
+                                                        class="field-help"
+                                                        x-text="capabilities.platform.idle_description"
+                                                    ></p>
+                                                    <label class="settings-field">
+                                                        <span>When the session locks</span>
+                                                        <select x-model="policy.lock_action">
+                                                            <option value="off">Off</option>
+                                                            <option
+                                                                value="dim"
+                                                                :disabled="!capabilities.platform.lock || !capabilities.dim"
+                                                            >
+                                                                Dim
+                                                            </option>
+                                                            <option
+                                                                value="sleep"
+                                                                :disabled="!capabilities.platform.lock || !capabilities.sleep"
+                                                            >
+                                                                Sleep
+                                                            </option>
+                                                        </select>
+                                                    </label>
+                                                    <p
+                                                        class="field-help"
+                                                        x-text="capabilities.platform.lock_description"
+                                                    ></p>
+                                                    <label class="settings-field">
+                                                        <span>During scheduled hours</span>
+                                                        <select x-model="policy.schedule_action">
+                                                            <option value="off">Off</option>
+                                                            <option
+                                                                value="dim"
+                                                                :disabled="!capabilities.dim"
+                                                            >
+                                                                Dim
+                                                            </option>
+                                                            <option
+                                                                value="sleep"
+                                                                :disabled="!capabilities.sleep"
+                                                            >
+                                                                Sleep
+                                                            </option>
+                                                        </select>
+                                                    </label>
+                                                    <div
+                                                        class="settings-section"
+                                                        x-show="policy.schedule_action !== 'off'"
+                                                    >
+                                                        <fieldset class="settings-section">
+                                                            <legend>Starting days</legend>
+                                                            <div class="button-row">
+                                                                <template
+                                                                    x-for="day in days"
+                                                                    :key="day.id"
+                                                                >
+                                                                    <label
+                                                                        class="preference-toggle"
+                                                                    >
+                                                                        <input
+                                                                            type="checkbox"
+                                                                            :data-day="day.id"
+                                                                            :checked="selectedDay(day.id)"
+                                                                            @change="toggleDay"
+                                                                        />
+                                                                        <span
+                                                                            x-text="day.label"
+                                                                        ></span>
+                                                                    </label>
+                                                                </template>
+                                                            </div>
+                                                        </fieldset>
+                                                        <div class="settings-form-grid">
+                                                            <label class="settings-field">
+                                                                <span>Start time</span>
+                                                                <input
+                                                                    type="time"
+                                                                    x-model="startTime"
+                                                                />
+                                                            </label>
+                                                            <label class="settings-field">
+                                                                <span>End time</span>
+                                                                <input
+                                                                    type="time"
+                                                                    x-model="endTime"
+                                                                />
+                                                            </label>
+                                                        </div>
+                                                        <p class="field-help">
+                                                            Uses this computer’s local time. An
+                                                            earlier end continues into the next day;
+                                                            matching times cover the full day.
+                                                        </p>
+                                                    </div>
+                                                    <label class="settings-field">
+                                                        <span>Dim brightness (%)</span>
+                                                        <input
+                                                            type="number"
+                                                            min="0"
+                                                            max="100"
+                                                            x-model="policy.dim_brightness"
+                                                        />
+                                                    </label>
+                                                </fieldset>
+                                                <p
+                                                    class="field-help"
+                                                    x-text="capabilities.wake_description"
+                                                ></p>
+                                                <p class="field-help">
+                                                    The interaction that wakes automatic sleep and
+                                                    its release are consumed. Manual sleep requires
+                                                    Wake.
+                                                </p>
+                                            </div>
+                                        </template>
+                                    </div>
+                                    <footer class="picker-footer">
+                                        <div class="button-row">
+                                            <button type="button" class="button" @click="close">
+                                                Cancel
+                                            </button>
+                                            <button
+                                                type="button"
+                                                class="button primary"
+                                                @click="save"
+                                                :disabled="!settings || loading || saving"
+                                                x-text="saving ? 'Saving…' : 'Save power settings'"
+                                            ></button>
+                                        </div>
+                                    </footer>
+                                </dialog>
+                            </div>
+                        </div>
+                    </section>
+                    <section class="settings-section" x-show="vibration && vibration.toggle">
+                        <div class="device-output-row">
+                            <label class="preference-toggle">
+                                <input
+                                    type="checkbox"
+                                    :checked="vibrationEnabled === true"
+                                    x-effect="syncVibration($el)"
+                                    @change="changeVibration"
+                                    :disabled="vibrationDisabled"
+                                />
+                                <span>Vibration feedback</span>
+                            </label>
+                            <p class="field-help" x-show="vibrationEnabled === null">
+                                Device default
+                            </p>
+                        </div>
+                        <div class="field-group">
+                            <p class="field-help">On/off feedback; strength is fixed.</p>
+                            <p
+                                class="field-help"
+                                x-show="vibrationRequirement"
+                                x-text="vibrationRequirement"
+                            ></p>
+                            <p
+                                class="field-help"
+                                x-show="!app.simulated && vibration && !vibration.writable"
+                                x-text="vibration ? vibration.unavailable_reason : ''"
+                            ></p>
+                            <p
+                                class="field-help"
+                                x-show="configurationFields.length && !hasReviewedConfiguration"
+                            >
+                                Review the linked device settings before your first change.
+                            </p>
+                            <p class="field-help danger-text" x-show="vibrationFirmwareBlocked">
+                                Update the device firmware before changing vibration.
+                            </p>
+                        </div>
+                        <div class="button-row" x-show="configurationFields.length">
+                            <button
+                                type="button"
+                                class="button"
+                                @click="reviewConfiguration"
+                                :disabled="app.busy"
+                                aria-haspopup="dialog"
+                            >
+                                Review device configuration
+                            </button>
+                        </div>
+                        <dialog
+                            x-ref="configuration"
+                            class="feature-dialog"
+                            aria-label="Review device configuration"
+                            @cancel.prevent="closeConfiguration"
+                        >
+                            <header class="picker-header">
+                                <h2>Review device configuration</h2>
+                                <button
+                                    type="button"
+                                    class="icon-button"
+                                    aria-label="Close device configuration"
+                                    @click="closeConfiguration"
+                                    :disabled="configurationSaving"
+                                >
+                                    ×
+                                </button>
+                            </header>
+                            <div class="feature-body settings-section">
+                                <p class="field-help">
+                                    These settings are applied together. Their current values aren’t
+                                    available here, so choose each one before applying. Later
+                                    vibration changes reuse the saved choices.
+                                </p>
+                                <div class="settings-form-grid">
+                                    <label class="settings-field">
+                                        <span>Vibration feedback</span>
+                                        <select
+                                            x-model="configurationVibration"
+                                            :disabled="configurationSaving"
+                                        >
+                                            <option value="">Choose on or off</option>
+                                            <option value="on">On</option>
+                                            <option value="off">Off</option>
+                                        </select>
+                                    </label>
+                                    <template x-for="field in configurationFields" :key="field.id">
+                                        <div class="field-group">
+                                            <label class="settings-field">
+                                                <span x-text="field.label"></span>
+                                                <select
+                                                    :data-field="field.id"
+                                                    :aria-label="field.label"
+                                                    :value="configurationDraft[field.id]"
+                                                    @change="configurationChanged"
+                                                    :disabled="configurationSaving"
+                                                >
+                                                    <option value="">Choose on or off</option>
+                                                    <option value="on">On</option>
+                                                    <option value="off">Off</option>
+                                                </select>
+                                            </label>
+                                            <small class="field-help" x-text="field.help"></small>
+                                        </div>
+                                    </template>
+                                </div>
+                                <p class="field-help" x-show="app.effectiveDeviceOutput.sleeping">
+                                    Changes will apply when the device wakes.
+                                </p>
+                                <p class="field-help danger-text" x-show="vibrationFirmwareBlocked">
+                                    Update the device firmware before applying these settings.
+                                </p>
+                                <p
+                                    class="danger-text"
+                                    role="alert"
+                                    x-show="configurationError"
+                                    x-text="configurationError"
+                                ></p>
+                            </div>
+                            <footer class="picker-footer button-row">
+                                <button
+                                    type="button"
+                                    class="button"
+                                    @click="closeConfiguration"
+                                    :disabled="configurationSaving"
+                                >
+                                    Cancel
+                                </button>
+                                <button
+                                    type="button"
+                                    class="button primary"
+                                    @click="saveConfiguration"
+                                    :disabled="!configurationCanApply"
+                                    x-text="configurationSaving ? 'Applying…' : 'Apply device configuration'"
+                                ></button>
+                            </footer>
+                        </dialog>
+                    </section>
+                </div>
+                <div
+                    id="device-output-firmware"
+                    role="tabpanel"
+                    aria-labelledby="device-output-tab-firmware"
+                    class="device-output-panel"
+                    x-show="outputTab === 'firmware'"
+                    tabindex="0"
+                >
+                    <section class="settings-section" aria-label="Device firmware">
+                        <dl class="health-details device-firmware-details" x-show="firmware">
+                            <div>
+                                <dt>Installed</dt>
+                                <dd x-text="installedFirmware"></dd>
+                            </div>
+                            <div>
+                                <dt>Latest release</dt>
+                                <dd x-text="latestFirmware"></dd>
+                            </div>
+                            <div>
+                                <dt>USB release</dt>
+                                <dd
+                                    x-text="app.device ? app.device.usb_release || 'Unavailable' : 'Unavailable'"
+                                ></dd>
+                            </div>
+                            <div>
+                                <dt>Last checked</dt>
+                                <dd>
+                                    <time
+                                        :datetime="firmwareCheckedAt"
+                                        x-text="firmwareChecked"
+                                    ></time>
+                                </dd>
+                            </div>
+                        </dl>
+                        <div
+                            class="field-group"
+                            x-show="firmwareReadMessage || firmwareReleaseMessage || firmwareError"
+                        >
+                            <p
+                                class="field-help"
+                                role="status"
+                                x-show="firmwareReadMessage"
+                                x-text="firmwareReadMessage"
+                            ></p>
+                            <p
+                                class="field-help"
+                                role="status"
+                                x-show="firmwareReleaseMessage"
+                                x-text="firmwareReleaseMessage"
+                            ></p>
+                            <p
+                                class="field-help danger-text"
+                                role="alert"
+                                x-show="firmwareError"
+                                x-text="firmwareError"
+                            ></p>
+                        </div>
+                        <div class="button-row">
+                            <button
+                                type="button"
+                                class="button"
+                                aria-label="Check for firmware updates"
+                                @click="checkFirmware"
+                                :disabled="firmwareBusy || !app.device || !app.device.manifest.capabilities.firmware_query"
+                            >
+                                Check for updates
+                            </button>
+                            <button
+                                type="button"
+                                class="button"
+                                aria-label="Open update instructions"
+                                @click="openFirmwareInstructions"
+                                x-show="firmware && firmware.instructions"
+                                :disabled="firmwareBusy"
+                            >
+                                Instructions
+                            </button>
+                        </div>
+                    </section>
+                </div>
+            </div>
+            <footer class="feature-footer">
+                <p
+                    class="field-help"
+                    x-show="outputTab !== 'keyboard'"
+                    x-text="outputTab === 'display' ? 'Brightness and colors save automatically.' : 'Settings apply to this device.'"
+                ></p>
+                <div class="button-row">
+                    <button
+                        type="button"
+                        class="button"
+                        x-show="outputTab === 'keyboard'"
+                        @click="keyboard.discard()"
+                        :disabled="keyboard.saving || keyboard.discarding || (!keyboard.dirty && !keyboard.previewId && !keyboard.previewing)"
+                    >
+                        Cancel
+                    </button>
+                    <button type="button" class="button" @click="closeOutput">Done</button>
+                    <button
+                        type="button"
+                        class="button primary"
+                        x-show="outputTab === 'keyboard'"
+                        @click="keyboard.apply()"
+                        :disabled="!keyboard.canApply"
+                        x-text="keyboard.saving ? 'Applying…' : 'Apply'"
+                    ></button>
+                </div>
+            </footer>
+        </dialog>
+    </section>
+    <dialog
+        x-ref="keyboardFactoryConfirm"
+        class="feature-dialog"
+        aria-label="Factory Default keyboard reset"
+        @cancel.prevent="cancelFactoryReset"
+    >
+        <header class="picker-header">
+            <h2>Factory Default</h2>
+            <button
+                type="button"
+                class="icon-button"
+                aria-label="Cancel factory reset"
+                @click="cancelFactoryReset"
+            >
+                ×
+            </button>
+        </header>
+        <div class="feature-body">
+            <p>Reset this keyboard to its factory defaults now?</p>
+            <p>
+                This resets device lighting, built-in key mappings, macros and stored images. This
+                is not just a lighting reset and cannot be undone. Manager profiles and bindings are
+                preserved.
+            </p>
+            <p>
+                Pending keyboard edits will be discarded. The keyboard may reconnect. Reported
+                settings will refresh afterward; fields the device does not report will remain
+                unknown.
+            </p>
+        </div>
+        <footer class="feature-footer">
+            <div class="button-row">
+                <button type="button" class="button" @click="cancelFactoryReset" autofocus>
+                    Cancel
+                </button>
+                <button
+                    type="button"
+                    class="button danger"
+                    @click="confirmFactoryReset"
+                    :disabled="!keyboard.canFactoryReset"
+                >
+                    Reset keyboard now
+                </button>
+            </div>
+        </footer>
+    </dialog>
+</div>

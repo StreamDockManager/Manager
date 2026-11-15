@@ -1,0 +1,76 @@
+{
+    "schema_version": 1,
+    "scope": "Pinned independent protocol references. Upstream hardware observations are not local qualification.",
+    "sources": [
+        {
+            "repository": "tommasobbianchi/opendeck-vsd-n1",
+            "revision": "635f1cb492c663e63200fcdaba9f436489f7a475",
+            "path": "src/mappings.rs",
+            "git_blob": "c736dda9eb3648de32920d317542a0ec13fe9216",
+            "sha256": "15a6601a391309cc66b4b74494f4fb0803d69541c5899be661009b5fdd3c35f8"
+        },
+        {
+            "repository": "tommasobbianchi/opendeck-vsd-n1",
+            "revision": "635f1cb492c663e63200fcdaba9f436489f7a475",
+            "path": "src/inputs.rs",
+            "git_blob": "97fc410b2f33a057e09cc92eabc9f2453a8496d3",
+            "sha256": "df91a07c233480f77a6d8d316616f0f6ce103afdf93f1499cd4fcc5b5de818f4"
+        },
+        {
+            "repository": "tommasobbianchi/opendeck-vsd-n1",
+            "revision": "635f1cb492c663e63200fcdaba9f436489f7a475",
+            "path": "src/device.rs",
+            "git_blob": "7f9a168a6f23b5d3eb245566b0e8b2d78662bd3c",
+            "sha256": "0e0ab00fed497830ec85ba8c6bb21b31ea967533e561053b3f54052e823e27b3"
+        },
+        {
+            "repository": "tommasobbianchi/opendeck-vsd-n1",
+            "revision": "635f1cb492c663e63200fcdaba9f436489f7a475",
+            "path": "docs/verified-mapping.md",
+            "git_blob": "d8aed124cb4710f8fc15a8067ccd96cb731dc2e7",
+            "sha256": "ebf9fc470e59064bc8d073f011c7e241141755334796682f4dc10084030ab2c0"
+        },
+        {
+            "repository": "skyf/lightslinger",
+            "revision": "a3d464243051f77627129c6b20981baf9df98310",
+            "path": "pkg/protocol/constants.go",
+            "git_blob": "87ac5550eda17c97aade808dc54065a0c45d295b",
+            "sha256": "1b1df0e8283004edee6657a3c37ba5028d294cdda336fc049eb91a1fdd86bef4"
+        },
+        {
+            "repository": "skyf/lightslinger",
+            "revision": "a3d464243051f77627129c6b20981baf9df98310",
+            "path": "pkg/transport/rawhid/commands.go",
+            "git_blob": "ec4cd8512071987dd614286bc2e80b60ba9d184e",
+            "sha256": "d596ed05924bda0079531ebc76a3052b72b3be7ebb20a16d4013191903c4f5d6"
+        },
+        {
+            "repository": "skyf/lightslinger",
+            "revision": "a3d464243051f77627129c6b20981baf9df98310",
+            "path": "pkg/device/manager.go",
+            "git_blob": "7a8b9b177241e9b19a3ed3a63ec254e8f86e499f",
+            "sha256": "bf1dae1f2f2e6335c67c4a608cc44ae56392c866318d6c91683df0806eb0624a"
+        },
+        {
+            "repository": "4ndv/mirajazz",
+            "revision": "f0a7fa3f9b5eaaa9b699c667312336d9c56f6723",
+            "path": "src/device.rs",
+            "git_blob": "840d8bf83392864afdc1f345235da343642d06c8",
+            "sha256": "9d7ed8ede874f7e02c505e3f4f326ae1f15f39f8be93387fdfcb8999f14649e5"
+        },
+        {
+            "repository": "4ndv/mirajazz",
+            "revision": "f0a7fa3f9b5eaaa9b699c667312336d9c56f6723",
+            "path": "src/state.rs",
+            "git_blob": "31ef4a86b3cf9cdad31700084fbba6cd57f48f22",
+            "sha256": "c5a11a9c5199f8020cc8809aee81a60d45fd92c67eac9f2d9671affb90a5bb1c"
+        },
+        {
+            "repository": "tommasobbianchi/opendeck-vsd-n1",
+            "revision": "635f1cb492c663e63200fcdaba9f436489f7a475",
+            "path": "Cargo.lock",
+            "git_blob": "97d574fb98afb60dd5b828293ae520bca6e9ed94",
+            "sha256": "524f3ad87c5bd83aa85dcd3df19c621bbd303ef0d4d14673c7c07c8117858164"
+        }
+    ]
+}

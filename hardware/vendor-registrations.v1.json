@@ -1,0 +1,786 @@
+{
+    "schema_version": 1,
+    "python_registrations": [
+        {
+            "usb_id": "5500:1001",
+            "vendor_model": "StreamDock293",
+            "source": "Python-SDK/src/StreamDock/ProductIDs.py",
+            "line": 104,
+            "model_id": "293"
+        },
+        {
+            "usb_id": "6603:1005",
+            "vendor_model": "StreamDock293V3",
+            "source": "Python-SDK/src/StreamDock/ProductIDs.py",
+            "line": 105,
+            "model_id": "293-v3"
+        },
+        {
+            "usb_id": "6603:1006",
+            "vendor_model": "StreamDock293V3",
+            "source": "Python-SDK/src/StreamDock/ProductIDs.py",
+            "line": 110,
+            "model_id": "293-v3"
+        },
+        {
+            "usb_id": "6603:1010",
+            "vendor_model": "StreamDock293V3",
+            "source": "Python-SDK/src/StreamDock/ProductIDs.py",
+            "line": 115,
+            "model_id": "293-v3"
+        },
+        {
+            "usb_id": "5548:6670",
+            "vendor_model": "StreamDock293s",
+            "source": "Python-SDK/src/StreamDock/ProductIDs.py",
+            "line": 120,
+            "model_id": "293s"
+        },
+        {
+            "usb_id": "6603:1014",
+            "vendor_model": "StreamDock293sV3",
+            "source": "Python-SDK/src/StreamDock/ProductIDs.py",
+            "line": 121,
+            "model_id": "293s-v3"
+        },
+        {
+            "usb_id": "6602:1000",
+            "vendor_model": "StreamDockN3",
+            "source": "Python-SDK/src/StreamDock/ProductIDs.py",
+            "line": 127,
+            "model_id": "n3"
+        },
+        {
+            "usb_id": "6603:1002",
+            "vendor_model": "StreamDockN3",
+            "source": "Python-SDK/src/StreamDock/ProductIDs.py",
+            "line": 128,
+            "model_id": "n3"
+        },
+        {
+            "usb_id": "6603:1003",
+            "vendor_model": "StreamDockN3",
+            "source": "Python-SDK/src/StreamDock/ProductIDs.py",
+            "line": 129,
+            "model_id": "n3"
+        },
+        {
+            "usb_id": "6602:1002",
+            "vendor_model": "StreamDockN3",
+            "source": "Python-SDK/src/StreamDock/ProductIDs.py",
+            "line": 130,
+            "model_id": "n3"
+        },
+        {
+            "usb_id": "6602:1003",
+            "vendor_model": "StreamDockN3",
+            "source": "Python-SDK/src/StreamDock/ProductIDs.py",
+            "line": 131,
+            "model_id": "n3"
+        },
+        {
+            "usb_id": "6602:2929",
+            "vendor_model": "StreamDockN3",
+            "source": "Python-SDK/src/StreamDock/ProductIDs.py",
+            "line": 132,
+            "model_id": "n3"
+        },
+        {
+            "usb_id": "1500:3001",
+            "vendor_model": "StreamDockN3",
+            "source": "Python-SDK/src/StreamDock/ProductIDs.py",
+            "line": 133,
+            "model_id": "n3"
+        },
+        {
+            "usb_id": "6602:1001",
+            "vendor_model": "StreamDockN4",
+            "source": "Python-SDK/src/StreamDock/ProductIDs.py",
+            "line": 135,
+            "model_id": "n4"
+        },
+        {
+            "usb_id": "6603:1007",
+            "vendor_model": "StreamDockN4",
+            "source": "Python-SDK/src/StreamDock/ProductIDs.py",
+            "line": 136,
+            "model_id": "n4"
+        },
+        {
+            "usb_id": "6603:1011",
+            "vendor_model": "StreamDockN1",
+            "source": "Python-SDK/src/StreamDock/ProductIDs.py",
+            "line": 138,
+            "model_id": "n1"
+        },
+        {
+            "usb_id": "6603:1000",
+            "vendor_model": "StreamDockN1",
+            "source": "Python-SDK/src/StreamDock/ProductIDs.py",
+            "line": 139,
+            "model_id": "n1"
+        },
+        {
+            "usb_id": "5548:1008",
+            "vendor_model": "StreamDockN4Pro",
+            "source": "Python-SDK/src/StreamDock/ProductIDs.py",
+            "line": 141,
+            "model_id": "n4-pro"
+        },
+        {
+            "usb_id": "5548:1023",
+            "vendor_model": "StreamDockN4Pro",
+            "source": "Python-SDK/src/StreamDock/ProductIDs.py",
+            "line": 146,
+            "model_id": "n4-pro"
+        },
+        {
+            "usb_id": "5548:1021",
+            "vendor_model": "StreamDockN4Pro",
+            "source": "Python-SDK/src/StreamDock/ProductIDs.py",
+            "line": 151,
+            "model_id": "n4-pro"
+        },
+        {
+            "usb_id": "5548:1028",
+            "vendor_model": "StreamDockXL",
+            "source": "Python-SDK/src/StreamDock/ProductIDs.py",
+            "line": 157,
+            "model_id": "xl"
+        },
+        {
+            "usb_id": "5548:1031",
+            "vendor_model": "StreamDockXL",
+            "source": "Python-SDK/src/StreamDock/ProductIDs.py",
+            "line": 158,
+            "model_id": "xl"
+        },
+        {
+            "usb_id": "5548:1000",
+            "vendor_model": "StreamDockM18",
+            "source": "Python-SDK/src/StreamDock/ProductIDs.py",
+            "line": 160,
+            "model_id": "m18"
+        },
+        {
+            "usb_id": "6603:1009",
+            "vendor_model": "StreamDockM18",
+            "source": "Python-SDK/src/StreamDock/ProductIDs.py",
+            "line": 161,
+            "model_id": "m18"
+        },
+        {
+            "usb_id": "6603:1012",
+            "vendor_model": "StreamDockM18",
+            "source": "Python-SDK/src/StreamDock/ProductIDs.py",
+            "line": 162,
+            "model_id": "m18"
+        },
+        {
+            "usb_id": "5548:1020",
+            "vendor_model": "StreamDockM3",
+            "source": "Python-SDK/src/StreamDock/ProductIDs.py",
+            "line": 170,
+            "model_id": "m3"
+        },
+        {
+            "usb_id": "5548:1032",
+            "vendor_model": "StreamDockM3",
+            "source": "Python-SDK/src/StreamDock/ProductIDs.py",
+            "line": 171,
+            "model_id": "m3"
+        },
+        {
+            "usb_id": "6603:1015",
+            "vendor_model": "K1Pro",
+            "source": "Python-SDK/src/StreamDock/ProductIDs.py",
+            "line": 173,
+            "model_id": "k1-pro"
+        },
+        {
+            "usb_id": "5548:1025",
+            "vendor_model": "K1Pro",
+            "source": "Python-SDK/src/StreamDock/ProductIDs.py",
+            "line": 174,
+            "model_id": "k1-pro"
+        },
+        {
+            "usb_id": "6603:1019",
+            "vendor_model": "K1Pro",
+            "source": "Python-SDK/src/StreamDock/ProductIDs.py",
+            "line": 175,
+            "model_id": "k1-pro"
+        },
+        {
+            "usb_id": "5548:1030",
+            "vendor_model": "StreamDockH1Pro",
+            "source": "Python-SDK/src/StreamDock/ProductIDs.py",
+            "line": 177,
+            "model_id": "h1-pro"
+        },
+        {
+            "usb_id": "5548:1033",
+            "vendor_model": "StreamDockH1Pro",
+            "source": "Python-SDK/src/StreamDock/ProductIDs.py",
+            "line": 178,
+            "model_id": "h1-pro"
+        },
+        {
+            "usb_id": "5548:1036",
+            "vendor_model": "StreamDockMini",
+            "source": "Python-SDK/src/StreamDock/ProductIDs.py",
+            "line": 180,
+            "model_id": "mini"
+        },
+        {
+            "usb_id": "5548:1037",
+            "vendor_model": "StreamDockMini",
+            "source": "Python-SDK/src/StreamDock/ProductIDs.py",
+            "line": 181,
+            "model_id": "mini"
+        }
+    ],
+    "cpp_registrations": [
+        {
+            "usb_id": "6603:1015",
+            "vendor_model": "K1Pro",
+            "source": "CPP-SDK/src/HotspotDevice/K1Pro/K1Pro.cpp"
+        },
+        {
+            "usb_id": "5548:1025",
+            "vendor_model": "K1Pro",
+            "source": "CPP-SDK/src/HotspotDevice/K1Pro/K1Pro.cpp"
+        },
+        {
+            "usb_id": "6603:1019",
+            "vendor_model": "K1Pro",
+            "source": "CPP-SDK/src/HotspotDevice/K1Pro/K1Pro.cpp"
+        },
+        {
+            "usb_id": "5500:1001",
+            "vendor_model": "StreamDock293V2",
+            "source": "CPP-SDK/src/HotspotDevice/StreamDock293V2/streamdock293V2.cpp"
+        },
+        {
+            "usb_id": "6603:1005",
+            "vendor_model": "StreamDock293V3",
+            "source": "CPP-SDK/src/HotspotDevice/StreamDock293V3/streamdock293V3.cpp"
+        },
+        {
+            "usb_id": "6603:1006",
+            "vendor_model": "StreamDock293V3",
+            "source": "CPP-SDK/src/HotspotDevice/StreamDock293V3/streamdock293V3.cpp"
+        },
+        {
+            "usb_id": "5548:6670",
+            "vendor_model": "StreamDock293sV2",
+            "source": "CPP-SDK/src/HotspotDevice/StreamDock293sV2/streamdock293sV2.cpp"
+        },
+        {
+            "usb_id": "6603:1014",
+            "vendor_model": "StreamDock293sV3",
+            "source": "CPP-SDK/src/HotspotDevice/StreamDock293sV3/streamdock293sV3.cpp"
+        },
+        {
+            "usb_id": "5548:1030",
+            "vendor_model": "StreamDockH1Pro",
+            "source": "CPP-SDK/src/HotspotDevice/StreamDockH1Pro/streamdockH1Pro.cpp"
+        },
+        {
+            "usb_id": "5548:1033",
+            "vendor_model": "StreamDockH1Pro",
+            "source": "CPP-SDK/src/HotspotDevice/StreamDockH1Pro/streamdockH1Pro.cpp"
+        },
+        {
+            "usb_id": "6603:1009",
+            "vendor_model": "StreamDockM18",
+            "source": "CPP-SDK/src/HotspotDevice/StreamDockM18/streamdockM18.cpp"
+        },
+        {
+            "usb_id": "5548:1000",
+            "vendor_model": "StreamDockM18",
+            "source": "CPP-SDK/src/HotspotDevice/StreamDockM18/streamdockM18.cpp"
+        },
+        {
+            "usb_id": "6603:1012",
+            "vendor_model": "StreamDockM18",
+            "source": "CPP-SDK/src/HotspotDevice/StreamDockM18/streamdockM18.cpp"
+        },
+        {
+            "usb_id": "5548:1020",
+            "vendor_model": "StreamDockM3",
+            "source": "CPP-SDK/src/HotspotDevice/StreamDockM3/streamdockM3.cpp"
+        },
+        {
+            "usb_id": "5548:1036",
+            "vendor_model": "StreamDockMini",
+            "source": "CPP-SDK/src/HotspotDevice/StreamDockMini/streamdockMini.cpp"
+        },
+        {
+            "usb_id": "5548:1037",
+            "vendor_model": "StreamDockMini",
+            "source": "CPP-SDK/src/HotspotDevice/StreamDockMini/streamdockMini.cpp"
+        },
+        {
+            "usb_id": "6603:1011",
+            "vendor_model": "StreamDockN1",
+            "source": "CPP-SDK/src/HotspotDevice/StreamDockN1/streamdockN1.cpp"
+        },
+        {
+            "usb_id": "6603:1000",
+            "vendor_model": "StreamDockN1",
+            "source": "CPP-SDK/src/HotspotDevice/StreamDockN1/streamdockN1.cpp"
+        },
+        {
+            "usb_id": "6602:1000",
+            "vendor_model": "StreamDockN3V2",
+            "source": "CPP-SDK/src/HotspotDevice/StreamDockN3V2/streamdockN3V2.cpp"
+        },
+        {
+            "usb_id": "6602:1002",
+            "vendor_model": "StreamDockN3V2",
+            "source": "CPP-SDK/src/HotspotDevice/StreamDockN3V2/streamdockN3V2.cpp"
+        },
+        {
+            "usb_id": "6603:1002",
+            "vendor_model": "StreamDockN3V25",
+            "source": "CPP-SDK/src/HotspotDevice/StreamDockN3V25/streamdockN3V25.cpp"
+        },
+        {
+            "usb_id": "6603:1003",
+            "vendor_model": "StreamDockN3V25",
+            "source": "CPP-SDK/src/HotspotDevice/StreamDockN3V25/streamdockN3V25.cpp"
+        },
+        {
+            "usb_id": "6602:1001",
+            "vendor_model": "StreamDockN4",
+            "source": "CPP-SDK/src/HotspotDevice/StreamDockN4/streamdockN4.cpp"
+        },
+        {
+            "usb_id": "6603:1007",
+            "vendor_model": "StreamDockN4",
+            "source": "CPP-SDK/src/HotspotDevice/StreamDockN4/streamdockN4.cpp"
+        },
+        {
+            "usb_id": "5548:1008",
+            "vendor_model": "StreamDockN4Pro",
+            "source": "CPP-SDK/src/HotspotDevice/StreamDockN4Pro/streamdockN4Pro.cpp"
+        },
+        {
+            "usb_id": "5548:1021",
+            "vendor_model": "StreamDockN4Pro",
+            "source": "CPP-SDK/src/HotspotDevice/StreamDockN4Pro/streamdockN4Pro.cpp"
+        },
+        {
+            "usb_id": "5548:1028",
+            "vendor_model": "StreamDockXL",
+            "source": "CPP-SDK/src/HotspotDevice/StreamDockXL/streamdockXL.cpp"
+        },
+        {
+            "usb_id": "5548:1031",
+            "vendor_model": "StreamDockXL",
+            "source": "CPP-SDK/src/HotspotDevice/StreamDockXL/streamdockXL.cpp"
+        }
+    ],
+    "python_only": ["1500:3001", "5548:1023", "5548:1032", "6602:1003", "6602:2929", "6603:1010"],
+    "cpp_only": [],
+    "revision": "fc124cb5bc8fe0cd6c72d3f2af80588adc7dcffb",
+    "scope": "Reviewed current manufacturer registrations; M18 remains unavailable pending firmware-mode reconciliation. Independent retail registrations retain their own evidence. Experimental matching does not qualify physical hardware.",
+    "historical_registrations": {
+        "revision": "7f0d47fe91033b0883edf29b574a6c74ea9bed00",
+        "python_registrations": [
+            {
+                "usb_id": "5500:1001",
+                "vendor_model": "StreamDock293",
+                "source": "Python-SDK/src/StreamDock/ProductIDs.py",
+                "line": 102,
+                "model_id": "293"
+            },
+            {
+                "usb_id": "6603:1005",
+                "vendor_model": "StreamDock293V3",
+                "source": "Python-SDK/src/StreamDock/ProductIDs.py",
+                "line": 103,
+                "model_id": "293-v3"
+            },
+            {
+                "usb_id": "6603:1006",
+                "vendor_model": "StreamDock293V3",
+                "source": "Python-SDK/src/StreamDock/ProductIDs.py",
+                "line": 108,
+                "model_id": "293-v3"
+            },
+            {
+                "usb_id": "6603:1010",
+                "vendor_model": "StreamDock293V3",
+                "source": "Python-SDK/src/StreamDock/ProductIDs.py",
+                "line": 113,
+                "model_id": "293-v3"
+            },
+            {
+                "usb_id": "5548:6670",
+                "vendor_model": "StreamDock293s",
+                "source": "Python-SDK/src/StreamDock/ProductIDs.py",
+                "line": 118,
+                "model_id": "293s"
+            },
+            {
+                "usb_id": "6603:1014",
+                "vendor_model": "StreamDock293sV3",
+                "source": "Python-SDK/src/StreamDock/ProductIDs.py",
+                "line": 119,
+                "model_id": "293s-v3"
+            },
+            {
+                "usb_id": "6603:1002",
+                "vendor_model": "StreamDockN3",
+                "source": "Python-SDK/src/StreamDock/ProductIDs.py",
+                "line": 125,
+                "model_id": "n3"
+            },
+            {
+                "usb_id": "6603:1003",
+                "vendor_model": "StreamDockN3",
+                "source": "Python-SDK/src/StreamDock/ProductIDs.py",
+                "line": 126,
+                "model_id": "n3"
+            },
+            {
+                "usb_id": "6602:1002",
+                "vendor_model": "StreamDockN3",
+                "source": "Python-SDK/src/StreamDock/ProductIDs.py",
+                "line": 127,
+                "model_id": "n3"
+            },
+            {
+                "usb_id": "6602:1003",
+                "vendor_model": "StreamDockN3",
+                "source": "Python-SDK/src/StreamDock/ProductIDs.py",
+                "line": 128,
+                "model_id": "n3"
+            },
+            {
+                "usb_id": "6602:2929",
+                "vendor_model": "StreamDockN3",
+                "source": "Python-SDK/src/StreamDock/ProductIDs.py",
+                "line": 129,
+                "model_id": "n3"
+            },
+            {
+                "usb_id": "1500:3001",
+                "vendor_model": "StreamDockN3",
+                "source": "Python-SDK/src/StreamDock/ProductIDs.py",
+                "line": 130,
+                "model_id": "n3"
+            },
+            {
+                "usb_id": "6602:1001",
+                "vendor_model": "StreamDockN4",
+                "source": "Python-SDK/src/StreamDock/ProductIDs.py",
+                "line": 132,
+                "model_id": "n4"
+            },
+            {
+                "usb_id": "6603:1007",
+                "vendor_model": "StreamDockN4",
+                "source": "Python-SDK/src/StreamDock/ProductIDs.py",
+                "line": 133,
+                "model_id": "n4"
+            },
+            {
+                "usb_id": "6603:1011",
+                "vendor_model": "StreamDockN1",
+                "source": "Python-SDK/src/StreamDock/ProductIDs.py",
+                "line": 135,
+                "model_id": "n1"
+            },
+            {
+                "usb_id": "6603:1000",
+                "vendor_model": "StreamDockN1",
+                "source": "Python-SDK/src/StreamDock/ProductIDs.py",
+                "line": 136,
+                "model_id": "n1"
+            },
+            {
+                "usb_id": "5548:1008",
+                "vendor_model": "StreamDockN4Pro",
+                "source": "Python-SDK/src/StreamDock/ProductIDs.py",
+                "line": 138,
+                "model_id": "n4-pro"
+            },
+            {
+                "usb_id": "5548:1023",
+                "vendor_model": "StreamDockN4Pro",
+                "source": "Python-SDK/src/StreamDock/ProductIDs.py",
+                "line": 143,
+                "model_id": "n4-pro"
+            },
+            {
+                "usb_id": "5548:1021",
+                "vendor_model": "StreamDockN4Pro",
+                "source": "Python-SDK/src/StreamDock/ProductIDs.py",
+                "line": 148,
+                "model_id": "n4-pro"
+            },
+            {
+                "usb_id": "5548:1028",
+                "vendor_model": "StreamDockXL",
+                "source": "Python-SDK/src/StreamDock/ProductIDs.py",
+                "line": 154,
+                "model_id": "xl"
+            },
+            {
+                "usb_id": "5548:1031",
+                "vendor_model": "StreamDockXL",
+                "source": "Python-SDK/src/StreamDock/ProductIDs.py",
+                "line": 155,
+                "model_id": "xl"
+            },
+            {
+                "usb_id": "6603:1009",
+                "vendor_model": "StreamDockM18",
+                "source": "Python-SDK/src/StreamDock/ProductIDs.py",
+                "line": 157,
+                "model_id": "m18"
+            },
+            {
+                "usb_id": "6603:1012",
+                "vendor_model": "StreamDockM18",
+                "source": "Python-SDK/src/StreamDock/ProductIDs.py",
+                "line": 158,
+                "model_id": "m18"
+            },
+            {
+                "usb_id": "5548:1020",
+                "vendor_model": "StreamDockM3",
+                "source": "Python-SDK/src/StreamDock/ProductIDs.py",
+                "line": 166,
+                "model_id": "m3"
+            },
+            {
+                "usb_id": "5548:1032",
+                "vendor_model": "StreamDockM3",
+                "source": "Python-SDK/src/StreamDock/ProductIDs.py",
+                "line": 167,
+                "model_id": "m3"
+            },
+            {
+                "usb_id": "6603:1015",
+                "vendor_model": "K1Pro",
+                "source": "Python-SDK/src/StreamDock/ProductIDs.py",
+                "line": 169,
+                "model_id": "k1-pro"
+            },
+            {
+                "usb_id": "5548:1025",
+                "vendor_model": "K1Pro",
+                "source": "Python-SDK/src/StreamDock/ProductIDs.py",
+                "line": 170,
+                "model_id": "k1-pro"
+            },
+            {
+                "usb_id": "6603:1019",
+                "vendor_model": "K1Pro",
+                "source": "Python-SDK/src/StreamDock/ProductIDs.py",
+                "line": 171,
+                "model_id": "k1-pro"
+            },
+            {
+                "usb_id": "5548:1030",
+                "vendor_model": "StreamDockH1Pro",
+                "source": "Python-SDK/src/StreamDock/ProductIDs.py",
+                "line": 173,
+                "model_id": "h1-pro"
+            },
+            {
+                "usb_id": "5548:1033",
+                "vendor_model": "StreamDockH1Pro",
+                "source": "Python-SDK/src/StreamDock/ProductIDs.py",
+                "line": 174,
+                "model_id": "h1-pro"
+            },
+            {
+                "usb_id": "5548:1036",
+                "vendor_model": "StreamDockMini",
+                "source": "Python-SDK/src/StreamDock/ProductIDs.py",
+                "line": 176,
+                "model_id": "mini"
+            },
+            {
+                "usb_id": "5548:1037",
+                "vendor_model": "StreamDockMini",
+                "source": "Python-SDK/src/StreamDock/ProductIDs.py",
+                "line": 177,
+                "model_id": "mini"
+            }
+        ],
+        "cpp_registrations": [
+            {
+                "usb_id": "6603:1015",
+                "vendor_model": "K1Pro",
+                "source": "CPP-SDK/src/HotspotDevice/K1Pro/K1Pro.cpp"
+            },
+            {
+                "usb_id": "5548:1025",
+                "vendor_model": "K1Pro",
+                "source": "CPP-SDK/src/HotspotDevice/K1Pro/K1Pro.cpp"
+            },
+            {
+                "usb_id": "6603:1019",
+                "vendor_model": "K1Pro",
+                "source": "CPP-SDK/src/HotspotDevice/K1Pro/K1Pro.cpp"
+            },
+            {
+                "usb_id": "5500:1001",
+                "vendor_model": "StreamDock293V2",
+                "source": "CPP-SDK/src/HotspotDevice/StreamDock293V2/streamdock293V2.cpp"
+            },
+            {
+                "usb_id": "6603:1005",
+                "vendor_model": "StreamDock293V3",
+                "source": "CPP-SDK/src/HotspotDevice/StreamDock293V3/streamdock293V3.cpp"
+            },
+            {
+                "usb_id": "6603:1006",
+                "vendor_model": "StreamDock293V3",
+                "source": "CPP-SDK/src/HotspotDevice/StreamDock293V3/streamdock293V3.cpp"
+            },
+            {
+                "usb_id": "5548:6670",
+                "vendor_model": "StreamDock293sV2",
+                "source": "CPP-SDK/src/HotspotDevice/StreamDock293sV2/streamdock293sV2.cpp"
+            },
+            {
+                "usb_id": "6603:1014",
+                "vendor_model": "StreamDock293sV3",
+                "source": "CPP-SDK/src/HotspotDevice/StreamDock293sV3/streamdock293sV3.cpp"
+            },
+            {
+                "usb_id": "5548:1030",
+                "vendor_model": "StreamDockH1Pro",
+                "source": "CPP-SDK/src/HotspotDevice/StreamDockH1Pro/streamdockH1Pro.cpp"
+            },
+            {
+                "usb_id": "5548:1033",
+                "vendor_model": "StreamDockH1Pro",
+                "source": "CPP-SDK/src/HotspotDevice/StreamDockH1Pro/streamdockH1Pro.cpp"
+            },
+            {
+                "usb_id": "6603:1009",
+                "vendor_model": "StreamDockM18",
+                "source": "CPP-SDK/src/HotspotDevice/StreamDockM18/streamdockM18.cpp"
+            },
+            {
+                "usb_id": "5548:1000",
+                "vendor_model": "StreamDockM18",
+                "source": "CPP-SDK/src/HotspotDevice/StreamDockM18/streamdockM18.cpp"
+            },
+            {
+                "usb_id": "6603:1012",
+                "vendor_model": "StreamDockM18",
+                "source": "CPP-SDK/src/HotspotDevice/StreamDockM18/streamdockM18.cpp"
+            },
+            {
+                "usb_id": "5548:1020",
+                "vendor_model": "StreamDockM3",
+                "source": "CPP-SDK/src/HotspotDevice/StreamDockM3/streamdockM3.cpp"
+            },
+            {
+                "usb_id": "5548:1036",
+                "vendor_model": "StreamDockMini",
+                "source": "CPP-SDK/src/HotspotDevice/StreamDockMini/streamdockMini.cpp"
+            },
+            {
+                "usb_id": "5548:1037",
+                "vendor_model": "StreamDockMini",
+                "source": "CPP-SDK/src/HotspotDevice/StreamDockMini/streamdockMini.cpp"
+            },
+            {
+                "usb_id": "6603:1011",
+                "vendor_model": "StreamDockN1",
+                "source": "CPP-SDK/src/HotspotDevice/StreamDockN1/streamdockN1.cpp"
+            },
+            {
+                "usb_id": "6603:1000",
+                "vendor_model": "StreamDockN1",
+                "source": "CPP-SDK/src/HotspotDevice/StreamDockN1/streamdockN1.cpp"
+            },
+            {
+                "usb_id": "6602:1000",
+                "vendor_model": "StreamDockN3V2",
+                "source": "CPP-SDK/src/HotspotDevice/StreamDockN3V2/streamdockN3V2.cpp"
+            },
+            {
+                "usb_id": "6602:1002",
+                "vendor_model": "StreamDockN3V2",
+                "source": "CPP-SDK/src/HotspotDevice/StreamDockN3V2/streamdockN3V2.cpp"
+            },
+            {
+                "usb_id": "6603:1002",
+                "vendor_model": "StreamDockN3V25",
+                "source": "CPP-SDK/src/HotspotDevice/StreamDockN3V25/streamdockN3V25.cpp"
+            },
+            {
+                "usb_id": "6603:1003",
+                "vendor_model": "StreamDockN3V25",
+                "source": "CPP-SDK/src/HotspotDevice/StreamDockN3V25/streamdockN3V25.cpp"
+            },
+            {
+                "usb_id": "6602:1001",
+                "vendor_model": "StreamDockN4",
+                "source": "CPP-SDK/src/HotspotDevice/StreamDockN4/streamdockN4.cpp"
+            },
+            {
+                "usb_id": "6603:1007",
+                "vendor_model": "StreamDockN4",
+                "source": "CPP-SDK/src/HotspotDevice/StreamDockN4/streamdockN4.cpp"
+            },
+            {
+                "usb_id": "5548:1008",
+                "vendor_model": "StreamDockN4Pro",
+                "source": "CPP-SDK/src/HotspotDevice/StreamDockN4Pro/streamdockN4Pro.cpp"
+            },
+            {
+                "usb_id": "5548:1021",
+                "vendor_model": "StreamDockN4Pro",
+                "source": "CPP-SDK/src/HotspotDevice/StreamDockN4Pro/streamdockN4Pro.cpp"
+            },
+            {
+                "usb_id": "5548:1028",
+                "vendor_model": "StreamDockXL",
+                "source": "CPP-SDK/src/HotspotDevice/StreamDockXL/streamdockXL.cpp"
+            },
+            {
+                "usb_id": "5548:1031",
+                "vendor_model": "StreamDockXL",
+                "source": "CPP-SDK/src/HotspotDevice/StreamDockXL/streamdockXL.cpp"
+            }
+        ],
+        "python_only": [
+            "1500:3001",
+            "5548:1023",
+            "5548:1032",
+            "6602:1003",
+            "6602:2929",
+            "6603:1010"
+        ],
+        "cpp_only": ["5548:1000", "6602:1000"]
+    },
+    "unavailable_variants": [
+        {
+            "model_id": "m18",
+            "usb_id": "6603:1009",
+            "reason": "Firmware-dependent background and lighting modes differ in the vendor implementations. The connected firmware mode is not established."
+        },
+        {
+            "model_id": "m18",
+            "usb_id": "6603:1012",
+            "reason": "Firmware-dependent background and lighting modes differ in the vendor implementations. The connected firmware mode is not established."
+        },
+        {
+            "model_id": "m18",
+            "usb_id": "5548:1000",
+            "reason": "Current Python and C++ register this identity, but firmware-dependent background and lighting modes remain unreconciled. Physical matching remains unavailable."
+        }
+    ]
+}

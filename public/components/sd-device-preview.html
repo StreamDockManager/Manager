@@ -1,0 +1,208 @@
+<div x-data="preview">
+    <div class="device-preview-frame">
+        <div
+            class="device-body"
+            :style="panelStyle"
+            :class="{sleeping: app.effectiveDeviceOutput.sleeping}"
+            aria-label="Device control layout"
+        >
+            <div class="device-wordmark" x-text="app.modelName" :title="app.modelName"></div>
+            <span class="sleep-indicator" x-show="app.effectiveDeviceOutput.sleeping">
+                ☾ Sleeping
+            </span>
+            <template x-for="panel in displayPanels" :key="panel.id">
+                <div
+                    class="hardware-display-panel"
+                    :style="displayPanelStyle(panel)"
+                    aria-hidden="true"
+                ></div>
+            </template>
+            <template x-for="control in controls" :key="control.id">
+                <div
+                    class="hardware-location"
+                    :class="dragClass(control)"
+                    :data-id="control.id"
+                    :aria-busy="pending(control)"
+                    :style="style(control)"
+                    @dragover="dragOver"
+                    @dragleave="dragLeave"
+                    @drop.stop="drop"
+                >
+                    <span
+                        class="screen-background"
+                        :class="control.kind"
+                        x-show="hasScreenBackground(control)"
+                        aria-hidden="true"
+                    >
+                        <img
+                            :src="screenBackground"
+                            :style="screenBackgroundStyle(control)"
+                            alt=""
+                            draggable="false"
+                        />
+                    </span>
+                    <button
+                        type="button"
+                        class="hardware-control"
+                        :class="controlClass(control)"
+                        :data-id="control.id"
+                        :aria-label="control.label"
+                        :title="triggerTooltip(control)"
+                        :aria-pressed="isSelected(control)"
+                        :disabled="app.busy"
+                        :draggable="canDrag(control)"
+                        @dragstart.stop="dragStart"
+                        @dragend="resetDrag"
+                        @click="selectControl"
+                    >
+                        <img
+                            class="surface-image"
+                            :src="app.previewSurface(control.id)"
+                            alt=""
+                            draggable="false"
+                            x-show="hasSurface(control)"
+                        />
+                        <span
+                            class="control-icon"
+                            x-show="showIcon(control)"
+                            x-text="icon(control)"
+                        ></span>
+                        <span
+                            class="control-title"
+                            x-show="showFallback(control)"
+                            x-text="control.preview_hidden ? control.label : title(control)"
+                        ></span>
+                        <span class="dial-notch" x-show="control.kind === 'encoder'"></span>
+                    </button>
+                    <button
+                        type="button"
+                        class="control-run"
+                        x-show="control.kind !== 'display' && control.kind !== 'encoder' && !control.semantics.includes('swipe')"
+                        :data-id="control.id"
+                        :aria-label="'Run ' + control.label + ' action'"
+                        :data-tooltip="'Run saved ' + control.label + ' action'"
+                        :disabled="!canRun(control)"
+                        :aria-busy="pending(control)"
+                        @click.stop="runControl"
+                    >
+                        <svg
+                            width="11"
+                            height="11"
+                            viewBox="0 0 24 24"
+                            fill="currentColor"
+                            aria-hidden="true"
+                        >
+                            <path d="m8 4 12 8-12 8z"></path>
+                        </svg>
+                    </button>
+                    <button
+                        type="button"
+                        class="control-swipe swipe-left"
+                        x-show="control.semantics.includes('swipe')"
+                        :data-id="control.id"
+                        data-swipe="left"
+                        :aria-label="'Swipe ' + control.label + ' left'"
+                        :disabled="!canRun(control)"
+                        @click.stop="runControl"
+                    >
+                        ←
+                    </button>
+                    <button
+                        type="button"
+                        class="control-swipe swipe-right"
+                        x-show="control.semantics.includes('swipe')"
+                        :data-id="control.id"
+                        data-swipe="right"
+                        :aria-label="'Swipe ' + control.label + ' right'"
+                        :disabled="!canRun(control)"
+                        @click.stop="runControl"
+                    >
+                        →
+                    </button>
+                    <button
+                        type="button"
+                        class="control-clear"
+                        x-show="control.kind !== 'encoder'"
+                        :data-id="control.id"
+                        :aria-label="'Clear ' + control.label"
+                        :data-tooltip="'Clear ' + control.label + ' binding and media (Undo available)'"
+                        :disabled="app.busy || pending(control) || !app.canClearBinding(control.id)"
+                        :aria-busy="pending(control)"
+                        @click.stop="clearControl"
+                    >
+                        <svg
+                            width="12"
+                            height="12"
+                            viewBox="0 0 24 24"
+                            fill="none"
+                            stroke="currentColor"
+                            stroke-width="2"
+                            aria-hidden="true"
+                        >
+                            <path d="M3 6h18M9 6V3h6v3M5 6l1 15h12l1-15M10 10v7M14 10v7"></path>
+                        </svg>
+                    </button>
+                </div>
+            </template>
+            <div class="device-bottom-mark"></div>
+        </div>
+    </div>
+    <template x-for="control in selectedDials" :key="control.id">
+        <div class="preview-dial-actions" role="group" :aria-label="control.label + ' actions'">
+            <strong x-text="control.label"></strong>
+            <div class="button-row">
+                <button
+                    type="button"
+                    class="button"
+                    :data-id="control.id"
+                    data-rotation="-1"
+                    :aria-label="'Turn ' + control.label + ' left'"
+                    :disabled="!canRun(control)"
+                    :aria-busy="pending(control)"
+                    @click.stop="runControl"
+                >
+                    <span aria-hidden="true">↶</span>
+                    Turn left
+                </button>
+                <button
+                    type="button"
+                    class="button"
+                    :data-id="control.id"
+                    :aria-label="'Run ' + control.label + ' action'"
+                    :data-tooltip="'Run saved ' + control.label + ' action'"
+                    :disabled="!canRun(control)"
+                    :aria-busy="pending(control)"
+                    @click.stop="runControl"
+                >
+                    Press
+                </button>
+                <button
+                    type="button"
+                    class="button"
+                    :data-id="control.id"
+                    data-rotation="1"
+                    :aria-label="'Turn ' + control.label + ' right'"
+                    :disabled="!canRun(control)"
+                    :aria-busy="pending(control)"
+                    @click.stop="runControl"
+                >
+                    <span aria-hidden="true">↷</span>
+                    Turn right
+                </button>
+                <button
+                    type="button"
+                    class="button danger"
+                    :data-id="control.id"
+                    :aria-label="'Clear ' + control.label"
+                    :data-tooltip="'Clear ' + control.label + ' binding and media (Undo available)'"
+                    :disabled="app.busy || pending(control) || !app.canClearBinding(control.id)"
+                    :aria-busy="pending(control)"
+                    @click.stop="clearControl"
+                >
+                    Clear
+                </button>
+            </div>
+        </div>
+    </template>
+    <p class="drag-status" role="status" x-show="dragMessage" x-text="dragMessage"></p>
+</div>

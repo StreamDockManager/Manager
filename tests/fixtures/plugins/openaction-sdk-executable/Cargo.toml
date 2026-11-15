@@ -1,0 +1,13 @@
+[package]
+name = "manager-openaction-sdk-probe"
+version = "0.1.0"
+edition = "2024"
+publish = false
+
+[workspace]
+
+[dependencies]
+# Official upstream SDK, pinned independently from Manager's implementation
+openaction = { git = "https://github.com/OpenActionAPI/rust", rev = "d435b2d57d6df13debaca330011a3067f66a99db" }
+serde_json = "1"
+tokio = { version = "1", features = ["full"] }

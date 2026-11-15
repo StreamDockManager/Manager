@@ -1,0 +1,11 @@
+{
+    "version": 1,
+    "groups": ["plugins"],
+    "options": {
+        "shadow": false
+    },
+    "metadata": {
+        "description": "First-party sd-plugins component. Controllers are registered by the trusted application bootstrap."
+    },
+    "dependencies": ["sd-updates"]
+}

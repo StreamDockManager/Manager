@@ -1,0 +1,11 @@
+{
+    "version": 1,
+    "groups": ["editor"],
+    "options": {
+        "shadow": false
+    },
+    "metadata": {
+        "description": "First-party sd-inspector component. Controllers are registered by the trusted application bootstrap."
+    },
+    "dependencies": ["sd-macro-editor", "sd-action-editor", "sd-media-options"]
+}

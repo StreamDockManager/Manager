@@ -1,0 +1,403 @@
+<!doctype html>
+<html lang="en">
+    <head>
+        <meta charset="UTF-8" />
+        <meta name="viewport" content="width=device-width,initial-scale=1" />
+        <meta name="color-scheme" content="light dark" />
+        <meta name="theme-color" content="#080808" />
+        <link rel="icon" type="image/png" sizes="32x32" href="/brand/favicon.png" />
+        <link rel="icon" type="image/svg+xml" sizes="any" href="/brand/tray-icon.svg" />
+        <title>Stream Dock Manager</title>
+        <!-- Critical startup styles: available before the application stylesheet or module graph -->
+        <style>
+            #boot {
+                --boot-canvas: #080808;
+                --boot-ink: #fafafa;
+                --boot-muted: #ababab;
+                box-sizing: border-box;
+                color: var(--ink, var(--boot-ink));
+                font:
+                    16px/1.5 Inter,
+                    -apple-system,
+                    BlinkMacSystemFont,
+                    'Segoe UI',
+                    sans-serif;
+                position: fixed;
+                inset: 0;
+                display: block;
+                overflow: auto;
+                padding: 24px;
+                background: var(--canvas, var(--boot-canvas));
+                z-index: 100;
+            }
+            #boot *,
+            #boot *::before,
+            #boot *::after {
+                box-sizing: border-box;
+            }
+            #boot .boot-content {
+                width: min(100%, 440px);
+                margin: max(0px, calc(50dvh - 100px)) auto 0;
+                text-align: center;
+            }
+            #boot .boot-brand {
+                justify-content: center;
+                margin: 0 0 28px;
+                text-align: left;
+            }
+            .boot-progress {
+                width: 28px;
+                height: 28px;
+                margin: 0 auto 16px;
+                border: 2px solid var(--border, #303030);
+                border-top-color: var(--accent, #c61e32);
+                border-radius: 50%;
+                animation: boot-spin 1s linear infinite;
+            }
+            .boot-status {
+                margin: 0;
+                color: var(--muted, var(--boot-muted));
+                font-size: 14px;
+            }
+            .boot-status-pending {
+                position: absolute;
+                width: 1px;
+                height: 1px;
+                padding: 0;
+                overflow: hidden;
+                clip-path: inset(50%);
+                white-space: nowrap;
+            }
+            .boot-details {
+                display: grid;
+                justify-items: center;
+                gap: 16px;
+            }
+            .boot-error {
+                margin: 16px 0 0;
+                max-width: 100%;
+                overflow-wrap: anywhere;
+                color: var(--danger-text, #ff7b88);
+                font-size: 14px;
+            }
+            #boot[data-state='error'] .boot-progress {
+                visibility: hidden;
+                animation: none;
+            }
+            @keyframes boot-spin {
+                to {
+                    transform: rotate(360deg);
+                }
+            }
+            @media (prefers-reduced-motion: reduce) {
+                .boot-progress {
+                    animation: none;
+                }
+            }
+
+            #boot .brand {
+                font-family: inherit;
+                display: flex;
+                align-items: center;
+                gap: 12px;
+                padding: 0 4px;
+                color: var(--ink, var(--boot-ink));
+                font-size: min(25px, calc(23px * var(--ui-text-scale, 1)));
+                font-weight: 750;
+                letter-spacing: -1px;
+                line-height: 1;
+            }
+            #boot .brand-wordmark {
+                white-space: nowrap;
+            }
+            #boot .brand-caption {
+                display: block;
+                margin-top: 5px;
+                font-size: var(--ui-text-size, 16px);
+                letter-spacing: 2px;
+                font-weight: 550;
+                color: var(--muted, var(--boot-muted));
+            }
+            #boot .brand-mark {
+                display: grid;
+                grid-template-columns: repeat(2, 12px);
+                grid-template-rows: repeat(2, 12px);
+                gap: 3px;
+                transform: rotate(-5deg);
+            }
+            #boot .brand-mark i {
+                background: var(--ink, var(--boot-ink));
+                border-radius: 3px;
+            }
+            #boot .brand-mark i:last-child {
+                background: var(--accent, #c61e32);
+            }
+            #boot .button {
+                border: 1px solid var(--border, #303030);
+                border-radius: 8px;
+                padding: 9px 12px;
+                min-height: 40px;
+                background: var(--surface, var(--boot-canvas));
+                color: inherit;
+                font: inherit;
+                cursor: pointer;
+            }
+            #boot .button:focus-visible {
+                outline: 2px solid var(--focus, #ff6376);
+                outline-offset: 3px;
+            }
+            #boot .button:disabled {
+                opacity: 0.5;
+                cursor: default;
+            }
+            @media (prefers-color-scheme: light) {
+                #boot {
+                    --boot-canvas: #f4f5f7;
+                    --boot-ink: #171b24;
+                    --boot-muted: #555e70;
+                }
+            }
+        </style>
+    </head>
+    <body>
+        <section id="boot" aria-label="Application startup">
+            <div class="boot-content">
+                <h1 class="brand boot-brand" aria-label="Stream Dock Manager">
+                    <span class="brand-mark" aria-hidden="true">
+                        <i></i>
+                        <i></i>
+                        <i></i>
+                        <i></i>
+                    </span>
+                    <span class="brand-wordmark">
+                        Stream Dock
+                        <span class="brand-caption">Manager</span>
+                    </span>
+                </h1>
+                <div class="boot-progress" aria-hidden="true"></div>
+                <p
+                    class="boot-status boot-status-pending"
+                    data-boot-status
+                    role="status"
+                    aria-live="polite"
+                >
+                    Loading application
+                </p>
+                <div class="boot-details" data-boot-details></div>
+            </div>
+        </section>
+        <section
+            id="startup-permissions"
+            x-data="startupPermissionDialog"
+            @startup-permissions-ready.window="begin()"
+            @focus.window="refreshVisible()"
+            @editor-window-resumed.window="refreshVisible()"
+            @visibilitychange.document="refreshVisible()"
+        >
+            <dialog
+                x-ref="dialog"
+                class="feature-dialog startup-permissions-dialog"
+                aria-labelledby="startup-permissions-title"
+                @cancel.prevent="closeReview()"
+            >
+                <header class="picker-header">
+                    <h2
+                        id="startup-permissions-title"
+                        x-text="permissions.reviewing ? 'Permissions' : 'Set up permissions'"
+                    >
+                        Set up permissions
+                    </h2>
+                </header>
+                <div class="feature-body">
+                    <p>
+                        Allow Stream Dock Manager to connect to your devices and run their actions.
+                    </p>
+                    <p class="field-help" x-show="permissions.isMacOS">
+                        Enable the installed copy in Applications. Permissions granted to Terminal
+                        or a development build may not apply. If macOS asks you to quit and reopen
+                        Manager, do so after enabling access.
+                    </p>
+                    <div class="startup-permission-list">
+                        <template
+                            x-for="permission in permissions.permissions"
+                            :key="permission.id"
+                        >
+                            <section class="settings-card startup-permission-card">
+                                <div class="startup-permission-heading">
+                                    <h3 x-text="permission.title"></h3>
+                                    <span
+                                        class="field-help"
+                                        x-text="permission.required ? 'Required' : 'Optional'"
+                                    ></span>
+                                </div>
+                                <p x-text="permission.description"></p>
+                                <p class="field-help" x-text="permission.instructions"></p>
+                                <div class="button-row">
+                                    <span
+                                        :class="permission.status === 'granted' ? 'permission-granted' : 'field-help'"
+                                        x-text="permission.status === 'granted' ? 'Enabled' : permission.status === 'not_required' ? 'Not required' : 'Not enabled'"
+                                    ></span>
+                                    <button
+                                        type="button"
+                                        class="button"
+                                        x-show="permission.settings_available"
+                                        :data-permission="permission.id"
+                                        :disabled="permissions.opening !== ''"
+                                        @click="openSettings"
+                                        :aria-label="'Open settings for ' + permission.title"
+                                    >
+                                        Open Settings
+                                    </button>
+                                </div>
+                            </section>
+                        </template>
+                    </div>
+                    <p class="field-help">
+                        Location, notifications, and individual app-automation permissions are
+                        requested only when you use features that need them.
+                    </p>
+                    <p role="status" aria-live="polite" x-text="statusMessage"></p>
+                    <p role="alert" x-show="permissions.error" x-text="permissions.error"></p>
+                </div>
+                <footer class="feature-footer button-row">
+                    <button
+                        type="button"
+                        class="button"
+                        @click="recheck()"
+                        :disabled="permissions.busy"
+                    >
+                        Check again
+                    </button>
+                    <button
+                        type="button"
+                        class="button primary"
+                        x-show="!permissions.completed"
+                        @click="continueSetup()"
+                        :disabled="permissions.busy || !permissions.ready || permissions.opening !== ''"
+                    >
+                        Connect devices
+                    </button>
+                    <button
+                        type="button"
+                        class="button primary"
+                        x-show="permissions.completed"
+                        :disabled="!permissions.canClose"
+                        @click="closeReview()"
+                    >
+                        Done
+                    </button>
+                </footer>
+            </dialog>
+        </section>
+        <acl-boundary><sd-app-shell></sd-app-shell></acl-boundary>
+        <script type="module" src="/src/frontend-startup.ts"></script>
+        <dialog
+            x-data
+            id="plugin-settings"
+            class="feature-dialog plugin-settings-dialog"
+            :class="$store.pluginSettings.nativeWindow ? 'plugin-settings-dialog-external' : ''"
+            aria-labelledby="plugin-settings-title"
+            @cancel.prevent="$store.pluginSettings.cancel()"
+        >
+            <header class="picker-header">
+                <h2 id="plugin-settings-title">Plugin settings</h2>
+                <button
+                    type="button"
+                    class="icon-button"
+                    aria-label="Close plugin settings"
+                    @click="$store.pluginSettings.cancel()"
+                >
+                    ×
+                </button>
+            </header>
+            <div class="feature-body plugin-settings-body">
+                <p class="field-help" x-show="$store.pluginSettings.nativeWindow">
+                    This vendor inspector is open in a separate, isolated window. Changes are saved
+                    immediately. Closing this panel also closes the inspector and its child windows.
+                </p>
+                <p
+                    class="field-help"
+                    x-show="$store.pluginSettings.immediate && !$store.pluginSettings.nativeWindow"
+                >
+                    Changes are saved immediately by this plugin.
+                </p>
+                <div class="plugin-settings-frame" x-show="!$store.pluginSettings.nativeWindow">
+                    <iframe
+                        src="about:blank"
+                        sandbox="allow-scripts allow-same-origin allow-forms"
+                        title="Plugin configuration"
+                    ></iframe>
+                </div>
+                <div x-show="$store.pluginSettings.location" class="field-group">
+                    <div class="button-row">
+                        <button
+                            class="button"
+                            @click="$store.pluginSettings.locate()"
+                            :disabled="$store.pluginSettings.locating"
+                        >
+                            Use current location
+                        </button>
+                        <button
+                            class="button"
+                            x-show="$store.pluginSettings.locating"
+                            @click="$store.pluginSettings.cancelLocation()"
+                        >
+                            Cancel location request
+                        </button>
+                    </div>
+                    <p class="field-help" x-show="$store.pluginSettings.locating" role="status">
+                        Waiting for location permission or a position…
+                    </p>
+                    <p class="field-help">
+                        Requests one position from your operating system. Review it before adding it
+                        to this draft.
+                    </p>
+                    <div x-show="$store.pluginSettings.locationPreview" class="field-group">
+                        <p x-text="$store.pluginSettings.locationDescription()" role="status"></p>
+                        <div class="button-row">
+                            <button class="button" @click="$store.pluginSettings.useLocation()">
+                                Use this position
+                            </button>
+                            <button class="button" @click="$store.pluginSettings.cancelLocation()">
+                                Discard position
+                            </button>
+                        </div>
+                    </div>
+                </div>
+                <p class="field-help" x-show="$store.pluginSettings.definition">
+                    Applying saves defaults for new bindings of this action. Existing bindings keep
+                    their own settings.
+                </p>
+                <p
+                    class="field-help"
+                    x-show="$store.pluginSettings.binding && !$store.pluginSettings.immediate"
+                >
+                    Applying updates this binding's draft. Use Save binding to keep these settings.
+                </p>
+                <p
+                    x-show="$store.pluginSettings.error"
+                    x-text="$store.pluginSettings.error"
+                    role="alert"
+                ></p>
+            </div>
+            <footer class="feature-footer button-row">
+                <button
+                    class="button primary"
+                    :disabled="$store.pluginSettings.saving || $store.pluginSettings.browsing"
+                    @click="$store.pluginSettings.save()"
+                >
+                    <span
+                        x-text="$store.pluginSettings.immediate ? 'Done' : 'Apply settings'"
+                    ></span>
+                </button>
+                <button
+                    class="button"
+                    x-show="!$store.pluginSettings.immediate"
+                    @click="$store.pluginSettings.cancel()"
+                >
+                    Cancel
+                </button>
+            </footer>
+        </dialog>
+    </body>
+</html>

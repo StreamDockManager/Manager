@@ -1,0 +1,11 @@
+# Automatically generated - DO NOT EDIT!
+
+[[permission]]
+identifier = "allow-next-archive-drop"
+description = "Enables the next_archive_drop command without any pre-configured scope."
+commands.allow = ["next_archive_drop"]
+
+[[permission]]
+identifier = "deny-next-archive-drop"
+description = "Denies the next_archive_drop command without any pre-configured scope."
+commands.deny = ["next_archive_drop"]

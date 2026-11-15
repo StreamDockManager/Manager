@@ -1,0 +1,7 @@
+{
+    "version": 1,
+    "groups": ["shell"],
+    "dependencies": ["sd-media-options"],
+    "options": { "shadow": false },
+    "metadata": { "description": "Shared, isolated device background editing dialog." }
+}

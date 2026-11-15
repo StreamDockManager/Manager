@@ -1,0 +1,180 @@
+<div x-data="profileConversion" @convert-profile.window="open">
+    <dialog
+        x-ref="dialog"
+        class="feature-dialog wide-dialog"
+        aria-labelledby="conversion-title"
+        @cancel.prevent="close"
+    >
+        <header class="picker-header">
+            <div>
+                <h2 id="conversion-title">Convert profile</h2>
+                <p x-text="sourceName"></p>
+            </div>
+            <button
+                type="button"
+                class="icon-button"
+                aria-label="Close profile conversion"
+                @click="close"
+                :disabled="committing"
+            >
+                ×
+            </button>
+        </header>
+        <div class="feature-body">
+            <p class="field-help">
+                Create a new profile from saved content. Review every mapping and explicitly omit
+                controls that cannot be transferred. Device assignments, rules, and the source
+                profile stay in place. Local parameter overrides and credentials are not copied.
+            </p>
+            <label>
+                Target model
+                <select
+                    aria-label="Target model"
+                    x-model="targetModel"
+                    @change="prepare"
+                    :disabled="busy"
+                >
+                    <option value="">Choose a model</option>
+                    <template x-for="model in models" :key="model.model_id">
+                        <option :value="model.model_id" x-text="model.name"></option>
+                    </template>
+                </select>
+            </label>
+            <p role="status" x-show="busy">Checking conversion…</p>
+            <p role="alert" class="danger-text" x-show="error" x-text="error"></p>
+            <div class="feature-fields" x-show="report" :inert="busy">
+                <label>
+                    New profile name
+                    <input type="text" x-model="name" @input="changed" maxlength="160" />
+                </label>
+                <label class="preference-toggle" x-show="report && report.background_present">
+                    <input type="checkbox" x-model="keepBackground" @change="changed" />
+                    <span>Keep background media</span>
+                </label>
+                <p class="field-help">
+                    Mappings apply across every page. Omitted controls are left out of the new
+                    profile.
+                </p>
+                <div
+                    class="runtime-table-scroll"
+                    tabindex="0"
+                    role="region"
+                    aria-label="Control conversion mappings"
+                >
+                    <table class="runtime-table conversion-table">
+                        <thead>
+                            <tr>
+                                <th scope="col">Source control</th>
+                                <th scope="col">Saved bindings</th>
+                                <th scope="col">Destination</th>
+                            </tr>
+                        </thead>
+                        <tbody>
+                            <template x-for="row in rowPage.items" :key="row.source_control">
+                                <tr>
+                                    <th scope="row" x-text="row.label"></th>
+                                    <td x-text="row.binding_count"></td>
+                                    <td>
+                                        <label>
+                                            <span
+                                                class="field-help"
+                                                x-text="'Destination for ' + row.label"
+                                            ></span>
+                                            <select
+                                                :aria-label="'Destination for ' + row.label"
+                                                x-model="row.target"
+                                                @change="changed"
+                                            >
+                                                <option value="">Choose destination</option>
+                                                <option value="@omit">Omit this control</option>
+                                                <template
+                                                    x-for="choice in row.choices"
+                                                    :key="choice.value"
+                                                >
+                                                    <option
+                                                        :value="choice.value"
+                                                        x-text="choice.label"
+                                                    ></option>
+                                                </template>
+                                            </select>
+                                        </label>
+                                        <p
+                                            class="field-help danger-text"
+                                            x-show="row.problem"
+                                            x-text="row.problem"
+                                        ></p>
+                                    </td>
+                                </tr>
+                            </template>
+                        </tbody>
+                    </table>
+                </div>
+                <nav
+                    class="button-row"
+                    aria-label="Conversion mapping pages"
+                    x-show="rowPage.pages > 1"
+                >
+                    <button
+                        type="button"
+                        class="button"
+                        @click="previous"
+                        :disabled="rowPage.page <= 1"
+                    >
+                        Previous mappings
+                    </button>
+                    <span x-text="'Page ' + rowPage.page + ' of ' + rowPage.pages"></span>
+                    <button
+                        type="button"
+                        class="button"
+                        @click="next"
+                        :disabled="rowPage.page >= rowPage.pages"
+                    >
+                        Next mappings
+                    </button>
+                </nav>
+                <div x-show="report && report.cloned_macros.length">
+                    <h3>Shared macros to copy</h3>
+                    <p class="field-help">
+                        Affected macros and their callers receive new identities. Existing
+                        definitions stay intact.
+                    </p>
+                    <ul>
+                        <template
+                            x-for="(macroName, index) in report ? report.cloned_macros : []"
+                            :key="index"
+                        >
+                            <li x-text="macroName"></li>
+                        </template>
+                    </ul>
+                </div>
+                <div x-show="report && report.issues.length">
+                    <h3>Resolve before creating</h3>
+                    <ul>
+                        <template x-for="issue in report ? report.issues : []" :key="issue">
+                            <li class="danger-text" x-text="issue"></li>
+                        </template>
+                    </ul>
+                </div>
+                <p role="status" x-show="reviewed">
+                    Mappings reviewed. Creating this profile is one undoable edit.
+                </p>
+                <div class="button-row">
+                    <button type="button" class="button" @click="review">Review mappings</button>
+                </div>
+            </div>
+        </div>
+        <footer class="feature-footer">
+            <button type="button" class="button" @click="close" :disabled="committing">
+                Cancel
+            </button>
+            <button
+                type="button"
+                class="button primary"
+                @click="commit"
+                :disabled="busy || !reviewed || !report || !report.ready"
+            >
+                Create converted profile
+            </button>
+        </footer>
+    </dialog>
+</div>

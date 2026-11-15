@@ -1,0 +1,11 @@
+# Automatically generated - DO NOT EDIT!
+
+[[permission]]
+identifier = "allow-discard-recording-review"
+description = "Enables the discard_recording_review command without any pre-configured scope."
+commands.allow = ["discard_recording_review"]
+
+[[permission]]
+identifier = "deny-discard-recording-review"
+description = "Denies the discard_recording_review command without any pre-configured scope."
+commands.deny = ["discard_recording_review"]

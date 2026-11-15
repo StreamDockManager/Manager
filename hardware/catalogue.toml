@@ -1,0 +1,3 @@
+# Active support is derived from reviewed vendor and additional registrations. Historical registrations remain in vendor-registrations.v1.json and protocol-audit-baseline.v1.json
+models = []
+unimplemented_variants = []

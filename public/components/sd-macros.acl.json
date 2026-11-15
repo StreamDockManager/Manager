@@ -1,0 +1,7 @@
+{
+    "version": 1,
+    "groups": ["macros"],
+    "dependencies": ["sd-action-editor", "sd-macro-delete-dialog"],
+    "options": { "shadow": false },
+    "metadata": { "description": "Saved macro library and management page." }
+}

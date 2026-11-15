@@ -1,0 +1,11 @@
+# Automatically generated - DO NOT EDIT!
+
+[[permission]]
+identifier = "allow-cancel-locate"
+description = "Enables the cancel_locate command without any pre-configured scope."
+commands.allow = ["cancel_locate"]
+
+[[permission]]
+identifier = "deny-cancel-locate"
+description = "Denies the cancel_locate command without any pre-configured scope."
+commands.deny = ["cancel_locate"]

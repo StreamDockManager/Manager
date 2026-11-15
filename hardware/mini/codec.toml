@@ -1,0 +1,105 @@
+schema_version = 1
+mode_before_wake = false
+reinitialize_on_wake = true
+require_input_ok = true
+button_states = [0, 1]
+rotate_states = [0]
+swipe_states = [0]
+report_size = 1025
+report_id = 0
+
+[[inputs]]
+event = "button"
+code = 1
+control_id = "key-1"
+
+[[inputs]]
+event = "button"
+code = 2
+control_id = "key-2"
+
+[[inputs]]
+event = "button"
+code = 3
+control_id = "key-3"
+
+[[inputs]]
+event = "button"
+code = 4
+control_id = "key-4"
+
+[[inputs]]
+event = "button"
+code = 5
+control_id = "key-5"
+
+[[inputs]]
+event = "button"
+code = 6
+control_id = "key-6"
+
+[[inputs]]
+event = "button"
+code = 36
+control_id = "switch-1-left"
+
+[[inputs]]
+event = "button"
+code = 37
+control_id = "switch-1-center"
+
+[[inputs]]
+event = "button"
+code = 38
+control_id = "switch-1-right"
+
+[[inputs]]
+event = "button"
+code = 33
+control_id = "switch-2-left"
+
+[[inputs]]
+event = "button"
+code = 34
+control_id = "switch-2-center"
+
+[[inputs]]
+event = "button"
+code = 35
+control_id = "switch-2-right"
+
+[[surfaces]]
+control_id = "key-1"
+encoding = "jpeg"
+rotation = 270
+
+[[surfaces]]
+control_id = "key-2"
+encoding = "jpeg"
+rotation = 270
+
+[[surfaces]]
+control_id = "key-3"
+encoding = "jpeg"
+rotation = 270
+
+[[surfaces]]
+control_id = "key-4"
+encoding = "jpeg"
+rotation = 270
+
+[[surfaces]]
+control_id = "key-5"
+encoding = "jpeg"
+rotation = 270
+
+[[surfaces]]
+control_id = "key-6"
+encoding = "jpeg"
+rotation = 270
+
+[boot]
+control_id = "boot"
+encoding = "jpeg"
+rotation = 270
+flip_x = false

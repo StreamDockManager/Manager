@@ -1,0 +1,38 @@
+import * as schemas from "@elgato/schemas/streamdeck/plugins";
+
+export { BarSubType } from "@elgato/schemas/streamdeck/plugins";
+
+/**
+ * Bar layout item used to render a horizontal bar with a filler, e.g. a progress bar. The amount to fill the bar by can be specified by setting the `value`.
+ */
+export type Bar = FeedbackPayloadItem<schemas.Bar>;
+
+/**
+ * Bar layout item used to render a horizontal bar with an indicator represented as a triangle beneath the bar. The location of the indicator can be specified by setting the `value`.
+ */
+export type GBar = FeedbackPayloadItem<schemas.GBar>;
+
+/**
+ * Image layout item used to render an image sourced from either a local file located under the plugin's folder, or base64 encoded `string`. The `value` defines the image.
+ */
+export type Pixmap = FeedbackPayloadItem<schemas.Pixmap>;
+
+/**
+ * Layout item used to render text.
+ *
+ * For Stream Deck + and Stream Deck + XL, when a text item has the key `title`, users can change
+ * the appearance (e.g. font color) and value within Stream Deck.
+ */
+export type Text = FeedbackPayloadItem<schemas.Text>;
+
+/**
+ * Payload object used to update a Stream Deck encoder's (touchscreen) layout.
+ */
+export type FeedbackPayload = Record<string, Bar | GBar | Pixmap | Text | number | string>;
+
+/**
+ * Omits immutable properties from {@template T}.
+ */
+type FeedbackPayloadItem<T extends schemas.Bar | schemas.GBar | schemas.Pixmap | schemas.Text> = Partial<
+	Omit<T, "key" | "rect" | "type">
+>;

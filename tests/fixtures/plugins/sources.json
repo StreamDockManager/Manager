@@ -1,0 +1,225 @@
+{
+    "schema_version": 1,
+    "sources": [
+        {
+            "id": "vsd-javascript",
+            "repository": "VSDinside/VSDinside-Plugin-SDK",
+            "revision": "4ac0234ed42196d782f6b663b2f82c2f3d159dfe",
+            "package_path": "VSDJavaScriptSDK/com.vsd.craft.xxx.sdPlugin",
+            "license": "MIT",
+            "files": [
+                {
+                    "path": "LICENSE",
+                    "sha": "10ec242c069825ac1c44c9a92892ceac5ee1248e"
+                },
+                {
+                    "path": "VSDJavaScriptSDK/com.vsd.craft.xxx.sdPlugin/en.json",
+                    "sha": "dcffcec65865166233d8d3580bdd1513459ec3c8"
+                },
+                {
+                    "path": "VSDJavaScriptSDK/com.vsd.craft.xxx.sdPlugin/manifest.json",
+                    "sha": "b7a2e6d03948a5f6670493b03b98b693b05bc5ce"
+                },
+                {
+                    "path": "VSDJavaScriptSDK/com.vsd.craft.xxx.sdPlugin/plugin/index.html",
+                    "sha": "6c926ad84a928fd9a67ddf152ec4e2344510168b"
+                },
+                {
+                    "path": "VSDJavaScriptSDK/com.vsd.craft.xxx.sdPlugin/plugin/index.js",
+                    "sha": "a8c33004bf3436916512acc8b119ed6015809a8b"
+                },
+                {
+                    "path": "VSDJavaScriptSDK/com.vsd.craft.xxx.sdPlugin/plugin/utils/axios.js",
+                    "sha": "78aa7b89d1490620ba5243a3658fbb161c0a01db"
+                },
+                {
+                    "path": "VSDJavaScriptSDK/com.vsd.craft.xxx.sdPlugin/plugin/utils/common.js",
+                    "sha": "beac8cc170a7d29078aa50ffff4804c52a674c75"
+                },
+                {
+                    "path": "VSDJavaScriptSDK/com.vsd.craft.xxx.sdPlugin/plugin/utils/worker.js",
+                    "sha": "241ed1a825b35d5eb7a5a0c53ed2cc929361b293"
+                },
+                {
+                    "path": "VSDJavaScriptSDK/com.vsd.craft.xxx.sdPlugin/propertyInspector/action1/index.html",
+                    "sha": "1a2cb39d2a9da889306929f653c1d59ab885a335"
+                },
+                {
+                    "path": "VSDJavaScriptSDK/com.vsd.craft.xxx.sdPlugin/propertyInspector/action1/index.js",
+                    "sha": "4d5fa0f8f06526572dacd750da64c967c341148e"
+                },
+                {
+                    "path": "VSDJavaScriptSDK/com.vsd.craft.xxx.sdPlugin/propertyInspector/utils/action.js",
+                    "sha": "d81fc1db7178cb4b68eff6ffc15a15d31305c980"
+                },
+                {
+                    "path": "VSDJavaScriptSDK/com.vsd.craft.xxx.sdPlugin/propertyInspector/utils/common.js",
+                    "sha": "8dda3c8fe2052ccea7932a54ef906eae7499ca92"
+                },
+                {
+                    "path": "VSDJavaScriptSDK/com.vsd.craft.xxx.sdPlugin/readme.md",
+                    "sha": "a7c2244edb2e5db033f0753b559e2af45af32ab3"
+                },
+                {
+                    "path": "VSDJavaScriptSDK/com.vsd.craft.xxx.sdPlugin/static/CH.png",
+                    "sha": "0666304e851c08cd481a2765bcfa1c9a240a409b"
+                },
+                {
+                    "path": "VSDJavaScriptSDK/com.vsd.craft.xxx.sdPlugin/static/css/caret.svg",
+                    "sha": "b69162a4f30e3169ae48ac74e600b1a885806d85"
+                },
+                {
+                    "path": "VSDJavaScriptSDK/com.vsd.craft.xxx.sdPlugin/static/css/check.png",
+                    "sha": "b5e9e622cb4cd2396d583bfde341ab09ad46b347"
+                },
+                {
+                    "path": "VSDJavaScriptSDK/com.vsd.craft.xxx.sdPlugin/static/css/check.svg",
+                    "sha": "5b96af052a9f74be151b2df2b047b059e57a378e"
+                },
+                {
+                    "path": "VSDJavaScriptSDK/com.vsd.craft.xxx.sdPlugin/static/css/elg_calendar.svg",
+                    "sha": "157e01bb57de9fe45c19da808b2e3e737cc0be0f"
+                },
+                {
+                    "path": "VSDJavaScriptSDK/com.vsd.craft.xxx.sdPlugin/static/css/elg_calendar_inv.svg",
+                    "sha": "4f8af68d32235d081cd13a5c087a2413c5c8b2ab"
+                },
+                {
+                    "path": "VSDJavaScriptSDK/com.vsd.craft.xxx.sdPlugin/static/css/g_d8d8d8.svg",
+                    "sha": "d99031408f05ab295e120304055e20fc5c42a53b"
+                },
+                {
+                    "path": "VSDJavaScriptSDK/com.vsd.craft.xxx.sdPlugin/static/css/rcheck.svg",
+                    "sha": "af478ee58d751be84c438caac26b5e0364d4964f"
+                },
+                {
+                    "path": "VSDJavaScriptSDK/com.vsd.craft.xxx.sdPlugin/static/css/sdpi.css",
+                    "sha": "26b725b1e294824e42d5cf573711ae41c2ada1fa"
+                },
+                {
+                    "path": "VSDJavaScriptSDK/com.vsd.craft.xxx.sdPlugin/static/default.jpg",
+                    "sha": "73340e3140c82ad9380acc1cae47bdac94d76da9"
+                },
+                {
+                    "path": "VSDJavaScriptSDK/com.vsd.craft.xxx.sdPlugin/zh_CN.json",
+                    "sha": "70b505a311a3d031d242a030368039cedc61a372"
+                }
+            ]
+        },
+        {
+            "id": "http-request",
+            "repository": "MiraboxSpace/StreamDock-Plugins",
+            "revision": "bcbfc9e5f3790d5dc700c2a26aac498e2a672e13",
+            "package_path": "Plugins/com.httprequest.stream-dock-manager.sdPlugin",
+            "license": "GPL-3.0",
+            "files": [
+                {
+                    "path": "LICENSE",
+                    "sha": "ad459a1fa2b693428628506a3d801265f02af617"
+                },
+                {
+                    "path": "Plugins/com.httprequest.stream-dock-manager.sdPlugin/README.md",
+                    "sha": "d7ea2084cafcf06d5df081e06720edc9905cb509"
+                },
+                {
+                    "path": "Plugins/com.httprequest.stream-dock-manager.sdPlugin/demo.png",
+                    "sha": "51e190a48dac0159662d707b0c1c81ada27f21b6"
+                },
+                {
+                    "path": "Plugins/com.httprequest.stream-dock-manager.sdPlugin/en.json",
+                    "sha": "372c049a4e5cbc2f8e3812a731b9c4fac692fe1b"
+                },
+                {
+                    "path": "Plugins/com.httprequest.stream-dock-manager.sdPlugin/manifest.json",
+                    "sha": "0e73dcbf7f71376f570dc6242382bf7d0d14959c"
+                },
+                {
+                    "path": "Plugins/com.httprequest.stream-dock-manager.sdPlugin/plugin/index.html",
+                    "sha": "53454eebe8032e40f1dccdf3cc194677cc470f66"
+                },
+                {
+                    "path": "Plugins/com.httprequest.stream-dock-manager.sdPlugin/plugin/index.js",
+                    "sha": "2b2348e1a9ebf5b6634126ecf53397af32ad0fa5"
+                },
+                {
+                    "path": "Plugins/com.httprequest.stream-dock-manager.sdPlugin/plugin/utils/common.js",
+                    "sha": "fdc7331357d51b281b2385aaeee443cefa1e1548"
+                },
+                {
+                    "path": "Plugins/com.httprequest.stream-dock-manager.sdPlugin/plugin/utils/worker.js",
+                    "sha": "2ad8f2a4a25ea054d2330fe7bc6a2063137166c7"
+                },
+                {
+                    "path": "Plugins/com.httprequest.stream-dock-manager.sdPlugin/propertyInspector/action/index.html",
+                    "sha": "2896db030d6ca981f5c9ca44443a9f3cc70608a8"
+                },
+                {
+                    "path": "Plugins/com.httprequest.stream-dock-manager.sdPlugin/propertyInspector/action/index.js",
+                    "sha": "03dbedc2a70c2cab3af2f870490b234427ce399c"
+                },
+                {
+                    "path": "Plugins/com.httprequest.stream-dock-manager.sdPlugin/propertyInspector/utils/action.js",
+                    "sha": "309dc19e0743a43a2d58cc798f8d960b974c1e04"
+                },
+                {
+                    "path": "Plugins/com.httprequest.stream-dock-manager.sdPlugin/propertyInspector/utils/common.js",
+                    "sha": "a9e7102edd093cb0ef8cd1afc2fc75ae46a95585"
+                },
+                {
+                    "path": "Plugins/com.httprequest.stream-dock-manager.sdPlugin/static/default.png",
+                    "sha": "283dec2c456715b770c611d7d09c021976dc9df1"
+                },
+                {
+                    "path": "Plugins/com.httprequest.stream-dock-manager.sdPlugin/static/default.svg",
+                    "sha": "2a02cfd1990ff6ab49983611fef725d0cc9f9509"
+                },
+                {
+                    "path": "Plugins/com.httprequest.stream-dock-manager.sdPlugin/static/icon.png",
+                    "sha": "e04ae7b096539bc746dd2462f061baa6dfc8973c"
+                },
+                {
+                    "path": "Plugins/com.httprequest.stream-dock-manager.sdPlugin/static/icon.svg",
+                    "sha": "a4ea6703048858bdd763904f63d90479263aa42e"
+                },
+                {
+                    "path": "Plugins/com.httprequest.stream-dock-manager.sdPlugin/zh_CN.json",
+                    "sha": "74cf9cf6d4e1ad23aee53f990364934ba381feeb"
+                }
+            ]
+        },
+        {
+            "id": "elgato-counter",
+            "repository": "elgatosf/streamdeck-counter",
+            "revision": "0f6cc540bf72f21e2133a30f2d2a9175f4832e92",
+            "archive": "Release/com.elgato.counter.streamDeckPlugin",
+            "license": "MIT",
+            "files": [
+                {
+                    "path": "Release/com.elgato.counter.streamDeckPlugin",
+                    "sha": "186a516237ecb3f969a369b57b7c8bc5f1792301"
+                },
+                {
+                    "path": "LICENSE",
+                    "sha": "661749150b6670506f6d7ba97aec7b78c30a95be"
+                }
+            ]
+        },
+        {
+            "id": "elgato-layouts",
+            "repository": "elgatosf/streamdeck-plugin-samples",
+            "revision": "8cc82bad8716c000bacc131285ffcf6805dafff9",
+            "archive": "layouts/com.elgato.layouts.streamDeckPlugin",
+            "license": "MIT",
+            "files": [
+                {
+                    "path": "LICENSE",
+                    "sha": "e4d182f43762120a7cdfdb2b316d897720abfe2f"
+                },
+                {
+                    "path": "layouts/com.elgato.layouts.streamDeckPlugin",
+                    "sha": "d1e826975309381b68d849fce3564adeb077d2b5"
+                }
+            ]
+        }
+    ]
+}

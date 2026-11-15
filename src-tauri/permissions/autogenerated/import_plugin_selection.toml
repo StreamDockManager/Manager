@@ -1,0 +1,11 @@
+# Automatically generated - DO NOT EDIT!
+
+[[permission]]
+identifier = "allow-import-plugin-selection"
+description = "Enables the import_plugin_selection command without any pre-configured scope."
+commands.allow = ["import_plugin_selection"]
+
+[[permission]]
+identifier = "deny-import-plugin-selection"
+description = "Denies the import_plugin_selection command without any pre-configured scope."
+commands.deny = ["import_plugin_selection"]

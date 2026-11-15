@@ -1,0 +1,11 @@
+# Automatically generated - DO NOT EDIT!
+
+[[permission]]
+identifier = "allow-heartbeat-keyboard-macro-recording"
+description = "Enables the heartbeat_keyboard_macro_recording command without any pre-configured scope."
+commands.allow = ["heartbeat_keyboard_macro_recording"]
+
+[[permission]]
+identifier = "deny-heartbeat-keyboard-macro-recording"
+description = "Denies the heartbeat_keyboard_macro_recording command without any pre-configured scope."
+commands.deny = ["heartbeat_keyboard_macro_recording"]

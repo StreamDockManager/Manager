@@ -1,0 +1,845 @@
+<div x-data="pluginCatalog">
+    <dialog
+        x-ref="catalogDialog"
+        class="feature-dialog catalog-dialog"
+        :class="updates.reviewActive ? 'catalog-review-dialog' : ''"
+        aria-labelledby="catalog-title"
+        @cancel.prevent="cancel"
+        @keydown.escape.prevent.stop="cancel"
+    >
+        <header class="picker-header catalog-header">
+            <h2 id="catalog-title">Plugin catalog</h2>
+            <div class="catalog-header-actions">
+                <button
+                    type="button"
+                    class="icon-button catalog-settings-toggle"
+                    x-ref="settingsToggle"
+                    aria-label="Catalog settings"
+                    data-tooltip="Catalog settings"
+                    x-show="!updates.reviewActive"
+                    aria-controls="catalog-settings"
+                    :aria-expanded="settingsOpen"
+                    :aria-pressed="settingsOpen"
+                    :disabled="updates.working || updates.reviewActive || sourceSaving"
+                    @click="toggleSettings"
+                >
+                    <img src="/appearance/icons/settings.svg" width="20" height="20" alt="" />
+                </button>
+                <button
+                    type="button"
+                    class="icon-button"
+                    aria-label="Close plugin catalog"
+                    @click="close"
+                    :disabled="updates.working || sourceSaving"
+                >
+                    ×
+                </button>
+            </div>
+            <p x-show="!updates.reviewActive">Find plugins and review updates.</p>
+        </header>
+        <div
+            class="catalog-tabs"
+            role="tablist"
+            aria-label="Plugin catalog views"
+            x-show="!settingsOpen && !updates.reviewActive"
+            @keydown="navigateTabs"
+        >
+            <button
+                type="button"
+                role="tab"
+                id="catalog-browse-tab"
+                x-ref="browseTab"
+                aria-controls="catalog-browse"
+                :aria-selected="updates.catalogTab === 'browse'"
+                :tabindex="updates.catalogTab === 'browse' ? 0 : -1"
+                @click="browse"
+            >
+                Browse
+            </button>
+            <button
+                type="button"
+                role="tab"
+                id="catalog-updates-tab"
+                x-ref="updatesTab"
+                aria-controls="catalog-updates"
+                :aria-selected="updates.catalogTab === 'updates'"
+                :tabindex="updates.catalogTab === 'updates' ? 0 : -1"
+                @click="updatesTab"
+            >
+                Updates
+                <span x-text="updates.count"></span>
+            </button>
+        </div>
+        <div
+            class="feature-body catalog-body"
+            :class="updates.reviewActive ? 'catalog-review-body' : ''"
+            x-ref="catalogBody"
+        >
+            <p
+                class="error"
+                role="alert"
+                x-show="updates.error && !settingsOpen"
+                x-text="updates.error"
+            ></p>
+            <section
+                role="region"
+                aria-label="Package review"
+                class="package-review"
+                :aria-busy="updates.reviewLoading ? 'true' : 'false'"
+                x-show="updates.reviewActive && !settingsOpen"
+            >
+                <div class="feature-body package-review-loading" x-show="updates.reviewLoading">
+                    <span class="review-spinner" aria-hidden="true"></span>
+                    <div class="field-group" role="status">
+                        <h3
+                            x-ref="reviewLoadingHeading"
+                            tabindex="-1"
+                            x-text="updates.reviewLoadingTitle"
+                        ></h3>
+                        <p class="field-help">
+                            Checking package files and compatibility before installation.
+                        </p>
+                    </div>
+                    <template x-if="updates.reviewDownload && updates.reviewDownload.total > 0">
+                        <div class="field-group package-review-progress">
+                            <progress
+                                :value="updates.reviewDownload.completed + ''"
+                                :max="updates.reviewDownload.total"
+                                aria-label="Package download progress"
+                            ></progress>
+                            <small
+                                x-text="updates.downloadProgress(updates.reviewDownload)"
+                            ></small>
+                        </div>
+                    </template>
+                </div>
+                <div
+                    class="feature-body package-review-content"
+                    x-ref="reviewBody"
+                    x-show="updates.review"
+                >
+                    <header class="package-review-heading">
+                        <h3>Review installation</h3>
+                        <div class="package-review-identity">
+                            <strong
+                                x-text="updates.review ? updates.review.manifest.name : ''"
+                            ></strong>
+                            <span
+                                class="chip"
+                                x-text="updates.review ? 'v' + updates.review.package.version : ''"
+                            ></span>
+                        </div>
+                        <p
+                            class="field-help"
+                            x-text="updates.review ? updates.review.manifest.publisher || 'Publisher not declared' : ''"
+                        ></p>
+                    </header>
+                    <div class="package-review-status">
+                        <span
+                            class="chip"
+                            x-text="updates.review && updates.review.can_import ? 'Can import' : 'Cannot import'"
+                        ></span>
+                        <span
+                            class="chip"
+                            x-text="updates.review && updates.review.can_run ? 'Runtime requirements met' : 'Runtime blocked'"
+                        ></span>
+                    </div>
+                    <p
+                        class="field-help"
+                        x-text="updates.review && updates.review.trusted ? 'Verified catalog package. Files and capabilities have been checked.' : 'Local package: manually managed. Only install packages you trust.'"
+                    ></p>
+                    <p
+                        class="error"
+                        role="alert"
+                        x-show="updates.review && updates.review.reason"
+                        x-text="updates.review ? updates.review.reason || '' : ''"
+                    ></p>
+                    <p class="danger-text" x-show="updates.review && !updates.review.can_run">
+                        The plugin will remain blocked until its runtime requirements are met. See
+                        Compatibility for details.
+                    </p>
+                    <div
+                        class="catalog-tabs package-review-tabs"
+                        role="tablist"
+                        aria-label="Installation review details"
+                        x-ref="reviewTabs"
+                        @keydown="navigateReviewTabs"
+                    >
+                        <template x-for="tab in reviewTabs" :key="tab.id">
+                            <button
+                                type="button"
+                                role="tab"
+                                :id="'review-' + tab.id + '-tab'"
+                                :aria-controls="'review-' + tab.id + '-panel'"
+                                :aria-selected="reviewTab === tab.id"
+                                :tabindex="reviewTab === tab.id ? 0 : -1"
+                                :data-review-tab="tab.id"
+                                @click="selectReviewTab"
+                                x-text="tab.label"
+                            ></button>
+                        </template>
+                    </div>
+                    <section
+                        role="tabpanel"
+                        id="review-overview-panel"
+                        aria-labelledby="review-overview-tab"
+                        tabindex="0"
+                        class="package-review-panel"
+                        x-show="reviewTab === 'overview'"
+                    >
+                        <dl class="package-review-facts">
+                            <div>
+                                <dt>Actions</dt>
+                                <dd
+                                    x-text="updates.review ? updates.review.manifest.action_count : ''"
+                                ></dd>
+                            </div>
+                            <div>
+                                <dt>Runtime</dt>
+                                <dd
+                                    x-text="updates.review ? updates.review.manifest.runtime_kind : ''"
+                                ></dd>
+                            </div>
+                            <div>
+                                <dt>Controls</dt>
+                                <dd
+                                    x-text="updates.review ? updates.review.manifest.control_types.join(', ') || 'Not declared' : ''"
+                                ></dd>
+                            </div>
+                            <div>
+                                <dt>Platforms</dt>
+                                <dd
+                                    x-text="updates.review ? updates.review.manifest.platforms.join(', ') || 'Not declared' : ''"
+                                ></dd>
+                            </div>
+                            <div>
+                                <dt>Installed version</dt>
+                                <dd
+                                    x-text="updates.review ? updates.review.installed_version || 'New plugin' : ''"
+                                ></dd>
+                            </div>
+                            <div>
+                                <dt>Release channel</dt>
+                                <dd x-text="updates.review ? updates.review.channel : ''"></dd>
+                            </div>
+                        </dl>
+                        <p
+                            class="field-help"
+                            x-show="updates.review && !updates.review.installed_version"
+                        >
+                            New plugins stay disabled until enabled and used by an active device
+                            profile.
+                        </p>
+                    </section>
+                    <section
+                        role="tabpanel"
+                        id="review-compatibility-panel"
+                        aria-labelledby="review-compatibility-tab"
+                        tabindex="0"
+                        class="package-review-panel"
+                        x-show="reviewTab === 'compatibility'"
+                    >
+                        <dl
+                            class="package-review-facts"
+                            x-show="updates.review && updates.review.compatibility.runtime"
+                        >
+                            <div>
+                                <dt>Declared runtime</dt>
+                                <dd
+                                    x-text="updates.review && updates.review.compatibility.runtime ? updates.review.compatibility.runtime.requirement.version || 'Supported default' : ''"
+                                ></dd>
+                            </div>
+                            <div>
+                                <dt>Selected runtime</dt>
+                                <dd
+                                    x-text="updates.review && updates.review.compatibility.runtime && updates.review.compatibility.runtime.selected ? updates.review.compatibility.runtime.selected.version : 'None'"
+                                ></dd>
+                            </div>
+                        </dl>
+                        <ul
+                            class="package-review-findings"
+                            x-show="updates.review && updates.review.compatibility.checks.length"
+                        >
+                            <template
+                                x-for="finding in updates.review ? updates.review.compatibility.checks : []"
+                                :key="finding.code + finding.message"
+                            >
+                                <li>
+                                    <span class="chip" x-text="finding.level"></span>
+                                    <div class="field-group">
+                                        <p x-text="finding.message"></p>
+                                        <p
+                                            class="field-help"
+                                            x-show="finding.remedy"
+                                            x-text="finding.remedy"
+                                        ></p>
+                                    </div>
+                                </li>
+                            </template>
+                        </ul>
+                        <p
+                            class="field-help"
+                            x-show="updates.review && !updates.review.compatibility.checks.length"
+                        >
+                            No additional compatibility findings.
+                        </p>
+                    </section>
+                    <section
+                        role="tabpanel"
+                        id="review-package-panel"
+                        aria-labelledby="review-package-tab"
+                        tabindex="0"
+                        class="package-review-panel"
+                        x-show="reviewTab === 'package'"
+                    >
+                        <dl class="package-review-facts">
+                            <div class="package-review-wide">
+                                <dt>Plugin ID</dt>
+                                <dd
+                                    class="source-path"
+                                    x-text="updates.review ? updates.review.package.id : ''"
+                                ></dd>
+                            </div>
+                            <div>
+                                <dt>Package type</dt>
+                                <dd
+                                    x-text="updates.review ? updates.review.manifest.dialect + ' · ' + updates.review.source.format : ''"
+                                ></dd>
+                            </div>
+                            <div>
+                                <dt>Minimum Manager version</dt>
+                                <dd
+                                    x-text="updates.review ? updates.review.package.minimum_manager : ''"
+                                ></dd>
+                            </div>
+                            <div>
+                                <dt>Entry point</dt>
+                                <dd
+                                    class="source-path"
+                                    x-text="updates.review ? updates.review.manifest.entry_point : ''"
+                                ></dd>
+                            </div>
+                            <div>
+                                <dt>Source</dt>
+                                <dd
+                                    class="source-path"
+                                    x-text="updates.review ? updates.review.source.filename : ''"
+                                ></dd>
+                            </div>
+                            <div class="package-review-wide">
+                                <dt>SHA-256</dt>
+                                <dd
+                                    class="source-path"
+                                    x-text="updates.review ? updates.review.source.sha256 : ''"
+                                ></dd>
+                            </div>
+                        </dl>
+                    </section>
+                </div>
+                <footer class="feature-footer package-review-footer">
+                    <div
+                        class="settings-section"
+                        x-show="updates.review && updates.review.channel_change || updates.review && !updates.review.trusted && updates.review.installed_version"
+                    >
+                        <label
+                            class="preference-toggle"
+                            x-show="updates.review && updates.review.channel_change"
+                        >
+                            <input
+                                type="checkbox"
+                                x-model="updates.allowChannelChange"
+                                :disabled="updates.working"
+                            />
+                            <span>Allow changing this plugin’s release channel</span>
+                        </label>
+                        <label
+                            class="preference-toggle"
+                            x-show="updates.review && !updates.review.trusted && updates.review.installed_version"
+                        >
+                            <input
+                                type="checkbox"
+                                x-model="updates.replaceInstalled"
+                                :disabled="updates.working"
+                            />
+                            <span>
+                                Replace the installed package; preserve settings, bindings, and
+                                enabled preference, and keep a backup
+                            </span>
+                        </label>
+                    </div>
+                    <div class="button-row">
+                        <button
+                            type="button"
+                            class="button"
+                            @click="updates.closeReview()"
+                            :disabled="updates.working"
+                            x-text="updates.reviewLoading ? 'Cancel review' : 'Cancel installation'"
+                        ></button>
+                        <button
+                            type="button"
+                            class="button primary"
+                            @click="updates.commit()"
+                            x-show="updates.review"
+                            :disabled="!updates.canCommit"
+                            x-text="updates.working ? 'Installing…' : 'Install package'"
+                        ></button>
+                    </div>
+                </footer>
+            </section>
+            <section
+                id="catalog-settings"
+                class="catalog-settings"
+                aria-labelledby="catalog-settings-title"
+                x-show="settingsOpen"
+            >
+                <div>
+                    <h3 id="catalog-settings-title">Catalog settings</h3>
+                    <p class="field-help">
+                        This source and release channel apply to both Browse and Updates.
+                    </p>
+                </div>
+                <form
+                    class="settings-section"
+                    @submit.prevent="saveSource"
+                    :aria-busy="sourceSaving"
+                >
+                    <p class="error" role="alert" x-show="sourceError" x-text="sourceError"></p>
+                    <label class="settings-field">
+                        Catalog source
+                        <select
+                            aria-label="Catalog source"
+                            x-model="sourceKind"
+                            @change="loadTokenStatus"
+                            :disabled="sourceSaving"
+                        >
+                            <option value="hosted">CDN catalog</option>
+                            <option value="repository">GitHub Releases (default)</option>
+                        </select>
+                    </label>
+                    <label class="settings-field">
+                        Plugins releases (owner/repository)
+                        <input
+                            x-ref="sourceRepository"
+                            x-model="sourceRepository"
+                            @change="loadTokenStatus"
+                            placeholder="owner/repository"
+                            maxlength="200"
+                            :disabled="sourceSaving"
+                        />
+                    </label>
+                    <div class="field-group" x-show="!repositorySource">
+                        <label class="settings-field">
+                            Plugin catalog URL (optional)
+                            <input
+                                type="url"
+                                x-model="sourceUrl"
+                                placeholder="Default: configured public bucket catalog"
+                                maxlength="2048"
+                                :disabled="sourceSaving"
+                            />
+                        </label>
+                        <p class="field-help">
+                            Leave the URL blank to use this build’s default public bucket catalog.
+                            Custom catalog URLs must use HTTPS.
+                        </p>
+                    </div>
+                    <div class="settings-section" x-show="repositorySource">
+                        <p class="field-help">
+                            Read catalog.json and plugin ZIPs from this repository’s GitHub
+                            Releases. Public repositories do not require sign-in. Private
+                            repositories need a fine-grained GitHub access token with Contents: read
+                            access to this repository.
+                        </p>
+                        <div class="field-group">
+                            <label class="settings-field">
+                                GitHub access token
+                                <input
+                                    type="password"
+                                    x-model="sourceToken"
+                                    autocomplete="new-password"
+                                    maxlength="4096"
+                                    :disabled="sourceSaving"
+                                />
+                            </label>
+                            <p class="field-help">
+                                Tokens are saved separately in your OS credential store for this
+                                repository.
+                            </p>
+                            <p class="field-help" role="status" x-show="tokenState">
+                                Token status:
+                                <span x-text="tokenState"></span>
+                            </p>
+                        </div>
+                        <div class="button-row">
+                            <button
+                                type="button"
+                                class="button"
+                                @click="saveToken"
+                                :disabled="sourceSaving || !sourceToken || !sourceRepository"
+                            >
+                                Save GitHub token
+                            </button>
+                            <button
+                                type="button"
+                                class="button danger"
+                                @click="clearToken"
+                                :disabled="sourceSaving || tokenState === 'missing' || !tokenState"
+                            >
+                                Remove GitHub token
+                            </button>
+                        </div>
+                    </div>
+                    <p class="field-help" x-show="updates.effectiveCatalogUrl">
+                        Active catalog:
+                        <span x-text="updates.effectiveCatalogUrl"></span>
+                    </p>
+                    <div class="field-group">
+                        <label class="settings-field">
+                            Plugin channel
+                            <select
+                                aria-label="Plugin channel"
+                                x-model="sourceChannel"
+                                :disabled="sourceSaving"
+                            >
+                                <option value="stable">Stable</option>
+                                <option value="development">Development</option>
+                            </select>
+                        </label>
+                        <p class="field-help" x-show="updates.checking">
+                            A check is running. You can save when it finishes.
+                        </p>
+                    </div>
+                    <div class="button-row catalog-settings-actions">
+                        <button
+                            type="button"
+                            class="button"
+                            @click="backToCatalog"
+                            :disabled="sourceSaving"
+                        >
+                            Cancel
+                        </button>
+                        <button
+                            type="submit"
+                            class="button primary"
+                            :disabled="sourceSaving || updates.checking"
+                            x-text="sourceSaving ? 'Saving…' : 'Save & refresh'"
+                        ></button>
+                    </div>
+                </form>
+            </section>
+            <section
+                role="tabpanel"
+                id="catalog-browse"
+                class="settings-section"
+                aria-labelledby="catalog-browse-tab"
+                x-show="!settingsOpen && !updates.reviewActive && updates.catalogTab === 'browse'"
+            >
+                <div class="catalog-toolbar">
+                    <label class="settings-field catalog-search">
+                        Search catalog
+                        <input
+                            type="search"
+                            x-model="updates.catalogSearch"
+                            placeholder="Name, action, dependency…"
+                        />
+                    </label>
+                    <label class="settings-field">
+                        Channel
+                        <select aria-label="Channel" x-model="updates.channel">
+                            <option value="stable">Stable</option>
+                            <option value="development">Development</option>
+                        </select>
+                    </label>
+                    <button
+                        type="button"
+                        class="button"
+                        @click="updates.check('plugins')"
+                        :disabled="updates.checking"
+                        x-text="updates.checking ? 'Refreshing…' : 'Refresh catalog'"
+                    ></button>
+                </div>
+                <div class="button-row" x-show="updates.linkedPlugin">
+                    <button type="button" class="button" @click="updates.clearLinkedPlugin">
+                        Show all plugins
+                    </button>
+                </div>
+                <p role="status" x-show="updates.checking">Checking the plugin catalog…</p>
+                <div class="catalog-empty" x-show="updates.pluginsError && !updates.checking">
+                    <h3>Catalog unavailable</h3>
+                    <p>
+                        The catalog could not be loaded. Refresh to retry, check Catalog settings,
+                        or import an individual package.
+                    </p>
+                </div>
+                <p
+                    role="status"
+                    x-show="!updates.hasCatalog && !updates.checking && !updates.pluginsError"
+                >
+                    Refresh the catalog to browse available packages.
+                </p>
+                <p
+                    role="status"
+                    x-show="updates.hasCatalog && !updates.availablePlugins.length && !updates.checking"
+                >
+                    No plugins match this search and channel.
+                </p>
+                <div class="catalog-grid">
+                    <template x-for="entry in updates.availablePlugins" :key="entry.id">
+                        <article
+                            class="card catalog-plugin"
+                            :aria-label="entry.name"
+                            tabindex="-1"
+                            :data-linked-catalog-card="updates.linkedPlugin === entry.id"
+                        >
+                            <header class="card-heading">
+                                <img
+                                    class="catalog-plugin-icon"
+                                    :src="entry.icon"
+                                    width="40"
+                                    height="40"
+                                    alt=""
+                                    loading="lazy"
+                                />
+                                <div>
+                                    <h3 x-text="entry.name"></h3>
+                                    <small x-text="'v' + entry.version"></small>
+                                </div>
+                            </header>
+                            <p x-text="entry.description"></p>
+
+                            <details class="disclosure">
+                                <summary>Dependencies and setup</summary>
+                                <div class="disclosure-body">
+                                    <dl class="package-review-facts">
+                                        <div>
+                                            <dt>Publisher</dt>
+                                            <dd x-text="entry.author"></dd>
+                                        </div>
+                                        <div>
+                                            <dt>License</dt>
+                                            <dd x-text="entry.license"></dd>
+                                        </div>
+                                    </dl>
+                                    <template
+                                        x-for="dependency in entry.dependencies"
+                                        :key="dependency.name"
+                                    >
+                                        <p>
+                                            <a
+                                                :href="dependency.documentation"
+                                                :data-repository="updates.selectedCatalog.repository"
+                                                :data-channel="updates.selectedCatalog.channel"
+                                                :data-plugin-id="entry.id"
+                                                :data-plugin-version="entry.version"
+                                                :data-dependency="dependency.name"
+                                                @click="updates.openPluginDocumentation($event)"
+                                                target="_blank"
+                                                rel="noopener"
+                                                x-text="dependency.name"
+                                            ></a>
+                                            <span
+                                                x-text="(dependency.required ? ' · Required · ' : ' · Optional · ') + dependency.platforms.join(', ')"
+                                            ></span>
+                                        </p>
+                                    </template>
+                                    <a
+                                        :href="entry.documentation"
+                                        :data-repository="updates.selectedCatalog.repository"
+                                        :data-channel="updates.selectedCatalog.channel"
+                                        :data-plugin-id="entry.id"
+                                        :data-plugin-version="entry.version"
+                                        @click="updates.openPluginDocumentation($event)"
+                                        target="_blank"
+                                        rel="noopener"
+                                    >
+                                        Documentation ↗
+                                    </a>
+                                </div>
+                            </details>
+                            <footer class="field-group catalog-plugin-footer">
+                                <div class="catalog-package-meta">
+                                    <small x-text="updates.downloadLabel(entry)"></small>
+                                    <small
+                                        x-text="'Manager ' + entry.minimum_manager + ' or later'"
+                                    ></small>
+                                </div>
+                                <p
+                                    class="field-help"
+                                    x-show="updates.artifact(entry)"
+                                    x-text="updates.vsdCraftLabel(entry)"
+                                ></p>
+                                <label class="field-group" x-show="updates.unifiedAvailable(entry)">
+                                    <span>Package</span>
+                                    <select
+                                        :data-id="entry.id"
+                                        :aria-label="'Package for ' + entry.name"
+                                        :value="updates.packageVariant(entry.id)"
+                                        @change="updates.selectPackageVariant($event)"
+                                        :disabled="updates.reviewActive || updates.working"
+                                    >
+                                        <option value="platform">This platform</option>
+                                        <option value="unified">Unified package</option>
+                                    </select>
+                                </label>
+                                <div class="button-row catalog-plugin-actions">
+                                    <button
+                                        type="button"
+                                        class="button"
+                                        :data-id="entry.id"
+                                        :aria-label="'Download package for ' + entry.name"
+                                        @click="updates.downloadPlugin($event)"
+                                        :disabled="!updates.artifact(entry) || updates.reviewActive || updates.working"
+                                    >
+                                        Download
+                                    </button>
+                                    <button
+                                        type="button"
+                                        class="button"
+                                        :data-id="entry.id"
+                                        :aria-label="'Install ' + entry.name"
+                                        @click="installFromCatalog"
+                                        :disabled="!updates.artifact(entry) || updates.reviewActive || updates.working"
+                                    >
+                                        Install
+                                    </button>
+                                </div>
+                            </footer>
+                        </article>
+                    </template>
+                </div>
+            </section>
+            <section
+                role="tabpanel"
+                id="catalog-updates"
+                aria-labelledby="catalog-updates-tab"
+                x-show="!settingsOpen && !updates.reviewActive && updates.catalogTab === 'updates'"
+                class="settings-section"
+            >
+                <div class="button-row">
+                    <button
+                        type="button"
+                        class="button"
+                        @click="updates.check('plugins')"
+                        :disabled="updates.checking"
+                    >
+                        Check for plugin updates
+                    </button>
+                    <button
+                        type="button"
+                        class="button primary"
+                        @click="updates.reviewAll()"
+                        :disabled="!updates.count || updates.reviewActive || updates.working"
+                    >
+                        Update all compatible
+                    </button>
+                </div>
+                <div class="button-row" role="status">
+                    <span class="chip" x-text="updates.pluginsState"></span>
+                    <span
+                        class="field-help"
+                        x-text="'Last checked: ' + updates.pluginsLastCheck"
+                    ></span>
+                </div>
+                <p
+                    role="status"
+                    x-text="updates.count + ' plugin updates available · Last checked: ' + updates.pluginsLastCheck"
+                ></p>
+                <p class="field-help" x-show="updates.pluginsError">
+                    The catalog is unavailable. Verify the source in Catalog settings or try
+                    checking again.
+                </p>
+                <template
+                    x-for="candidate in updates.pluginUpdates"
+                    :key="candidate.id + candidate.channel"
+                >
+                    <div class="update-candidate">
+                        <div>
+                            <strong x-text="candidate.id"></strong>
+                            <p
+                                x-text="candidate.installed_version + ' → ' + candidate.available_version + ' · ' + candidate.channel"
+                            ></p>
+                            <small x-text="candidate.reason || ''"></small>
+                        </div>
+                        <button
+                            type="button"
+                            class="button"
+                            :data-id="candidate.id"
+                            @click="updates.reviewOne($event)"
+                            :disabled="!candidate.compatible || updates.reviewActive || updates.working"
+                        >
+                            Review update
+                        </button>
+                    </div>
+                </template>
+                <template x-for="job in updates.jobs" :key="job.id">
+                    <div class="download-row">
+                        <div class="field-group">
+                            <p x-show="job.asset_name" x-text="job.asset_name"></p>
+                            <strong x-text="job.state"></strong>
+                            <p x-show="job.error" x-text="job.error || ''"></p>
+                            <p
+                                role="status"
+                                x-show="job.state === 'running'"
+                                x-text="updates.downloadProgress(job)"
+                            ></p>
+                            <progress
+                                :value="job.completed || 0"
+                                :max="job.total || 1"
+                                x-show="job.state === 'running'"
+                                :aria-label="'Plugin download progress ' + (job.asset_name || job.id)"
+                            ></progress>
+                        </div>
+                        <button
+                            type="button"
+                            class="button"
+                            :data-id="job.id"
+                            @click="updates.cancel($event)"
+                            x-show="job.state === 'running' || job.state === 'queued'"
+                        >
+                            Cancel download
+                        </button>
+                        <div class="button-row" x-show="job.state === 'complete'">
+                            <button
+                                type="button"
+                                class="button"
+                                :data-id="job.id"
+                                @click="updates.show($event)"
+                            >
+                                Show in folder
+                            </button>
+                            <button
+                                type="button"
+                                class="button"
+                                :data-id="job.id"
+                                @click="updates.prepareDrag($event)"
+                                :disabled="updates.preparingDrag"
+                                x-show="updates.dragSupported && updates.dragJob !== job.id"
+                            >
+                                Prepare drag
+                            </button>
+                            <button
+                                type="button"
+                                class="button"
+                                @mousedown="updates.dragPackage($event)"
+                                x-show="updates.dragJob === job.id"
+                            >
+                                Drag package
+                            </button>
+                        </div>
+                        <button
+                            type="button"
+                            class="button"
+                            :data-id="job.id"
+                            @click="updates.retryDownload($event)"
+                            :aria-label="'Retry download ' + (job.asset_name || job.id)"
+                            x-show="updates.canRetry(job)"
+                            :disabled="updates.reviewActive || updates.working"
+                        >
+                            Retry download
+                        </button>
+                    </div>
+                </template>
+            </section>
+        </div>
+    </dialog>
+</div>

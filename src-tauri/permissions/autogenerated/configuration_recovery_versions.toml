@@ -1,0 +1,11 @@
+# Automatically generated - DO NOT EDIT!
+
+[[permission]]
+identifier = "allow-configuration-recovery-versions"
+description = "Enables the configuration_recovery_versions command without any pre-configured scope."
+commands.allow = ["configuration_recovery_versions"]
+
+[[permission]]
+identifier = "deny-configuration-recovery-versions"
+description = "Denies the configuration_recovery_versions command without any pre-configured scope."
+commands.deny = ["configuration_recovery_versions"]

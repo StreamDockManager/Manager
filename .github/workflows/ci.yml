@@ -1,0 +1,251 @@
+name: checks
+on:
+    push:
+        branches: [test-build]
+    workflow_dispatch:
+        inputs:
+            targets:
+                description: 'Native check targets; test-build pushes check all platforms'
+                required: false
+                type: choice
+                default: all
+                options: [all, linux-windows, linux, linux-host]
+    workflow_call:
+        inputs:
+            release_checks: { required: true, type: boolean }
+            commit: { required: true, type: string }
+permissions:
+    contents: read
+concurrency:
+    group: manager-tests-${{ github.ref }}-${{ inputs.targets || 'all' }}-${{ github.ref == 'refs/heads/main' && github.run_id || 'latest' }}
+    cancel-in-progress: ${{ github.ref == 'refs/heads/test-build' }}
+jobs:
+    quality:
+        if: (github.event_name == 'workflow_dispatch' || (github.event_name == 'push' && !github.event.created)) && (inputs.commit == '' || inputs.commit == github.sha) && (github.ref == 'refs/heads/test-build' || (github.ref == 'refs/heads/main' && github.event_name == 'workflow_dispatch' && github.workflow_ref == 'StreamDockManager/Manager/.github/workflows/prepare-release.yml@refs/heads/main' && inputs.release_checks && inputs.commit == github.sha))
+        runs-on: ${{ vars.LINUX_RUNNER_LABELS != '' && (github.event_name != 'pull_request' || github.event.pull_request.head.repo.full_name == github.repository) && fromJSON(vars.LINUX_RUNNER_LABELS) || 'ubuntu-24.04' }}
+        container: ${{ (github.event_name != 'workflow_dispatch' || inputs.targets != 'linux-host') && 'ubuntu@sha256:78d4744ead1f5b19b04d0df558ab182a5300903900755e515b2ca4d10eb2044d' || '' }}
+        defaults:
+            run:
+                shell: bash
+        timeout-minutes: 120
+        env:
+            STREAM_DOCK_MANAGER_LINUX_HOST: ${{ github.event_name == 'workflow_dispatch' && inputs.targets == 'linux-host' }}
+            STREAM_DOCK_MANAGER_LINUX_BASELINE_IMAGE: ubuntu@sha256:78d4744ead1f5b19b04d0df558ab182a5300903900755e515b2ca4d10eb2044d
+            # Keep Rust debug and incremental outputs from exhausting browser-test disk space
+            CARGO_PROFILE_DEV_DEBUG: '0'
+            CARGO_PROFILE_TEST_DEBUG: '0'
+            CARGO_INCREMENTAL: '0'
+        steps:
+            - name: Bootstrap pinned Ubuntu build userspace
+              if: env.STREAM_DOCK_MANAGER_LINUX_HOST != 'true'
+              shell: bash
+              run: |
+                  echo "STREAM_DOCK_MANAGER_WORKSPACE_OWNER=$(stat -c '%u:%g' "$GITHUB_WORKSPACE")" >> "$GITHUB_ENV"
+                  apt-get update
+                  DEBIAN_FRONTEND=noninteractive apt-get install -y --no-install-recommends bash git ca-certificates curl sudo python3 python3-venv python-is-python3 xz-utils build-essential pkg-config
+                  cat /etc/os-release
+                  getconf GNU_LIBC_VERSION
+                  uname -a
+                  echo "CARGO_HOME=$GITHUB_WORKSPACE/target/.cargo" >> "$GITHUB_ENV"
+                  echo "RUSTUP_HOME=$GITHUB_WORKSPACE/target/.rustup" >> "$GITHUB_ENV"
+                  echo "CARGO_TARGET_DIR=$GITHUB_WORKSPACE/target" >> "$GITHUB_ENV"
+                  echo "NPM_CONFIG_PREFIX=$GITHUB_WORKSPACE/target/.npm-prefix" >> "$GITHUB_ENV"
+                  echo "$GITHUB_WORKSPACE/target/.npm-prefix/bin" >> "$GITHUB_PATH"
+            - uses: actions/checkout@v7.0.1
+              with:
+                  persist-credentials: false
+            - name: Require clean baseline build outputs
+              if: env.STREAM_DOCK_MANAGER_LINUX_HOST != 'true'
+              shell: bash
+              run: |
+                  if [ -e "$GITHUB_WORKSPACE/target" ]; then
+                    echo 'Refusing to reuse native outputs from another userspace; checkout must clean this owned target directory.' >&2
+                    exit 1
+                  fi
+                  mkdir "$GITHUB_WORKSPACE/target"
+                  # Checkout's temporary HOME does not carry this trust into run steps
+                  git config --file "$GITHUB_WORKSPACE/target/.gitconfig" --add safe.directory "$GITHUB_WORKSPACE"
+                  echo "GIT_CONFIG_GLOBAL=$GITHUB_WORKSPACE/target/.gitconfig" >> "$GITHUB_ENV"
+            - name: Verify pinned vendor compatibility evidence
+              run: |
+                  python3 scripts/vsd_contract_inventory.py --check
+                  python3 scripts/vendor-compatibility.py
+            - name: Report Linux environment
+              run: uname -a && cat /etc/os-release && df -h .
+            - name: Configure isolated workspace tools
+              shell: bash
+              run: |
+                  mkdir -p "$GITHUB_WORKSPACE/target/.npm-prefix"
+                  echo "NPM_CONFIG_CACHE=$GITHUB_WORKSPACE/target/.npm-cache" >> "$GITHUB_ENV"
+                  echo "NPM_CONFIG_PREFIX=$GITHUB_WORKSPACE/target/.npm-prefix" >> "$GITHUB_ENV"
+                  echo "CARGO_TARGET_DIR=$GITHUB_WORKSPACE/target" >> "$GITHUB_ENV"
+            - uses: actions/setup-python@v7.1.0
+              if: env.STREAM_DOCK_MANAGER_LINUX_HOST == 'true'
+              with:
+                  python-version: '3.12'
+            - name: Prepare isolated Linux Python
+              run: |
+                  python3 -m venv --without-pip "$GITHUB_WORKSPACE/target/.python"
+                  echo "$GITHUB_WORKSPACE/target/.python/bin" >> "$GITHUB_PATH"
+            - uses: dtolnay/rust-toolchain@stable
+              with:
+                  components: rustfmt, clippy
+            - uses: actions/setup-node@v7.1.0
+              with:
+                  node-version: 26
+                  cache: npm
+            - run: npm install --global npm@12.2.2
+            - name: Activate isolated workspace npm
+              if: runner.os == 'Linux'
+              shell: bash
+              run: echo "$NPM_CONFIG_PREFIX/bin" >> "$GITHUB_PATH"
+            - run: sudo apt-get update && sudo apt-get install -y build-essential pkg-config libssl-dev libudev-dev libxdo-dev libdbus-1-dev libwebkit2gtk-4.1-dev libappindicator3-dev librsvg2-dev patchelf ffmpeg
+              if: env.STREAM_DOCK_MANAGER_LINUX_HOST != 'true'
+            - run: python scripts/native_build.py --os linux --arch amd64 --mode build-only --targets linux --report artifacts/linux-build-environment.json
+              if: env.STREAM_DOCK_MANAGER_LINUX_HOST != 'true'
+            - name: Record native Linux host evidence
+              if: env.STREAM_DOCK_MANAGER_LINUX_HOST == 'true'
+              run: |
+                  python - <<'PY'
+                  import json, os, pathlib, platform, subprocess, sys
+                  sys.path.insert(0, str(pathlib.Path('scripts').resolve()))
+                  from native_build import validate_native_host
+                  # Capture checked toolchain output for native-host qualification
+                  def command(*args):
+                      return subprocess.check_output(args, text=True).strip()
+                  rust = command('rustc', '-Vv')
+                  native = dict(system=platform.system(), machine=platform.machine(),
+                                runner_arch=os.environ.get('RUNNER_ARCH', ''),
+                                rust_host=next(line.removeprefix('host: ') for line in rust.splitlines() if line.startswith('host: ')),
+                                cargo_target=os.environ.get('CARGO_BUILD_TARGET', ''))
+                  validate_native_host('linux', 'amd64', **native)
+                  assert not pathlib.Path('/.dockerenv').exists(), 'linux-host must run outside the job container'
+                  source = command('git', 'rev-parse', 'HEAD')
+                  assert source == os.environ['GITHUB_SHA'], 'Checkout differs from the selected workflow source'
+                  report = dict(native, execution='native-host', source_commit=source,
+                                workflow_commit=os.environ['GITHUB_SHA'], kernel=platform.release(),
+                                distribution=platform.freedesktop_os_release(), libc=platform.libc_ver(),
+                                python=sys.version, node=command('node', '--version'),
+                                runner_name=os.environ.get('RUNNER_NAME'),
+                                scope='Quality checks on the recorded host; no Ubuntu 24.04 baseline, installer lifecycle, GUI or HID qualification')
+                  path = pathlib.Path('artifacts/linux-host-environment.json')
+                  path.parent.mkdir(exist_ok=True)
+                  path.write_text(json.dumps(report, indent=2) + '\n', encoding='utf-8')
+                  print(json.dumps(report, indent=2))
+                  PY
+            - run: python scripts/release.py version
+            - run: python -m compileall -q scripts
+            - run: npm ci
+            - name: Prepare verified patched Rust dependencies
+              run: python scripts/prepare_patched_deps.py
+            - name: Verify connection contract implementation and conformance
+              run: |
+                  python3 scripts/test_connection_contract.py
+                  python3 scripts/test_vendor_inventory.py
+                  python3 scripts/test_vsd_contract_inventory.py
+                  python3 scripts/check-connection-contract.py
+                  node --test tests/browser-registration.test.mjs tests/browser-resource-selection.test.mjs tests/browser-resource-selection-portable.test.mjs tests/dial-actions.test.mjs tests/preview-cadence.test.mjs tests/preview-images.test.mjs tests/health-panel-lifecycle.test.mjs
+            - run: npm run format:check
+            - run: cargo run -p xtask -- types --check && cargo run -p xtask -- hardware generate
+            - run: git diff --exit-code -- public/hardware.json packaging/linux/60-stream-dock-manager.rules
+            - run: cargo run -p xtask -- hardware check
+            - run: npm run build:native
+            - run: cargo clippy --workspace --all-targets -- -D warnings
+            - run: python scripts/test_prepare_patched_deps.py && python scripts/test_patched_dependency_wiring.py
+            - run: python scripts/test_check_syntax.py
+            - run: python scripts/test_package_metadata.py
+            - run: python scripts/check_syntax.py --rust-only
+            - name: Verify GLib security backport with optimizations
+              run: cargo test --locked --release -p stream-dock-manager --test glib_variant_iter
+            - uses: actions/upload-artifact@v7.0.2
+              if: always()
+              with:
+                  name: linux-acceptance
+                  path: |
+                      artifacts/linux-build-environment.json
+                      artifacts/linux-host-environment.json
+                  if-no-files-found: ignore
+            - name: Restore owned workspace permissions
+              if: always() && env.STREAM_DOCK_MANAGER_LINUX_HOST != 'true' && env.STREAM_DOCK_MANAGER_WORKSPACE_OWNER != ''
+              shell: bash
+              run: |
+                  if [[ ! "$STREAM_DOCK_MANAGER_WORKSPACE_OWNER" =~ ^[0-9]+:[0-9]+$ ]]; then exit 1; fi
+                  chown -hR "$STREAM_DOCK_MANAGER_WORKSPACE_OWNER" "$GITHUB_WORKSPACE"
+    platform-build:
+        if: (github.event_name == 'workflow_dispatch' || (github.event_name == 'push' && !github.event.created)) && (inputs.commit == '' || inputs.commit == github.sha) && (github.ref == 'refs/heads/test-build' || (github.ref == 'refs/heads/main' && github.event_name == 'workflow_dispatch' && github.workflow_ref == 'StreamDockManager/Manager/.github/workflows/prepare-release.yml@refs/heads/main' && inputs.release_checks && inputs.commit == github.sha)) && inputs.targets != 'linux' && inputs.targets != 'linux-host'
+        strategy:
+            fail-fast: false
+            matrix:
+                include: >-
+                    ${{ fromJSON(
+                      github.event_name == 'workflow_dispatch' && inputs.targets == 'linux-windows' && '[{"os":"windows-2022","runner_variable":"WINDOWS_RUNNER_LABELS"}]' ||
+                      '[{"os":"macos-15","runner_variable":"MACOS_RUNNER_LABELS"},{"os":"windows-2022","runner_variable":"WINDOWS_RUNNER_LABELS"}]'
+                    ) }}
+        runs-on: ${{ vars[matrix.runner_variable] != '' && (github.event_name != 'pull_request' || github.event.pull_request.head.repo.full_name == github.repository) && fromJSON(vars[matrix.runner_variable]) || matrix.os }}
+        timeout-minutes: 90
+        steps:
+            - uses: actions/checkout@v7.0.1
+              with:
+                  persist-credentials: false
+            - uses: actions/setup-python@v7.1.0
+              if: runner.os != 'macOS' || runner.environment != 'self-hosted'
+              with:
+                  python-version: '3.12'
+            - name: Prepare self-hosted macOS Python
+              if: runner.os == 'macOS' && runner.environment == 'self-hosted'
+              run: |
+                  python3 -c 'import sys; print(sys.version); sys.exit(0 if sys.version_info >= (3, 12) else "Install Python 3.12 or newer on this runner.")'
+                  python3 -m venv --without-pip "$RUNNER_TEMP/native-checks-python"
+                  echo "$RUNNER_TEMP/native-checks-python/bin" >> "$GITHUB_PATH"
+            - name: Use Git for Windows Bash
+              if: runner.os == 'Windows'
+              shell: powershell
+              run: |
+                  $gitDirectory = Split-Path (Get-Command git.exe -ErrorAction Stop).Source -Parent
+                  $gitBash = Join-Path $gitDirectory '..\bin\bash.exe'
+                  if (!(Test-Path -LiteralPath $gitBash)) { throw 'Git for Windows Bash is required; the WSL bash launcher cannot run native Windows setup actions.' }
+                  $bashDirectory = Split-Path (Resolve-Path -LiteralPath $gitBash).Path -Parent
+                  $bashDirectory | Out-File -FilePath $env:GITHUB_PATH -Encoding utf8 -Append
+            - name: Configure npm cache
+              shell: bash
+              run: echo "NPM_CONFIG_CACHE=$RUNNER_TEMP/npm-cache" >> "$GITHUB_ENV"
+            - uses: dtolnay/rust-toolchain@stable
+            - uses: actions/setup-node@v7.1.0
+              with:
+                  node-version: 26
+                  cache: npm
+            - run: npm install --global npm@12.2.2
+            - name: Verify Windows native toolchain
+              if: runner.os == 'Windows'
+              shell: powershell
+              run: |
+                  python --version
+                  rustc -Vv
+                  cargo -V
+                  node --version
+                  npm --version
+                  git --version
+                  $vswhere = Join-Path ${env:ProgramFiles(x86)} 'Microsoft Visual Studio\Installer\vswhere.exe'
+                  if (!(Test-Path -LiteralPath $vswhere)) { throw 'Install Visual Studio C++ Build Tools and the Windows SDK on this runner.' }
+                  $installation = & $vswhere -latest -products '*' -requires Microsoft.VisualStudio.Component.VC.Tools.x86.x64 -property installationPath
+                  if (!$installation) { throw 'The MSVC x64/x86 C++ toolchain is required for Rust native tests.' }
+                  Write-Output "MSVC installation: $installation"
+                  $sdkLibraries = Join-Path ${env:ProgramFiles(x86)} 'Windows Kits\10\Lib\*\um\x64\kernel32.lib'
+                  if (!(Get-ChildItem -Path $sdkLibraries -ErrorAction SilentlyContinue)) { throw 'A Windows SDK with x64 libraries is required.' }
+            - name: Verify macOS native toolchain
+              if: runner.os == 'macOS'
+              run: |
+                  sw_vers
+                  uname -m
+                  rustc -Vv
+                  xcode-select -p
+                  xcrun --find clang
+                  xcrun --sdk macosx --show-sdk-path
+            - run: python scripts/release.py version
+            - run: python -m compileall -q scripts
+            - run: npm ci
+            - run: npm run build:native
+            - name: Prepare verified patched Rust dependencies
+              run: python scripts/prepare_patched_deps.py
+            - run: cargo check --workspace --all-targets --locked
+            - run: cargo check -p stream-dock-manager

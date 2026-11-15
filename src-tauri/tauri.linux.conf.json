@@ -1,0 +1,7 @@
+{
+    "bundle": {
+        "resources": {
+            "../packaging/install-instructions/linux/INSTALL-INSTRUCTIONS.md": "INSTALL-INSTRUCTIONS.md"
+        }
+    }
+}

@@ -1,0 +1,295 @@
+<!doctype html>
+<html lang="en">
+    <head>
+        <meta charset="UTF-8" />
+        <meta name="viewport" content="width=device-width,initial-scale=1" />
+        <meta name="color-scheme" content="light dark" />
+        <meta name="theme-color" content="#080808" />
+        <link rel="icon" href="/brand/favicon.png" />
+        <title>Repair saved data · Stream Dock Manager</title>
+    </head>
+    <body class="configuration-recovery-window">
+        <main class="configuration-recovery-shell">
+            <header class="configuration-recovery-brand">
+                <img src="/brand/app-icon.svg" width="48" height="48" alt="" />
+                <span>
+                    Stream Dock
+                    <strong>Manager</strong>
+                </span>
+                <span class="configuration-recovery-badge">Recovery</span>
+            </header>
+            <section class="card configuration-recovery-intro" aria-labelledby="recovery-heading">
+                <div class="configuration-recovery-heading">
+                    <div>
+                        <h1 id="recovery-heading">Configuration recovery</h1>
+                        <p>Review and repair saved data before starting Manager.</p>
+                    </div>
+                    <div class="button-row">
+                        <button class="button" id="recovery-open-data">Open data folder</button>
+                        <button class="button" id="recovery-refresh">Check again</button>
+                        <button class="button primary" id="recovery-retry" disabled>
+                            Continue to Manager
+                        </button>
+                    </div>
+                </div>
+                <p class="field-help">
+                    Your originals are preserved. Edit a supported profile, draft, macro, or setting
+                    as JSON, or delete it after reviewing. Every saved change keeps a backup.
+                    Devices and plugins stay stopped while this page is open.
+                </p>
+                <details id="recovery-startup-details">
+                    <summary>Startup details</summary>
+                    <p id="recovery-startup-error"></p>
+                </details>
+            </section>
+            <section
+                class="card configuration-recovery-issues"
+                id="recovery-global"
+                aria-labelledby="recovery-global-heading"
+                hidden
+            >
+                <h2 id="recovery-global-heading">Remaining issues</h2>
+                <ol id="recovery-global-list" class="recovery-issue-list"></ol>
+            </section>
+            <section
+                class="card configuration-recovery-backups"
+                id="recovery-backups"
+                aria-labelledby="recovery-backups-heading"
+                hidden
+            >
+                <h2 id="recovery-backups-heading">Recover from a database backup</h2>
+                <p>
+                    Choose a backup to copy selected profiles or preview a full database restore.
+                    Copying profiles adds new copies. Restoring replaces the current database and
+                    requires separate confirmation.
+                </p>
+                <div class="field-group">
+                    <label for="recovery-backup-select">Backup database</label>
+                    <select id="recovery-backup-select">
+                        <option value="">Choose a backup…</option>
+                    </select>
+                </div>
+                <section
+                    class="configuration-recovery-restore"
+                    aria-labelledby="recovery-restore-heading"
+                >
+                    <h3 id="recovery-restore-heading">Restore the full database</h3>
+                    <p>
+                        Use this when the current database cannot be opened, or when you need the
+                        complete saved database state rather than selected profiles.
+                    </p>
+                    <button class="button" id="recovery-preview-restore" disabled>
+                        Preview full restore
+                    </button>
+                    <div id="recovery-restore-review" hidden>
+                        <p id="recovery-restore-summary" role="status"></p>
+                        <ol id="recovery-restore-issues" class="recovery-issue-list"></ol>
+                        <ul id="recovery-restore-warnings" class="recovery-issue-list"></ul>
+                        <p class="field-help">
+                            Restoring replaces the current database. Its previous contents are
+                            preserved separately; the selected backup is not changed. Devices and
+                            plugins stay stopped until you explicitly continue.
+                        </p>
+                        <button class="button danger" id="recovery-restore-backup" disabled>
+                            Restore this database…
+                        </button>
+                    </div>
+                    <p id="recovery-restore-error" class="danger-text" role="alert" hidden></p>
+                </section>
+                <h3>Copy selected profiles</h3>
+                <p id="recovery-transfer-unavailable" class="field-help" hidden>
+                    The current database cannot be read, so individual profiles cannot be copied
+                    into it. Preview a full restore instead.
+                </p>
+                <ul id="recovery-backup-warnings" class="recovery-issue-list"></ul>
+                <p id="recovery-backup-status" role="status" aria-live="polite"></p>
+                <p id="recovery-backup-conflict" class="danger-text" hidden>
+                    The backup list or selected profiles could not be read or transferred. Choose
+                    Check again, then review and select the profiles again. No automatic retry or
+                    full restore will be performed.
+                </p>
+                <p id="recovery-backup-error" class="danger-text" role="alert" hidden></p>
+                <div id="recovery-backup-profiles" class="configuration-recovery-items"></div>
+                <p class="field-help">
+                    Invalid profiles cannot be selected. Profiles that refer to other profiles may
+                    need to be selected together. Existing profiles are never replaced.
+                </p>
+                <button id="recovery-backup-transfer" class="button primary" disabled>
+                    Transfer selected profiles
+                </button>
+            </section>
+            <section aria-labelledby="recovery-items-heading">
+                <h2 id="recovery-items-heading">Saved items</h2>
+                <p class="field-help">
+                    Supported profiles, drafts, macros, and selected settings appear here when
+                    readable. Validation checks the submitted JSON before saving; unsupported
+                    internal or sensitive settings are not editable.
+                </p>
+                <div id="recovery-items" class="configuration-recovery-items"></div>
+                <p id="recovery-empty" hidden>
+                    No editable items are available. Review the remaining issues above.
+                </p>
+            </section>
+            <p id="recovery-backup" class="field-help" hidden></p>
+        </main>
+        <dialog
+            id="recovery-editor"
+            class="feature-dialog wide-dialog configuration-recovery-editor"
+            aria-labelledby="recovery-editor-heading"
+        >
+            <header class="picker-header">
+                <div>
+                    <h2 id="recovery-editor-heading">Edit saved data</h2>
+                    <p id="recovery-editor-kind" class="field-help"></p>
+                </div>
+                <button class="icon-button" id="recovery-editor-close" aria-label="Close editor">
+                    ×
+                </button>
+            </header>
+            <div class="feature-body">
+                <section class="configuration-recovery-validation" aria-label="Validation results">
+                    <p id="recovery-validation-status" role="status" aria-live="polite"></p>
+                    <ol id="recovery-validation-issues" class="recovery-issue-list"></ol>
+                </section>
+                <div class="recovery-json-toolbar">
+                    <label class="configuration-recovery-json-label" for="recovery-json">
+                        JSON
+                    </label>
+                    <div class="recovery-json-search" role="search">
+                        <input
+                            id="recovery-json-search"
+                            type="search"
+                            placeholder="Find in JSON"
+                            aria-label="Find in JSON"
+                        />
+                        <span id="recovery-json-count" role="status" aria-live="polite"></span>
+                        <button
+                            id="recovery-json-previous"
+                            class="icon-button"
+                            aria-label="Previous match"
+                            disabled
+                        >
+                            ↑
+                        </button>
+                        <button
+                            id="recovery-json-next"
+                            class="icon-button"
+                            aria-label="Next match"
+                            disabled
+                        >
+                            ↓
+                        </button>
+                    </div>
+                </div>
+                <div class="recovery-json-surface">
+                    <div class="recovery-json-highlight-viewport" aria-hidden="true">
+                        <pre id="recovery-json-highlights"></pre>
+                    </div>
+                    <textarea
+                        id="recovery-json"
+                        wrap="off"
+                        spellcheck="false"
+                        autocapitalize="off"
+                        autocomplete="off"
+                        aria-describedby="recovery-json-help"
+                    ></textarea>
+                </div>
+                <p id="recovery-json-help" class="field-help">
+                    Validate checks your changes without saving. Save validates again and writes
+                    back to Manager’s saved format.
+                </p>
+            </div>
+            <footer class="feature-footer">
+                <button class="button" id="recovery-editor-cancel">Cancel</button>
+                <span class="configuration-recovery-footer-gap"></span>
+                <button class="button" id="recovery-compare">Compare &amp; versions</button>
+                <button class="button" id="recovery-editor-reload">Reload saved version</button>
+                <button class="button" id="recovery-validate">Validate</button>
+                <button class="button primary" id="recovery-save">Save</button>
+            </footer>
+        </dialog>
+        <dialog
+            id="recovery-versions"
+            class="feature-dialog wide-dialog recovery-versions-dialog"
+            aria-labelledby="recovery-versions-heading"
+        >
+            <header class="picker-header">
+                <h2 id="recovery-versions-heading">Compare &amp; previous versions</h2>
+                <button
+                    id="recovery-versions-close"
+                    class="icon-button"
+                    aria-label="Close comparison"
+                >
+                    ×
+                </button>
+            </header>
+            <div class="feature-body">
+                <label for="recovery-versions-select">Compare with</label>
+                <select id="recovery-versions-select">
+                    <option value="">Currently saved JSON</option>
+                </select>
+                <p id="recovery-versions-status" class="field-help" role="status"></p>
+                <p class="field-help">Selected saved version → Current editor text</p>
+                <div class="recovery-diff-legend">
+                    <span>− Selected version</span>
+                    <span>+ Current editor</span>
+                </div>
+                <p id="recovery-diff-summary" class="field-help"></p>
+                <div
+                    id="recovery-diff"
+                    class="recovery-diff"
+                    role="region"
+                    aria-label="JSON changes"
+                    tabindex="0"
+                ></div>
+                <p class="field-help">
+                    Loading replaces the editor with the selected version, not the + lines shown
+                    above. Validate and Save to apply changes to this item; other profiles are not
+                    restored.
+                </p>
+            </div>
+            <footer class="feature-footer">
+                <button id="recovery-versions-cancel" class="button">Close</button>
+                <button id="recovery-versions-load" class="button primary">
+                    Load selected into editor
+                </button>
+            </footer>
+        </dialog>
+        <dialog
+            id="recovery-confirm"
+            class="feature-dialog configuration-recovery-confirm"
+            aria-labelledby="recovery-confirm-heading"
+        >
+            <header class="picker-header"><h2 id="recovery-confirm-heading"></h2></header>
+            <div class="feature-body"><p id="recovery-confirm-message"></p></div>
+            <footer class="feature-footer">
+                <button class="button" id="recovery-confirm-cancel">Cancel</button>
+                <button class="button danger" id="recovery-confirm-accept"></button>
+            </footer>
+        </dialog>
+        <dialog
+            id="recovery-leave"
+            class="feature-dialog configuration-recovery-confirm"
+            aria-labelledby="recovery-leave-heading"
+        >
+            <header class="picker-header">
+                <h2 id="recovery-leave-heading">Continue to Manager</h2>
+            </header>
+            <div class="feature-body">
+                <p>
+                    Continue in recovery mode with plugins paused, or restart normally. Devices can
+                    connect in either mode.
+                </p>
+                <p id="recovery-leave-blocker" class="danger-text" hidden>
+                    Resolve the remaining saved-data issues before continuing.
+                </p>
+            </div>
+            <footer class="feature-footer">
+                <button class="button" id="recovery-leave-cancel">Cancel</button>
+                <button class="button" id="recovery-leave-paused">Continue in recovery mode</button>
+                <button class="button primary" id="recovery-leave-normal">Restart normally</button>
+            </footer>
+        </dialog>
+        <script type="module" src="/src/config-recovery.ts"></script>
+    </body>
+</html>

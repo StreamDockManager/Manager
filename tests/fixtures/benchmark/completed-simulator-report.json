@@ -1,0 +1,583 @@
+{
+    "benchmark_harness_revision": "synthetic-ui-fixture",
+    "restoration": "not_required",
+    "schema_version": 1,
+    "manager_version": "0.1.0",
+    "source_revision": "synthetic-ui-fixture",
+    "source_dirty": "false",
+    "build_profile": "synthetic",
+    "platform": "synthetic / no hardware",
+    "started_utc": "2026-01-01T00:00:00Z",
+    "config": {
+        "target": "simulator",
+        "device_id": "simulator:n4-pro",
+        "workload": "all_keys",
+        "mode": "compare",
+        "pattern": "numbered",
+        "target_fps": 24,
+        "warmup_seconds": 0,
+        "duration_seconds": 1,
+        "repetitions": 1,
+        "acknowledge_hardware": false
+    },
+    "model_id": "n4-pro",
+    "variant_id": "synthetic",
+    "firmware": "synthetic",
+    "usb_path": null,
+    "usb_speed": null,
+    "device_name": "Synthetic UI Fixture",
+    "measurement_scope": "synthetic_ui_fixture_no_measurement",
+    "runs": [
+        {
+            "mode": "individual_updates",
+            "repetition": 1,
+            "elapsed_ms": 1000,
+            "requested_fps": 24,
+            "surfaces": [
+                {
+                    "surface_id": "key-1",
+                    "width": 112,
+                    "height": 112,
+                    "generated": 24,
+                    "enqueued": 24,
+                    "transport_completed": 24,
+                    "dropped": 0,
+                    "host_completed_fps": 24,
+                    "displayed_fps": null
+                },
+                {
+                    "surface_id": "key-2",
+                    "width": 112,
+                    "height": 112,
+                    "generated": 24,
+                    "enqueued": 24,
+                    "transport_completed": 24,
+                    "dropped": 0,
+                    "host_completed_fps": 24,
+                    "displayed_fps": null
+                },
+                {
+                    "surface_id": "key-3",
+                    "width": 112,
+                    "height": 112,
+                    "generated": 24,
+                    "enqueued": 24,
+                    "transport_completed": 24,
+                    "dropped": 0,
+                    "host_completed_fps": 24,
+                    "displayed_fps": null
+                },
+                {
+                    "surface_id": "key-4",
+                    "width": 112,
+                    "height": 112,
+                    "generated": 24,
+                    "enqueued": 24,
+                    "transport_completed": 24,
+                    "dropped": 0,
+                    "host_completed_fps": 24,
+                    "displayed_fps": null
+                },
+                {
+                    "surface_id": "key-5",
+                    "width": 112,
+                    "height": 112,
+                    "generated": 24,
+                    "enqueued": 24,
+                    "transport_completed": 24,
+                    "dropped": 0,
+                    "host_completed_fps": 24,
+                    "displayed_fps": null
+                },
+                {
+                    "surface_id": "key-6",
+                    "width": 112,
+                    "height": 112,
+                    "generated": 24,
+                    "enqueued": 24,
+                    "transport_completed": 24,
+                    "dropped": 0,
+                    "host_completed_fps": 24,
+                    "displayed_fps": null
+                },
+                {
+                    "surface_id": "key-7",
+                    "width": 112,
+                    "height": 112,
+                    "generated": 24,
+                    "enqueued": 24,
+                    "transport_completed": 24,
+                    "dropped": 0,
+                    "host_completed_fps": 24,
+                    "displayed_fps": null
+                },
+                {
+                    "surface_id": "key-8",
+                    "width": 112,
+                    "height": 112,
+                    "generated": 24,
+                    "enqueued": 24,
+                    "transport_completed": 24,
+                    "dropped": 0,
+                    "host_completed_fps": 24,
+                    "displayed_fps": null
+                },
+                {
+                    "surface_id": "key-9",
+                    "width": 112,
+                    "height": 112,
+                    "generated": 24,
+                    "enqueued": 24,
+                    "transport_completed": 24,
+                    "dropped": 0,
+                    "host_completed_fps": 24,
+                    "displayed_fps": null
+                },
+                {
+                    "surface_id": "key-10",
+                    "width": 112,
+                    "height": 112,
+                    "generated": 24,
+                    "enqueued": 24,
+                    "transport_completed": 24,
+                    "dropped": 0,
+                    "host_completed_fps": 24,
+                    "displayed_fps": null
+                }
+            ],
+            "render_ms": {
+                "count": 24,
+                "p50": 1,
+                "p95": 2,
+                "p99": 3,
+                "maximum": 4
+            },
+            "queue_ms": {
+                "count": 24,
+                "p50": 1,
+                "p95": 2,
+                "p99": 3,
+                "maximum": 4
+            },
+            "transfer_ms": {
+                "count": 24,
+                "p50": 1,
+                "p95": 2,
+                "p99": 3,
+                "maximum": 4
+            },
+            "feedback_latency_ms": null,
+            "output": {
+                "pending_bytes": 0,
+                "pending_count": 0,
+                "in_flight_count": 0,
+                "in_flight_bytes": 0,
+                "oldest_pending_ms": 0,
+                "total_completed": 240,
+                "total_dropped": 0,
+                "total_report_bytes": 24000,
+                "total_commits": 240,
+                "peak_pending_bytes": 1000,
+                "peak_pending_count": 10,
+                "total_failed": 0,
+                "outcomes_lost": 0,
+                "estimated_bytes_per_ms": 100
+            },
+            "generated_image_bytes": 24000,
+            "policy": {
+                "mode": "individual_updates",
+                "target_frame_hz": 24,
+                "max_pending_bytes": 16777216,
+                "max_batch_bytes": 262144,
+                "max_batch_estimated_ms": 40,
+                "max_batch_surfaces": 64,
+                "max_surface_bytes": 8388608
+            },
+            "policy_sha256": "dd8788477eb4fa930138cb467e8b396d3e6c362ed6fc06fff688eba74cd1cb95",
+            "asset_sha256": "1ec36082bec9b77fb2c45bde6427be5ca015ae1301bc09df290264e35614b884",
+            "status": "completed",
+            "error": null,
+            "restoration": "not_required",
+            "image_format": "png",
+            "process_rss_peak_bytes": null,
+            "process_cpu_percent": {
+                "count": 0,
+                "p50": null,
+                "p95": null,
+                "p99": null,
+                "maximum": null
+            },
+            "cache_before": {},
+            "cache_after": {}
+        },
+        {
+            "mode": "frame_scheduling",
+            "repetition": 1,
+            "elapsed_ms": 1000,
+            "requested_fps": 24,
+            "surfaces": [
+                {
+                    "surface_id": "key-1",
+                    "width": 112,
+                    "height": 112,
+                    "generated": 24,
+                    "enqueued": 24,
+                    "transport_completed": 24,
+                    "dropped": 0,
+                    "host_completed_fps": 24,
+                    "displayed_fps": null
+                },
+                {
+                    "surface_id": "key-2",
+                    "width": 112,
+                    "height": 112,
+                    "generated": 24,
+                    "enqueued": 24,
+                    "transport_completed": 24,
+                    "dropped": 0,
+                    "host_completed_fps": 24,
+                    "displayed_fps": null
+                },
+                {
+                    "surface_id": "key-3",
+                    "width": 112,
+                    "height": 112,
+                    "generated": 24,
+                    "enqueued": 24,
+                    "transport_completed": 24,
+                    "dropped": 0,
+                    "host_completed_fps": 24,
+                    "displayed_fps": null
+                },
+                {
+                    "surface_id": "key-4",
+                    "width": 112,
+                    "height": 112,
+                    "generated": 24,
+                    "enqueued": 24,
+                    "transport_completed": 24,
+                    "dropped": 0,
+                    "host_completed_fps": 24,
+                    "displayed_fps": null
+                },
+                {
+                    "surface_id": "key-5",
+                    "width": 112,
+                    "height": 112,
+                    "generated": 24,
+                    "enqueued": 24,
+                    "transport_completed": 24,
+                    "dropped": 0,
+                    "host_completed_fps": 24,
+                    "displayed_fps": null
+                },
+                {
+                    "surface_id": "key-6",
+                    "width": 112,
+                    "height": 112,
+                    "generated": 24,
+                    "enqueued": 24,
+                    "transport_completed": 24,
+                    "dropped": 0,
+                    "host_completed_fps": 24,
+                    "displayed_fps": null
+                },
+                {
+                    "surface_id": "key-7",
+                    "width": 112,
+                    "height": 112,
+                    "generated": 24,
+                    "enqueued": 24,
+                    "transport_completed": 24,
+                    "dropped": 0,
+                    "host_completed_fps": 24,
+                    "displayed_fps": null
+                },
+                {
+                    "surface_id": "key-8",
+                    "width": 112,
+                    "height": 112,
+                    "generated": 24,
+                    "enqueued": 24,
+                    "transport_completed": 24,
+                    "dropped": 0,
+                    "host_completed_fps": 24,
+                    "displayed_fps": null
+                },
+                {
+                    "surface_id": "key-9",
+                    "width": 112,
+                    "height": 112,
+                    "generated": 24,
+                    "enqueued": 24,
+                    "transport_completed": 24,
+                    "dropped": 0,
+                    "host_completed_fps": 24,
+                    "displayed_fps": null
+                },
+                {
+                    "surface_id": "key-10",
+                    "width": 112,
+                    "height": 112,
+                    "generated": 24,
+                    "enqueued": 24,
+                    "transport_completed": 24,
+                    "dropped": 0,
+                    "host_completed_fps": 24,
+                    "displayed_fps": null
+                }
+            ],
+            "render_ms": {
+                "count": 24,
+                "p50": 1,
+                "p95": 2,
+                "p99": 3,
+                "maximum": 4
+            },
+            "queue_ms": {
+                "count": 24,
+                "p50": 1,
+                "p95": 2,
+                "p99": 3,
+                "maximum": 4
+            },
+            "transfer_ms": {
+                "count": 24,
+                "p50": 1,
+                "p95": 2,
+                "p99": 3,
+                "maximum": 4
+            },
+            "feedback_latency_ms": null,
+            "output": {
+                "pending_bytes": 0,
+                "pending_count": 0,
+                "in_flight_count": 0,
+                "in_flight_bytes": 0,
+                "oldest_pending_ms": 0,
+                "total_completed": 240,
+                "total_dropped": 0,
+                "total_report_bytes": 24000,
+                "total_commits": 240,
+                "peak_pending_bytes": 1000,
+                "peak_pending_count": 10,
+                "total_failed": 0,
+                "outcomes_lost": 0,
+                "estimated_bytes_per_ms": 100
+            },
+            "generated_image_bytes": 24000,
+            "policy": {
+                "mode": "frame_scheduling",
+                "target_frame_hz": 24,
+                "max_pending_bytes": 16777216,
+                "max_batch_bytes": 262144,
+                "max_batch_estimated_ms": 40,
+                "max_batch_surfaces": 64,
+                "max_surface_bytes": 8388608
+            },
+            "policy_sha256": "d39cac8478d956a7272e75e3cdc49530949fdcb025cf362afe27f614a4d6a2b8",
+            "asset_sha256": "1ec36082bec9b77fb2c45bde6427be5ca015ae1301bc09df290264e35614b884",
+            "status": "completed",
+            "error": null,
+            "restoration": "not_required",
+            "image_format": "png",
+            "process_rss_peak_bytes": null,
+            "process_cpu_percent": {
+                "count": 0,
+                "p50": null,
+                "p95": null,
+                "p99": null,
+                "maximum": null
+            },
+            "cache_before": {},
+            "cache_after": {}
+        },
+        {
+            "mode": "grouped_key_updates",
+            "repetition": 1,
+            "elapsed_ms": 1000,
+            "requested_fps": 24,
+            "surfaces": [
+                {
+                    "surface_id": "key-1",
+                    "width": 112,
+                    "height": 112,
+                    "generated": 24,
+                    "enqueued": 24,
+                    "transport_completed": 24,
+                    "dropped": 0,
+                    "host_completed_fps": 24,
+                    "displayed_fps": null
+                },
+                {
+                    "surface_id": "key-2",
+                    "width": 112,
+                    "height": 112,
+                    "generated": 24,
+                    "enqueued": 24,
+                    "transport_completed": 24,
+                    "dropped": 0,
+                    "host_completed_fps": 24,
+                    "displayed_fps": null
+                },
+                {
+                    "surface_id": "key-3",
+                    "width": 112,
+                    "height": 112,
+                    "generated": 24,
+                    "enqueued": 24,
+                    "transport_completed": 24,
+                    "dropped": 0,
+                    "host_completed_fps": 24,
+                    "displayed_fps": null
+                },
+                {
+                    "surface_id": "key-4",
+                    "width": 112,
+                    "height": 112,
+                    "generated": 24,
+                    "enqueued": 24,
+                    "transport_completed": 24,
+                    "dropped": 0,
+                    "host_completed_fps": 24,
+                    "displayed_fps": null
+                },
+                {
+                    "surface_id": "key-5",
+                    "width": 112,
+                    "height": 112,
+                    "generated": 24,
+                    "enqueued": 24,
+                    "transport_completed": 24,
+                    "dropped": 0,
+                    "host_completed_fps": 24,
+                    "displayed_fps": null
+                },
+                {
+                    "surface_id": "key-6",
+                    "width": 112,
+                    "height": 112,
+                    "generated": 24,
+                    "enqueued": 24,
+                    "transport_completed": 24,
+                    "dropped": 0,
+                    "host_completed_fps": 24,
+                    "displayed_fps": null
+                },
+                {
+                    "surface_id": "key-7",
+                    "width": 112,
+                    "height": 112,
+                    "generated": 24,
+                    "enqueued": 24,
+                    "transport_completed": 24,
+                    "dropped": 0,
+                    "host_completed_fps": 24,
+                    "displayed_fps": null
+                },
+                {
+                    "surface_id": "key-8",
+                    "width": 112,
+                    "height": 112,
+                    "generated": 24,
+                    "enqueued": 24,
+                    "transport_completed": 24,
+                    "dropped": 0,
+                    "host_completed_fps": 24,
+                    "displayed_fps": null
+                },
+                {
+                    "surface_id": "key-9",
+                    "width": 112,
+                    "height": 112,
+                    "generated": 24,
+                    "enqueued": 24,
+                    "transport_completed": 24,
+                    "dropped": 0,
+                    "host_completed_fps": 24,
+                    "displayed_fps": null
+                },
+                {
+                    "surface_id": "key-10",
+                    "width": 112,
+                    "height": 112,
+                    "generated": 24,
+                    "enqueued": 24,
+                    "transport_completed": 24,
+                    "dropped": 0,
+                    "host_completed_fps": 24,
+                    "displayed_fps": null
+                }
+            ],
+            "render_ms": {
+                "count": 24,
+                "p50": 1,
+                "p95": 2,
+                "p99": 3,
+                "maximum": 4
+            },
+            "queue_ms": {
+                "count": 24,
+                "p50": 1,
+                "p95": 2,
+                "p99": 3,
+                "maximum": 4
+            },
+            "transfer_ms": {
+                "count": 24,
+                "p50": 1,
+                "p95": 2,
+                "p99": 3,
+                "maximum": 4
+            },
+            "feedback_latency_ms": null,
+            "output": {
+                "pending_bytes": 0,
+                "pending_count": 0,
+                "in_flight_count": 0,
+                "in_flight_bytes": 0,
+                "oldest_pending_ms": 0,
+                "total_completed": 240,
+                "total_dropped": 0,
+                "total_report_bytes": 24000,
+                "total_commits": 240,
+                "peak_pending_bytes": 1000,
+                "peak_pending_count": 10,
+                "total_failed": 0,
+                "outcomes_lost": 0,
+                "estimated_bytes_per_ms": 100
+            },
+            "generated_image_bytes": 24000,
+            "policy": {
+                "mode": "frame_scheduling",
+                "target_frame_hz": 24,
+                "max_pending_bytes": 16777216,
+                "max_batch_bytes": 262144,
+                "max_batch_estimated_ms": 40,
+                "max_batch_surfaces": 64,
+                "max_surface_bytes": 8388608
+            },
+            "policy_sha256": "d39cac8478d956a7272e75e3cdc49530949fdcb025cf362afe27f614a4d6a2b8",
+            "asset_sha256": "1ec36082bec9b77fb2c45bde6427be5ca015ae1301bc09df290264e35614b884",
+            "status": "completed",
+            "error": null,
+            "restoration": "not_required",
+            "image_format": "png",
+            "process_rss_peak_bytes": null,
+            "process_cpu_percent": {
+                "count": 0,
+                "p50": null,
+                "p95": null,
+                "p99": null,
+                "maximum": null
+            },
+            "cache_before": {},
+            "cache_after": {}
+        }
+    ],
+    "plugin_fixture": null,
+    "limitations": [
+        "Synthetic UI data only. No encoder, USB, firmware, display or performance measurement was run."
+    ],
+    "status": "completed"
+}

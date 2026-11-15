@@ -1,0 +1,11 @@
+# Automatically generated - DO NOT EDIT!
+
+[[permission]]
+identifier = "allow-commit-plugin-package"
+description = "Enables the commit_plugin_package command without any pre-configured scope."
+commands.allow = ["commit_plugin_package"]
+
+[[permission]]
+identifier = "deny-commit-plugin-package"
+description = "Denies the commit_plugin_package command without any pre-configured scope."
+commands.deny = ["commit_plugin_package"]

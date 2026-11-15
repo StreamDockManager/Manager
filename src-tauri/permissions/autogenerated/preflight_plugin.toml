@@ -1,0 +1,11 @@
+# Automatically generated - DO NOT EDIT!
+
+[[permission]]
+identifier = "allow-preflight-plugin"
+description = "Enables the preflight_plugin command without any pre-configured scope."
+commands.allow = ["preflight_plugin"]
+
+[[permission]]
+identifier = "deny-preflight-plugin"
+description = "Denies the preflight_plugin command without any pre-configured scope."
+commands.deny = ["preflight_plugin"]

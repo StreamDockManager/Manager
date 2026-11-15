@@ -1,0 +1,931 @@
+<div class="action-fields">
+    <p class="field-help danger-text" role="alert" x-show="error && !dialogMode" x-text="error"></p>
+    <template x-for="row in detailRows" :key="row.id">
+        <div class="action-node" :data-node="row.id">
+            <label x-show="!dialogMode" x-text="row.label"></label>
+            <button
+                type="button"
+                class="button action-chooser"
+                x-show="dialogMode || macroMode || row.path !== ''"
+                :aria-label="'Choose action for ' + row.label"
+                :data-path="row.path"
+                @click="browseActions"
+                :disabled="app.navigationPending"
+            >
+                <span
+                    x-text="dialogMode ? 'Change action' : selectedActionLabel(row.action)"
+                ></span>
+                <span aria-hidden="true">⌕</span>
+            </button>
+
+            <template
+                x-if="row.action.kind === 'builtin' && row.action.action.kind === 'keyboard_macro'"
+            >
+                <div class="field-group">
+                    <p class="field-help" x-text="stepSummary(row.action)"></p>
+                    <button
+                        type="button"
+                        class="button"
+                        :data-path="row.path"
+                        @click="editKeyboardRecording"
+                    >
+                        Edit recording
+                    </button>
+                </div>
+            </template>
+            <template x-if="callInputs(row).length">
+                <div class="parameter-editors" aria-label="Macro call arguments">
+                    <template x-for="input in callInputs(row)" :key="input.name">
+                        <fieldset class="parameter-editor">
+                            <legend x-text="input.label"></legend>
+                            <div class="settings-form-grid parameter-fields">
+                                <label>
+                                    Argument source
+                                    <select
+                                        :aria-label="'Source for ' + input.label"
+                                        :value="argumentSource(row,input.name)"
+                                        :data-path="row.path"
+                                        :data-name="input.name"
+                                        data-operation="source"
+                                        @change="changeArgument"
+                                    >
+                                        <option value="default">Default / unassigned</option>
+                                        <option value="literal">Literal value</option>
+                                        <option value="parameter">Profile parameter</option>
+                                        <option value="input" :disabled="!namedMode">
+                                            Caller input
+                                        </option>
+                                        <option value="output">Prior run output</option>
+                                    </select>
+                                </label>
+                                <template
+                                    x-if="argumentSource(row,input.name) === 'literal' && input.type !== 'boolean'"
+                                >
+                                    <label>
+                                        Literal value
+                                        <input
+                                            :aria-label="'Value for ' + input.label"
+                                            :type="input.type === 'number' ? 'number' : 'text'"
+                                            :value="argumentText(row,input.name)"
+                                            :data-path="row.path"
+                                            :data-name="input.name"
+                                            data-source="literal"
+                                            @change="changeArgument"
+                                        />
+                                    </label>
+                                </template>
+                                <template
+                                    x-if="argumentSource(row,input.name) === 'literal' && input.type === 'boolean'"
+                                >
+                                    <label class="preference-toggle">
+                                        <input
+                                            :aria-label="'Value for ' + input.label"
+                                            type="checkbox"
+                                            :checked="argumentChecked(row,input.name)"
+                                            :data-path="row.path"
+                                            :data-name="input.name"
+                                            data-source="literal"
+                                            @change="changeArgument"
+                                        />
+                                        <span>True</span>
+                                    </label>
+                                </template>
+                                <template
+                                    x-if="['input','parameter'].includes(argumentSource(row,input.name))"
+                                >
+                                    <label>
+                                        Reference
+                                        <select
+                                            :aria-label="'Reference for ' + input.label"
+                                            :value="argumentText(row,input.name)"
+                                            :data-path="row.path"
+                                            :data-name="input.name"
+                                            :data-source="argumentSource(row,input.name)"
+                                            @change="changeArgument"
+                                        >
+                                            <option value="">Choose…</option>
+                                            <template
+                                                x-for="option in argumentOptions(input,argumentSource(row,input.name))"
+                                                :key="option.value"
+                                            >
+                                                <option
+                                                    :value="option.value"
+                                                    x-text="option.label"
+                                                ></option>
+                                            </template>
+                                        </select>
+                                    </label>
+                                </template>
+                                <template x-if="argumentSource(row,input.name) === 'output'">
+                                    <label>
+                                        Run output name
+                                        <input
+                                            :aria-label="'Output for ' + input.label"
+                                            :value="argumentText(row,input.name)"
+                                            :data-path="row.path"
+                                            :data-name="input.name"
+                                            data-source="output"
+                                            @change="changeArgument"
+                                            placeholder="result.stdout"
+                                            maxlength="160"
+                                        />
+                                    </label>
+                                </template>
+                            </div>
+                            <p
+                                class="field-help danger-text"
+                                role="status"
+                                x-show="input.required && input.default === null && argumentSource(row,input.name) === 'default'"
+                            >
+                                This input is required. Assign a value before running this call.
+                            </p>
+                        </fieldset>
+                    </template>
+                </div>
+            </template>
+            <div x-show="row.action.kind === 'builtin' || row.fields.length" class="builtin-fields">
+                <p
+                    class="field-help danger-text"
+                    role="status"
+                    x-show="availability(row.action)"
+                    x-text="availability(row.action)"
+                ></p>
+                <template x-for="field in row.fields" :key="field.key">
+                    <div
+                        class="builtin-field"
+                        :class="{'builtin-boolean': field.type === 'boolean'}"
+                        x-show="actionFieldVisible(row.action,field.key)"
+                    >
+                        <label :for="fieldId(row.path,field.key)" x-text="field.label"></label>
+                        <template x-if="field.type === 'boolean'">
+                            <input
+                                :id="fieldId(row.path,field.key)"
+                                type="checkbox"
+                                :checked="field.value"
+                                :data-path="row.path"
+                                :data-field="field.key"
+                                :data-type="field.type"
+                                @change="builtinField"
+                            />
+                        </template>
+                        <template x-if="field.type === 'primitive'">
+                            <select
+                                aria-label="Value type"
+                                :value="primitiveType(field.value)"
+                                :data-path="row.path"
+                                :data-field="field.key"
+                                @change="primitiveChoice"
+                            >
+                                <option value="string">Text</option>
+                                <option value="number">Number</option>
+                                <option value="boolean">Boolean</option>
+                            </select>
+                        </template>
+                        <template x-if="['string','number','primitive'].includes(field.type)">
+                            <div class="action-path-field">
+                                <input
+                                    :id="fieldId(row.path,field.key)"
+                                    :aria-label="row.action.kind === 'command' ? 'Action node program' : null"
+                                    :type="field.type === 'number' ? 'number' : field.key === 'url' ? 'url' : 'text'"
+                                    :min="field.min"
+                                    :max="field.max"
+                                    :placeholder="field.placeholder"
+                                    :value="fieldText(field)"
+                                    :data-path="row.path"
+                                    :data-field="field.key"
+                                    :data-type="field.type"
+                                    @input="builtinField"
+                                />
+                                <template
+                                    x-for="picker in pathPickers(row.action,field.key)"
+                                    :key="picker.mode"
+                                >
+                                    <button
+                                        type="button"
+                                        class="button"
+                                        :data-path="row.path"
+                                        :data-field="field.key"
+                                        :data-mode="picker.mode"
+                                        @click="browseActionPath"
+                                        x-text="picker.label"
+                                    ></button>
+                                </template>
+                            </div>
+                        </template>
+                        <template x-if="field.presets">
+                            <label class="field-group">
+                                Format presets
+                                <select
+                                    :data-path="row.path"
+                                    :data-field="field.key"
+                                    @change="applyActionPreset"
+                                >
+                                    <option value="">Choose a format…</option>
+                                    <template x-for="preset in field.presets" :key="preset.value">
+                                        <option
+                                            :value="preset.value"
+                                            x-text="preset.label"
+                                        ></option>
+                                    </template>
+                                </select>
+                            </label>
+                        </template>
+                        <template x-if="['text','lines'].includes(field.type)">
+                            <textarea
+                                :id="fieldId(row.path,field.key)"
+                                :value="fieldText(field)"
+                                :placeholder="field.placeholder"
+                                :data-path="row.path"
+                                :data-field="field.key"
+                                :data-type="field.type"
+                                @input="builtinField"
+                            ></textarea>
+                        </template>
+                        <p class="field-help" x-show="field.help" x-text="field.help"></p>
+                        <template x-if="field.key === 'controls'">
+                            <div class="field-group">
+                                <label class="field-group" x-show="layerControlTargets.length">
+                                    Add a control
+                                    <select :data-path="row.path" @change="addLayerControl">
+                                        <option value="">Choose a control…</option>
+                                        <template
+                                            x-for="control in layerControlTargets"
+                                            :key="control.id"
+                                        >
+                                            <option
+                                                :value="control.id"
+                                                :disabled="field.value.includes(control.id)"
+                                                x-text="control.name"
+                                            ></option>
+                                        </template>
+                                    </select>
+                                </label>
+                                <p class="field-help">Leave the list empty to use all controls.</p>
+                            </div>
+                        </template>
+                        <template
+                            x-if="['select','page','macro','binding-target'].includes(field.type)"
+                        >
+                            <select
+                                :id="fieldId(row.path,field.key)"
+                                :value="field.value"
+                                :data-path="row.path"
+                                :data-field="field.key"
+                                :data-type="field.type"
+                                @change="builtinField"
+                            >
+                                <option
+                                    value=""
+                                    :selected="field.value === ''"
+                                    x-text="emptyFieldLabel(field,row.action)"
+                                ></option>
+                                <template
+                                    x-for="option in fieldOptions(field,row.action)"
+                                    :key="option.value"
+                                >
+                                    <option
+                                        :value="option.value"
+                                        :selected="option.value === field.value"
+                                        x-text="option.label"
+                                    ></option>
+                                </template>
+                            </select>
+                        </template>
+                        <template
+                            x-if="['url','path','program','text','args'].includes(field.key) && referenceOptions().length"
+                        >
+                            <label class="field-group">
+                                Insert reference
+                                <select
+                                    :aria-label="'Insert reference for ' + field.label"
+                                    :data-path="row.path"
+                                    :data-field="field.key"
+                                    @change="insertReference"
+                                >
+                                    <option value="">Choose a parameter or input…</option>
+                                    <template
+                                        x-for="option in referenceOptions()"
+                                        :key="option.value"
+                                    >
+                                        <option
+                                            :value="option.value"
+                                            x-text="option.label"
+                                        ></option>
+                                    </template>
+                                </select>
+                            </label>
+                        </template>
+                        <button
+                            type="button"
+                            class="button"
+                            x-show="field.key === 'keys'"
+                            :data-path="row.path"
+                            @click="recordKeys"
+                        >
+                            Record key combination
+                        </button>
+                        <template x-if="field.type === 'condition'">
+                            <div class="condition-fields">
+                                <select
+                                    :id="fieldId(row.path,field.key)"
+                                    aria-label="Condition source"
+                                    :value="field.value.source"
+                                    :data-path="row.path"
+                                    :data-field="field.key"
+                                    data-part="source"
+                                    @change="builtinField"
+                                >
+                                    <option value="clipboard">Clipboard text</option>
+                                    <option value="file">File or folder</option>
+                                    <option value="process">Running process</option>
+                                    <option value="application">Foreground application</option>
+                                </select>
+                                <label class="field-group">
+                                    Comparison
+                                    <select
+                                        aria-label="Condition comparison"
+                                        :value="field.value.operator"
+                                        :data-path="row.path"
+                                        :data-field="field.key"
+                                        data-part="operator"
+                                        @change="builtinField"
+                                    >
+                                        <template
+                                            x-for="option in conditionOperators(field.value)"
+                                            :key="option.value"
+                                        >
+                                            <option
+                                                :value="option.value"
+                                                :selected="option.value === field.value.operator"
+                                                x-text="option.label"
+                                            ></option>
+                                        </template>
+                                    </select>
+                                </label>
+                                <template x-if="['file','process'].includes(field.value.source)">
+                                    <div class="field-group">
+                                        <label
+                                            :for="fieldId(row.path,'condition-subject')"
+                                            x-text="field.value.source === 'file' ? 'File or folder path' : 'Process name or executable path'"
+                                        ></label>
+                                        <div class="action-path-field">
+                                            <input
+                                                :id="fieldId(row.path,'condition-subject')"
+                                                :value="field.value.subject"
+                                                :data-path="row.path"
+                                                :data-field="field.key"
+                                                data-part="subject"
+                                                @input="builtinField"
+                                            />
+                                            <template
+                                                x-for="picker in pathPickers(row.action,field.key,'subject')"
+                                                :key="picker.mode"
+                                            >
+                                                <button
+                                                    type="button"
+                                                    class="button"
+                                                    :data-path="row.path"
+                                                    :data-field="field.key"
+                                                    :data-mode="picker.mode"
+                                                    data-part="subject"
+                                                    @click="browseActionPath"
+                                                    x-text="picker.label"
+                                                ></button>
+                                            </template>
+                                        </div>
+                                    </div>
+                                </template>
+                                <template x-if="conditionUsesValue(field.value)">
+                                    <div class="field-group">
+                                        <label
+                                            :for="fieldId(row.path,'condition-value')"
+                                            x-text="field.value.source === 'application' ? 'Application' : field.value.source === 'clipboard' ? 'Clipboard text' : 'Comparison value'"
+                                        ></label>
+                                        <select
+                                            x-show="primitiveType(field.value.value) !== 'string' || ['file','process'].includes(field.value.source)"
+                                            aria-label="Condition value type"
+                                            :value="primitiveType(field.value.value)"
+                                            :data-path="row.path"
+                                            :data-field="field.key"
+                                            data-part="value"
+                                            @change="primitiveChoice"
+                                        >
+                                            <option value="string">Text</option>
+                                            <option value="number">Number</option>
+                                            <option value="boolean">Boolean</option>
+                                        </select>
+                                        <div class="action-path-field">
+                                            <template
+                                                x-if="primitiveType(field.value.value) === 'boolean'"
+                                            >
+                                                <input
+                                                    :id="fieldId(row.path,'condition-value')"
+                                                    type="checkbox"
+                                                    :checked="field.value.value"
+                                                    :data-path="row.path"
+                                                    :data-field="field.key"
+                                                    data-part="value"
+                                                    @change="builtinField"
+                                                />
+                                            </template>
+                                            <template
+                                                x-if="primitiveType(field.value.value) !== 'boolean'"
+                                            >
+                                                <input
+                                                    :id="fieldId(row.path,'condition-value')"
+                                                    :type="primitiveType(field.value.value) === 'number' ? 'number' : 'text'"
+                                                    :value="scalar(field.value.value)"
+                                                    :data-path="row.path"
+                                                    :data-field="field.key"
+                                                    :data-type="primitiveType(field.value.value)"
+                                                    data-part="value"
+                                                    @input="builtinField"
+                                                />
+                                            </template>
+                                            <template
+                                                x-for="picker in pathPickers(row.action,field.key,'value')"
+                                                :key="picker.mode"
+                                            >
+                                                <button
+                                                    type="button"
+                                                    class="button"
+                                                    :data-path="row.path"
+                                                    :data-field="field.key"
+                                                    :data-mode="picker.mode"
+                                                    data-part="value"
+                                                    @click="browseActionPath"
+                                                    x-text="picker.label"
+                                                ></button>
+                                            </template>
+                                        </div>
+                                    </div>
+                                </template>
+                                <template
+                                    x-if="field.value.source === 'process' || (field.value.source === 'application' && conditionUsesValue(field.value))"
+                                >
+                                    <div class="field-group">
+                                        <div class="button-row">
+                                            <button
+                                                type="button"
+                                                class="button"
+                                                :data-source="field.value.source"
+                                                :disabled="conditionTargetList(field.value.source).loading"
+                                                @click="loadConditionTargets"
+                                                x-text="field.value.source === 'application' ? 'List running applications' : 'List running processes'"
+                                            ></button>
+                                        </div>
+                                        <label
+                                            class="field-group"
+                                            x-show="conditionTargetList(field.value.source).options.length"
+                                        >
+                                            <span
+                                                x-text="field.value.source === 'application' ? 'Running application' : 'Running process'"
+                                            ></span>
+                                            <select
+                                                :value="field.value.source === 'process' ? field.value.subject : field.value.value"
+                                                :data-path="row.path"
+                                                @change="chooseConditionTarget"
+                                            >
+                                                <option value="">Choose…</option>
+                                                <template
+                                                    x-for="option in conditionTargetList(field.value.source).options || []"
+                                                    :key="option.value"
+                                                >
+                                                    <option
+                                                        :value="option.value"
+                                                        :selected="option.value === (field.value.source === 'process' ? field.value.subject : field.value.value)"
+                                                        x-text="option.label"
+                                                    ></option>
+                                                </template>
+                                            </select>
+                                        </label>
+                                        <p
+                                            class="field-help"
+                                            role="status"
+                                            x-show="conditionTargetList(field.value.source).loading"
+                                        >
+                                            Looking for running targets…
+                                        </p>
+                                        <p
+                                            class="field-help"
+                                            role="status"
+                                            x-show="conditionTargetList(field.value.source).loaded && !conditionTargetList(field.value.source).loading && !conditionTargetList(field.value.source).options.length && !conditionTargetList(field.value.source).error"
+                                        >
+                                            No running targets were found. Use the file chooser or
+                                            enter a value.
+                                        </p>
+                                        <p
+                                            class="field-help danger-text"
+                                            role="alert"
+                                            x-show="conditionTargetList(field.value.source).error"
+                                            x-text="conditionTargetList(field.value.source).error"
+                                        ></p>
+                                        <p
+                                            class="field-help"
+                                            x-show="field.value.source === 'application'"
+                                        >
+                                            Choose an application to fill in the identifier Manager
+                                            compares with the foreground app.
+                                        </p>
+                                    </div>
+                                </template>
+                            </div>
+                        </template>
+                    </div>
+                </template>
+                <template x-if="['trigger_binding','edit_binding'].includes(row.choice)">
+                    <details class="disclosure">
+                        <summary>Enter target IDs</summary>
+                        <div class="disclosure-body settings-form-grid">
+                            <template x-for="field in row.fields" :key="field.key">
+                                <label class="field-group">
+                                    <span x-text="field.label + ' ID'"></span>
+                                    <input
+                                        :value="field.value"
+                                        :data-path="row.path"
+                                        :data-field="field.key"
+                                        @input="builtinField"
+                                    />
+                                </label>
+                            </template>
+                        </div>
+                    </details>
+                </template>
+                <p
+                    class="field-help"
+                    x-show="actionFieldHelp(row)"
+                    x-text="actionFieldHelp(row)"
+                ></p>
+            </div>
+            <template x-if="row.valueLabel">
+                <label class="field-group">
+                    <span x-text="row.valueLabel"></span>
+                    <input
+                        :type="['delay','volume','brightness'].includes(row.action.kind) ? 'number' : row.action.kind === 'open_url' ? 'url' : 'text'"
+                        :min="row.action.kind === 'volume' ? -100 : 0"
+                        :max="row.action.kind === 'delay' ? 60000 : 100"
+                        :value="row.value"
+                        :data-path="row.path"
+                        @input="changeValue"
+                    />
+                </label>
+            </template>
+            <button
+                type="button"
+                class="button"
+                x-show="row.action.kind === 'hotkey'"
+                :data-path="row.path"
+                @click="recordKeys"
+            >
+                Record key combination
+            </button>
+            <template x-for="field in topLevelReferenceFields(row)" :key="field.key">
+                <label x-show="referenceOptions().length">
+                    Insert reference
+                    <select
+                        :aria-label="'Insert reference for ' + field.label"
+                        :data-path="row.path"
+                        :data-field="field.key"
+                        @change="insertReference"
+                    >
+                        <option value="">Choose parameter or input…</option>
+                        <template x-for="option in referenceOptions()" :key="option.value">
+                            <option :value="option.value" x-text="option.label"></option>
+                        </template>
+                    </select>
+                </label>
+            </template>
+            <template x-for="field in pluginReferenceFields(row)" :key="field">
+                <label x-show="pluginReferenceOptions().length">
+                    <span x-text="'Reference for ' + field"></span>
+                    <select
+                        :aria-label="'Insert reference for plugin field ' + field"
+                        :data-path="row.path"
+                        :data-field="field"
+                        @change="insertReference"
+                    >
+                        <option value="">Choose parameter or input…</option>
+                        <template x-for="option in pluginReferenceOptions()" :key="option.value">
+                            <option :value="option.value" x-text="option.label"></option>
+                        </template>
+                    </select>
+                </label>
+            </template>
+            <div x-show="row.action.kind === 'command'">
+                <label class="field-group">
+                    Arguments, one per line
+                    <textarea
+                        aria-label="Action node arguments"
+                        :value="row.args"
+                        :data-path="row.path"
+                        data-field="args"
+                        @input="field"
+                    ></textarea>
+                </label>
+            </div>
+            <label class="field-group" x-show="row.action.kind === 'media'">
+                Media command
+                <select :value="row.action.command" :data-path="row.path" @change="field">
+                    <option value="play-pause">Play/pause</option>
+                    <option value="next">Next</option>
+                    <option value="previous">Previous</option>
+                    <option value="stop">Stop</option>
+                </select>
+            </label>
+            <div x-show="row.action.kind === 'navigate'">
+                <label class="field-group">
+                    Navigation target
+                    <select
+                        :value="row.action.target"
+                        :data-path="row.path"
+                        data-field="target"
+                        @change="field"
+                    >
+                        <option value="page">Page</option>
+                        <option value="profile">Profile</option>
+                    </select>
+                </label>
+                <label class="field-group">
+                    Navigation direction
+                    <select
+                        :value="row.action.direction"
+                        :data-path="row.path"
+                        data-field="direction"
+                        @change="field"
+                    >
+                        <option value="previous">Previous (left)</option>
+                        <option value="next">Next (right)</option>
+                    </select>
+                </label>
+            </div>
+            <label class="field-group" x-show="row.action.kind === 'profile'">
+                Target profile
+                <select :value="row.action.profile_id" :data-path="row.path" @change="field">
+                    <option value="">Choose a profile…</option>
+                    <template
+                        x-for="option in targetOptions(app.snapshot.profiles, row.action.profile_id)"
+                        :key="option.value"
+                    >
+                        <option
+                            :value="option.value"
+                            :selected="option.value === row.action.profile_id"
+                            x-text="option.label"
+                        ></option>
+                    </template>
+                </select>
+            </label>
+            <label class="field-group" x-show="row.action.kind === 'page'">
+                Target page
+                <select :value="row.action.page_id" :data-path="row.path" @change="field">
+                    <option value="">Choose a page…</option>
+                    <template
+                        x-for="option in targetOptions(contextPages, row.action.page_id)"
+                        :key="option.value"
+                    >
+                        <option
+                            :value="option.value"
+                            :selected="option.value === row.action.page_id"
+                            x-text="option.label"
+                        ></option>
+                    </template>
+                </select>
+            </label>
+            <div x-show="row.action.kind === 'swipe_navigation'">
+                <label>Swipe between</label>
+                <select
+                    aria-label="Swipe navigation target"
+                    :value="row.action.target"
+                    :data-path="row.path"
+                    data-field="target"
+                    @change="field"
+                >
+                    <option value="page" :selected="row.action.target === 'page'">Pages</option>
+                    <option value="profile" :selected="row.action.target === 'profile'">
+                        Profiles (scenes)
+                    </option>
+                </select>
+                <label>
+                    <input
+                        type="checkbox"
+                        aria-label="Wrap swipe navigation"
+                        :checked="row.action.wrap"
+                        :data-path="row.path"
+                        data-field="wrap"
+                        @change="field"
+                    />
+                    Wrap at the first and last item
+                </label>
+                <div class="field-group">
+                    <label>
+                        <input
+                            type="checkbox"
+                            aria-label="Reverse swipe direction"
+                            :checked="row.action.reverse"
+                            :data-path="row.path"
+                            data-field="reverse"
+                            @change="field"
+                        />
+                        Reverse direction
+                    </label>
+                    <p class="field-help">
+                        Swipe left for next, right for previous. Only this device changes. Profiles
+                        use the same dock model and remember their last page.
+                    </p>
+                </div>
+            </div>
+            <template x-if="row.action.kind === 'lighting'">
+                <div>
+                    <label class="field-group">
+                        Brightness (%)
+                        <input
+                            type="number"
+                            min="0"
+                            max="100"
+                            :value="row.action.brightness"
+                            :data-path="row.path"
+                            @input="field"
+                        />
+                    </label>
+                    <fieldset class="dial-colors">
+                        <legend>Lighting colors</legend>
+                        <template x-for="(color, index) in row.colors" :key="index">
+                            <label>
+                                <span x-text="'Color channel ' + (index + 1)"></span>
+                                <input
+                                    type="color"
+                                    :value="color"
+                                    :data-path="row.path"
+                                    :data-index="index"
+                                    @change="changeLightingColor"
+                                />
+                            </label>
+                        </template>
+                    </fieldset>
+                    <div class="button-row">
+                        <button
+                            type="button"
+                            class="button"
+                            :data-path="row.path"
+                            data-op="add"
+                            :disabled="row.colors.length >= 32"
+                            @click="resizeLightingColors"
+                        >
+                            Add color channel
+                        </button>
+                        <button
+                            type="button"
+                            class="button"
+                            :data-path="row.path"
+                            data-op="remove"
+                            :disabled="row.colors.length <= 1"
+                            @click="resizeLightingColors"
+                        >
+                            Remove last channel
+                        </button>
+                    </div>
+                </div>
+            </template>
+            <template x-if="row.action.kind === 'plugin'">
+                <div class="macro-plugin-fields">
+                    <div class="field-group" x-show="pluginStateChoices(row).length === 2">
+                        <label>
+                            Requested state
+                            <select
+                                :value="pluginDesiredState(row)"
+                                :data-path="row.path"
+                                :aria-invalid="pluginStateError(row) ? 'true' : 'false'"
+                                @change="changePluginDesiredState"
+                            >
+                                <option value="" :selected="pluginDesiredState(row) === ''">
+                                    Choose a state
+                                </option>
+                                <template
+                                    x-for="(name, index) in pluginStateChoices(row)"
+                                    :key="index"
+                                >
+                                    <option
+                                        :value="index"
+                                        :selected="index === row.action.user_desired_state"
+                                        x-text="name"
+                                    ></option>
+                                </template>
+                            </select>
+                        </label>
+                        <p class="field-help">
+                            The plugin receives this request separately from its current state.
+                        </p>
+                        <p
+                            class="field-help danger-text"
+                            x-show="pluginStateError(row)"
+                            x-text="pluginStateError(row)"
+                        ></p>
+                    </div>
+
+                    <div class="button-row">
+                        <button
+                            type="button"
+                            class="button"
+                            x-show="pluginHasInspector(row)"
+                            :data-path="row.path"
+                            @click="inspector"
+                            :disabled="pluginJsonError(row) !== ''"
+                            aria-haspopup="dialog"
+                        >
+                            Configure action
+                        </button>
+                        <button
+                            type="button"
+                            class="button"
+                            :data-path="row.path"
+                            @click="browsePlugins"
+                            :disabled="app.navigationPending"
+                        >
+                            Browse plugin actions
+                        </button>
+                    </div>
+                    <p class="field-help" x-show="!pluginHasInspector(row)">
+                        This action has no settings form. You can edit its settings under Advanced.
+                    </p>
+                    <details class="macro-plugin-advanced">
+                        <summary>Advanced</summary>
+                        <label class="field-group">
+                            Plugin settings (JSON)
+                            <textarea
+                                :value="pluginJsonText(row)"
+                                :data-path="row.path"
+                                :aria-invalid="pluginJsonError(row) ? 'true' : 'false'"
+                                :aria-describedby="fieldId(row.path, 'plugin-settings-error')"
+                                spellcheck="false"
+                                @input="changePluginJson"
+                            ></textarea>
+                        </label>
+                        <p
+                            class="danger-text field-help"
+                            role="alert"
+                            :id="fieldId(row.path, 'plugin-settings-error')"
+                            x-show="pluginJsonError(row)"
+                            x-text="pluginJsonError(row)"
+                        ></p>
+                    </details>
+                </div>
+            </template>
+            <p class="field-help" x-show="dialogMode && noActionSettings(row)">
+                This action has no settings.
+            </p>
+            <button
+                type="button"
+                class="button"
+                x-show="row.action.kind === 'macro' || (row.action.kind === 'builtin' && row.action.action.children && !['conditional','gesture','press_release','cooldown','failure_policy'].includes(row.action.action.kind))"
+                :data-path="row.path"
+                @click="add"
+            >
+                Add nested step
+            </button>
+            <div class="button-row" x-show="!dialogMode && isSequenceChild(row.path)">
+                <button
+                    type="button"
+                    class="icon-button"
+                    aria-label="Move step up"
+                    :data-path="row.path"
+                    data-op="up"
+                    @click="operation"
+                >
+                    ↑
+                </button>
+                <button
+                    type="button"
+                    class="icon-button"
+                    aria-label="Move step down"
+                    :data-path="row.path"
+                    data-op="down"
+                    @click="operation"
+                >
+                    ↓
+                </button>
+                <button
+                    type="button"
+                    class="icon-button"
+                    aria-label="Duplicate step"
+                    :data-path="row.path"
+                    data-op="copy"
+                    @click="operation"
+                >
+                    ＋
+                </button>
+                <button
+                    type="button"
+                    class="icon-button"
+                    aria-label="Remove step"
+                    :data-path="row.path"
+                    data-op="remove"
+                    @click="operation"
+                >
+                    ×
+                </button>
+            </div>
+        </div>
+    </template>
+    <p class="field-help" x-show="macroMode && !dialogMode">
+        Steps run in order. Delays yield to other controls; Stop macros cancels pending steps.
+    </p>
+</div>

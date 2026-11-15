@@ -1,0 +1,11 @@
+# Automatically generated - DO NOT EDIT!
+
+[[permission]]
+identifier = "allow-subscribe-surfaces"
+description = "Enables the subscribe_surfaces command without any pre-configured scope."
+commands.allow = ["subscribe_surfaces"]
+
+[[permission]]
+identifier = "deny-subscribe-surfaces"
+description = "Denies the subscribe_surfaces command without any pre-configured scope."
+commands.deny = ["subscribe_surfaces"]

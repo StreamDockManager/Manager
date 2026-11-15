@@ -1,0 +1,75 @@
+{
+    "$schema": "https://schema.tauri.app/config/2",
+    "productName": "Stream Dock Manager",
+    "version": "0.1.0",
+    "identifier": "app.streamdockmanager.manager",
+    "build": {
+        "beforeDevCommand": "npm run dev",
+        "devUrl": "http://localhost:1420",
+        "beforeBuildCommand": "npm run build:native",
+        "frontendDist": "../dist"
+    },
+    "app": {
+        "windows": [
+            {
+                "label": "main",
+                "create": false,
+                "title": "Stream Dock Manager",
+                "dragDropEnabled": false,
+                "backgroundColor": "#080808",
+                "width": 1440,
+                "height": 940,
+                "minWidth": 1060,
+                "minHeight": 720,
+                "visible": false
+            }
+        ],
+        "security": {
+            "csp": "default-src 'self'; script-src 'self'; style-src 'self' 'unsafe-inline'; img-src 'self' asset: http://asset.localhost data: blob:; font-src 'self'; connect-src 'self' ipc: http://ipc.localhost; object-src 'none'; frame-src 'self' http://127.0.0.1:*; base-uri 'self'",
+            "devCsp": "default-src 'self'; script-src 'self'; style-src 'self' 'unsafe-inline'; img-src 'self' data: blob:; connect-src 'self' ipc: http://ipc.localhost ws://localhost:1420 ws://127.0.0.1:1420; object-src 'none'; frame-src 'self' http://127.0.0.1:*"
+        }
+    },
+    "plugins": {
+        "deep-link": {
+            "desktop": { "schemes": ["stream-dock-manager"] }
+        }
+    },
+    "bundle": {
+        "active": true,
+        "targets": ["app", "dmg", "nsis", "deb", "rpm"],
+        "icon": [
+            "icons/icon.png",
+            "icons/32x32.png",
+            "icons/64x64.png",
+            "icons/128x128.png",
+            "icons/128x128@2x.png",
+            "icons/icon.icns",
+            "icons/icon.ico"
+        ],
+        "shortDescription": "Independent, modular Stream Dock device manager",
+        "category": "Utility",
+        "license": "GPL-3.0-or-later",
+        "macOS": {
+            "minimumSystemVersion": "14.0"
+        },
+        "linux": {
+            "deb": {
+                "desktopTemplate": "../packaging/linux/deb.desktop.hbs",
+                "depends": [],
+                "files": {
+                    "/usr/share/applications/app.streamdockmanager.manager.desktop": "../packaging/linux/hidden-manager.desktop",
+                    "/usr/lib/udev/rules.d/60-stream-dock-manager.rules": "../packaging/linux/60-stream-dock-manager.rules"
+                }
+            },
+            "rpm": {
+                "desktopTemplate": "../packaging/linux/hidden-manager.desktop",
+                "depends": [],
+                "files": {
+                    "/usr/share/applications/app.streamdockmanager.manager.desktop": "../packaging/linux/app.streamdockmanager.manager.desktop",
+                    "/usr/share/icons/hicolor/128x128/apps/app.streamdockmanager.manager.png": "icons/128x128.png",
+                    "/usr/lib/udev/rules.d/60-stream-dock-manager.rules": "../packaging/linux/60-stream-dock-manager.rules"
+                }
+            }
+        }
+    }
+}

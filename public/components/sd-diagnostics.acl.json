@@ -1,0 +1,10 @@
+{
+    "version": 1,
+    "groups": ["diagnostics"],
+    "options": {
+        "shadow": false
+    },
+    "metadata": {
+        "description": "First-party sd-diagnostics component. Controllers are registered by the trusted application bootstrap."
+    }
+}

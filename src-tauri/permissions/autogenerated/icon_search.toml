@@ -1,0 +1,11 @@
+# Automatically generated - DO NOT EDIT!
+
+[[permission]]
+identifier = "allow-icon-search"
+description = "Enables the icon_search command without any pre-configured scope."
+commands.allow = ["icon_search"]
+
+[[permission]]
+identifier = "deny-icon-search"
+description = "Denies the icon_search command without any pre-configured scope."
+commands.deny = ["icon_search"]

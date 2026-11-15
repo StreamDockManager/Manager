@@ -1,0 +1,28 @@
+[package]
+name = "stream-dock-manager-hardware-registry"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+
+[dependencies]
+hardware-core.workspace = true
+stream-dock-manager-hardware-n4-pro = { path = "../../hardware/n4-pro" }
+serde.workspace = true
+serde_json.workspace = true
+toml.workspace = true
+
+stream-dock-manager-hardware-293 = { path = "../../hardware/293" }
+stream-dock-manager-hardware-293-v3 = { path = "../../hardware/293-v3" }
+stream-dock-manager-hardware-293s = { path = "../../hardware/293s" }
+stream-dock-manager-hardware-293s-v3 = { path = "../../hardware/293s-v3" }
+stream-dock-manager-hardware-m18 = { path = "../../hardware/m18" }
+stream-dock-manager-hardware-m3 = { path = "../../hardware/m3" }
+stream-dock-manager-hardware-n3 = { path = "../../hardware/n3" }
+stream-dock-manager-hardware-n3-vsd = { path = "../../hardware/n3-vsd" }
+stream-dock-manager-hardware-n1 = { path = "../../hardware/n1" }
+stream-dock-manager-hardware-n1-vsd = { path = "../../hardware/n1-vsd" }
+stream-dock-manager-hardware-n4 = { path = "../../hardware/n4" }
+stream-dock-manager-hardware-k1-pro = { path = "../../hardware/k1-pro" }
+stream-dock-manager-hardware-mini = { path = "../../hardware/mini" }
+stream-dock-manager-hardware-xl = { path = "../../hardware/xl" }
+stream-dock-manager-hardware-h1-pro = { path = "../../hardware/h1-pro" }

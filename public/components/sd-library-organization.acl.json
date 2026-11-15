@@ -1,0 +1,7 @@
+{
+    "version": 1,
+    "groups": ["shell"],
+    "dependencies": [],
+    "options": { "shadow": false },
+    "metadata": { "description": "Installation-local library favorites and tag editor." }
+}

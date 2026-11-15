@@ -1,0 +1,9 @@
+<div
+    class="macro-editor"
+    x-data="macroEditor"
+    @keydown.window="captureKeys"
+    @open-named-macro.window="openNamed"
+    @open-multi-action="openEditor"
+>
+    <sd-action-workspace></sd-action-workspace>
+</div>

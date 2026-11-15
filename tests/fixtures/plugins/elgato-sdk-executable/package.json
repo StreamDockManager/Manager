@@ -1,0 +1,17 @@
+{
+    "name": "manager-elgato-sdk-conformance-fixture",
+    "private": true,
+    "type": "module",
+    "license": "GPL-3.0-or-later",
+    "scripts": {
+        "build": "rolldown src/plugin.js --file package/com.manager.fixture.elgato.sdPlugin/plugin.js --format esm --platform node",
+        "build:current": "rolldown src/current-mode.js --file package/com.manager.fixture.elgato.sdPlugin/current-mode.js --format esm --platform node",
+        "build:profiles": "rolldown src/bundled-profiles.js --file package/com.manager.fixture.elgato.sdPlugin/bundled-profiles.js --format esm --platform node"
+    },
+    "dependencies": {
+        "@elgato/streamdeck": "3.0.4"
+    },
+    "devDependencies": {
+        "rolldown": "1.3.2"
+    }
+}

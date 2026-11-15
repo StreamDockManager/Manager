@@ -1,0 +1,160 @@
+[package]
+name = "stream-dock-manager-runtime"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+
+[features]
+test-support = []
+# Opt-in read-only GUI session observations; no capture/output bypass
+native-session-probe = []
+
+[[example]]
+name = "keyboard_linux_session_probe"
+required-features = ["native-session-probe"]
+
+[[example]]
+name = "keyboard_session_probe"
+required-features = ["native-session-probe"]
+
+[[example]]
+name = "keyboard_target_probe"
+required-features = ["native-session-probe"]
+
+[[example]]
+name = "plugin_monitor"
+required-features = ["test-support"]
+
+[[example]]
+name = "profile_discovery_perf"
+required-features = ["test-support"]
+
+[[example]]
+name = "image_perf"
+required-features = ["test-support"]
+
+[[example]]
+name = "image_shared_perf"
+required-features = ["test-support"]
+
+[dependencies]
+tokio = { version = "1.54.1", features = ["rt", "time", "sync", "macros"] }
+stream-dock-manager-storage.workspace = true
+hex.workspace = true
+stream-dock-manager-plugin-runtimes.workspace = true
+stream-dock-manager-downloads.workspace = true
+hardware-core.workspace = true
+hardware-registry.workspace = true
+stream-dock-manager-plugin-host.workspace = true
+serde.workspace = true
+serde_json.workspace = true
+uuid.workspace = true
+image.workspace = true
+base64 = "0.23.1"
+chrono = "0.4.45"
+regex = "1.13.1"
+hidapi = "2.6.7"
+directories = "6.0.0"
+zip.workspace = true
+enigo = "0.6.1"
+keyring = "4.2.0"
+
+ts-rs.workspace = true
+schemars.workspace = true
+tempfile = "3.27.0"
+reqwest = { version = "0.13.5", default-features = false, features = [
+  "blocking",
+  "json",
+  "rustls",
+] }
+sha2 = "0.11.1"
+flate2 = "1.1.11"
+semver = "1.0.28"
+sysinfo = { version = "=0.40.3", default-features = false, features = [
+  "system",
+  "disk",
+  "network",
+] }
+
+[target.'cfg(target_os = "linux")'.dependencies]
+zbus = { version = "6.2.1", default-features = false, features = [
+  "tokio",
+  "proxy"
+] }
+ashpd = { version = "0.14.0", default-features = false, features = [
+  "tokio",
+  "remote_desktop",
+  "screencast",
+] }
+futures-util = "0.3.34"
+x11rb = { version = "0.14.0", features = [
+  "xkb",
+  "xtest",
+  "xinput",
+  "res",
+  "record"
+] }
+x11rb-protocol = { version = "0.14.0", features = ["std"] }
+rustix = { version = "1.1.6", features = ["event", "net", "process"] }
+
+[target."cfg(unix)".dependencies]
+rustix = { version = "1.1.6", features = ["fs"] }
+
+[target.'cfg(target_os = "macos")'.dependencies]
+dispatch2 = "0.3.1"
+objc2-app-kit = { version = "0.3.2", default-features = false, features = [
+  "std",
+  "NSWorkspace",
+  "NSApplication",
+  "NSResponder",
+  "NSRunningApplication",
+  "libc",
+] }
+objc2-foundation = { version = "0.3.2", default-features = false, features = [
+  "std",
+  "NSBundle",
+  "NSNotification",
+  "NSRunLoop",
+  "NSDate",
+  "NSOperation",
+  "block2",
+] }
+block2 = "0.6.2"
+objc2 = "0.6.5"
+
+[target.'cfg(target_os = "windows")'.dependencies]
+# The implement! macro must use the core ABI exported by windows 0.62
+# Must match windows 0.62: windows-core 0.100 types are not ABI/API interchangeable
+windows-core = "0.62.2"
+windows = { version = "0.62.2", features = [
+  "Wdk_Foundation",
+  "Wdk_Storage_FileSystem",
+  "Win32_Storage_FileSystem",
+  "Win32_System_IO",
+  "Win32_Media_Audio",
+  "Win32_Media_Audio_Endpoints",
+  "Win32_System_Com",
+  "Win32_System_Performance",
+  "Win32_System_Com_StructuredStorage",
+  "Win32_System_Variant",
+  "Win32_Foundation",
+  "Win32_Security",
+  "Win32_System_JobObjects",
+  "Win32_System_Threading",
+  "Win32_System_RemoteDesktop",
+  "Win32_System_SystemInformation",
+  "Win32_System_Power",
+  "Win32_UI_WindowsAndMessaging",
+  "Win32_UI_Accessibility",
+  "Win32_Graphics_Gdi",
+  "Win32_UI_Input_KeyboardAndMouse",
+] }
+
+[target."cfg(windows)".dev-dependencies]
+windows = { version = "0.62.2", features = [
+  "Win32_System_Ioctl",
+  "Win32_System_SystemServices",
+] }
+
+[dev-dependencies]
+tungstenite = "0.30.0"

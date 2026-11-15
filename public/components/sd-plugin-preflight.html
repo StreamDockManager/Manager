@@ -1,0 +1,62 @@
+<div
+    x-data="pluginPreflight"
+    @open-plugin-preflight.window="openPreflight"
+    @runtime-changed.window="refreshRuntime"
+>
+    <dialog
+        class="feature-dialog"
+        x-ref="preflightDialog"
+        aria-labelledby="preflight-title"
+        @cancel.prevent="closePreflight"
+    >
+        <header class="picker-header">
+            <h2 id="preflight-title">Plugin compatibility review</h2>
+            <button
+                class="icon-button"
+                aria-label="Close compatibility review"
+                @click="closePreflight"
+                :disabled="working"
+            >
+                ×
+            </button>
+        </header>
+        <div class="feature-body">
+            <h3 x-text="preflight ? preflight.name : 'Inspecting package…'"></h3>
+            <p x-show="preflightMode === 'enable' && !$store.recovery.status.active">
+                Enabled is your saved preference. Plugin code runs with your user permissions only
+                when a connected device or running simulator’s active profile uses it and runtime
+                requirements are met.
+            </p>
+            <p x-show="preflightMode === 'enable' && $store.recovery.status.active">
+                Enabling saves your preference. Plugin execution stays paused until you exit
+                recovery mode. After restarting, enabled plugins can run with your user permissions
+                when an active profile uses them and runtime requirements are met.
+            </p>
+            <button class="button" x-show="preflight && preflight.runtime" @click="chooseRuntime">
+                Choose runtime version and source
+            </button>
+            <template
+                x-for="check in preflight ? preflight.checks : []"
+                :key="check.code + check.message"
+            >
+                <article class="check-row">
+                    <div>
+                        <span class="chip" x-text="check.level"></span>
+                        <p x-text="check.message"></p>
+                        <small x-text="check.remedy"></small>
+                    </div>
+                </article>
+            </template>
+            <p class="danger-text" role="alert" x-show="error" x-text="error"></p>
+        </div>
+        <footer class="feature-footer">
+            <button class="button" @click="closePreflight" :disabled="working">Cancel</button>
+            <button
+                class="button primary"
+                @click="confirmPreflight"
+                :disabled="working || !preflight || !preflight.can_install"
+                x-text="preflightMode === 'enable' ? 'Enable plugin' : 'Install disabled'"
+            ></button>
+        </footer>
+    </dialog>
+</div>

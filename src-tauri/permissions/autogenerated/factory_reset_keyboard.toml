@@ -1,0 +1,11 @@
+# Automatically generated - DO NOT EDIT!
+
+[[permission]]
+identifier = "allow-factory-reset-keyboard"
+description = "Enables the factory_reset_keyboard command without any pre-configured scope."
+commands.allow = ["factory_reset_keyboard"]
+
+[[permission]]
+identifier = "deny-factory-reset-keyboard"
+description = "Denies the factory_reset_keyboard command without any pre-configured scope."
+commands.deny = ["factory_reset_keyboard"]

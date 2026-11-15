@@ -1,0 +1,11 @@
+# Automatically generated - DO NOT EDIT!
+
+[[permission]]
+identifier = "allow-open-settings-panel"
+description = "Enables the open_settings_panel command without any pre-configured scope."
+commands.allow = ["open_settings_panel"]
+
+[[permission]]
+identifier = "deny-open-settings-panel"
+description = "Denies the open_settings_panel command without any pre-configured scope."
+commands.deny = ["open_settings_panel"]

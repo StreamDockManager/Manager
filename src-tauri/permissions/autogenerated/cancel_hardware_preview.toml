@@ -1,0 +1,11 @@
+# Automatically generated - DO NOT EDIT!
+
+[[permission]]
+identifier = "allow-cancel-hardware-preview"
+description = "Enables the cancel_hardware_preview command without any pre-configured scope."
+commands.allow = ["cancel_hardware_preview"]
+
+[[permission]]
+identifier = "deny-cancel-hardware-preview"
+description = "Denies the cancel_hardware_preview command without any pre-configured scope."
+commands.deny = ["cancel_hardware_preview"]

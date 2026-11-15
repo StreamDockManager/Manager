@@ -1,0 +1,405 @@
+{
+    "schema_version": 1,
+    "sources": [
+        {
+            "vendor": "vsd",
+            "repository": "https://github.com/VSDinside/VSDinside-Plugin-SDK",
+            "revision": "4ac0234ed42196d782f6b663b2f82c2f3d159dfe",
+            "license": "MIT",
+            "scope": "Untouched JavaScript sample, MIT C++ plugin SDK definitions/dispatch/interfaces and READMEs; factual identifier/requiredness extracts from official documentation, with separate website response hashes and review date.",
+            "documentation_sources": [
+                {
+                    "url": "https://sdk.key123.vip/en/guide/manifest.html",
+                    "response_sha256": "bec6a82dbb44c77cae1d9f05c1bf483b7879b0bf027151f2a5c4b012e8961d55",
+                    "reviewed_at": "2026-11-09"
+                },
+                {
+                    "url": "https://sdk.key123.vip/en/guide/events-sent.html",
+                    "response_sha256": "fb4546fc9c66a72356cee478c10c765127fd8fe588a80798a11fbc4434691bdd",
+                    "reviewed_at": "2026-11-09"
+                },
+                {
+                    "url": "https://sdk.key123.vip/en/guide/events-received.html",
+                    "response_sha256": "98980f73ece214c8208a294d0e73e08fa6faa69c7700472329d87dfd593c4cff",
+                    "reviewed_at": "2026-11-09"
+                }
+            ]
+        },
+        {
+            "vendor": "elgato",
+            "repository": "https://github.com/elgatosf/streamdeck",
+            "revision": "9d9636e9ea956ff4be0246e7ab8e3679866b324f",
+            "package": "@elgato/streamdeck",
+            "package_version": "3.0.4",
+            "node_minimum": "20.5.1",
+            "license": "MIT",
+            "scope": "Untouched core TypeScript contracts, Counter manifest and package.json; Counter executable not built or executed; current and versioned manifest TypeScript schema source; untouched Lights Out distributed V2 profile archives and current plugin manifest, no executable or reference-host execution",
+            "schema_version": "0.6.0"
+        },
+        {
+            "vendor": "elgato",
+            "url": "https://docs.elgato.com/streamdeck/sdk/guides/keys/",
+            "retrieved": "2026-11-09",
+            "version": "3.0.0",
+            "scope": "Short attributed documentary excerpts for press-state payload timing and setImage animation limitation; not a complete source snapshot or runtime trace"
+        },
+        {
+            "vendor": "elgato",
+            "package": "@elgato/schemas",
+            "package_version": "0.6.0",
+            "schema_version": "0.6.0",
+            "url": "https://registry.npmjs.org/@elgato/schemas/-/schemas-0.6.0.tgz",
+            "tarball_sha256": "1a2b3e0fa8a666595a37987d3e6462b7d60187908fee15046fe45d11421a8525",
+            "integrity": "sha512-fK3y35ZDwow3HV7/wuQyN/cy/Ir2rlYHiGAV9cUrNETz1T1bjtMl5tSaIooC3CBVLtMjsM4JuHwxejJouTkR1Q==",
+            "reviewed_at": "2026-11-09",
+            "license": "MIT",
+            "scope": "Untouched published Draft 7 manifest JSON Schema, package license and README. npm pack --ignore-scripts; no package code executed. Version branches 6.4 through 7.6; runtime shape validation, not vendor behavior or image-dimension qualification. Untouched published layout TypeScript declarations pin text alignment and gbar indicator/bar_h semantics; no optical/reference-host parity claim."
+        },
+        {
+            "vendor": "elgato",
+            "url": "https://docs.elgato.com/streamdeck/sdk/guides/dials/",
+            "retrieved": "2026-11-09",
+            "version": "3.0.0",
+            "scope": "Factual builtin layout item identifiers, types, geometry, ordering and defaults transcribed from official guide JSON. Not a reference-host render trace or typography qualification."
+        },
+        {
+            "vendor": "elgato",
+            "repository": "https://github.com/GeekyEggo/sdpi-components",
+            "revision": "bfd17677540da403e28ecc442110df77be4306ca",
+            "package": "sdpi-components",
+            "package_version": "4.0.1",
+            "license": "MIT",
+            "reviewed_at": "2026-11-09",
+            "scope": "Untouched file input component, path sanitizer and upstream path tests from Elgato-recommended UI library. They establish full percent-encoded file path input values after fakepath stripping, not WebKit/native file picker parity or VSD callback payload shape."
+        },
+        {
+            "vendor": "elgato",
+            "url": "https://www.elgato.com/uk/en/explorer/products/stream-deck/key-logic-stream-deck/",
+            "reviewed_at": "2026-11-09",
+            "license": "GPL-3.0-or-later (project-owned factual summary only)",
+            "scope": "Project-owned factual findings in key-logic-facts.json, cross-checked with official manifest, keys and WebSocket docs and pinned SDK3.0.4/schema0.6.0. No copied upstream excerpt or implementation; no reference-host trace."
+        }
+    ],
+    "files": [
+        {
+            "path": "vendor/elgato/LICENSE",
+            "sha256": "e5c5c304f2c149fd57035ba66c2dbe4f1484b82ae096eaad2e547ad2545566ab"
+        },
+        {
+            "path": "vendor/elgato/core-src/command.ts",
+            "sha256": "77b37549422cd592102ca1e1fb8784e5f19aeaede61cd0e41f6636be8a09b2cb"
+        },
+        {
+            "path": "vendor/elgato/core-src/device.ts",
+            "sha256": "5603982bb6a3c1d582cfab3dc9dc1d2edd0ef100f491f8fe95543a4c46836413"
+        },
+        {
+            "path": "vendor/elgato/core-src/events/action.ts",
+            "sha256": "2e2dcae282237a1823be84df1d0515cfd421c414c6ecd483ef75c92f8376a1bb"
+        },
+        {
+            "path": "vendor/elgato/core-src/events/device.ts",
+            "sha256": "2609c5a40ca8a8ac9349b1e2b484edb60f07e258fb66bc7b66395fdf557b6558"
+        },
+        {
+            "path": "vendor/elgato/core-src/events/encoder.ts",
+            "sha256": "2651944aa16a67c93dd9ecdc386f7115119b3c362ff89f40873925543d8953ce"
+        },
+        {
+            "path": "vendor/elgato/core-src/events/events.ts",
+            "sha256": "db58dabb163f22e7d678f28a9e25af951d3ebc9bafd5c19cb43224e90fcb07c3"
+        },
+        {
+            "path": "vendor/elgato/core-src/events/keypad.ts",
+            "sha256": "0e4f9acf57139caaf79e4e77582d1a8e5498000f52d2e581df6ecc001404c263"
+        },
+        {
+            "path": "vendor/elgato/core-src/events/system.ts",
+            "sha256": "ddb03305b9211fb5530482abb96162963a65d14ac14025b7301ee9f36d57a34b"
+        },
+        {
+            "path": "vendor/elgato/core-src/events/ui.ts",
+            "sha256": "43aae37ec1d609989d4d7fa128085a1c6f74ee9e728cf9851e0a75d5af42154d"
+        },
+        {
+            "path": "vendor/elgato/core-src/i18n.ts",
+            "sha256": "77eeaef0fdb132c942096dca2dd08d09dcdc134db6bb1cd5bf22161dc26f740a"
+        },
+        {
+            "path": "vendor/elgato/core-src/index.ts",
+            "sha256": "2b56ab30f1f8d31ce33fdfe98894587a8c951445751bffbfa97751a13ffc1f43"
+        },
+        {
+            "path": "vendor/elgato/core-src/layout.ts",
+            "sha256": "649d08d4d0ba58d6ec055a184b107c8e06c09f0d2e564749c4c1e97e88cf3408"
+        },
+        {
+            "path": "vendor/elgato/core-src/registration/info.ts",
+            "sha256": "31411129256ff6045de855941343d07686b14569132a0ce33aa8f96f893ae3db"
+        },
+        {
+            "path": "vendor/elgato/core-src/registration/parameters.ts",
+            "sha256": "ccadcdef3d23bb7424b1808f989ea64cab9d654b5f8f9389e06586d56a0cf1de"
+        },
+        {
+            "path": "vendor/elgato/core-src/registration/ui.ts",
+            "sha256": "a8dc20d23c5305a009cffcd0dba8aad71e074b9903aef0a92acb9b16199bdd8a"
+        },
+        {
+            "path": "vendor/elgato/core-src/resources.ts",
+            "sha256": "d9bd184a99900c5d8bfdec364e4c9dc21ac63da5249e48f50888b6660c31add0"
+        },
+        {
+            "path": "vendor/elgato/core-src/target.ts",
+            "sha256": "aeee7ae59b1d26d9e4b4bbccc4e9f0d3271e4931aac9b1a2d4c09f6c076198ed"
+        },
+        {
+            "path": "vendor/elgato/counter/manifest.json",
+            "sha256": "dba057362d24d00c284f69afc7e247fccfe869e5a7d23b725fdc47331f8fda89"
+        },
+        {
+            "path": "vendor/elgato/counter/package.json",
+            "sha256": "55a80b54d5a446b6e224e72796cbca6446b5b3e4e4b4dd3b2dfe75fbabd9be56"
+        },
+        {
+            "path": "vendor/elgato/keys-guide-evidence.txt",
+            "sha256": "16691a1665d2d91d5ad99d91e98a229a97d2e27926e5eaa47686ebcb65e32eb5"
+        },
+        {
+            "path": "vendor/elgato/manifest-schema/LICENSE",
+            "sha256": "971884120f57f8f09ef52b8e9c4faef71746b29b49aaba8791a2ee823d62e0d8"
+        },
+        {
+            "path": "vendor/elgato/manifest-schema/latest.ts",
+            "sha256": "f40d66b15b3b36b37e3a2f897bb74ee2b8de666b556d96ea20d7096d39ff4539"
+        },
+        {
+            "path": "vendor/elgato/manifest-schema/manifest.json",
+            "sha256": "81c52abef30f7ab588cee6882eba822679c5b948d550b65c2a8689c6e8353112"
+        },
+        {
+            "path": "vendor/elgato/manifest-schema/npm-README.md",
+            "sha256": "769bcbfe27eefef4e1eea6583b169fddb03b9aa375b8c11e2d78a8afe6ffe334"
+        },
+        {
+            "path": "vendor/elgato/manifest-schema/package.json",
+            "sha256": "9ecf2ef1590e121c41b6cca1142ed593e2a7baed6a63e57a3c1516d830d00702"
+        },
+        {
+            "path": "vendor/elgato/manifest-schema/v6.4.ts",
+            "sha256": "0a19ed3c9c0314b4ac2a5e9925a3b09366128a9cbaaefd5115a6d9862ec5d7f9"
+        },
+        {
+            "path": "vendor/elgato/manifest-schema/v6.5.ts",
+            "sha256": "83928168767034132995f3d4a299f7f012654f3ff64668e79173cb213904c93f"
+        },
+        {
+            "path": "vendor/elgato/manifest-schema/v6.6.ts",
+            "sha256": "ad1aa2cd729a292acc52c28b6dfcc0c311d32f766a1783ae17462753dce04e88"
+        },
+        {
+            "path": "vendor/elgato/manifest-schema/v6.9.ts",
+            "sha256": "6b47248b90375113579fa93df204e7213576bef989b24205f86f916aa678ac59"
+        },
+        {
+            "path": "vendor/elgato/manifest-schema/v7.0.ts",
+            "sha256": "a5d4a44384477ff508a766ab0622395fe15f04ac3e98bad3f558eca2e46d500b"
+        },
+        {
+            "path": "vendor/elgato/manifest-schema/v7.1.ts",
+            "sha256": "563b608c41c4fc7946bba8e84554fd35522e6bdc79599e50a7049908dcc551fd"
+        },
+        {
+            "path": "vendor/elgato/manifest-schema/v7.6.ts",
+            "sha256": "5631c7cc800bc116e2cdd1ae2e52c4df560eb9fd5e9309f5f5361323dab16daf"
+        },
+        {
+            "path": "vendor/vsd/LICENSE",
+            "sha256": "ab90d64cbe5d51523abedc8f2b053326646193f49aabfd8d4755b3a4c01193c8"
+        },
+        {
+            "path": "vendor/vsd/README.md",
+            "sha256": "05726dab7678a9b87da76f27ef8c0f36666d68c754b2552cdf5d005e453a0d6e"
+        },
+        {
+            "path": "vendor/vsd/VSDCPPSDK/README.md",
+            "sha256": "d21f144a44b4544159592b93f29c1d7d6f45ffce6dadb66064990c1b778cffdf"
+        },
+        {
+            "path": "vendor/vsd/VSDCPPSDK/StreamDockCPPSDK/StreamDockSDK/HSDAction.h",
+            "sha256": "34fb3c930782da2b3b78174601ac7d60ec88c69bb224f104b60406399f6c693d"
+        },
+        {
+            "path": "vendor/vsd/VSDCPPSDK/StreamDockCPPSDK/StreamDockSDK/HSDConnectionManager.cpp",
+            "sha256": "d90ba1299e9fea26b432accbaae24192b0d9f032cb0a9e2015d172ac730819e7"
+        },
+        {
+            "path": "vendor/vsd/VSDCPPSDK/StreamDockCPPSDK/StreamDockSDK/HSDPlugin.h",
+            "sha256": "ee706900d8170a513f7986783ff265e7dc1b3d8f280f7755b44b6a0db579bdef"
+        },
+        {
+            "path": "vendor/vsd/VSDCPPSDK/StreamDockCPPSDK/StreamDockSDK/HSDSDKDefines.h",
+            "sha256": "97492f7607845345a85b6a0e838e633e017f0344671aa9c42c11d64edba17e4e"
+        },
+        {
+            "path": "vendor/vsd/VSDJavaScriptSDK/com.vsd.craft.xxx.sdPlugin/en.json",
+            "sha256": "b6aa5200e74665ed44bfa5b7ea8468f00ce742822c3eee81b94aa02297e4ba1e"
+        },
+        {
+            "path": "vendor/vsd/VSDJavaScriptSDK/com.vsd.craft.xxx.sdPlugin/manifest.json",
+            "sha256": "1971756ef894ea0c400463871774c101ac995ad81debb8ac8d253401f92b391b"
+        },
+        {
+            "path": "vendor/vsd/VSDJavaScriptSDK/com.vsd.craft.xxx.sdPlugin/plugin/index.html",
+            "sha256": "92906fd2db676d10a063c0457ad435550acdb0a1b21a07eb76e047324efa79e3"
+        },
+        {
+            "path": "vendor/vsd/VSDJavaScriptSDK/com.vsd.craft.xxx.sdPlugin/plugin/index.js",
+            "sha256": "29a666a9998aee152d72e842d740943316679ccc41546954c7c77312ce3dcf6a"
+        },
+        {
+            "path": "vendor/vsd/VSDJavaScriptSDK/com.vsd.craft.xxx.sdPlugin/plugin/utils/axios.js",
+            "sha256": "b38e84fad4b6a237f833bbaf87d726cc3c38e8e63322731f365d2d0dd40a9cc5"
+        },
+        {
+            "path": "vendor/vsd/VSDJavaScriptSDK/com.vsd.craft.xxx.sdPlugin/plugin/utils/common.js",
+            "sha256": "bd6685ec5a8fe4f77a3313270889504484277de5ba8530c9324c5f381f9b2d8b"
+        },
+        {
+            "path": "vendor/vsd/VSDJavaScriptSDK/com.vsd.craft.xxx.sdPlugin/plugin/utils/worker.js",
+            "sha256": "03086145e9789aae6fd69648a89c86730cc817a0a96d050c69db1a594f01d272"
+        },
+        {
+            "path": "vendor/vsd/VSDJavaScriptSDK/com.vsd.craft.xxx.sdPlugin/propertyInspector/action1/index.html",
+            "sha256": "2808f73a488374b6148a36bfc749ed62fe99c7b65a082f2d91ef4143d5d224cd"
+        },
+        {
+            "path": "vendor/vsd/VSDJavaScriptSDK/com.vsd.craft.xxx.sdPlugin/propertyInspector/action1/index.js",
+            "sha256": "daa93d77c7608b27a74cc3a1181d174c05012c57b675d40f9e597f02a1593414"
+        },
+        {
+            "path": "vendor/vsd/VSDJavaScriptSDK/com.vsd.craft.xxx.sdPlugin/propertyInspector/utils/action.js",
+            "sha256": "9dcb9d979b5782722c5a6b28ddb2ac09b1f100ca89e962dbdc672bdde37cb8d3"
+        },
+        {
+            "path": "vendor/vsd/VSDJavaScriptSDK/com.vsd.craft.xxx.sdPlugin/propertyInspector/utils/common.js",
+            "sha256": "e29d61158646be12c489937b0360373c9c1c169684e7e2efed6c29f2b952cbd0"
+        },
+        {
+            "path": "vendor/vsd/VSDJavaScriptSDK/com.vsd.craft.xxx.sdPlugin/readme.md",
+            "sha256": "e8a3007f904f8172c04fcbbc4192e15b0a91eeb13267465542d48ed63e2f16db"
+        },
+        {
+            "path": "vendor/vsd/VSDJavaScriptSDK/com.vsd.craft.xxx.sdPlugin/static/CH.png",
+            "sha256": "f4eba213b920f94f5cc2927e6204a3bf23eec1b4458f3be14aaefaa97ed31f3b"
+        },
+        {
+            "path": "vendor/vsd/VSDJavaScriptSDK/com.vsd.craft.xxx.sdPlugin/static/css/caret.svg",
+            "sha256": "40a4b4cbfd029b639fbf28ff33b49f18130f53cffef4e0eb870e01f2d13b5b04"
+        },
+        {
+            "path": "vendor/vsd/VSDJavaScriptSDK/com.vsd.craft.xxx.sdPlugin/static/css/check.png",
+            "sha256": "b5fb6fbe1417751ca7dd87552398d4585cb002654aa69632fdf6f43dbc65220c"
+        },
+        {
+            "path": "vendor/vsd/VSDJavaScriptSDK/com.vsd.craft.xxx.sdPlugin/static/css/check.svg",
+            "sha256": "335209a5e56c21e31a9b3a119fa2370facd178283557f2ae6fa9f06e848c368c"
+        },
+        {
+            "path": "vendor/vsd/VSDJavaScriptSDK/com.vsd.craft.xxx.sdPlugin/static/css/elg_calendar.svg",
+            "sha256": "f11a7b1eaf040f2513593c81f9695e7aa5ca907d44a45a19f8d6dca67075b66d"
+        },
+        {
+            "path": "vendor/vsd/VSDJavaScriptSDK/com.vsd.craft.xxx.sdPlugin/static/css/elg_calendar_inv.svg",
+            "sha256": "2c8f4decb363794fa8dd4369c98f764e313748fa5f89f03b5e3bad8b391eb778"
+        },
+        {
+            "path": "vendor/vsd/VSDJavaScriptSDK/com.vsd.craft.xxx.sdPlugin/static/css/g_d8d8d8.svg",
+            "sha256": "f57885a426e1e665cc666eb2a29aff9419edb79dd61292c9db07119ea8106ca9"
+        },
+        {
+            "path": "vendor/vsd/VSDJavaScriptSDK/com.vsd.craft.xxx.sdPlugin/static/css/rcheck.svg",
+            "sha256": "44ae62b4098b72ddd73376d87409983c52e5aa65cb70a36063793b98599803a7"
+        },
+        {
+            "path": "vendor/vsd/VSDJavaScriptSDK/com.vsd.craft.xxx.sdPlugin/static/css/sdpi.css",
+            "sha256": "dc355e5cefc34b775ddb79a2139900e62c7c82e536010641e3787a82822639cc"
+        },
+        {
+            "path": "vendor/vsd/VSDJavaScriptSDK/com.vsd.craft.xxx.sdPlugin/static/default.jpg",
+            "sha256": "eb5c4d9b90e10680cb8f13a6c12ad0f426601fd2ee4130494fa06b6e6bb1677c"
+        },
+        {
+            "path": "vendor/vsd/VSDJavaScriptSDK/com.vsd.craft.xxx.sdPlugin/zh_CN.json",
+            "sha256": "aeda643861c2ccde1a7d5535953766ab7b8410d73295d754cce213abf39da42a"
+        },
+        {
+            "path": "vendor/vsd/documentation-facts.json",
+            "sha256": "7b0118a7153f2e56ef0d5b9f8e82cb40800393acf9bc604fa7cbcecba65dc231"
+        },
+        {
+            "path": "vendor/elgato/builtin-layout-facts.json",
+            "sha256": "aa647393e88a286573bee79db8eff24e32bb2c4e8be6d58338acffe948f61355"
+        },
+        {
+            "path": "vendor/elgato/layout-schema/layout.d.ts",
+            "sha256": "194b4c4e624b10a2bcaaaee5027732b120a5380b1fb78c03db77bcacb187ce89"
+        },
+        {
+            "path": "vendor/elgato/sdpi-components/LICENSE.md",
+            "sha256": "1a8d519d1fda69ebcfbe91ef6a94d9198d2fac11978d19db966317b249829636"
+        },
+        {
+            "path": "vendor/elgato/sdpi-components/package.json",
+            "sha256": "e45723177906fa3d1cc08b13ef48dd5fc8a5931bed53dd1758e6e9f4af39fc88"
+        },
+        {
+            "path": "vendor/elgato/sdpi-components/src/components/file.ts",
+            "sha256": "d8859d7de681a19cc03f26e188c5a511fa00eb20d571c8c0b6700f4e5c352ee7"
+        },
+        {
+            "path": "vendor/elgato/sdpi-components/src/core/__tests__/file.test.ts",
+            "sha256": "1bb11f38d5ece74342924bf60f4fe4403c920308d56598a66941a3e28d3b1b0e"
+        },
+        {
+            "path": "vendor/elgato/sdpi-components/src/core/file.ts",
+            "sha256": "57571cde95e09fdd40e75c8d338e8f43a1613bf3fe2d8ed42151de87e5e174cc"
+        },
+        {
+            "path": "vendor/elgato/key-logic-facts.json",
+            "sha256": "e129579d00672cfe0c12899ccde5dacacc08ea3e45f8a30443e4f3612012f6a5"
+        },
+        {
+            "path": "vendor/elgato/lights-out-profiles/LICENSE",
+            "sha256": "e5c5c304f2c149fd57035ba66c2dbe4f1484b82ae096eaad2e547ad2545566ab"
+        },
+        {
+            "path": "vendor/elgato/lights-out-profiles/manifest.json",
+            "sha256": "9a0b22ed01ce4c4ff2de6725ae2658f1285ef685161c16b5e653d350237a3f70"
+        },
+        {
+            "path": "vendor/elgato/lights-out-profiles/sd-mini.streamDeckProfile",
+            "sha256": "fb59f02bb591135dde7cbc7c8a1a38fb58206c5870559d5149d90aa8385215a2"
+        },
+        {
+            "path": "vendor/elgato/lights-out-profiles/sd-mobile.streamDeckProfile",
+            "sha256": "7c9eae0ff9584c9745b5653c39d8dbc9ff9a1cbf2578bb4956b46e0614490f0e"
+        },
+        {
+            "path": "vendor/elgato/lights-out-profiles/sd-neo.streamDeckProfile",
+            "sha256": "fdbe9c712b1e4d0aec6a3f8bbf9a08abc424dbd9f6db4e322c50137e3e18678f"
+        },
+        {
+            "path": "vendor/elgato/lights-out-profiles/sd.streamDeckProfile",
+            "sha256": "fe52f01d6ec0bab3386788cc82984366985c7f4dc589e8284ec8adcf336152b6"
+        },
+        {
+            "path": "vendor/elgato/lights-out-profiles/sdp.streamDeckProfile",
+            "sha256": "899d78ef9a27b09e01d3cc68b2c88547686a855ac5e6c42165f91847f175e9f5"
+        },
+        {
+            "path": "vendor/elgato/lights-out-profiles/sdxl.streamDeckProfile",
+            "sha256": "d01549287ade5835f2f929471e8aec70785d045d7329979b8a489c46f70f5942"
+        }
+    ]
+}

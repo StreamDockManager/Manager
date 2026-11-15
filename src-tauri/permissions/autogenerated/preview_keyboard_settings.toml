@@ -1,0 +1,11 @@
+# Automatically generated - DO NOT EDIT!
+
+[[permission]]
+identifier = "allow-preview-keyboard-settings"
+description = "Enables the preview_keyboard_settings command without any pre-configured scope."
+commands.allow = ["preview_keyboard_settings"]
+
+[[permission]]
+identifier = "deny-preview-keyboard-settings"
+description = "Denies the preview_keyboard_settings command without any pre-configured scope."
+commands.deny = ["preview_keyboard_settings"]

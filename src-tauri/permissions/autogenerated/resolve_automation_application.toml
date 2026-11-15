@@ -1,0 +1,11 @@
+# Automatically generated - DO NOT EDIT!
+
+[[permission]]
+identifier = "allow-resolve-automation-application"
+description = "Enables the resolve_automation_application command without any pre-configured scope."
+commands.allow = ["resolve_automation_application"]
+
+[[permission]]
+identifier = "deny-resolve-automation-application"
+description = "Denies the resolve_automation_application command without any pre-configured scope."
+commands.deny = ["resolve_automation_application"]

@@ -1,0 +1,11 @@
+# Automatically generated - DO NOT EDIT!
+
+[[permission]]
+identifier = "allow-retain-video-recording"
+description = "Enables the retain_video_recording command without any pre-configured scope."
+commands.allow = ["retain_video_recording"]
+
+[[permission]]
+identifier = "deny-retain-video-recording"
+description = "Denies the retain_video_recording command without any pre-configured scope."
+commands.deny = ["retain_video_recording"]

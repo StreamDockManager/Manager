@@ -1,0 +1,11 @@
+# Automatically generated - DO NOT EDIT!
+
+[[permission]]
+identifier = "allow-video-target"
+description = "Enables the video_target command without any pre-configured scope."
+commands.allow = ["video_target"]
+
+[[permission]]
+identifier = "deny-video-target"
+description = "Denies the video_target command without any pre-configured scope."
+commands.deny = ["video_target"]

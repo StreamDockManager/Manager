@@ -1,0 +1,444 @@
+<section
+    x-data="pluginLogReader"
+    @keydown.escape.window="logs.escape($event)"
+    @click.window="logs.dismiss($event)"
+>
+    <section
+        class="plugin-log-panel"
+        x-show="logs.visible"
+        x-cloak
+        :style="logs.position"
+        :class="logs.detached ? 'plugin-log-detached' : ''"
+        aria-label="Plugin logs"
+    >
+        <header class="picker-header">
+            <h2 x-text="logs.title"></h2>
+            <button
+                type="button"
+                class="icon-button plugin-log-close"
+                :aria-label="logs.detached ? 'Close log window' : 'Close log reader'"
+                @click="logs.close()"
+            >
+                ×
+            </button>
+            <button
+                type="button"
+                class="button plugin-log-heading-action"
+                x-show="logs.detached && logs.selected"
+                aria-label="View all captures"
+                @click="logs.showCaptures()"
+            >
+                Captures
+            </button>
+            <button
+                type="button"
+                class="button plugin-log-heading-action"
+                x-show="!logs.detached && logs.selected"
+                :disabled="logs.busy"
+                @click="logs.popOut()"
+            >
+                Open in window
+            </button>
+        </header>
+        <div class="plugin-log-content">
+            <p class="field-help" x-show="!logs.detached">
+                Captures last for this Manager session. Download to keep a copy. Success (stdout)
+                includes informational output.
+            </p>
+            <p role="alert" class="danger-text" x-show="logs.error" x-text="logs.error"></p>
+            <template x-if="!logs.selected">
+                <div class="plugin-log-list">
+                    <label class="preference-toggle">
+                        <input
+                            type="checkbox"
+                            data-preference="global"
+                            :checked="logs.preferences.enabled"
+                            @change="logs.changePreference($event)"
+                        />
+                        <span>Enable plugin logging</span>
+                    </label>
+                    <template x-if="logs.requestedPlugin">
+                        <section
+                            class="plugin-log-preferences"
+                            aria-label="Plugin logging preferences"
+                        >
+                            <h3 x-text="logs.requestedName"></h3>
+                            <label class="preference-toggle">
+                                <input
+                                    type="checkbox"
+                                    data-preference="enabled"
+                                    :checked="logs.pluginPreferences.enabled"
+                                    @change="logs.changePreference($event)"
+                                />
+                                <span>Enable logging for this plugin</span>
+                            </label>
+                            <label class="preference-toggle">
+                                <input
+                                    type="checkbox"
+                                    data-preference="stdout"
+                                    :checked="logs.pluginPreferences.stdout"
+                                    @change="logs.changePreference($event)"
+                                />
+                                <span>Capture stdout</span>
+                            </label>
+                            <label class="preference-toggle">
+                                <input
+                                    type="checkbox"
+                                    data-preference="stderr"
+                                    :checked="logs.pluginPreferences.stderr"
+                                    @change="logs.changePreference($event)"
+                                />
+                                <span>Capture stderr</span>
+                            </label>
+                            <label class="preference-toggle">
+                                <input
+                                    type="checkbox"
+                                    data-preference="debug_network"
+                                    :checked="logs.pluginPreferences.debug_network"
+                                    @change="logs.changePreference($event)"
+                                />
+                                <span>Debug network requests</span>
+                            </label>
+                            <p class="field-help">
+                                Include request and response headers and bodies with methods,
+                                sanitized addresses, status codes, and timing. Click a network entry
+                                to inspect headers and bodies. Authorization, cookies, API keys,
+                                tokens, known credentials, and JSON/form credential fields are
+                                redacted. Bodies over 64 KiB are omitted. Requires an updated plugin
+                                SDK.
+                            </p>
+                            <div class="button-row">
+                                <button
+                                    type="button"
+                                    class="button primary"
+                                    :disabled="!logs.canStart"
+                                    :aria-label="'Start capture for ' + logs.requestedName"
+                                    @click="logs.startRequested()"
+                                >
+                                    Start capture
+                                </button>
+                            </div>
+                        </section>
+                    </template>
+                    <template x-for="capture in logs.captures" :key="capture.id">
+                        <div class="macro-library-row">
+                            <div class="macro-library-info">
+                                <strong x-text="capture.name"></strong>
+                                <small
+                                    x-text="capture.error || (capture.capturing ? 'Capturing' : 'Stopped')"
+                                ></small>
+                            </div>
+                            <div class="button-row">
+                                <button
+                                    type="button"
+                                    class="button"
+                                    :data-id="capture.id"
+                                    @click="logs.viewEvent($event)"
+                                    :aria-label="'View logs for ' + capture.name"
+                                >
+                                    View
+                                </button>
+                                <button
+                                    type="button"
+                                    class="button"
+                                    :data-id="capture.id"
+                                    @click="logs.stopEvent($event)"
+                                    x-show="capture.capturing"
+                                    :disabled="logs.busy"
+                                    :aria-label="'Stop capture for ' + capture.name"
+                                >
+                                    Stop
+                                </button>
+                            </div>
+                        </div>
+                    </template>
+                    <p x-show="!logs.captures.length">
+                        Open Logs on a plugin card to start a capture.
+                    </p>
+                </div>
+            </template>
+            <template x-if="logs.capture">
+                <div class="plugin-log-reader">
+                    <p role="status" x-text="logs.status"></p>
+                    <div class="plugin-log-toolbar">
+                        <div
+                            class="plugin-log-tabs button-row"
+                            role="tablist"
+                            aria-label="Log stream"
+                            @keydown="logs.tabKey($event)"
+                        >
+                            <button
+                                id="plugin-log-stderr"
+                                class="button"
+                                role="tab"
+                                data-tab="stderr"
+                                :aria-selected="logs.reading.tab === 'stderr'"
+                                :tabindex="logs.reading.tab === 'stderr' ? 0 : -1"
+                                aria-controls="plugin-log-output"
+                                @click="logs.tab($event)"
+                            >
+                                Errors (stderr)
+                            </button>
+                            <button
+                                id="plugin-log-stdout"
+                                class="button"
+                                role="tab"
+                                data-tab="stdout"
+                                :aria-selected="logs.reading.tab === 'stdout'"
+                                :tabindex="logs.reading.tab === 'stdout' ? 0 : -1"
+                                aria-controls="plugin-log-output"
+                                data-tooltip="Includes informational output"
+                                @click="logs.tab($event)"
+                            >
+                                Success (stdout)
+                            </button>
+                        </div>
+                        <div
+                            class="button-row plugin-log-navigation"
+                            role="group"
+                            aria-label="Log navigation"
+                        >
+                            <button
+                                class="text-button"
+                                @click="logs.earlier()"
+                                :disabled="!logs.reading.earlier || logs.busy"
+                            >
+                                Load earlier
+                            </button>
+                            <button
+                                class="text-button"
+                                @click="logs.latest()"
+                                x-text="logs.detached ? (logs.reading.follow ? 'Following latest' : 'Follow latest') : 'Latest · follow new entries'"
+                            >
+                                Latest · follow new entries
+                            </button>
+                        </div>
+                        <small
+                            x-show="!logs.detached"
+                            x-text="logs.reading.follow ? 'Following new entries' : 'Reading earlier output'"
+                        ></small>
+                    </div>
+                    <div
+                        id="plugin-log-output"
+                        class="plugin-log-output"
+                        role="tabpanel"
+                        :aria-labelledby="logs.reading.tab === 'stderr' ? 'plugin-log-stderr' : 'plugin-log-stdout'"
+                        tabindex="0"
+                        @scroll="logs.scrolled($event)"
+                    >
+                        <p x-show="!logs.entries.length" class="field-help">
+                            No captured entries in this stream on this page.
+                        </p>
+                        <template x-for="entry in logs.entries" :key="entry.sequence">
+                            <div class="plugin-log-entry">
+                                <div class="plugin-log-entry-meta">
+                                    <time
+                                        :datetime="entry.time.iso"
+                                        :aria-label="entry.time.title"
+                                        x-text="entry.time.label"
+                                    ></time>
+                                    <small
+                                        x-text="'#' + entry.sequence + ' · ' + entry.source + (entry.continuation ? ' · continued' : '')"
+                                    ></small>
+                                </div>
+                                <template x-if="!entry.network_request_id">
+                                    <pre x-text="entry.message"></pre>
+                                </template>
+                                <template x-if="entry.network_request_id">
+                                    <details
+                                        class="plugin-network-entry"
+                                        :data-sequence="entry.sequence"
+                                        :open="logs.networkSequence === entry.sequence"
+                                        @toggle="logs.networkToggled($event)"
+                                    >
+                                        <summary>
+                                            <pre x-text="entry.message"></pre>
+                                            <span class="field-help">Headers and bodies</span>
+                                        </summary>
+                                        <div class="plugin-network-details">
+                                            <p role="status" x-show="logs.networkLoading">
+                                                Loading request details…
+                                            </p>
+                                            <p
+                                                role="alert"
+                                                class="danger-text"
+                                                x-show="logs.networkError"
+                                                x-text="logs.networkError"
+                                            ></p>
+                                            <button
+                                                class="text-button"
+                                                x-show="logs.networkError"
+                                                @click="logs.loadNetwork()"
+                                            >
+                                                Retry loading details
+                                            </button>
+                                            <template
+                                                x-if="logs.networkDetail && logs.networkSequence === entry.sequence"
+                                            >
+                                                <div class="plugin-network-details">
+                                                    <section aria-label="Request headers">
+                                                        <h3>Request headers</h3>
+                                                        <pre
+                                                            class="plugin-network-body"
+                                                            tabindex="0"
+                                                            aria-label="Request headers content"
+                                                            x-text="logs.headersText(logs.networkDetail.request_headers)"
+                                                        ></pre>
+                                                    </section>
+                                                    <section aria-label="Request body">
+                                                        <h3>Request body</h3>
+                                                        <small
+                                                            x-text="logs.bodyDescription(logs.networkDetail.request)"
+                                                        ></small>
+                                                        <pre
+                                                            class="plugin-network-body"
+                                                            tabindex="0"
+                                                            aria-label="Request body content"
+                                                            x-text="logs.bodyText(logs.networkDetail.request)"
+                                                        ></pre>
+                                                    </section>
+                                                    <section aria-label="Response headers">
+                                                        <h3>Response headers</h3>
+                                                        <pre
+                                                            class="plugin-network-body"
+                                                            tabindex="0"
+                                                            aria-label="Response headers content"
+                                                            x-text="logs.headersText(logs.networkDetail.response_headers)"
+                                                        ></pre>
+                                                    </section>
+                                                    <section aria-label="Response body">
+                                                        <h3>Response body</h3>
+                                                        <small
+                                                            x-text="logs.bodyDescription(logs.networkDetail.response)"
+                                                        ></small>
+                                                        <pre
+                                                            class="plugin-network-body"
+                                                            tabindex="0"
+                                                            aria-label="Response body content"
+                                                            x-text="logs.bodyText(logs.networkDetail.response)"
+                                                        ></pre>
+                                                    </section>
+                                                </div>
+                                            </template>
+                                        </div>
+                                    </details>
+                                </template>
+                            </div>
+                        </template>
+                    </div>
+                    <details class="disclosure">
+                        <summary>Logging preferences</summary>
+                        <div
+                            class="plugin-log-preferences"
+                            role="region"
+                            aria-label="Logging preference options"
+                            tabindex="0"
+                        >
+                            <label class="preference-toggle">
+                                <input
+                                    type="checkbox"
+                                    data-preference="global"
+                                    :checked="logs.preferences.enabled"
+                                    @change="logs.changePreference($event)"
+                                />
+                                <span>Enable plugin logging</span>
+                            </label>
+                            <label class="preference-toggle">
+                                <input
+                                    type="checkbox"
+                                    data-preference="enabled"
+                                    :checked="logs.pluginPreferences.enabled"
+                                    @change="logs.changePreference($event)"
+                                />
+                                <span>Enable logging for this plugin</span>
+                            </label>
+                            <label class="preference-toggle">
+                                <input
+                                    type="checkbox"
+                                    data-preference="stdout"
+                                    :checked="logs.pluginPreferences.stdout"
+                                    @change="logs.changePreference($event)"
+                                />
+                                <span>Capture stdout</span>
+                            </label>
+                            <label class="preference-toggle">
+                                <input
+                                    type="checkbox"
+                                    data-preference="stderr"
+                                    :checked="logs.pluginPreferences.stderr"
+                                    @change="logs.changePreference($event)"
+                                />
+                                <span>Capture stderr</span>
+                            </label>
+                            <label class="preference-toggle">
+                                <input
+                                    type="checkbox"
+                                    data-preference="debug_network"
+                                    :checked="logs.pluginPreferences.debug_network"
+                                    @change="logs.changePreference($event)"
+                                />
+                                <span>Debug network requests</span>
+                            </label>
+                            <p class="field-help">
+                                Include request and response headers and bodies with methods,
+                                sanitized addresses, status codes, and timing. Click a network entry
+                                to inspect headers and bodies. Authorization, cookies, API keys,
+                                tokens, known credentials, and JSON/form credential fields are
+                                redacted. Bodies over 64 KiB are omitted. Requires an updated plugin
+                                SDK.
+                            </p>
+                            <p class="field-help">
+                                Stream choices affect new entries. Disabling logging stops captures
+                                and keeps existing files; enabling it does not resume them. Captures
+                                last for this Manager session. Closing this window keeps capture
+                                running; Download saves a lasting copy.
+                            </p>
+                        </div>
+                    </details>
+                </div>
+            </template>
+        </div>
+        <template x-if="logs.capture">
+            <footer class="feature-footer plugin-log-footer">
+                <div class="button-row">
+                    <button
+                        class="button"
+                        x-show="logs.capture.capturing"
+                        :disabled="logs.busy"
+                        @click="logs.stop()"
+                    >
+                        Stop capture
+                    </button>
+                    <button
+                        class="button primary"
+                        x-show="!logs.capture.capturing"
+                        :disabled="logs.busy || logs.capture.incomplete || !logs.preferences.enabled || !logs.pluginPreferences.enabled"
+                        @click="logs.resume()"
+                    >
+                        Resume capture
+                    </button>
+                    <button class="button" :disabled="logs.busy" @click="logs.download()">
+                        Download
+                    </button>
+                    <button
+                        class="button danger"
+                        x-show="!logs.capture.capturing"
+                        :disabled="logs.busy"
+                        @click="logs.confirmingClear = true"
+                    >
+                        Clear captured logs
+                    </button>
+                </div>
+                <div class="plugin-log-clear" x-show="logs.confirmingClear">
+                    <p>Delete this capture’s temporary file? Download first to keep a copy.</p>
+                    <div class="button-row">
+                        <button class="button danger" :disabled="logs.busy" @click="logs.clear()">
+                            Delete captured logs
+                        </button>
+                        <button class="button" @click="logs.confirmingClear = false">Cancel</button>
+                    </div>
+                </div>
+            </footer>
+        </template>
+    </section>
+</section>

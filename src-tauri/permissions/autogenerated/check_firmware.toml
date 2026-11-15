@@ -1,0 +1,11 @@
+# Automatically generated - DO NOT EDIT!
+
+[[permission]]
+identifier = "allow-check-firmware"
+description = "Enables the check_firmware command without any pre-configured scope."
+commands.allow = ["check_firmware"]
+
+[[permission]]
+identifier = "deny-check-firmware"
+description = "Denies the check_firmware command without any pre-configured scope."
+commands.deny = ["check_firmware"]

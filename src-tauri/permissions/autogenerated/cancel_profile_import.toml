@@ -1,0 +1,11 @@
+# Automatically generated - DO NOT EDIT!
+
+[[permission]]
+identifier = "allow-cancel-profile-import"
+description = "Enables the cancel_profile_import command without any pre-configured scope."
+commands.allow = ["cancel_profile_import"]
+
+[[permission]]
+identifier = "deny-cancel-profile-import"
+description = "Denies the cancel_profile_import command without any pre-configured scope."
+commands.deny = ["cancel_profile_import"]

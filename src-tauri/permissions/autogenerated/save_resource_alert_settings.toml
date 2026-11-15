@@ -1,0 +1,11 @@
+# Automatically generated - DO NOT EDIT!
+
+[[permission]]
+identifier = "allow-save-resource-alert-settings"
+description = "Enables the save_resource_alert_settings command without any pre-configured scope."
+commands.allow = ["save_resource_alert_settings"]
+
+[[permission]]
+identifier = "deny-save-resource-alert-settings"
+description = "Denies the save_resource_alert_settings command without any pre-configured scope."
+commands.deny = ["save_resource_alert_settings"]

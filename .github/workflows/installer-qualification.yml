@@ -1,0 +1,134 @@
+name: bounded native installer qualification
+on:
+    workflow_call:
+        inputs:
+            target: { required: true, type: string }
+            build: { required: true, type: string }
+            commit: { required: true, type: string }
+            older_build: { required: false, type: string, default: '' }
+            older_commit: { required: false, type: string, default: '' }
+            inspect_only: { required: false, type: boolean, default: false }
+permissions:
+    contents: read
+    actions: read
+concurrency:
+    group: installer-qualification-${{ inputs.target }}
+    cancel-in-progress: false
+jobs:
+    lifecycle:
+        if: github.ref == 'refs/heads/package-build' && github.event_name == 'workflow_dispatch'
+        runs-on: ${{ fromJSON(inputs.target == 'windows-cli' && (vars.WINDOWS_RUNNER_LABELS || '["self-hosted","Windows","X64"]') || (vars.LINUX_RUNNER_LABELS || '["self-hosted","Linux","X64"]')) }}
+        timeout-minutes: 60
+        env:
+            QUALIFICATION_TARGET: ${{ inputs.target }}
+            QUALIFICATION_BUILD: ${{ inputs.build }}
+            QUALIFICATION_COMMIT: ${{ inputs.commit }}
+            QUALIFICATION_OLDER_BUILD: ${{ inputs.older_build }}
+            QUALIFICATION_OLDER_COMMIT: ${{ inputs.older_commit }}
+            QUALIFICATION_INSPECT_ONLY: ${{ inputs.inspect_only }}
+            STREAM_DOCK_MANAGER_LINUX_BASELINE_IMAGE: ubuntu@sha256:78d4744ead1f5b19b04d0df558ab182a5300903900755e515b2ca4d10eb2044d
+        steps:
+            - uses: actions/checkout@v7.0.1
+              with:
+                  persist-credentials: false
+            - uses: actions/setup-python@v7.1.0
+              with:
+                  python-version: '3.12'
+            - name: Verify native qualification guards before any installation
+              shell: python
+              run: |
+                  import subprocess, sys
+                  subprocess.run([sys.executable, '-m', 'compileall', '-q', 'scripts'], check=True)
+            - name: Validate selection and create fresh qualification directory
+              shell: python
+              run: |
+                  import os, pathlib, sys
+                  sys.path.insert(0, str(pathlib.Path('scripts').resolve()))
+                  import installer_inputs
+                  target = os.environ['QUALIFICATION_TARGET']
+                  if target not in ('windows-cli', 'linux-deb'):
+                      raise ValueError('Unsupported qualification target')
+                  if os.environ['QUALIFICATION_INSPECT_ONLY'] == 'true' and target != 'windows-cli':
+                      raise ValueError('Read-only installer inspection is Windows CLI only')
+                  system = 'windows' if target == 'windows-cli' else 'linux'
+                  if os.environ['RUNNER_OS'] != system.title():
+                      raise ValueError('Wrong native runner for the selected qualification')
+                  installer_inputs.identity(os.environ['GITHUB_REPOSITORY'], os.environ['QUALIFICATION_COMMIT'], os.environ['QUALIFICATION_BUILD'], system, 'manager-cli')
+                  older = [os.environ['QUALIFICATION_OLDER_BUILD'], os.environ['QUALIFICATION_OLDER_COMMIT']]
+                  if bool(older[0]) != bool(older[1]):
+                      raise ValueError('Baseline build and commit must both be supplied')
+                  if target == 'windows-cli' and not older[0]:
+                      raise ValueError('Windows CLI qualification requires a baseline for replacement')
+                  if older[0]:
+                      installer_inputs.identity(os.environ['GITHUB_REPOSITORY'], older[1], older[0], system, 'manager-cli')
+                  root = pathlib.Path(os.environ['GITHUB_WORKSPACE']).resolve() / 'artifacts/installer-qualification' / (os.environ['GITHUB_RUN_ID'] + '-' + os.environ['GITHUB_RUN_ATTEMPT'] + '-' + target)
+                  if any(installer_inputs.linked(p) for p in (root, *root.parents)):
+                      raise ValueError('Qualification output cannot traverse links')
+                  root.mkdir(parents=True, exist_ok=False)
+                  import hashlib, json
+                  sources = [*pathlib.Path('scripts').glob('*installer*.py'), *pathlib.Path('scripts').glob('qualify_*.py'), pathlib.Path('.github/workflows/installer-qualification.yml')]
+                  sources.append(pathlib.Path('scripts/run_linux_qualification.py'))
+                  receipt = {'workflow_commit': os.environ['GITHUB_SHA'], 'workflow_ref': os.environ['GITHUB_WORKFLOW_REF'],
+                      'run': os.environ['GITHUB_RUN_ID'], 'attempt': os.environ['GITHUB_RUN_ATTEMPT'], 'target': target,
+                      'candidate_build': os.environ['QUALIFICATION_BUILD'], 'candidate_commit': os.environ['QUALIFICATION_COMMIT'],
+                      'baseline_build': older[0], 'baseline_commit': older[1],
+                      'inspect_only': os.environ['QUALIFICATION_INSPECT_ONLY'] == 'true',
+                      'script_sha256': {p.as_posix(): hashlib.sha256(p.read_bytes()).hexdigest() for p in sorted(sources)}}
+                  (root / 'qualification-source.json').write_text(json.dumps(receipt, indent=2) + '\n', encoding='utf-8')
+                  with open(os.environ['GITHUB_ENV'], 'a', encoding='utf-8') as output:
+                      output.write('QUALIFICATION_ROOT=' + str(root) + '\n')
+            - name: Fetch authenticated source-bound package inputs
+              shell: python
+              env:
+                  GH_TOKEN: ${{ github.token }}
+              run: |
+                  import os, pathlib, sys
+                  sys.path.insert(0, str(pathlib.Path('scripts').resolve()))
+                  import installer_inputs
+                  root = pathlib.Path(os.environ['QUALIFICATION_ROOT'])
+                  system = 'windows' if os.environ['QUALIFICATION_TARGET'] == 'windows-cli' else 'linux'
+                  products = ['manager-cli'] if system == 'windows' else ['manager', 'manager-cli']
+                  api = installer_inputs.GitHub()
+                  for phase, prefix in [('candidate', 'QUALIFICATION_'), ('baseline', 'QUALIFICATION_OLDER_')]:
+                      if not os.environ.get(prefix + 'BUILD'):
+                          continue
+                      for product in products:
+                          selected = installer_inputs.identity(os.environ['GITHUB_REPOSITORY'], os.environ[prefix + 'COMMIT'], os.environ[prefix + 'BUILD'], system, product)
+                          installer_inputs.fetch(root / phase / product, selected, api)
+            - name: Qualify Windows per-user CLI installers
+              if: inputs.target == 'windows-cli'
+              shell: python
+              run: |
+                  import os, pathlib, subprocess, sys
+                  root = pathlib.Path(os.environ['QUALIFICATION_ROOT'])
+                  command = [sys.executable, 'scripts/qualify_windows_cli.py',
+                      '--repository', os.environ['GITHUB_REPOSITORY'],
+                      '--inputs', str(root / 'candidate/manager-cli'),
+                      '--commit', os.environ['QUALIFICATION_COMMIT'], '--build', os.environ['QUALIFICATION_BUILD'],
+                      '--older-inputs', str(root / 'baseline/manager-cli'),
+                      '--older-commit', os.environ['QUALIFICATION_OLDER_COMMIT'], '--older-build', os.environ['QUALIFICATION_OLDER_BUILD'],
+                      '--report-dir', str(root / 'report')]
+                  if os.environ['QUALIFICATION_INSPECT_ONLY'] == 'true':
+                      command.append('--inspect-only')
+                  subprocess.run(command, check=True)
+            - name: Qualify Ubuntu DEB package lifecycle
+              if: inputs.target == 'linux-deb'
+              shell: python
+              run: |
+                  import os, pathlib, subprocess, sys
+                  root = pathlib.Path(os.environ['QUALIFICATION_ROOT'])
+                  command = [sys.executable, 'scripts/run_linux_qualification.py',
+                      '--repository', os.environ['GITHUB_REPOSITORY'],
+                      '--root', str(root),
+                      '--commit', os.environ['QUALIFICATION_COMMIT'], '--build', os.environ['QUALIFICATION_BUILD'],
+                  ]
+                  if os.environ.get('QUALIFICATION_OLDER_BUILD'):
+                      command += ['--older-commit', os.environ['QUALIFICATION_OLDER_COMMIT'], '--older-build', os.environ['QUALIFICATION_OLDER_BUILD']]
+                  subprocess.run(command, check=True)
+            - name: Retain exact inputs and every lifecycle result
+              if: always() && env.QUALIFICATION_ROOT != ''
+              uses: actions/upload-artifact@v7.0.2
+              with:
+                  name: installer-qualification-${{ inputs.target }}-${{ github.run_attempt }}
+                  path: ${{ env.QUALIFICATION_ROOT }}/
+                  if-no-files-found: error

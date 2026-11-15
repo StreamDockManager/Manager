@@ -1,0 +1,868 @@
+<section
+    class="editor-screen"
+    x-data="editor"
+    @request-control-clear="requestControlClear"
+    @dock-locate.window="located"
+    @keydown.escape.window="cancelLocate"
+>
+    <div class="page-heading">
+        <div>
+            <h1>Device editor</h1>
+        </div>
+        <div class="heading-actions">
+            <sd-automatic-profiles></sd-automatic-profiles>
+            <button
+                class="button"
+                @click="locateControl"
+                :disabled="!!locateReason || locatePending"
+                :title="locateReason"
+                :aria-pressed="!!locateToken"
+                x-text="locateToken ? 'Cancel locate' : 'Locate from dock'"
+            ></button>
+            <button class="button" @click="app.bridge.command('cancel_macros')">Stop macros</button>
+        </div>
+    </div>
+    <div class="feature-notice">
+        <p>
+            Device support is experimental, and not all devices have been thoroughly tested.
+            Feedback and testing results are welcome and help improve compatibility.
+        </p>
+    </div>
+    <div class="editor-grid">
+        <div class="editor-main">
+            <section class="workspace-card" x-data="workspaceTools">
+                <div class="workspace-toolbar">
+                    <div class="workspace-selectors" role="group" aria-label="Device and profile">
+                        <div class="workspace-field">
+                            <div class="workspace-field-heading">
+                                <label for="device-picker">Device</label>
+                                <small
+                                    x-show="app.device"
+                                    x-text="app.simulated ? 'Simulator' : app.device.connected ? 'Connected' : 'Disconnected'"
+                                ></small>
+                            </div>
+                            <div class="workspace-select">
+                                <select
+                                    id="device-picker"
+                                    :value="app.deviceId"
+                                    :disabled="!app.snapshot.devices.length"
+                                    @change="app.selectDevice($event)"
+                                >
+                                    <template
+                                        x-for="device in app.snapshot.devices"
+                                        :key="device.id"
+                                    >
+                                        <option :value="device.id" x-text="device.name"></option>
+                                    </template>
+                                </select>
+                                <span
+                                    aria-hidden="true"
+                                    x-text="app.device ? app.device.name : 'No devices'"
+                                ></span>
+                            </div>
+                        </div>
+                        <div class="workspace-field">
+                            <label for="profile">Profile</label>
+                            <div class="workspace-profile-controls">
+                                <div class="workspace-select">
+                                    <select
+                                        id="profile"
+                                        :value="app.profile ? app.profile.id : app.snapshot.active_profile"
+                                        :disabled="app.busy || !app.compatibleProfiles.length"
+                                        @change="$dispatch('profile-change', {id: $event.target.value})"
+                                    >
+                                        <template
+                                            x-for="profile in app.compatibleProfiles"
+                                            :key="profile.id"
+                                        >
+                                            <option
+                                                :value="profile.id"
+                                                x-text="profile.name"
+                                            ></option>
+                                        </template>
+                                    </select>
+                                    <span
+                                        aria-hidden="true"
+                                        x-text="app.profile ? app.profile.name : 'No profile selected'"
+                                    ></span>
+                                </div>
+                                <div
+                                    class="workspace-profile-actions"
+                                    role="group"
+                                    aria-label="Profile actions"
+                                >
+                                    <button
+                                        type="button"
+                                        class="icon-button"
+                                        aria-label="Versions"
+                                        data-tooltip="Profile versions"
+                                        @click="$dispatch('profile-versions')"
+                                        :disabled="app.busy || !app.profile"
+                                    >
+                                        <svg
+                                            class="workspace-icon"
+                                            viewBox="0 0 24 24"
+                                            fill="none"
+                                            stroke="currentColor"
+                                            stroke-width="1.8"
+                                            stroke-linecap="round"
+                                            stroke-linejoin="round"
+                                            aria-hidden="true"
+                                        >
+                                            <path d="M3 11a9 9 0 1 1 2.4 6.1M3 4v7h7M12 7v5l3 2" />
+                                        </svg>
+                                    </button>
+                                    <button
+                                        type="button"
+                                        class="icon-button"
+                                        aria-label="Add profile"
+                                        data-tooltip="Add profile"
+                                        @click="$dispatch('create-profile')"
+                                    >
+                                        <svg
+                                            class="workspace-icon"
+                                            viewBox="0 0 24 24"
+                                            fill="none"
+                                            stroke="currentColor"
+                                            stroke-width="1.8"
+                                            stroke-linecap="round"
+                                            stroke-linejoin="round"
+                                            aria-hidden="true"
+                                        >
+                                            <path d="M12 5v14M5 12h14" />
+                                        </svg>
+                                    </button>
+                                    <button
+                                        type="button"
+                                        class="icon-button"
+                                        aria-label="Convert profile"
+                                        data-tooltip="Convert profile to another device"
+                                        @click="$dispatch('convert-profile')"
+                                        :disabled="app.busy || !app.profile"
+                                    >
+                                        <svg
+                                            class="workspace-icon"
+                                            viewBox="0 0 24 24"
+                                            fill="none"
+                                            stroke="currentColor"
+                                            stroke-width="1.8"
+                                            stroke-linecap="round"
+                                            stroke-linejoin="round"
+                                            aria-hidden="true"
+                                        >
+                                            <path d="M4 7h16m-4-4 4 4-4 4M20 17H4m4-4-4 4 4 4" />
+                                        </svg>
+                                    </button>
+                                    <button
+                                        type="button"
+                                        class="icon-button danger-text"
+                                        aria-label="Delete profile"
+                                        :data-tooltip="app.profile ? 'Delete this profile' : 'No profile selected'"
+                                        :disabled="!canDeleteProfile"
+                                        @click="deleteProfile"
+                                    >
+                                        <svg
+                                            class="workspace-icon"
+                                            viewBox="0 0 24 24"
+                                            fill="none"
+                                            stroke="currentColor"
+                                            stroke-width="1.8"
+                                            stroke-linecap="round"
+                                            stroke-linejoin="round"
+                                            aria-hidden="true"
+                                        >
+                                            <path
+                                                d="M3 6h18M9 6V4h6v2M5 6l1 14h12l1-14M10 10v6M14 10v6"
+                                            />
+                                        </svg>
+                                    </button>
+                                </div>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+
+                <section class="workspace-tools" aria-label="Editing tools">
+                    <div class="workspace-edit-actions">
+                        <div
+                            class="button-row workspace-history-actions"
+                            role="group"
+                            aria-label="Undo and redo"
+                        >
+                            <button
+                                type="button"
+                                class="icon-button"
+                                aria-label="Undo"
+                                data-tooltip="Undo"
+                                @click="undo"
+                                :disabled="app.busy || !app.snapshot.history.undo.length"
+                            >
+                                <svg
+                                    class="workspace-icon"
+                                    viewBox="0 0 24 24"
+                                    fill="none"
+                                    stroke="currentColor"
+                                    stroke-width="1.8"
+                                    stroke-linecap="round"
+                                    stroke-linejoin="round"
+                                    aria-hidden="true"
+                                >
+                                    <path d="M3 10h11a7 7 0 0 1 7 7v3M3 10l6-6M3 10l6 6" />
+                                </svg>
+                            </button>
+                            <button
+                                type="button"
+                                class="icon-button"
+                                aria-label="Redo"
+                                data-tooltip="Redo"
+                                @click="redo"
+                                :disabled="app.busy || !app.snapshot.history.redo.length"
+                            >
+                                <svg
+                                    class="workspace-icon"
+                                    viewBox="0 0 24 24"
+                                    fill="none"
+                                    stroke="currentColor"
+                                    stroke-width="1.8"
+                                    stroke-linecap="round"
+                                    stroke-linejoin="round"
+                                    aria-hidden="true"
+                                >
+                                    <path d="M21 10H10a7 7 0 0 0-7 7v3M21 10l-6-6M21 10l-6 6" />
+                                </svg>
+                            </button>
+                        </div>
+                        <div class="button-row" role="group" aria-label="Clipboard">
+                            <button
+                                type="button"
+                                class="button"
+                                aria-label="Copy bindings"
+                                @click="copySelection"
+                                :disabled="!canCopySelection"
+                            >
+                                Copy
+                            </button>
+                            <button
+                                type="button"
+                                class="button"
+                                aria-label="Paste bindings"
+                                @click="paste"
+                                :disabled="!canEditSelection || !app.clipboard.length"
+                            >
+                                Paste
+                            </button>
+                        </div>
+                    </div>
+                    <div class="button-row workspace-selection-status">
+                        <span class="field-help" role="status" x-text="selectionSummary"></span>
+                        <button
+                            type="button"
+                            class="button"
+                            aria-label="Edit history"
+                            aria-haspopup="dialog"
+                            @click="showHistory"
+                        >
+                            <img class="nav-icon" src="/appearance/icons/clock.svg" alt="" />
+                            History
+                        </button>
+                    </div>
+                </section>
+                <div class="preview-area" x-show="app.device && app.profile">
+                    <div class="device-label">
+                        <span><span x-text="controlSummary"></span></span>
+                        <div class="button-row">
+                            <button
+                                type="button"
+                                class="button"
+                                aria-haspopup="dialog"
+                                @click="$dispatch('open-background-editor')"
+                                x-show="app.device && app.device.manifest.capabilities.background"
+                                :disabled="app.busy || !app.profile"
+                            >
+                                Device background
+                            </button>
+                        </div>
+                    </div>
+                    <sd-device-preview></sd-device-preview>
+                    <div class="preview-hint">
+                        <button
+                            type="button"
+                            class="icon-button preview-help"
+                            aria-label="Device preview help"
+                            :data-tooltip="previewHelp"
+                            @click="focusPreviewHelp"
+                        >
+                            <svg
+                                class="workspace-icon"
+                                viewBox="0 0 24 24"
+                                fill="none"
+                                stroke="currentColor"
+                                stroke-width="1.8"
+                                stroke-linecap="round"
+                                aria-hidden="true"
+                            >
+                                <circle cx="12" cy="12" r="9" />
+                                <path d="M12 11v6M12 7h.01" />
+                            </svg>
+                        </button>
+                    </div>
+                </div>
+                <div class="empty-device" x-show="!app.device">
+                    <span>▦</span>
+                    <h2>No device connected</h2>
+                    <p>Connect a Stream Dock or add a simulator.</p>
+                </div>
+                <div class="empty-device" x-show="app.device && !app.profile">
+                    <span>▦</span>
+                    <h2>No profiles for this device</h2>
+                    <p>Create a profile to add pages and configure controls.</p>
+                    <button
+                        type="button"
+                        class="button primary"
+                        @click="$dispatch('create-profile')"
+                    >
+                        Create profile
+                    </button>
+                </div>
+                <div class="workspace-footer">
+                    <section class="workspace-pages" aria-label="Pages" x-show="app.profile">
+                        <div class="page-toolbar">
+                            <div class="page-list-heading">
+                                <h2>Pages</h2>
+                                <span class="page-count" x-text="pageCount"></span>
+                            </div>
+                            <div
+                                class="button-row page-actions"
+                                role="group"
+                                aria-label="Page actions"
+                            >
+                                <button
+                                    type="button"
+                                    class="icon-button"
+                                    aria-label="Add page"
+                                    data-tooltip="Add page"
+                                    @click="newPage"
+                                    :disabled="app.busy || !app.profile"
+                                >
+                                    <svg
+                                        class="workspace-icon"
+                                        viewBox="0 0 24 24"
+                                        fill="none"
+                                        stroke="currentColor"
+                                        stroke-width="1.8"
+                                        stroke-linecap="round"
+                                        stroke-linejoin="round"
+                                        aria-hidden="true"
+                                    >
+                                        <path d="M12 5v14M5 12h14" />
+                                    </svg>
+                                </button>
+                                <button
+                                    type="button"
+                                    class="icon-button danger-text"
+                                    aria-label="Remove page"
+                                    :data-tooltip="removePageHint"
+                                    :title="removePageHint"
+                                    @click="removePage"
+                                    :disabled="!canDeletePage"
+                                >
+                                    <svg
+                                        class="workspace-icon"
+                                        viewBox="0 0 24 24"
+                                        fill="none"
+                                        stroke="currentColor"
+                                        stroke-width="1.8"
+                                        stroke-linecap="round"
+                                        stroke-linejoin="round"
+                                        aria-hidden="true"
+                                    >
+                                        <path
+                                            d="M3 6h18M9 6V4h6v2M5 6l1 14h12l1-14M10 10v6M14 10v6"
+                                        />
+                                    </svg>
+                                </button>
+                            </div>
+                        </div>
+                        <div class="page-navigation">
+                            <button
+                                type="button"
+                                class="icon-button"
+                                aria-label="Previous page"
+                                data-tooltip="Previous page"
+                                x-show="hasSwipe"
+                                @click="previousPage"
+                                :disabled="app.busy || app.effectiveDeviceOutput.sleeping || pageCount < 2"
+                            >
+                                <svg
+                                    class="workspace-icon"
+                                    viewBox="0 0 24 24"
+                                    fill="none"
+                                    stroke="currentColor"
+                                    stroke-width="1.8"
+                                    stroke-linecap="round"
+                                    stroke-linejoin="round"
+                                    aria-hidden="true"
+                                >
+                                    <path d="m14 6-6 6 6 6" />
+                                </svg>
+                            </button>
+                            <div
+                                class="page-tab-strip"
+                                x-ref="pageTabs"
+                                x-init="observePageStrip"
+                                @keydown="navigatePageTabs"
+                                x-effect="revealCurrentPage(app.page)"
+                                role="tablist"
+                                aria-label="Profile pages"
+                            >
+                                <template x-for="(page, index) in app.pages || []" :key="page.id">
+                                    <button
+                                        type="button"
+                                        role="tab"
+                                        :tabindex="app.page && page.id === app.page.id ? 0 : -1"
+                                        :aria-label="page.name"
+                                        :aria-selected="app.page && page.id === app.page.id"
+                                        :class="{active: app.page && page.id === app.page.id, 'page-drop-target': pageDropTarget === page.id}"
+                                        :data-id="page.id"
+                                        :aria-disabled="app.busy"
+                                        :draggable="canDragPage(page)"
+                                        @dragstart="startPageDrag"
+                                        @dragover="dragPageOver"
+                                        @dragleave="leavePageDrag"
+                                        @drop.stop="dropPage"
+                                        @dragend="resetPageDrag"
+                                        @click="selectPage"
+                                    >
+                                        <span
+                                            class="page-tab-number"
+                                            aria-hidden="true"
+                                            x-text="index + 1"
+                                        ></span>
+                                        <span class="page-tab-name" x-text="page.name"></span>
+                                    </button>
+                                </template>
+                            </div>
+                            <button
+                                type="button"
+                                class="icon-button"
+                                aria-label="Next page"
+                                data-tooltip="Next page"
+                                x-show="hasSwipe"
+                                @click="nextPage"
+                                :disabled="app.busy || app.effectiveDeviceOutput.sleeping || pageCount < 2"
+                            >
+                                <svg
+                                    class="workspace-icon"
+                                    viewBox="0 0 24 24"
+                                    fill="none"
+                                    stroke="currentColor"
+                                    stroke-width="1.8"
+                                    stroke-linecap="round"
+                                    stroke-linejoin="round"
+                                    aria-hidden="true"
+                                >
+                                    <path d="m10 6 6 6-6 6" />
+                                </svg>
+                            </button>
+                        </div>
+                    </section>
+                    <div class="workspace-device-settings" x-show="app.device">
+                        <sd-device-settings></sd-device-settings>
+                    </div>
+                </div>
+                <dialog
+                    x-ref="historyDialog"
+                    class="feature-dialog wide-dialog"
+                    aria-labelledby="history-title"
+                    @cancel.prevent="closeHistory"
+                >
+                    <header class="picker-header">
+                        <h2 id="history-title">Edit history</h2>
+                        <button
+                            type="button"
+                            class="icon-button"
+                            aria-label="Close edit history"
+                            @click="closeHistory"
+                        >
+                            ×
+                        </button>
+                    </header>
+                    <div class="feature-body">
+                        <p>
+                            Undo and deletion recovery survive desktop restarts. Up to 100 edits or
+                            64 MiB are retained.
+                        </p>
+                        <label>
+                            Edits to inspect
+                            <select
+                                aria-label="Edits to inspect"
+                                x-model="historyStack"
+                                @change="historyStackChanged"
+                            >
+                                <option value="undo">Applied edits</option>
+                                <option value="redo">Undone edits</option>
+                            </select>
+                        </label>
+                        <template x-for="item in undoItems" :key="item.id">
+                            <div class="history-entry">
+                                <div class="history-entry-info">
+                                    <span x-text="item.description"></span>
+                                    <time x-text="historyTime(item.timestamp_ms)"></time>
+                                </div>
+                                <button
+                                    type="button"
+                                    class="button"
+                                    :data-id="item.id"
+                                    @click="compareHistory"
+                                    :disabled="historyLoading"
+                                    :aria-label="'Compare ' + item.description"
+                                >
+                                    Compare
+                                </button>
+                            </div>
+                        </template>
+                        <p x-show="!undoItems.length">No saved edits.</p>
+                        <p
+                            x-show="redoItems.length"
+                            x-text="redoItems.length + ' edit(s) available to redo'"
+                        ></p>
+                        <nav
+                            class="pagination"
+                            aria-label="Edit history pages"
+                            x-show="historyWindow.pages > 1"
+                        >
+                            <button
+                                class="button"
+                                @click="historyPrevious"
+                                :disabled="historyWindow.page === 1"
+                            >
+                                Previous edits
+                            </button>
+                            <span
+                                x-text="'Page ' + historyWindow.page + ' of ' + historyWindow.pages"
+                            ></span>
+                            <button
+                                class="button"
+                                @click="historyNext"
+                                :disabled="historyWindow.page === historyWindow.pages"
+                            >
+                                Next edits
+                            </button>
+                        </nav>
+                        <p role="status" x-show="historyLoading">
+                            Loading integrity-checked comparison…
+                        </p>
+                        <p
+                            role="alert"
+                            class="danger-text"
+                            x-show="historyError"
+                            x-text="historyError"
+                        ></p>
+                        <template x-if="comparison">
+                            <section class="settings-section" aria-label="History comparison">
+                                <h3 x-text="comparison.item.description"></h3>
+                                <p class="field-help">
+                                    Static saved content. Historical actions and plugins are not
+                                    run, and credentials are not retrieved. Undo/Redo remains
+                                    sequential.
+                                </p>
+                                <p role="status" x-show="comparison.truncated">
+                                    Some changes are omitted because the comparison reached its size
+                                    limit.
+                                </p>
+                                <div class="button-row" aria-label="Changed items">
+                                    <template x-for="change in comparison.changes" :key="change.id">
+                                        <button
+                                            type="button"
+                                            class="button"
+                                            :data-id="change.id"
+                                            @click="chooseHistoryChange"
+                                            :aria-pressed="selectedHistoryChange === change.id"
+                                            x-text="change.operation + ' · ' + change.label"
+                                        ></button>
+                                    </template>
+                                </div>
+                                <template x-if="historyChange">
+                                    <div class="settings-section">
+                                        <h3 x-text="historyChange.label"></h3>
+                                        <div
+                                            class="runtime-table-scroll"
+                                            role="region"
+                                            aria-label="Before and after history fields"
+                                            tabindex="0"
+                                        >
+                                            <table class="runtime-table history-field-table">
+                                                <thead>
+                                                    <tr>
+                                                        <th scope="col">Field</th>
+                                                        <th scope="col">Before</th>
+                                                        <th scope="col">After</th>
+                                                    </tr>
+                                                </thead>
+                                                <tbody>
+                                                    <template
+                                                        x-for="field in historyChange.fields"
+                                                        :key="field.field"
+                                                    >
+                                                        <tr>
+                                                            <th
+                                                                scope="row"
+                                                                x-text="field.field"
+                                                            ></th>
+                                                            <td
+                                                                class="history-field-value"
+                                                                x-text="historyValue(field.before)"
+                                                            ></td>
+                                                            <td
+                                                                class="history-field-value"
+                                                                x-text="historyValue(field.after)"
+                                                            ></td>
+                                                        </tr>
+                                                    </template>
+                                                </tbody>
+                                            </table>
+                                        </div>
+                                    </div>
+                                </template>
+                                <p role="status" x-show="previewLoading">
+                                    Rendering static control previews…
+                                </p>
+                                <template x-if="historyPreview">
+                                    <div class="settings-form-grid history-previews">
+                                        <figure>
+                                            <figcaption>Before</figcaption>
+                                            <img
+                                                x-show="historyPreview.before.image"
+                                                :src="historyPreview.before.image"
+                                                alt="Saved control appearance before this edit"
+                                            />
+                                            <p
+                                                class="field-help"
+                                                x-show="historyPreview.before.warning"
+                                                x-text="historyPreview.before.warning"
+                                            ></p>
+                                        </figure>
+                                        <figure>
+                                            <figcaption>After</figcaption>
+                                            <img
+                                                x-show="historyPreview.after.image"
+                                                :src="historyPreview.after.image"
+                                                alt="Saved control appearance after this edit"
+                                            />
+                                            <p
+                                                class="field-help"
+                                                x-show="historyPreview.after.warning"
+                                                x-text="historyPreview.after.warning"
+                                            ></p>
+                                        </figure>
+                                    </div>
+                                </template>
+                            </section>
+                        </template>
+                        <div class="button-row">
+                            <button class="button" @click="clear">Clear edit history</button>
+                        </div>
+                    </div>
+                    <footer class="feature-footer">
+                        <button type="button" class="button" @click="closeHistory">Close</button>
+                    </footer>
+                </dialog>
+            </section>
+        </div>
+        <div class="editor-sidebar">
+            <sd-inspector></sd-inspector>
+            <details
+                class="card disclosure simulator-card"
+                x-data="simulatorManager"
+                aria-labelledby="simulators-title"
+                open
+            >
+                <summary aria-controls="simulator-controls">
+                    <h2 id="simulators-title">Simulators</h2>
+                </summary>
+                <div id="simulator-controls" class="simulator-body">
+                    <label>
+                        Simulator model
+                        <select aria-label="Simulator model" x-model="modelId" :disabled="app.busy">
+                            <template x-for="model in app.models" :key="model.model_id">
+                                <option :value="model.model_id" x-text="model.name"></option>
+                            </template>
+                        </select>
+                    </label>
+                    <button
+                        type="button"
+                        class="button"
+                        @click="addSimulator"
+                        :disabled="app.busy || !app.models.length"
+                    >
+                        Add simulator
+                    </button>
+                    <p class="field-help">
+                        Experimental layouts. Use a simulator to edit its profiles and test saved
+                        actions in the desktop app.
+                    </p>
+                    <template x-for="simulator in app.simulators" :key="simulator.id">
+                        <article
+                            class="simulator-row"
+                            :class="{active: simulator.id === app.deviceId}"
+                        >
+                            <strong x-text="simulator.name"></strong>
+                            <small
+                                x-text="simulator.connected ? simulator.id === app.deviceId ? 'Selected' : 'Connected' : 'Disconnected'"
+                            ></small>
+                            <div class="button-row">
+                                <button
+                                    type="button"
+                                    class="button"
+                                    :data-device-id="simulator.id"
+                                    :aria-label="'Use ' + simulator.name"
+                                    @click="useSimulator"
+                                    :disabled="app.busy || simulator.id === app.deviceId"
+                                    x-text="simulator.connected ? 'Use' : 'Reconnect'"
+                                ></button>
+                                <button
+                                    type="button"
+                                    class="button"
+                                    x-show="simulator.connected"
+                                    :data-device-id="simulator.id"
+                                    :aria-label="'Disconnect ' + simulator.name"
+                                    @click="disconnectSimulator"
+                                    :disabled="app.busy"
+                                >
+                                    Disconnect
+                                </button>
+                                <button
+                                    type="button"
+                                    class="button danger-text"
+                                    :data-device-id="simulator.id"
+                                    :aria-label="'Remove ' + simulator.name"
+                                    @click="removeSimulator"
+                                    :disabled="app.busy"
+                                >
+                                    Remove
+                                </button>
+                            </div>
+                        </article>
+                    </template>
+                    <p class="field-help" x-show="!app.simulators.length">No saved simulators.</p>
+                </div>
+            </details>
+        </div>
+    </div>
+    <div x-data="profileCreator" @create-profile.window="open">
+        <dialog
+            x-ref="dialog"
+            class="feature-dialog profile-dialog"
+            aria-labelledby="profile-creation-title"
+            aria-describedby="profile-creation-description"
+            @cancel.prevent="cancel"
+        >
+            <form @submit.prevent="create">
+                <header class="picker-header">
+                    <div>
+                        <h2 id="profile-creation-title">Create profile</h2>
+                        <p
+                            id="profile-creation-description"
+                            x-text="'Device model: ' + modelName"
+                        ></p>
+                    </div>
+                    <button
+                        type="button"
+                        class="icon-button"
+                        aria-label="Cancel profile creation"
+                        @click="cancel"
+                        :disabled="creating"
+                    >
+                        ×
+                    </button>
+                </header>
+                <div class="feature-body feature-fields">
+                    <label x-show="!deviceId">
+                        Device model
+                        <select x-model="modelId" @change="modelChanged" :disabled="creating">
+                            <option value="">Choose a device model</option>
+                            <template x-for="model in models" :key="model.model_id">
+                                <option :value="model.model_id" x-text="model.name"></option>
+                            </template>
+                        </select>
+                    </label>
+                    <label>
+                        Profile name
+                        <input
+                            x-ref="name"
+                            x-model="name"
+                            placeholder="e.g. Work, Streaming, Music"
+                            maxlength="160"
+                            autocomplete="off"
+                            required
+                            autofocus
+                            :disabled="creating"
+                        />
+                    </label>
+                    <label>
+                        Start with
+                        <select x-model="sourceId" :disabled="creating">
+                            <option value="">Blank profile</option>
+                            <template x-for="profile in sources" :key="profile.id">
+                                <option
+                                    :value="profile.id"
+                                    x-text="'Copy “' + profile.name + '”'"
+                                ></option>
+                            </template>
+                        </select>
+                    </label>
+                    <label x-show="!sourceId">
+                        First page name
+                        <input
+                            x-model="firstPage"
+                            maxlength="160"
+                            :required="!sourceId"
+                            :disabled="creating || !!sourceId"
+                        />
+                    </label>
+                    <p class="field-help" x-show="sourceId">
+                        Copies all pages, bindings, and appearance. You can edit the new profile
+                        independently.
+                    </p>
+                    <p
+                        class="profile-creation-error"
+                        role="alert"
+                        x-show="error"
+                        x-text="error"
+                    ></p>
+                </div>
+                <footer class="feature-footer">
+                    <button type="button" class="button" @click="cancel" :disabled="creating">
+                        Cancel
+                    </button>
+                    <button
+                        type="submit"
+                        class="button primary"
+                        :disabled="cannotCreate"
+                        x-text="creating ? 'Creating…' : 'Create profile'"
+                    ></button>
+                </footer>
+            </form>
+        </dialog>
+    </div>
+    <dialog
+        x-ref="deleteDialog"
+        class="confirmation-dialog"
+        aria-labelledby="deletion-title"
+        aria-describedby="deletion-description"
+        @cancel.prevent="cancelDeletion"
+    >
+        <h2 id="deletion-title" x-text="deletionTitle"></h2>
+        <p id="deletion-description" x-text="deletionDescription"></p>
+        <div class="button-row">
+            <button type="button" class="button" autofocus @click="cancelDeletion">Cancel</button>
+            <button
+                type="button"
+                class="button danger"
+                @click="confirmDeletion"
+                :disabled="app.busy"
+                x-text="deletionLabel"
+            ></button>
+        </div>
+    </dialog>
+</section>

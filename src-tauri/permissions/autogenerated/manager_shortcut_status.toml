@@ -1,0 +1,11 @@
+# Automatically generated - DO NOT EDIT!
+
+[[permission]]
+identifier = "allow-manager-shortcut-status"
+description = "Enables the manager_shortcut_status command without any pre-configured scope."
+commands.allow = ["manager_shortcut_status"]
+
+[[permission]]
+identifier = "deny-manager-shortcut-status"
+description = "Denies the manager_shortcut_status command without any pre-configured scope."
+commands.deny = ["manager_shortcut_status"]

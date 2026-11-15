@@ -1,0 +1,180 @@
+schema_version = 1
+mode_before_wake = false
+reinitialize_on_wake = true
+require_input_ok = true
+button_states = [0, 1]
+rotate_states = [0]
+swipe_states = [0]
+report_size = 513
+report_id = 0
+
+[[inputs]]
+event = "button"
+code = 13
+control_id = "key-1"
+
+[[inputs]]
+event = "button"
+code = 10
+control_id = "key-2"
+
+[[inputs]]
+event = "button"
+code = 7
+control_id = "key-3"
+
+[[inputs]]
+event = "button"
+code = 4
+control_id = "key-4"
+
+[[inputs]]
+event = "button"
+code = 1
+control_id = "key-5"
+
+[[inputs]]
+event = "button"
+code = 14
+control_id = "key-6"
+
+[[inputs]]
+event = "button"
+code = 11
+control_id = "key-7"
+
+[[inputs]]
+event = "button"
+code = 8
+control_id = "key-8"
+
+[[inputs]]
+event = "button"
+code = 5
+control_id = "key-9"
+
+[[inputs]]
+event = "button"
+code = 2
+control_id = "key-10"
+
+[[inputs]]
+event = "button"
+code = 15
+control_id = "key-11"
+
+[[inputs]]
+event = "button"
+code = 12
+control_id = "key-12"
+
+[[inputs]]
+event = "button"
+code = 9
+control_id = "key-13"
+
+[[inputs]]
+event = "button"
+code = 6
+control_id = "key-14"
+
+[[inputs]]
+event = "button"
+code = 3
+control_id = "key-15"
+
+[[surfaces]]
+control_id = "key-1"
+encoding = "jpeg"
+rotation = 270
+
+[[surfaces]]
+control_id = "key-2"
+encoding = "jpeg"
+rotation = 270
+
+[[surfaces]]
+control_id = "key-3"
+encoding = "jpeg"
+rotation = 270
+
+[[surfaces]]
+control_id = "key-4"
+encoding = "jpeg"
+rotation = 270
+
+[[surfaces]]
+control_id = "key-5"
+encoding = "jpeg"
+rotation = 270
+
+[[surfaces]]
+control_id = "key-6"
+encoding = "jpeg"
+rotation = 270
+
+[[surfaces]]
+control_id = "key-7"
+encoding = "jpeg"
+rotation = 270
+
+[[surfaces]]
+control_id = "key-8"
+encoding = "jpeg"
+rotation = 270
+
+[[surfaces]]
+control_id = "key-9"
+encoding = "jpeg"
+rotation = 270
+
+[[surfaces]]
+control_id = "key-10"
+encoding = "jpeg"
+rotation = 270
+
+[[surfaces]]
+control_id = "key-11"
+encoding = "jpeg"
+rotation = 270
+
+[[surfaces]]
+control_id = "key-12"
+encoding = "jpeg"
+rotation = 270
+
+[[surfaces]]
+control_id = "key-13"
+encoding = "jpeg"
+rotation = 270
+
+[[surfaces]]
+control_id = "key-14"
+encoding = "jpeg"
+rotation = 270
+
+[[surfaces]]
+control_id = "key-15"
+encoding = "jpeg"
+rotation = 270
+
+[[surfaces]]
+control_id = "key-16"
+encoding = "jpeg"
+rotation = 270
+
+[[surfaces]]
+control_id = "key-17"
+encoding = "jpeg"
+rotation = 270
+
+[[surfaces]]
+control_id = "key-18"
+encoding = "jpeg"
+rotation = 270
+
+[boot]
+control_id = "boot"
+encoding = "bgr_rows"
+rotation = 270
+flip_x = false

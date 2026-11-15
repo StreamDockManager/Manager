@@ -1,0 +1,11 @@
+# Automatically generated - DO NOT EDIT!
+
+[[permission]]
+identifier = "allow-commit-media-deletion"
+description = "Enables the commit_media_deletion command without any pre-configured scope."
+commands.allow = ["commit_media_deletion"]
+
+[[permission]]
+identifier = "deny-commit-media-deletion"
+description = "Denies the commit_media_deletion command without any pre-configured scope."
+commands.deny = ["commit_media_deletion"]

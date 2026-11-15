@@ -1,0 +1,11 @@
+# Automatically generated - DO NOT EDIT!
+
+[[permission]]
+identifier = "allow-open-startup-permission-settings"
+description = "Enables the open_startup_permission_settings command without any pre-configured scope."
+commands.allow = ["open_startup_permission_settings"]
+
+[[permission]]
+identifier = "deny-open-startup-permission-settings"
+description = "Denies the open_startup_permission_settings command without any pre-configured scope."
+commands.deny = ["open_startup_permission_settings"]

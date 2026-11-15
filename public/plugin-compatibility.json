@@ -1,0 +1,122 @@
+[
+    {
+        "id": "vsd-javascript",
+        "revision": "4ac0234ed42196d782f6b663b2f82c2f3d159dfe",
+        "package_id": "com.vsd.craft.xxx",
+        "source": {
+            "filename": "com.vsd.craft.xxx.sdPlugin",
+            "format": "folder",
+            "sha256": "851cc46fe543d94490b33fb906bfee436c81648193d32950f369f968b0d50746"
+        },
+        "dialect": "vsd",
+        "runtime": {
+            "kind": "browser"
+        },
+        "tested_apis": ["setState", "setTitle"],
+        "version": "1.0.0",
+        "platform": "darwin",
+        "architecture": "arm64",
+        "method": "simulated",
+        "outcome": "pass",
+        "limitations": [],
+        "scope": "Browser registration, appearance, keypad input and title feedback",
+        "date": "2026-10-24T01:38:20.199Z"
+    },
+    {
+        "id": "http-request",
+        "revision": "bcbfc9e5f3790d5dc700c2a26aac498e2a672e13",
+        "package_id": "com.httprequest.streamdock",
+        "source": {
+            "filename": "com.httprequest.stream-dock-manager.sdPlugin",
+            "format": "folder",
+            "sha256": "3aa5d1beed405647a44445bcca4da3bd06f1fe85ac930edba85876f5b2258ce4"
+        },
+        "dialect": "vsd",
+        "runtime": {
+            "kind": "browser"
+        },
+        "tested_apis": ["setState", "setTitle", "showOk"],
+        "version": "1.0.0",
+        "platform": "darwin",
+        "architecture": "arm64",
+        "method": "simulated",
+        "outcome": "pass",
+        "limitations": [],
+        "scope": "Browser registration, localhost GET, status feedback and inspector settings handshake",
+        "date": "2026-10-24T01:38:21.014Z"
+    },
+    {
+        "id": "elgato-counter",
+        "revision": "0f6cc540bf72f21e2133a30f2d2a9175f4832e92",
+        "package_id": "com.elgato.counter",
+        "source": {
+            "filename": "com.elgato.counter.streamDeckPlugin",
+            "format": "zip",
+            "sha256": "b54c61fe4aa778bd3bb3aa6ef1880e9b4348b4227114719d70c16bd09a45c789"
+        },
+        "dialect": "streamdeck",
+        "runtime": {
+            "kind": "browser"
+        },
+        "tested_apis": ["setSettings", "setState", "setTitle"],
+        "version": "1.4.1",
+        "platform": "darwin",
+        "architecture": "arm64",
+        "method": "simulated",
+        "outcome": "pass",
+        "limitations": [],
+        "scope": "Browser registration, press/release increment, settings and title feedback",
+        "date": "2026-10-24T01:38:21.746Z"
+    },
+    {
+        "id": "elgato-layouts",
+        "revision": "8cc82bad8716c000bacc131285ffcf6805dafff9",
+        "package_id": "com.elgato.layouts",
+        "source": {
+            "filename": "com.elgato.layouts.streamDeckPlugin",
+            "format": "zip",
+            "sha256": "38f79ed3b5380ef0b9daf65ab60d52b170e18e2719078775afe16cf29394535b"
+        },
+        "dialect": "streamdeck",
+        "runtime": {
+            "requirement": {
+                "channel": "lts",
+                "kind": "nodejs",
+                "permissions": {
+                    "Env": [],
+                    "Net": [],
+                    "Read": [],
+                    "Run": [],
+                    "Write": []
+                },
+                "version": "20"
+            },
+            "overridden": true,
+            "selected": {
+                "kind": "nodejs",
+                "channel": "lts",
+                "line": "24",
+                "version": "24.20.0",
+                "source": "external"
+            }
+        },
+        "tested_apis": [
+            "desktopInput",
+            "setFeedback",
+            "setFeedbackLayout",
+            "setSettings",
+            "setState",
+            "unsupportedFeature"
+        ],
+        "version": "0.1.0.0",
+        "platform": "darwin",
+        "architecture": "arm64",
+        "method": "simulated",
+        "outcome": "pass_with_limitations",
+        "limitations": [
+            "$C1 sample references missing imgs/actions/layout/layout.svg; host reports the missing image"
+        ],
+        "scope": "Node registration, encoder rotation, built-in/custom feedback layouts and settings; missing C1 asset diagnostic",
+        "date": "2026-10-24T01:38:22.668Z"
+    }
+]

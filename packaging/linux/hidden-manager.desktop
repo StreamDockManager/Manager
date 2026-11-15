@@ -1,0 +1,7 @@
+[Desktop Entry]
+Type=Application
+Name=Stream Dock Manager
+Exec=stream-dock-manager
+Icon=stream-dock-manager
+NoDisplay=true
+Terminal=false

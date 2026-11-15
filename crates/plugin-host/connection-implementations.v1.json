@@ -1,0 +1,244 @@
+{
+    "schema_version": 1,
+    "manager_contract_version": 1,
+    "surface_contract_version": 1,
+    "capabilities": [
+        {
+            "id": "plugin-protocol-v1",
+            "implementation": [
+                {
+                    "path": "src/transport.rs",
+                    "symbol": "register"
+                }
+            ],
+            "tests": ["transport_tests::rejected_duplicate_registration_preserves_live_session"]
+        },
+        {
+            "id": "manager-controls-v1",
+            "implementation": [
+                {
+                    "path": "src/lib.rs",
+                    "symbol": "setDynamicItems"
+                }
+            ],
+            "tests": [
+                "connection_contract::tests::managed_controls_and_telemetry_use_authenticated_transport"
+            ]
+        },
+        {
+            "id": "telemetry-v1",
+            "implementation": [
+                {
+                    "path": "src/lib.rs",
+                    "symbol": "publish_telemetry"
+                }
+            ],
+            "tests": [
+                "connection_contract::tests::managed_controls_and_telemetry_use_authenticated_transport"
+            ]
+        },
+        {
+            "id": "surface-metadata-v1",
+            "implementation": [
+                {
+                    "path": "src/lib.rs",
+                    "symbol": "dispatch_inner"
+                }
+            ],
+            "tests": ["connection_contract::tests::surface_metadata_uses_the_embedded_version"]
+        },
+        {
+            "id": "plugin-theme-v1",
+            "implementation": [
+                {
+                    "path": "src/theme.rs",
+                    "symbol": "theme_rpc"
+                }
+            ],
+            "tests": ["theme::tests::theme_rpc_negotiates_live_snapshots_and_rejects_inspectors"]
+        },
+        {
+            "id": "plugin-settings-v1",
+            "implementation": [
+                {
+                    "path": "src/saved_settings.rs",
+                    "symbol": "queue_saved_settings"
+                }
+            ],
+            "tests": [
+                "saved_settings::tests::saved_settings_publish_only_after_workspace_commit_and_rejection_keeps_projection"
+            ]
+        },
+        {
+            "id": "plugin-storage-v1",
+            "implementation": [
+                {
+                    "path": "src/storage_rpc.rs",
+                    "symbol": "dispatch"
+                }
+            ],
+            "tests": [
+                "storage_rpc::tests::dedup_precedes_cas_survives_restart_and_purge_fences_old_handles"
+            ]
+        },
+        {
+            "id": "desktop-input-v1",
+            "implementation": [
+                {
+                    "path": "src/effects.rs",
+                    "symbol": "DesktopInput"
+                }
+            ],
+            "tests": [
+                "effects::tests::routing_and_generation_come_from_host_state_not_wire_metadata"
+            ]
+        },
+        {
+            "id": "action-results-v1",
+            "implementation": [
+                {
+                    "path": "src/lib.rs",
+                    "symbol": "complete_action"
+                }
+            ],
+            "tests": [
+                "lifecycle_tests::tracked_plugin_actions_require_a_correlated_result_from_the_owning_session"
+            ]
+        },
+        {
+            "id": "network-payload-v1",
+            "implementation": [
+                {
+                    "path": "src/monitor.rs",
+                    "symbol": "report_network"
+                }
+            ],
+            "tests": [
+                "monitor::network_tests::cumulative_payload_reports_recover_drops_and_reject_stale_runs_decreases_and_invalid_values"
+            ]
+        },
+        {
+            "id": "plugin-logs-v1",
+            "implementation": [
+                {
+                    "path": "src/log_capture.rs",
+                    "symbol": "record_entry"
+                }
+            ],
+            "tests": [
+                "log_capture::tests::redaction_precedes_continuations_and_stream_preferences_keep_history"
+            ]
+        }
+    ],
+    "vendors": [
+        {
+            "dialect": "streamdeck",
+            "application_version": "7.1.0",
+            "compatibility_label": "streamdeck-7.1-subset",
+            "sdk_versions": [2, 3],
+            "implementation": [
+                {
+                    "path": "src/manifest.rs",
+                    "symbol": "normalize_with_identity"
+                },
+                {
+                    "path": "src/preflight.rs",
+                    "symbol": "inspect_with_identity"
+                },
+                {
+                    "path": "src/browser.rs",
+                    "symbol": "registration_info"
+                }
+            ],
+            "tests": [
+                "connection_contract::tests::registration_and_admission_share_the_embedded_contract",
+                "connection_contract::tests::vendor_minimums_remain_fail_closed",
+                "saved_settings_reads::tests::getters_fence_prior_accepted_writes_not_later_writes_or_other_contexts",
+                "saved_settings_reads::tests::resource_reads_wait_for_commit_and_rejected_transactions_return_committed_state",
+                "saved_settings_reads::tests::baseline_elgato_initialization_requires_correlated_global_getter_but_other_dialects_keep_push",
+                "vendor_contract_tests::device_changes_emit_change_without_fabricating_reconnect"
+            ]
+        },
+        {
+            "dialect": "vsd",
+            "application_version": "3.10.205.0918",
+            "compatibility_label": "3.10.205.0918-subset",
+            "sdk_versions": [1],
+            "implementation": [
+                {
+                    "path": "src/manifest.rs",
+                    "symbol": "normalize_with_identity"
+                },
+                {
+                    "path": "src/preflight.rs",
+                    "symbol": "inspect_with_identity"
+                },
+                {
+                    "path": "src/browser.rs",
+                    "symbol": "registration_info"
+                }
+            ],
+            "tests": [
+                "connection_contract::tests::registration_and_admission_share_the_embedded_contract",
+                "connection_contract::tests::vendor_minimums_remain_fail_closed",
+                "vendor_contract_tests::untouched_vsd_package_has_vendor_identity_controls_and_inspector"
+            ]
+        },
+        {
+            "dialect": "openaction",
+            "application_version": "0.1.0",
+            "compatibility_label": "openaction-subset",
+            "sdk_versions": [],
+            "implementation": [
+                {
+                    "path": "src/manifest.rs",
+                    "symbol": "entry_point"
+                },
+                {
+                    "path": "src/manifest_schema.rs",
+                    "symbol": "validate_openaction"
+                },
+                {
+                    "path": "src/lib.rs",
+                    "symbol": "dispatch_inner"
+                },
+                {
+                    "path": "src/settings.rs",
+                    "symbol": "inspector_lifecycle_event"
+                },
+                {
+                    "path": "src/visual.rs",
+                    "symbol": "prepare"
+                }
+            ],
+            "tests": [
+                "manifest::tests::openaction_manifest_is_bounded_and_selects_cpu_override",
+                "manifest::tests::genuine_openaction_starterpack_manifest_is_accepted_unchanged",
+                "connection_contract::tests::openaction_is_an_independent_bounded_contract_without_sdk_claims",
+                "preflight::tests::openaction_codepaths_only_package_uses_selected_entry_in_preflight",
+                "manifest::tests::original_openaction_and_opendeck_import_manifests_normalize_unchanged",
+                "openaction_tests::openaction_fresh_pulse_announces_initial_state_before_release_toggle",
+                "openaction_tests::openaction_multi_action_release_toggles_after_event_without_affecting_press",
+                "openaction_tests::openaction_sdk_null_visual_reset_uses_action_icon_and_defaults",
+                "openaction_tests::openaction_opaque_global_settings_survive_snapshot_validation_and_restart",
+                "openaction_tests::openaction_opaque_defaults_commit_and_configuration_roundtrip",
+                "settings::default_tests::inspector_lifecycle_payload_preserves_live_action_and_device",
+                "saved_settings::tests::inspector_settings_event_keeps_token_and_resolves_live_device_metadata",
+                "openaction_tests::openaction_state_without_title_clears_previous_encoder_feedback_title",
+                "openaction_tests::openaction_socket_misc_and_encoder_feedback_routes_are_scoped",
+                "vendor_system::tests::deep_links_have_bounded_exact_owner_and_opaque_message",
+                "vendor_system::tests::system_and_deep_link_events_are_scoped_to_enabled_registered_owners"
+            ]
+        }
+    ],
+    "contract_tests": [
+        "connection_contract::tests::config_cannot_expand_implementation_claims",
+        "connection_contract::tests::schema_rejects_invalid_static_configuration",
+        "connection_contract::tests::registration_and_admission_share_the_embedded_contract",
+        "connection_contract::tests::vendor_minimums_remain_fail_closed",
+        "registration_environment::tests::provided_locale_and_scale_are_preserved_and_validated",
+        "registration_environment::tests::unknown_native_context_fails_and_browser_context_is_only_staged",
+        "registration_environment::tests::missing_native_display_fails_before_process_or_run_state_is_created",
+        "registration_environment::tests::independent_hosts_do_not_share_presentation_context"
+    ]
+}

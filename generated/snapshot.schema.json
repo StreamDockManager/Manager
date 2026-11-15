@@ -1,0 +1,5152 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "title": "Snapshot",
+  "type": "object",
+  "properties": {
+    "active_profile": {
+      "type": "string"
+    },
+    "binding_overrides": {
+      "type": "object",
+      "additionalProperties": {
+        "type": "object",
+        "additionalProperties": {
+          "$ref": "#/$defs/EffectiveBinding"
+        }
+      },
+      "default": {}
+    },
+    "configuration_revision": {
+      "type": "integer",
+      "format": "uint64",
+      "minimum": 0
+    },
+    "devices": {
+      "type": "array",
+      "items": {
+        "$ref": "#/$defs/DeviceInfo"
+      }
+    },
+    "history": {
+      "$ref": "#/$defs/HistoryIndex"
+    },
+    "plugins": {
+      "type": "array",
+      "items": {
+        "$ref": "#/$defs/PluginInfo"
+      }
+    },
+    "profiles": {
+      "type": "array",
+      "items": {
+        "$ref": "#/$defs/Profile"
+      }
+    },
+    "revision": {
+      "type": "integer",
+      "format": "uint64",
+      "minimum": 0
+    },
+    "rules": {
+      "type": "array",
+      "items": {
+        "$ref": "#/$defs/AppRule"
+      }
+    },
+    "saved_macros": {
+      "type": "array",
+      "default": [],
+      "items": {
+        "$ref": "#/$defs/SavedMacro"
+      }
+    },
+    "sessions": {
+      "type": "object",
+      "additionalProperties": {
+        "$ref": "#/$defs/DeviceSession"
+      }
+    },
+    "styles": {
+      "type": "array",
+      "default": [],
+      "items": {
+        "$ref": "#/$defs/AppearancePreset"
+      }
+    }
+  },
+  "required": [
+    "revision",
+    "configuration_revision",
+    "sessions",
+    "rules",
+    "history",
+    "devices",
+    "profiles",
+    "active_profile",
+    "plugins"
+  ],
+  "$defs": {
+    "Action": {
+      "oneOf": [
+        {
+          "type": "object",
+          "properties": {
+            "kind": {
+              "type": "string",
+              "const": "none"
+            }
+          },
+          "additionalProperties": false,
+          "required": [
+            "kind"
+          ]
+        },
+        {
+          "type": "object",
+          "properties": {
+            "action": {
+              "$ref": "#/$defs/BuiltinAction"
+            },
+            "kind": {
+              "type": "string",
+              "const": "builtin"
+            }
+          },
+          "additionalProperties": false,
+          "required": [
+            "kind",
+            "action"
+          ]
+        },
+        {
+          "type": "object",
+          "properties": {
+            "keys": {
+              "type": "array",
+              "items": {
+                "type": "string"
+              }
+            },
+            "kind": {
+              "type": "string",
+              "const": "hotkey"
+            }
+          },
+          "additionalProperties": false,
+          "required": [
+            "kind",
+            "keys"
+          ]
+        },
+        {
+          "type": "object",
+          "properties": {
+            "kind": {
+              "type": "string",
+              "const": "open_url"
+            },
+            "url": {
+              "type": "string"
+            }
+          },
+          "additionalProperties": false,
+          "required": [
+            "kind",
+            "url"
+          ]
+        },
+        {
+          "type": "object",
+          "properties": {
+            "kind": {
+              "type": "string",
+              "const": "open_path"
+            },
+            "path": {
+              "type": "string"
+            }
+          },
+          "additionalProperties": false,
+          "required": [
+            "kind",
+            "path"
+          ]
+        },
+        {
+          "type": "object",
+          "properties": {
+            "kind": {
+              "type": "string",
+              "const": "application"
+            },
+            "path": {
+              "type": "string"
+            }
+          },
+          "additionalProperties": false,
+          "required": [
+            "kind",
+            "path"
+          ]
+        },
+        {
+          "type": "object",
+          "properties": {
+            "command": {
+              "type": "string"
+            },
+            "kind": {
+              "type": "string",
+              "const": "media"
+            }
+          },
+          "additionalProperties": false,
+          "required": [
+            "kind",
+            "command"
+          ]
+        },
+        {
+          "type": "object",
+          "properties": {
+            "delta": {
+              "type": "integer",
+              "format": "int32"
+            },
+            "kind": {
+              "type": "string",
+              "const": "volume"
+            }
+          },
+          "additionalProperties": false,
+          "required": [
+            "kind",
+            "delta"
+          ]
+        },
+        {
+          "type": "object",
+          "properties": {
+            "kind": {
+              "type": "string",
+              "const": "mute"
+            }
+          },
+          "additionalProperties": false,
+          "required": [
+            "kind"
+          ]
+        },
+        {
+          "type": "object",
+          "properties": {
+            "args": {
+              "type": "array",
+              "items": {
+                "type": "string"
+              }
+            },
+            "kind": {
+              "type": "string",
+              "const": "command"
+            },
+            "program": {
+              "type": "string"
+            }
+          },
+          "additionalProperties": false,
+          "required": [
+            "kind",
+            "program",
+            "args"
+          ]
+        },
+        {
+          "type": "object",
+          "properties": {
+            "kind": {
+              "type": "string",
+              "const": "profile"
+            },
+            "profile_id": {
+              "type": "string"
+            }
+          },
+          "additionalProperties": false,
+          "required": [
+            "kind",
+            "profile_id"
+          ]
+        },
+        {
+          "type": "object",
+          "properties": {
+            "kind": {
+              "type": "string",
+              "const": "page"
+            },
+            "page_id": {
+              "type": "string"
+            }
+          },
+          "additionalProperties": false,
+          "required": [
+            "kind",
+            "page_id"
+          ]
+        },
+        {
+          "type": "object",
+          "properties": {
+            "direction": {
+              "$ref": "#/$defs/NavigationDirection"
+            },
+            "kind": {
+              "type": "string",
+              "const": "navigate"
+            },
+            "target": {
+              "$ref": "#/$defs/NavigationTarget"
+            }
+          },
+          "additionalProperties": false,
+          "required": [
+            "kind",
+            "target",
+            "direction"
+          ]
+        },
+        {
+          "type": "object",
+          "properties": {
+            "kind": {
+              "type": "string",
+              "const": "swipe_navigation"
+            },
+            "reverse": {
+              "type": "boolean"
+            },
+            "target": {
+              "type": "string"
+            },
+            "wrap": {
+              "type": "boolean"
+            }
+          },
+          "additionalProperties": false,
+          "required": [
+            "kind",
+            "target",
+            "wrap",
+            "reverse"
+          ]
+        },
+        {
+          "type": "object",
+          "properties": {
+            "kind": {
+              "type": "string",
+              "const": "delay"
+            },
+            "milliseconds": {
+              "type": "integer",
+              "format": "uint64",
+              "minimum": 0
+            }
+          },
+          "additionalProperties": false,
+          "required": [
+            "kind",
+            "milliseconds"
+          ]
+        },
+        {
+          "type": "object",
+          "properties": {
+            "actions": {
+              "type": "array",
+              "items": {
+                "$ref": "#/$defs/Action"
+              }
+            },
+            "kind": {
+              "type": "string",
+              "const": "macro"
+            }
+          },
+          "additionalProperties": false,
+          "required": [
+            "kind",
+            "actions"
+          ]
+        },
+        {
+          "description": "Independent dial actions: turn left, turn right, and press",
+          "type": "object",
+          "properties": {
+            "actions": {
+              "type": "array",
+              "items": {
+                "$ref": "#/$defs/Action"
+              }
+            },
+            "kind": {
+              "type": "string",
+              "const": "dial"
+            },
+            "linked_turns": {
+              "description": "Keep turn-lane editing synchronized without changing independent runtime contexts",
+              "type": "boolean",
+              "default": false
+            }
+          },
+          "additionalProperties": false,
+          "required": [
+            "kind",
+            "actions"
+          ]
+        },
+        {
+          "type": "object",
+          "properties": {
+            "kind": {
+              "type": "string",
+              "const": "toggle"
+            },
+            "off": {
+              "$ref": "#/$defs/Action"
+            },
+            "on": {
+              "$ref": "#/$defs/Action"
+            }
+          },
+          "additionalProperties": false,
+          "required": [
+            "kind",
+            "on",
+            "off"
+          ]
+        },
+        {
+          "type": "object",
+          "properties": {
+            "kind": {
+              "type": "string",
+              "const": "brightness"
+            },
+            "value": {
+              "type": "integer",
+              "format": "uint8",
+              "maximum": 255,
+              "minimum": 0
+            }
+          },
+          "additionalProperties": false,
+          "required": [
+            "kind",
+            "value"
+          ]
+        },
+        {
+          "type": "object",
+          "properties": {
+            "brightness": {
+              "type": "integer",
+              "format": "uint8",
+              "maximum": 255,
+              "minimum": 0
+            },
+            "colors": {
+              "type": "array",
+              "items": {
+                "type": "array",
+                "items": {
+                  "type": "integer",
+                  "format": "uint8",
+                  "maximum": 255,
+                  "minimum": 0
+                },
+                "maxItems": 3,
+                "minItems": 3
+              }
+            },
+            "kind": {
+              "type": "string",
+              "const": "lighting"
+            }
+          },
+          "additionalProperties": false,
+          "required": [
+            "kind",
+            "brightness",
+            "colors"
+          ]
+        },
+        {
+          "type": "object",
+          "properties": {
+            "kind": {
+              "type": "string",
+              "const": "sleep"
+            }
+          },
+          "additionalProperties": false,
+          "required": [
+            "kind"
+          ]
+        },
+        {
+          "type": "object",
+          "properties": {
+            "action_id": {
+              "type": "string"
+            },
+            "kind": {
+              "type": "string",
+              "const": "plugin"
+            },
+            "plugin_id": {
+              "type": "string"
+            },
+            "resources": {
+              "type": "object",
+              "additionalProperties": {
+                "type": "string"
+              }
+            },
+            "settings": true,
+            "user_desired_state": {
+              "description": "Explicit Elgato multi-action state selection; plugin settings stay opaque",
+              "type": [
+                "integer",
+                "null"
+              ],
+              "format": "uint8",
+              "maximum": 255,
+              "minimum": 0
+            }
+          },
+          "additionalProperties": false,
+          "required": [
+            "kind",
+            "plugin_id",
+            "action_id",
+            "settings"
+          ]
+        }
+      ]
+    },
+    "ActionCapability": {
+      "type": "object",
+      "properties": {
+        "additive_dial": {
+          "type": "boolean"
+        },
+        "control_types": {
+          "type": "array",
+          "items": {
+            "type": "string"
+          }
+        },
+        "feedback_layout": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "icon": {
+          "$ref": "#/$defs/ThemedAsset"
+        },
+        "parameter_fields": {
+          "type": "array",
+          "items": {
+            "type": "string"
+          }
+        },
+        "refresh": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/RefreshPolicy"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "settings": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "states": {
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/ThemedAsset"
+          }
+        }
+      },
+      "additionalProperties": false,
+      "required": [
+        "icon",
+        "states"
+      ]
+    },
+    "ActivationPolicy": {
+      "type": "string",
+      "enum": [
+        "queue",
+        "ignore_busy",
+        "replace_pending"
+      ]
+    },
+    "AppRule": {
+      "type": "object",
+      "properties": {
+        "application": {
+          "type": "string"
+        },
+        "device_key": {
+          "type": "string"
+        },
+        "id": {
+          "type": "string"
+        },
+        "page_id": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "profile_id": {
+          "type": "string"
+        },
+        "schedule": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/Schedule"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "title": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/TitleCondition"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        }
+      },
+      "additionalProperties": false,
+      "required": [
+        "id",
+        "device_key",
+        "application",
+        "profile_id"
+      ]
+    },
+    "Appearance": {
+      "type": "object",
+      "properties": {
+        "align": {
+          "type": "string",
+          "default": "center"
+        },
+        "font": {
+          "type": "string",
+          "default": "sans"
+        },
+        "foreground": {
+          "type": "string",
+          "default": "#ffffff"
+        },
+        "icon": {
+          "type": "string",
+          "default": ""
+        },
+        "icon_asset": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/IconAsset"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "icon_position": {
+          "type": "string",
+          "default": "center"
+        },
+        "icon_size": {
+          "type": "integer",
+          "format": "uint8",
+          "default": 42,
+          "maximum": 255,
+          "minimum": 0
+        },
+        "position": {
+          "type": "string",
+          "default": "bottom"
+        },
+        "show_title": {
+          "type": "boolean",
+          "default": true
+        },
+        "size": {
+          "description": "Font size as a percentage of surface height",
+          "type": "integer",
+          "format": "uint8",
+          "default": 18,
+          "maximum": 255,
+          "minimum": 0
+        },
+        "toggle_icon": {
+          "description": "Alternate icon selected after each successful binding execution",
+          "anyOf": [
+            {
+              "$ref": "#/$defs/ToggleIcon"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        }
+      },
+      "additionalProperties": false
+    },
+    "AppearancePreset": {
+      "type": "object",
+      "properties": {
+        "appearance": {
+          "$ref": "#/$defs/Appearance"
+        },
+        "background_source": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/BackgroundSource"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "color": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "composition": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/DisplayComposition"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "id": {
+          "type": "string"
+        },
+        "name": {
+          "type": "string"
+        },
+        "overlay_enabled": {
+          "type": [
+            "boolean",
+            "null"
+          ]
+        },
+        "plugin_appearance": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/PluginAppearance"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        }
+      },
+      "additionalProperties": false,
+      "required": [
+        "id",
+        "name",
+        "appearance"
+      ]
+    },
+    "BackgroundSource": {
+      "description": "Selects a background without discarding the saved custom color or media",
+      "type": "string",
+      "enum": [
+        "palette",
+        "custom"
+      ]
+    },
+    "Binding": {
+      "type": "object",
+      "properties": {
+        "action": {
+          "$ref": "#/$defs/Action"
+        },
+        "activation_policy": {
+          "$ref": "#/$defs/ActivationPolicy"
+        },
+        "appearance": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/Appearance"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "asset": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "background_source": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/BackgroundSource"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "color": {
+          "type": "string"
+        },
+        "composition": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/DisplayComposition"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "custom_background": {
+          "description": "Distinguishes an explicit color (including transparent) from the original default",
+          "type": "boolean"
+        },
+        "dial_response": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/DialResponse"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "disabled": {
+          "type": "boolean",
+          "default": false
+        },
+        "feedback": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "media": {
+          "$ref": "#/$defs/MediaOptions",
+          "default": {
+            "crop": [
+              0.0,
+              0.0,
+              1.0,
+              1.0
+            ],
+            "fit": "fill",
+            "speed": 1.0,
+            "trim_end_ms": null,
+            "trim_start_ms": 0
+          }
+        },
+        "plugin_appearance": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/PluginAppearance"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "title": {
+          "type": "string"
+        }
+      },
+      "additionalProperties": false,
+      "required": [
+        "title",
+        "color",
+        "action"
+      ]
+    },
+    "BootLogoCapabilities": {
+      "type": "object",
+      "properties": {
+        "size": {
+          "type": "array",
+          "items": {
+            "type": "integer",
+            "format": "uint16",
+            "maximum": 65535,
+            "minimum": 0
+          },
+          "maxItems": 2,
+          "minItems": 2
+        }
+      },
+      "additionalProperties": false,
+      "required": [
+        "size"
+      ]
+    },
+    "BuiltinAction": {
+      "oneOf": [
+        {
+          "type": "object",
+          "properties": {
+            "kind": {
+              "type": "string",
+              "const": "type_text"
+            },
+            "template": {
+              "type": "boolean"
+            },
+            "text": {
+              "type": "string"
+            }
+          },
+          "additionalProperties": false,
+          "required": [
+            "kind",
+            "text",
+            "template"
+          ]
+        },
+        {
+          "type": "object",
+          "properties": {
+            "kind": {
+              "type": "string",
+              "const": "paste_text"
+            },
+            "restore": {
+              "type": "boolean"
+            },
+            "template": {
+              "type": "boolean"
+            },
+            "text": {
+              "type": "string"
+            }
+          },
+          "additionalProperties": false,
+          "required": [
+            "kind",
+            "text",
+            "template",
+            "restore"
+          ]
+        },
+        {
+          "type": "object",
+          "properties": {
+            "kind": {
+              "type": "string",
+              "const": "set_clipboard"
+            },
+            "template": {
+              "type": "boolean"
+            },
+            "text": {
+              "type": "string"
+            }
+          },
+          "additionalProperties": false,
+          "required": [
+            "kind",
+            "text",
+            "template"
+          ]
+        },
+        {
+          "type": "object",
+          "properties": {
+            "kind": {
+              "type": "string",
+              "const": "clear_clipboard"
+            }
+          },
+          "additionalProperties": false,
+          "required": [
+            "kind"
+          ]
+        },
+        {
+          "type": "object",
+          "properties": {
+            "kind": {
+              "type": "string",
+              "const": "keyboard_macro"
+            },
+            "playback": {
+              "$ref": "#/$defs/KeyboardMacroPlayback"
+            },
+            "recording": {
+              "$ref": "#/$defs/KeyboardMacroRecording"
+            }
+          },
+          "additionalProperties": false,
+          "required": [
+            "kind",
+            "recording",
+            "playback"
+          ]
+        },
+        {
+          "type": "object",
+          "properties": {
+            "keys": {
+              "type": "array",
+              "items": {
+                "type": "string"
+              }
+            },
+            "kind": {
+              "type": "string",
+              "const": "hold_keys"
+            }
+          },
+          "additionalProperties": false,
+          "required": [
+            "kind",
+            "keys"
+          ]
+        },
+        {
+          "type": "object",
+          "properties": {
+            "keys": {
+              "type": "array",
+              "items": {
+                "type": "string"
+              }
+            },
+            "kind": {
+              "type": "string",
+              "const": "latch_keys"
+            }
+          },
+          "additionalProperties": false,
+          "required": [
+            "kind",
+            "keys"
+          ]
+        },
+        {
+          "type": "object",
+          "properties": {
+            "button": {
+              "type": "string"
+            },
+            "clicks": {
+              "type": "integer",
+              "format": "int32"
+            },
+            "kind": {
+              "type": "string",
+              "const": "mouse_click"
+            }
+          },
+          "additionalProperties": false,
+          "required": [
+            "kind",
+            "button",
+            "clicks"
+          ]
+        },
+        {
+          "type": "object",
+          "properties": {
+            "kind": {
+              "type": "string",
+              "const": "mouse_move"
+            },
+            "relative": {
+              "type": "boolean"
+            },
+            "x": {
+              "type": "integer",
+              "format": "int32"
+            },
+            "y": {
+              "type": "integer",
+              "format": "int32"
+            }
+          },
+          "additionalProperties": false,
+          "required": [
+            "kind",
+            "x",
+            "y",
+            "relative"
+          ]
+        },
+        {
+          "type": "object",
+          "properties": {
+            "kind": {
+              "type": "string",
+              "const": "mouse_scroll"
+            },
+            "x": {
+              "type": "integer",
+              "format": "int32"
+            },
+            "y": {
+              "type": "integer",
+              "format": "int32"
+            }
+          },
+          "additionalProperties": false,
+          "required": [
+            "kind",
+            "x",
+            "y"
+          ]
+        },
+        {
+          "type": "object",
+          "properties": {
+            "button": {
+              "type": "string"
+            },
+            "kind": {
+              "type": "string",
+              "const": "mouse_drag"
+            },
+            "milliseconds": {
+              "type": "integer",
+              "format": "int32"
+            },
+            "relative": {
+              "type": "boolean"
+            },
+            "x": {
+              "type": "integer",
+              "format": "int32"
+            },
+            "y": {
+              "type": "integer",
+              "format": "int32"
+            }
+          },
+          "additionalProperties": false,
+          "required": [
+            "kind",
+            "button",
+            "x",
+            "y",
+            "relative",
+            "milliseconds"
+          ]
+        },
+        {
+          "type": "object",
+          "properties": {
+            "kind": {
+              "type": "string",
+              "const": "open_link"
+            },
+            "template": {
+              "type": "boolean"
+            },
+            "url": {
+              "type": "string"
+            }
+          },
+          "additionalProperties": false,
+          "required": [
+            "kind",
+            "url",
+            "template"
+          ]
+        },
+        {
+          "type": "object",
+          "properties": {
+            "kind": {
+              "type": "string",
+              "const": "reveal_file"
+            },
+            "path": {
+              "type": "string"
+            },
+            "template": {
+              "type": "boolean"
+            }
+          },
+          "additionalProperties": false,
+          "required": [
+            "kind",
+            "path",
+            "template"
+          ]
+        },
+        {
+          "type": "object",
+          "properties": {
+            "direction": {
+              "type": "string"
+            },
+            "kind": {
+              "type": "string",
+              "const": "page_step"
+            },
+            "wrap": {
+              "type": "boolean"
+            }
+          },
+          "additionalProperties": false,
+          "required": [
+            "kind",
+            "direction",
+            "wrap"
+          ]
+        },
+        {
+          "type": "object",
+          "properties": {
+            "kind": {
+              "type": "string",
+              "const": "page_back"
+            }
+          },
+          "additionalProperties": false,
+          "required": [
+            "kind"
+          ]
+        },
+        {
+          "type": "object",
+          "properties": {
+            "kind": {
+              "type": "string",
+              "const": "momentary_page"
+            },
+            "page_id": {
+              "type": "string"
+            }
+          },
+          "additionalProperties": false,
+          "required": [
+            "kind",
+            "page_id"
+          ]
+        },
+        {
+          "type": "object",
+          "properties": {
+            "children": {
+              "type": "array",
+              "items": {
+                "$ref": "#/$defs/Action"
+              }
+            },
+            "kind": {
+              "type": "string",
+              "const": "cycle_actions"
+            }
+          },
+          "additionalProperties": false,
+          "required": [
+            "kind",
+            "children"
+          ]
+        },
+        {
+          "type": "object",
+          "properties": {
+            "children": {
+              "type": "array",
+              "items": {
+                "$ref": "#/$defs/Action"
+              }
+            },
+            "count": {
+              "type": "integer",
+              "format": "int32"
+            },
+            "interval_ms": {
+              "type": "integer",
+              "format": "int32"
+            },
+            "kind": {
+              "type": "string",
+              "const": "repeat_actions"
+            }
+          },
+          "additionalProperties": false,
+          "required": [
+            "kind",
+            "count",
+            "interval_ms",
+            "children"
+          ]
+        },
+        {
+          "type": "object",
+          "properties": {
+            "children": {
+              "type": "array",
+              "items": {
+                "$ref": "#/$defs/Action"
+              }
+            },
+            "interval_ms": {
+              "type": "integer",
+              "format": "int32"
+            },
+            "kind": {
+              "type": "string",
+              "const": "repeat_held"
+            }
+          },
+          "additionalProperties": false,
+          "required": [
+            "kind",
+            "interval_ms",
+            "children"
+          ]
+        },
+        {
+          "type": "object",
+          "properties": {
+            "children": {
+              "type": "array",
+              "items": {
+                "$ref": "#/$defs/Action"
+              }
+            },
+            "condition": {
+              "$ref": "#/$defs/Condition"
+            },
+            "kind": {
+              "type": "string",
+              "const": "conditional"
+            }
+          },
+          "additionalProperties": false,
+          "required": [
+            "kind",
+            "condition",
+            "children"
+          ]
+        },
+        {
+          "type": "object",
+          "properties": {
+            "condition": {
+              "$ref": "#/$defs/Condition"
+            },
+            "kind": {
+              "type": "string",
+              "const": "wait_condition"
+            },
+            "poll_ms": {
+              "type": "integer",
+              "format": "int32"
+            },
+            "timeout_ms": {
+              "type": "integer",
+              "format": "int32"
+            }
+          },
+          "additionalProperties": false,
+          "required": [
+            "kind",
+            "condition",
+            "timeout_ms",
+            "poll_ms"
+          ]
+        },
+        {
+          "type": "object",
+          "properties": {
+            "kind": {
+              "type": "string",
+              "const": "cancel_macros"
+            }
+          },
+          "additionalProperties": false,
+          "required": [
+            "kind"
+          ]
+        },
+        {
+          "type": "object",
+          "properties": {
+            "delta": {
+              "type": "integer",
+              "format": "int32"
+            },
+            "kind": {
+              "type": "string",
+              "const": "brightness_step"
+            }
+          },
+          "additionalProperties": false,
+          "required": [
+            "kind",
+            "delta"
+          ]
+        },
+        {
+          "type": "object",
+          "properties": {
+            "kind": {
+              "type": "string",
+              "const": "automation_control"
+            },
+            "operation": {
+              "type": "string"
+            }
+          },
+          "additionalProperties": false,
+          "required": [
+            "kind",
+            "operation"
+          ]
+        },
+        {
+          "type": "object",
+          "properties": {
+            "kind": {
+              "type": "string",
+              "const": "notification"
+            },
+            "template": {
+              "type": "boolean"
+            },
+            "text": {
+              "type": "string"
+            },
+            "title": {
+              "type": "string"
+            }
+          },
+          "additionalProperties": false,
+          "required": [
+            "kind",
+            "title",
+            "text",
+            "template"
+          ]
+        },
+        {
+          "type": "object",
+          "properties": {
+            "format": {
+              "type": "string"
+            },
+            "kind": {
+              "type": "string",
+              "const": "date_time"
+            },
+            "utc": {
+              "type": "boolean"
+            }
+          },
+          "additionalProperties": false,
+          "required": [
+            "kind",
+            "format",
+            "utc"
+          ]
+        },
+        {
+          "type": "object",
+          "properties": {
+            "kind": {
+              "type": "string",
+              "const": "transform_text"
+            },
+            "operation": {
+              "type": "string"
+            }
+          },
+          "additionalProperties": false,
+          "required": [
+            "kind",
+            "operation"
+          ]
+        },
+        {
+          "type": "object",
+          "properties": {
+            "kind": {
+              "type": "string",
+              "const": "search_selection"
+            },
+            "source": {
+              "type": "string"
+            },
+            "url": {
+              "type": "string"
+            }
+          },
+          "additionalProperties": false,
+          "required": [
+            "kind",
+            "url",
+            "source"
+          ]
+        },
+        {
+          "type": "object",
+          "properties": {
+            "kind": {
+              "type": "string",
+              "const": "clipboard_slot"
+            },
+            "name": {
+              "type": "string"
+            },
+            "operation": {
+              "type": "string"
+            },
+            "persist": {
+              "type": "boolean"
+            }
+          },
+          "additionalProperties": false,
+          "required": [
+            "kind",
+            "name",
+            "operation",
+            "persist"
+          ]
+        },
+        {
+          "type": "object",
+          "properties": {
+            "kind": {
+              "type": "string",
+              "const": "input_prompt"
+            },
+            "output": {
+              "type": "string"
+            },
+            "text": {
+              "type": "string"
+            },
+            "title": {
+              "type": "string"
+            }
+          },
+          "additionalProperties": false,
+          "required": [
+            "kind",
+            "title",
+            "text",
+            "output"
+          ]
+        },
+        {
+          "type": "object",
+          "properties": {
+            "children": {
+              "type": "array",
+              "items": {
+                "$ref": "#/$defs/Action"
+              }
+            },
+            "kind": {
+              "type": "string",
+              "const": "action_menu"
+            },
+            "labels": {
+              "type": "array",
+              "items": {
+                "type": "string"
+              }
+            },
+            "title": {
+              "type": "string"
+            }
+          },
+          "additionalProperties": false,
+          "required": [
+            "kind",
+            "title",
+            "labels",
+            "children"
+          ]
+        },
+        {
+          "type": "object",
+          "properties": {
+            "children": {
+              "type": "array",
+              "items": {
+                "$ref": "#/$defs/Action"
+              }
+            },
+            "double_ms": {
+              "type": "integer",
+              "format": "int32"
+            },
+            "hold_ms": {
+              "type": "integer",
+              "format": "int32"
+            },
+            "kind": {
+              "type": "string",
+              "const": "gesture"
+            }
+          },
+          "additionalProperties": false,
+          "required": [
+            "kind",
+            "double_ms",
+            "hold_ms",
+            "children"
+          ]
+        },
+        {
+          "type": "object",
+          "properties": {
+            "children": {
+              "type": "array",
+              "items": {
+                "$ref": "#/$defs/Action"
+              }
+            },
+            "kind": {
+              "type": "string",
+              "const": "press_release"
+            }
+          },
+          "additionalProperties": false,
+          "required": [
+            "kind",
+            "children"
+          ]
+        },
+        {
+          "type": "object",
+          "properties": {
+            "kind": {
+              "type": "string",
+              "const": "wait_release"
+            },
+            "timeout_ms": {
+              "type": "integer",
+              "format": "int32"
+            }
+          },
+          "additionalProperties": false,
+          "required": [
+            "kind",
+            "timeout_ms"
+          ]
+        },
+        {
+          "type": "object",
+          "properties": {
+            "children": {
+              "type": "array",
+              "items": {
+                "$ref": "#/$defs/Action"
+              }
+            },
+            "kind": {
+              "type": "string",
+              "const": "parallel"
+            },
+            "wait": {
+              "type": "boolean"
+            }
+          },
+          "additionalProperties": false,
+          "required": [
+            "kind",
+            "wait",
+            "children"
+          ]
+        },
+        {
+          "type": "object",
+          "properties": {
+            "children": {
+              "type": "array",
+              "items": {
+                "$ref": "#/$defs/Action"
+              }
+            },
+            "delay_ms": {
+              "type": "integer",
+              "format": "int32"
+            },
+            "kind": {
+              "type": "string",
+              "const": "failure_policy"
+            },
+            "operation": {
+              "type": "string"
+            },
+            "retries": {
+              "type": "integer",
+              "format": "int32"
+            }
+          },
+          "additionalProperties": false,
+          "required": [
+            "kind",
+            "operation",
+            "retries",
+            "delay_ms",
+            "children"
+          ]
+        },
+        {
+          "type": "object",
+          "properties": {
+            "arguments": {
+              "type": "object",
+              "additionalProperties": {
+                "$ref": "#/$defs/MacroArgument"
+              }
+            },
+            "kind": {
+              "type": "string",
+              "const": "saved_macro"
+            },
+            "macro_id": {
+              "type": "string"
+            }
+          },
+          "additionalProperties": false,
+          "required": [
+            "kind",
+            "macro_id"
+          ]
+        },
+        {
+          "type": "object",
+          "properties": {
+            "children": {
+              "type": "array",
+              "items": {
+                "$ref": "#/$defs/Action"
+              }
+            },
+            "kind": {
+              "type": "string",
+              "const": "random_action"
+            }
+          },
+          "additionalProperties": false,
+          "required": [
+            "kind",
+            "children"
+          ]
+        },
+        {
+          "type": "object",
+          "properties": {
+            "kind": {
+              "type": "string",
+              "const": "reset_state"
+            },
+            "scope": {
+              "type": "string"
+            }
+          },
+          "additionalProperties": false,
+          "required": [
+            "kind",
+            "scope"
+          ]
+        },
+        {
+          "type": "object",
+          "properties": {
+            "children": {
+              "type": "array",
+              "items": {
+                "$ref": "#/$defs/Action"
+              }
+            },
+            "kind": {
+              "type": "string",
+              "const": "cooldown"
+            },
+            "milliseconds": {
+              "type": "integer",
+              "format": "int32"
+            }
+          },
+          "additionalProperties": false,
+          "required": [
+            "kind",
+            "milliseconds",
+            "children"
+          ]
+        },
+        {
+          "type": "object",
+          "properties": {
+            "controls": {
+              "type": "array",
+              "items": {
+                "type": "string"
+              }
+            },
+            "kind": {
+              "type": "string",
+              "const": "binding_layer"
+            },
+            "page_id": {
+              "type": "string"
+            },
+            "toggle": {
+              "type": "boolean"
+            }
+          },
+          "additionalProperties": false,
+          "required": [
+            "kind",
+            "page_id",
+            "controls",
+            "toggle"
+          ]
+        },
+        {
+          "type": "object",
+          "properties": {
+            "control_id": {
+              "type": "string"
+            },
+            "device_id": {
+              "type": "string"
+            },
+            "kind": {
+              "type": "string",
+              "const": "trigger_binding"
+            },
+            "page_id": {
+              "type": "string"
+            },
+            "profile_id": {
+              "type": "string"
+            }
+          },
+          "additionalProperties": false,
+          "required": [
+            "kind",
+            "device_id",
+            "profile_id",
+            "page_id",
+            "control_id"
+          ]
+        },
+        {
+          "type": "object",
+          "properties": {
+            "kind": {
+              "type": "string",
+              "const": "show_manager"
+            }
+          },
+          "additionalProperties": false,
+          "required": [
+            "kind"
+          ]
+        },
+        {
+          "type": "object",
+          "properties": {
+            "control_id": {
+              "type": "string"
+            },
+            "device_id": {
+              "type": "string"
+            },
+            "kind": {
+              "type": "string",
+              "const": "edit_binding"
+            },
+            "page_id": {
+              "type": "string"
+            },
+            "profile_id": {
+              "type": "string"
+            }
+          },
+          "additionalProperties": false,
+          "required": [
+            "kind",
+            "device_id",
+            "profile_id",
+            "page_id",
+            "control_id"
+          ]
+        },
+        {
+          "type": "object",
+          "properties": {
+            "kind": {
+              "type": "string",
+              "const": "pause_bindings"
+            },
+            "operation": {
+              "type": "string"
+            }
+          },
+          "additionalProperties": false,
+          "required": [
+            "kind",
+            "operation"
+          ]
+        },
+        {
+          "type": "object",
+          "properties": {
+            "application": {
+              "type": "string"
+            },
+            "kind": {
+              "type": "string",
+              "const": "open_with"
+            },
+            "path": {
+              "type": "string"
+            },
+            "template": {
+              "type": "boolean"
+            }
+          },
+          "additionalProperties": false,
+          "required": [
+            "kind",
+            "application",
+            "path",
+            "template"
+          ]
+        },
+        {
+          "type": "object",
+          "properties": {
+            "kind": {
+              "type": "string",
+              "const": "open_terminal"
+            },
+            "path": {
+              "type": "string"
+            },
+            "program": {
+              "type": "string"
+            },
+            "template": {
+              "type": "boolean"
+            }
+          },
+          "additionalProperties": false,
+          "required": [
+            "kind",
+            "program",
+            "path",
+            "template"
+          ]
+        },
+        {
+          "type": "object",
+          "properties": {
+            "args": {
+              "type": "array",
+              "items": {
+                "type": "string"
+              }
+            },
+            "kind": {
+              "type": "string",
+              "const": "command_result"
+            },
+            "output": {
+              "type": "string"
+            },
+            "path": {
+              "type": "string"
+            },
+            "program": {
+              "type": "string"
+            },
+            "template": {
+              "type": "boolean"
+            },
+            "timeout_ms": {
+              "type": "integer",
+              "format": "int32"
+            }
+          },
+          "additionalProperties": false,
+          "required": [
+            "kind",
+            "program",
+            "args",
+            "path",
+            "timeout_ms",
+            "output",
+            "template"
+          ]
+        },
+        {
+          "type": "object",
+          "properties": {
+            "destination": {
+              "type": "string"
+            },
+            "kind": {
+              "type": "string",
+              "const": "file_operation"
+            },
+            "operation": {
+              "type": "string"
+            },
+            "replace": {
+              "type": "boolean"
+            },
+            "source": {
+              "type": "string"
+            },
+            "template": {
+              "type": "boolean"
+            }
+          },
+          "additionalProperties": false,
+          "required": [
+            "kind",
+            "operation",
+            "source",
+            "destination",
+            "replace",
+            "template"
+          ]
+        },
+        {
+          "type": "object",
+          "properties": {
+            "kind": {
+              "type": "string",
+              "const": "write_file"
+            },
+            "operation": {
+              "type": "string"
+            },
+            "path": {
+              "type": "string"
+            },
+            "replace": {
+              "type": "boolean"
+            },
+            "template": {
+              "type": "boolean"
+            },
+            "text": {
+              "type": "string"
+            }
+          },
+          "additionalProperties": false,
+          "required": [
+            "kind",
+            "path",
+            "text",
+            "operation",
+            "replace",
+            "template"
+          ]
+        },
+        {
+          "type": "object",
+          "properties": {
+            "directory": {
+              "type": "boolean"
+            },
+            "kind": {
+              "type": "string",
+              "const": "choose_path"
+            },
+            "output": {
+              "type": "string"
+            }
+          },
+          "additionalProperties": false,
+          "required": [
+            "kind",
+            "directory",
+            "output"
+          ]
+        }
+      ]
+    },
+    "Capabilities": {
+      "type": "object",
+      "properties": {
+        "actions": {
+          "type": "object",
+          "additionalProperties": {
+            "$ref": "#/$defs/ActionCapability"
+          }
+        },
+        "icon": {
+          "$ref": "#/$defs/ThemedAsset"
+        },
+        "id": {
+          "type": "string"
+        },
+        "input_protocol": {
+          "type": "integer",
+          "format": "uint32",
+          "minimum": 0
+        },
+        "minimum_manager": {
+          "type": "string"
+        },
+        "plugin_settings": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "plugin_version": {
+          "type": "string"
+        },
+        "required_capabilities": {
+          "type": "array",
+          "items": {
+            "type": "string"
+          }
+        },
+        "settings_protocol": {
+          "type": "integer",
+          "format": "uint32",
+          "minimum": 0
+        },
+        "theme_protocol": {
+          "type": "integer",
+          "format": "uint32",
+          "minimum": 0
+        },
+        "version": {
+          "type": "integer",
+          "format": "uint32",
+          "minimum": 0
+        }
+      },
+      "additionalProperties": false,
+      "required": [
+        "version",
+        "id",
+        "plugin_version",
+        "theme_protocol",
+        "settings_protocol",
+        "input_protocol",
+        "icon",
+        "actions"
+      ]
+    },
+    "Condition": {
+      "type": "object",
+      "properties": {
+        "operator": {
+          "type": "string"
+        },
+        "source": {
+          "type": "string"
+        },
+        "subject": {
+          "type": "string"
+        },
+        "value": true
+      },
+      "additionalProperties": false,
+      "required": [
+        "source",
+        "subject",
+        "operator",
+        "value"
+      ]
+    },
+    "Control": {
+      "type": "object",
+      "properties": {
+        "directional_switch": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/DirectionalSwitch"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "feedback_surface": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "height": {
+          "type": "integer",
+          "format": "uint16",
+          "maximum": 65535,
+          "minimum": 0
+        },
+        "id": {
+          "type": "string"
+        },
+        "image_height": {
+          "type": [
+            "integer",
+            "null"
+          ],
+          "format": "uint16",
+          "maximum": 65535,
+          "minimum": 0
+        },
+        "image_slot": {
+          "type": [
+            "integer",
+            "null"
+          ],
+          "format": "uint8",
+          "maximum": 255,
+          "minimum": 0
+        },
+        "image_width": {
+          "type": [
+            "integer",
+            "null"
+          ],
+          "format": "uint16",
+          "maximum": 65535,
+          "minimum": 0
+        },
+        "kind": {
+          "type": "string"
+        },
+        "label": {
+          "type": "string"
+        },
+        "minimum_manager": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "preview_hidden": {
+          "type": "boolean",
+          "default": false
+        },
+        "semantics": {
+          "type": "array",
+          "items": {
+            "type": "string"
+          }
+        },
+        "width": {
+          "type": "integer",
+          "format": "uint16",
+          "maximum": 65535,
+          "minimum": 0
+        },
+        "x": {
+          "type": "integer",
+          "format": "uint16",
+          "maximum": 65535,
+          "minimum": 0
+        },
+        "y": {
+          "type": "integer",
+          "format": "uint16",
+          "maximum": 65535,
+          "minimum": 0
+        }
+      },
+      "additionalProperties": false,
+      "required": [
+        "id",
+        "label",
+        "kind",
+        "x",
+        "y",
+        "width",
+        "height",
+        "semantics"
+      ]
+    },
+    "DeviceCapabilities": {
+      "type": "object",
+      "properties": {
+        "background": {
+          "type": "boolean"
+        },
+        "background_minimum_manager": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "background_size": {
+          "type": [
+            "array",
+            "null"
+          ],
+          "items": {
+            "type": "integer",
+            "format": "uint16",
+            "maximum": 65535,
+            "minimum": 0
+          },
+          "maxItems": 2,
+          "minItems": 2
+        },
+        "boot_logo": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/BootLogoCapabilities"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "brightness": {
+          "type": "boolean"
+        },
+        "firmware_query": {
+          "type": "boolean",
+          "default": false
+        },
+        "firmware_report": {
+          "description": "Model-specific HID read contract. Omitted means SDK input report 0, 513 bytes",
+          "anyOf": [
+            {
+              "$ref": "#/$defs/FirmwareReport"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "frame_output": {
+          "description": "Implemented experimental paths, not hardware qualification or FPS ratings",
+          "anyOf": [
+            {
+              "$ref": "#/$defs/FrameOutputCapabilities"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "image_formats": {
+          "type": "array",
+          "items": {
+            "type": "string"
+          }
+        },
+        "image_output_unavailable_reason": {
+          "description": "A source-derived contract could not safely choose the image encoding",
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "keyboard": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/KeyboardCapabilities"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "lighting": {
+          "type": "boolean"
+        },
+        "lighting_channels": {
+          "type": "array",
+          "items": {
+            "type": "string"
+          }
+        },
+        "lighting_minimum_manager": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "max_fps": {
+          "type": "integer",
+          "format": "uint8",
+          "maximum": 255,
+          "minimum": 0
+        },
+        "media_formats": {
+          "description": "Accepted source assets; animated sources are decoded into image_formats by the runtime",
+          "type": "array",
+          "items": {
+            "type": "string"
+          }
+        },
+        "reliable_button_release": {
+          "type": "boolean"
+        },
+        "reliable_encoder_release": {
+          "type": "boolean"
+        },
+        "sleep": {
+          "type": "boolean",
+          "default": false
+        },
+        "touch_panel": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/TouchPanelCapabilities"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "vibration": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/VibrationCapabilities"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        }
+      },
+      "additionalProperties": false,
+      "required": [
+        "brightness",
+        "lighting",
+        "lighting_channels",
+        "background",
+        "reliable_button_release",
+        "reliable_encoder_release",
+        "image_formats",
+        "media_formats",
+        "max_fps"
+      ]
+    },
+    "DeviceConfigurationField": {
+      "type": "object",
+      "properties": {
+        "help": {
+          "type": "string"
+        },
+        "id": {
+          "type": "string"
+        },
+        "label": {
+          "type": "string"
+        }
+      },
+      "additionalProperties": false,
+      "required": [
+        "id",
+        "label",
+        "help"
+      ]
+    },
+    "DeviceFramePolicy": {
+      "description": "Rendering policy; host cadence is independent of firmware qualification",
+      "type": "object",
+      "properties": {
+        "encoding": {
+          "$ref": "#/$defs/FrameEncoding"
+        },
+        "policy": {
+          "$ref": "#/$defs/OutputPolicy"
+        }
+      },
+      "additionalProperties": false,
+      "required": [
+        "policy",
+        "encoding"
+      ]
+    },
+    "DeviceInfo": {
+      "type": "object",
+      "properties": {
+        "connected": {
+          "type": "boolean"
+        },
+        "firmware": {
+          "type": "string"
+        },
+        "id": {
+          "type": "string"
+        },
+        "identity_port_dependent": {
+          "type": "boolean"
+        },
+        "manifest": {
+          "$ref": "#/$defs/ModelManifest"
+        },
+        "model_id": {
+          "type": "string"
+        },
+        "name": {
+          "type": "string"
+        },
+        "persistence_key": {
+          "type": "string"
+        },
+        "simulated": {
+          "type": "boolean"
+        },
+        "usb_release": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "variant_id": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "id",
+        "persistence_key",
+        "identity_port_dependent",
+        "model_id",
+        "name",
+        "variant_id",
+        "firmware",
+        "connected",
+        "simulated",
+        "manifest"
+      ]
+    },
+    "DeviceOutput": {
+      "type": "object",
+      "properties": {
+        "brightness": {
+          "type": "integer",
+          "format": "uint8",
+          "maximum": 255,
+          "minimum": 0
+        },
+        "device_configuration": {
+          "description": "Explicit neighboring hardware choices; absent until the first review",
+          "type": "object",
+          "additionalProperties": {
+            "type": "boolean"
+          },
+          "default": {}
+        },
+        "frame_policy": {
+          "description": "Missing policies use grouped key updates when supported, otherwise frame scheduling",
+          "anyOf": [
+            {
+              "$ref": "#/$defs/DeviceFramePolicy"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "keyboard": {
+          "description": "App preference only. Applied solely by the explicit keyboard command",
+          "anyOf": [
+            {
+              "$ref": "#/$defs/KeyboardSettings"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "lighting_brightness": {
+          "type": "integer",
+          "format": "uint8",
+          "maximum": 255,
+          "minimum": 0
+        },
+        "lighting_colors": {
+          "type": "array",
+          "items": {
+            "type": "array",
+            "items": {
+              "type": "integer",
+              "format": "uint8",
+              "maximum": 255,
+              "minimum": 0
+            },
+            "maxItems": 3,
+            "minItems": 3
+          }
+        },
+        "sleeping": {
+          "type": "boolean"
+        },
+        "vibration_enabled": {
+          "type": [
+            "boolean",
+            "null"
+          ]
+        }
+      },
+      "additionalProperties": false,
+      "required": [
+        "sleeping",
+        "brightness",
+        "lighting_brightness",
+        "lighting_colors"
+      ]
+    },
+    "DeviceSession": {
+      "type": "object",
+      "properties": {
+        "automation_enabled": {
+          "type": "boolean"
+        },
+        "automation_paused": {
+          "type": "boolean"
+        },
+        "automation_restore_on_exit": {
+          "type": "boolean",
+          "default": false
+        },
+        "manual_profile": {
+          "type": "string"
+        },
+        "output": {
+          "$ref": "#/$defs/DeviceOutput"
+        },
+        "page_id": {
+          "type": "string"
+        },
+        "profile_id": {
+          "type": "string"
+        },
+        "remembered_pages": {
+          "type": "object",
+          "additionalProperties": {
+            "type": "string"
+          }
+        }
+      },
+      "additionalProperties": false,
+      "required": [
+        "profile_id",
+        "page_id",
+        "remembered_pages",
+        "manual_profile",
+        "automation_enabled",
+        "automation_paused",
+        "output"
+      ]
+    },
+    "DialCurve": {
+      "type": "string",
+      "enum": [
+        "linear",
+        "gentle",
+        "fast"
+      ]
+    },
+    "DialResponse": {
+      "type": "object",
+      "properties": {
+        "curve": {
+          "$ref": "#/$defs/DialCurve"
+        },
+        "max_steps": {
+          "type": "integer",
+          "format": "uint8",
+          "maximum": 255,
+          "minimum": 0
+        }
+      },
+      "additionalProperties": false,
+      "required": [
+        "curve",
+        "max_steps"
+      ]
+    },
+    "DirectionalSwitch": {
+      "description": "A switch has independent left/center/right button edges. Each position owns\na distinct control ID, so simultaneous directions and their releases retain\nnormal per-control scheduling and held-input ownership.",
+      "type": "object",
+      "properties": {
+        "group": {
+          "type": "string"
+        },
+        "position": {
+          "type": "string"
+        }
+      },
+      "additionalProperties": false,
+      "required": [
+        "group",
+        "position"
+      ]
+    },
+    "DisplayComposition": {
+      "type": "object",
+      "properties": {
+        "layers": {
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/DisplayLayer"
+          }
+        }
+      },
+      "additionalProperties": false,
+      "required": [
+        "layers"
+      ]
+    },
+    "DisplayLayer": {
+      "type": "object",
+      "properties": {
+        "id": {
+          "type": "string"
+        },
+        "label": {
+          "type": "string"
+        },
+        "source": {
+          "$ref": "#/$defs/DisplaySource"
+        },
+        "style": {
+          "$ref": "#/$defs/ElementStyle"
+        },
+        "text": {
+          "type": "string",
+          "default": ""
+        }
+      },
+      "additionalProperties": false,
+      "required": [
+        "id",
+        "label",
+        "source",
+        "style"
+      ]
+    },
+    "DisplaySource": {
+      "type": "object",
+      "properties": {
+        "action_id": {
+          "type": "string",
+          "default": ""
+        },
+        "element_kind": {
+          "type": "string",
+          "default": ""
+        },
+        "key": {
+          "type": "string",
+          "default": ""
+        },
+        "kind": {
+          "type": "string",
+          "default": ""
+        },
+        "layout": {
+          "type": "string",
+          "default": ""
+        },
+        "plugin_id": {
+          "type": "string",
+          "default": ""
+        }
+      },
+      "additionalProperties": false
+    },
+    "EffectiveBinding": {
+      "type": "object",
+      "properties": {
+        "binding": {
+          "$ref": "#/$defs/Binding"
+        },
+        "page_id": {
+          "type": "string"
+        },
+        "profile_id": {
+          "type": "string"
+        },
+        "scope": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "profile_id",
+        "page_id",
+        "binding",
+        "scope"
+      ]
+    },
+    "ElementStyle": {
+      "type": "object",
+      "properties": {
+        "align": {
+          "type": "string",
+          "default": "center"
+        },
+        "font": {
+          "type": "string",
+          "default": "sans"
+        },
+        "foreground": {
+          "type": "string",
+          "default": "#ffffff"
+        },
+        "icon_asset": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/IconAsset"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "key": {
+          "type": "string",
+          "default": ""
+        },
+        "kind": {
+          "type": "string",
+          "default": "text"
+        },
+        "layout": {
+          "type": "string",
+          "default": ""
+        },
+        "rect": {
+          "description": "X, Y, width and height, as percentages of the surface",
+          "type": "array",
+          "default": [
+            0.0,
+            0.0,
+            100.0,
+            100.0
+          ],
+          "items": {
+            "type": "number",
+            "format": "double"
+          },
+          "maxItems": 4,
+          "minItems": 4
+        },
+        "size": {
+          "type": "number",
+          "format": "double",
+          "default": 12.0
+        },
+        "state_icons": {
+          "type": "object",
+          "additionalProperties": {
+            "$ref": "#/$defs/IconAsset"
+          },
+          "default": {}
+        },
+        "vertical_align": {
+          "type": "string",
+          "default": "center"
+        },
+        "visible": {
+          "type": "boolean",
+          "default": true
+        },
+        "wrap": {
+          "type": "boolean",
+          "default": true
+        }
+      },
+      "additionalProperties": false
+    },
+    "FirmwareReport": {
+      "description": "Read-only version transport; it never sends firmware images or update commands",
+      "type": "object",
+      "properties": {
+        "kind": {
+          "$ref": "#/$defs/FirmwareReportKind"
+        },
+        "length": {
+          "type": "integer",
+          "format": "uint16",
+          "maximum": 65535,
+          "minimum": 0
+        },
+        "report_id": {
+          "type": "integer",
+          "format": "uint8",
+          "maximum": 255,
+          "minimum": 0
+        },
+        "windows_supported": {
+          "description": "Some independently sourced protocols are explicitly unimplemented on Windows",
+          "type": "boolean"
+        }
+      },
+      "additionalProperties": false,
+      "required": [
+        "kind",
+        "report_id",
+        "length",
+        "windows_supported"
+      ]
+    },
+    "FirmwareReportKind": {
+      "type": "string",
+      "enum": [
+        "input",
+        "feature"
+      ]
+    },
+    "FrameEncoding": {
+      "type": "string",
+      "enum": [
+        "individual_updates",
+        "grouped_key_updates"
+      ]
+    },
+    "FrameOutputCapabilities": {
+      "type": "object",
+      "properties": {
+        "frame_scheduling": {
+          "type": "boolean"
+        },
+        "grouped_key_updates": {
+          "type": "boolean"
+        }
+      },
+      "additionalProperties": false,
+      "required": [
+        "frame_scheduling",
+        "grouped_key_updates"
+      ]
+    },
+    "HealthCounts": {
+      "type": "object",
+      "properties": {
+        "automatic_restarts": {
+          "type": "integer",
+          "format": "uint64",
+          "minimum": 0
+        },
+        "crashes": {
+          "type": "integer",
+          "format": "uint64",
+          "minimum": 0
+        },
+        "failed_starts": {
+          "type": "integer",
+          "format": "uint64",
+          "minimum": 0
+        },
+        "issues": {
+          "type": "integer",
+          "format": "uint64",
+          "minimum": 0
+        }
+      },
+      "required": [
+        "crashes",
+        "failed_starts",
+        "automatic_restarts",
+        "issues"
+      ]
+    },
+    "HealthEvent": {
+      "type": "object",
+      "properties": {
+        "category": {
+          "type": "string"
+        },
+        "id": {
+          "type": "string"
+        },
+        "message": {
+          "type": "string"
+        },
+        "occurrences": {
+          "type": "integer",
+          "format": "uint64",
+          "minimum": 0
+        },
+        "run_id": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "severity": {
+          "type": "string"
+        },
+        "timestamp_ms": {
+          "type": "integer",
+          "format": "uint64",
+          "minimum": 0
+        },
+        "version": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "id",
+        "timestamp_ms",
+        "version",
+        "category",
+        "severity",
+        "message",
+        "occurrences"
+      ]
+    },
+    "HidSelector": {
+      "description": "Discovery predicate, distinct from the actual identity reported by HIDAPI\nOmitted interface means any interface; usage pages require an exact value or\nan inclusive lower bound. Device/vendor/usage are always exact.",
+      "type": "object",
+      "properties": {
+        "interface": {
+          "type": [
+            "integer",
+            "null"
+          ],
+          "format": "int32"
+        },
+        "product_id": {
+          "type": "integer",
+          "format": "uint16",
+          "maximum": 65535,
+          "minimum": 0
+        },
+        "usage": {
+          "type": "integer",
+          "format": "uint16",
+          "maximum": 65535,
+          "minimum": 0
+        },
+        "usage_page": {
+          "type": [
+            "integer",
+            "null"
+          ],
+          "format": "uint16",
+          "maximum": 65535,
+          "minimum": 0
+        },
+        "usage_page_min": {
+          "type": [
+            "integer",
+            "null"
+          ],
+          "format": "uint16",
+          "maximum": 65535,
+          "minimum": 0
+        },
+        "vendor_id": {
+          "type": "integer",
+          "format": "uint16",
+          "maximum": 65535,
+          "minimum": 0
+        }
+      },
+      "additionalProperties": false,
+      "required": [
+        "vendor_id",
+        "product_id",
+        "usage"
+      ]
+    },
+    "HistoryIndex": {
+      "type": "object",
+      "properties": {
+        "redo": {
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/HistoryItem"
+          }
+        },
+        "undo": {
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/HistoryItem"
+          }
+        }
+      },
+      "additionalProperties": false,
+      "required": [
+        "undo",
+        "redo"
+      ]
+    },
+    "HistoryItem": {
+      "type": "object",
+      "properties": {
+        "bytes": {
+          "type": "integer",
+          "format": "uint",
+          "minimum": 0
+        },
+        "description": {
+          "type": "string"
+        },
+        "id": {
+          "type": "string"
+        },
+        "timestamp_ms": {
+          "type": "integer",
+          "format": "uint64",
+          "minimum": 0
+        }
+      },
+      "required": [
+        "id",
+        "description",
+        "timestamp_ms",
+        "bytes"
+      ]
+    },
+    "IconAsset": {
+      "description": "The vector and attribution travel with bindings and presets, independently of the disk cache",
+      "type": "object",
+      "properties": {
+        "author": {
+          "type": "string"
+        },
+        "collection": {
+          "type": "string"
+        },
+        "id": {
+          "type": "string"
+        },
+        "license": {
+          "type": "string"
+        },
+        "license_url": {
+          "type": "string"
+        },
+        "svg": {
+          "type": "string"
+        }
+      },
+      "additionalProperties": false,
+      "required": [
+        "id",
+        "svg",
+        "collection",
+        "author",
+        "license",
+        "license_url"
+      ]
+    },
+    "KeyboardBackgroundColor": {
+      "description": "K1's background command carries hue and saturation only (full value)",
+      "type": "object",
+      "properties": {
+        "hue": {
+          "type": "integer",
+          "format": "uint16",
+          "maximum": 65535,
+          "minimum": 0
+        },
+        "saturation": {
+          "type": "integer",
+          "format": "uint8",
+          "maximum": 255,
+          "minimum": 0
+        }
+      },
+      "additionalProperties": false,
+      "required": [
+        "hue",
+        "saturation"
+      ]
+    },
+    "KeyboardCapabilities": {
+      "type": "object",
+      "properties": {
+        "background_color_effects": {
+          "type": "array",
+          "default": [],
+          "items": {
+            "type": "integer",
+            "format": "uint8",
+            "maximum": 255,
+            "minimum": 0
+          }
+        },
+        "brightness_max": {
+          "type": "integer",
+          "format": "uint8",
+          "maximum": 255,
+          "minimum": 0
+        },
+        "effect_max": {
+          "type": [
+            "integer",
+            "null"
+          ],
+          "format": "uint8",
+          "maximum": 255,
+          "minimum": 0
+        },
+        "effect_names": {
+          "description": "Ordered wire indexes, not the vendor UI's decorative IDs",
+          "type": "array",
+          "default": [],
+          "items": {
+            "type": "string"
+          }
+        },
+        "effects_unavailable_reason": {
+          "type": "string",
+          "default": ""
+        },
+        "factory_reset": {
+          "type": "boolean",
+          "default": false
+        },
+        "global_rgb": {
+          "type": "boolean"
+        },
+        "os_modes": {
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/KeyboardOsMode"
+          }
+        },
+        "settings_query": {
+          "type": "boolean",
+          "default": false
+        },
+        "sleep_timeout_seconds_options": {
+          "description": "Supported firmware idle timers in seconds, including u32::MAX for Never",
+          "type": "array",
+          "default": [],
+          "items": {
+            "type": "integer",
+            "format": "uint32",
+            "minimum": 0
+          }
+        },
+        "speed_max": {
+          "type": [
+            "integer",
+            "null"
+          ],
+          "format": "uint8",
+          "maximum": 255,
+          "minimum": 0
+        },
+        "speed_unavailable_reason": {
+          "type": "string",
+          "default": ""
+        }
+      },
+      "additionalProperties": false,
+      "required": [
+        "brightness_max",
+        "global_rgb",
+        "os_modes"
+      ]
+    },
+    "KeyboardMacroEvent": {
+      "type": "object",
+      "properties": {
+        "delay_ms": {
+          "type": "integer",
+          "format": "uint32",
+          "minimum": 0
+        },
+        "key": {
+          "$ref": "#/$defs/PhysicalKey"
+        },
+        "kind": {
+          "$ref": "#/$defs/KeyboardMacroEventKind"
+        }
+      },
+      "additionalProperties": false,
+      "required": [
+        "kind",
+        "key",
+        "delay_ms"
+      ]
+    },
+    "KeyboardMacroEventKind": {
+      "type": "string",
+      "enum": [
+        "key_down",
+        "key_up",
+        "repeat"
+      ]
+    },
+    "KeyboardMacroFocusPolicy": {
+      "type": "string",
+      "enum": [
+        "stay_on_target",
+        "allow_focus_changes"
+      ]
+    },
+    "KeyboardMacroKeyMode": {
+      "type": "string",
+      "enum": [
+        "physical"
+      ]
+    },
+    "KeyboardMacroPlatform": {
+      "type": "string",
+      "enum": [
+        "macos",
+        "windows",
+        "linux",
+        "unknown"
+      ]
+    },
+    "KeyboardMacroPlayback": {
+      "type": "object",
+      "properties": {
+        "focus_policy": {
+          "$ref": "#/$defs/KeyboardMacroFocusPolicy"
+        },
+        "repeat_mode": {
+          "$ref": "#/$defs/KeyboardMacroRepeatMode",
+          "default": "exact"
+        },
+        "speed": {
+          "type": "number",
+          "format": "double"
+        }
+      },
+      "additionalProperties": false,
+      "required": [
+        "speed",
+        "focus_policy"
+      ]
+    },
+    "KeyboardMacroRecording": {
+      "type": "object",
+      "properties": {
+        "events": {
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/KeyboardMacroEvent"
+          }
+        },
+        "key_mode": {
+          "$ref": "#/$defs/KeyboardMacroKeyMode"
+        },
+        "layout": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "platform": {
+          "$ref": "#/$defs/KeyboardMacroPlatform"
+        },
+        "version": {
+          "type": "integer",
+          "format": "uint32",
+          "minimum": 0
+        }
+      },
+      "additionalProperties": false,
+      "required": [
+        "version",
+        "platform",
+        "key_mode",
+        "events"
+      ]
+    },
+    "KeyboardMacroRepeatMode": {
+      "description": "Repeat behavior is explicit saved action intent, never a platform fallback",
+      "oneOf": [
+        {
+          "type": "string",
+          "enum": [
+            "exact"
+          ]
+        },
+        {
+          "description": "Linux X11 supplies repeats from the user's existing keyboard controls\nRecorded Repeat events retain their timing but are not injected",
+          "type": "string",
+          "const": "system"
+        }
+      ]
+    },
+    "KeyboardOsMode": {
+      "type": "string",
+      "enum": [
+        "auto",
+        "windows",
+        "macos"
+      ]
+    },
+    "KeyboardSettings": {
+      "description": "Only explicitly supplied properties are written. These are keyboard outputs,\nseparate from display brightness and the device's lighting channels.",
+      "type": "object",
+      "properties": {
+        "background_color": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/KeyboardBackgroundColor"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "brightness": {
+          "description": "Keyboard backlight percentage (0..100), independent of LCD brightness",
+          "type": [
+            "integer",
+            "null"
+          ],
+          "format": "uint8",
+          "maximum": 255,
+          "minimum": 0
+        },
+        "color": {
+          "type": [
+            "array",
+            "null"
+          ],
+          "items": {
+            "type": "integer",
+            "format": "uint8",
+            "maximum": 255,
+            "minimum": 0
+          },
+          "maxItems": 3,
+          "minItems": 3
+        },
+        "custom_color": {
+          "description": "False selects the device's rainbow palette without forgetting custom RGB",
+          "type": [
+            "boolean",
+            "null"
+          ]
+        },
+        "effect": {
+          "type": [
+            "integer",
+            "null"
+          ],
+          "format": "uint8",
+          "maximum": 255,
+          "minimum": 0
+        },
+        "os_mode": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/KeyboardOsMode"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "sleep_timeout_seconds": {
+          "description": "Device-managed idle timer; u32::MAX disables timed sleep. Apply-only",
+          "type": [
+            "integer",
+            "null"
+          ],
+          "format": "uint32",
+          "minimum": 0
+        },
+        "speed": {
+          "type": [
+            "integer",
+            "null"
+          ],
+          "format": "uint8",
+          "maximum": 255,
+          "minimum": 0
+        }
+      },
+      "additionalProperties": false
+    },
+    "Layout": {
+      "type": "object",
+      "properties": {
+        "height": {
+          "type": "integer",
+          "format": "uint16",
+          "maximum": 65535,
+          "minimum": 0
+        },
+        "rotation": {
+          "type": "integer",
+          "format": "uint16",
+          "maximum": 65535,
+          "minimum": 0
+        },
+        "width": {
+          "type": "integer",
+          "format": "uint16",
+          "maximum": 65535,
+          "minimum": 0
+        }
+      },
+      "additionalProperties": false,
+      "required": [
+        "width",
+        "height",
+        "rotation"
+      ]
+    },
+    "MacroArgument": {
+      "oneOf": [
+        {
+          "type": "object",
+          "properties": {
+            "kind": {
+              "type": "string",
+              "const": "literal"
+            },
+            "value": true
+          },
+          "additionalProperties": false,
+          "required": [
+            "kind",
+            "value"
+          ]
+        },
+        {
+          "type": "object",
+          "properties": {
+            "kind": {
+              "type": "string",
+              "const": "parameter"
+            },
+            "name": {
+              "type": "string"
+            }
+          },
+          "additionalProperties": false,
+          "required": [
+            "kind",
+            "name"
+          ]
+        },
+        {
+          "type": "object",
+          "properties": {
+            "kind": {
+              "type": "string",
+              "const": "input"
+            },
+            "name": {
+              "type": "string"
+            }
+          },
+          "additionalProperties": false,
+          "required": [
+            "kind",
+            "name"
+          ]
+        },
+        {
+          "type": "object",
+          "properties": {
+            "kind": {
+              "type": "string",
+              "const": "output"
+            },
+            "name": {
+              "type": "string"
+            }
+          },
+          "additionalProperties": false,
+          "required": [
+            "kind",
+            "name"
+          ]
+        }
+      ]
+    },
+    "MacroInput": {
+      "type": "object",
+      "properties": {
+        "default": {
+          "default": null
+        },
+        "label": {
+          "type": "string"
+        },
+        "name": {
+          "type": "string"
+        },
+        "required": {
+          "type": "boolean",
+          "default": false
+        },
+        "type": {
+          "type": "string"
+        }
+      },
+      "additionalProperties": false,
+      "required": [
+        "name",
+        "label",
+        "type"
+      ]
+    },
+    "MeasurementCoverage": {
+      "type": "string",
+      "enum": [
+        "unavailable",
+        "partial"
+      ]
+    },
+    "MeasurementSource": {
+      "type": "string",
+      "enum": [
+        "unavailable",
+        "process_tree_rss",
+        "shared_webview",
+        "sdk_payload"
+      ]
+    },
+    "MeasurementState": {
+      "type": "string",
+      "enum": [
+        "warming_up",
+        "available",
+        "stale",
+        "unavailable",
+        "not_running"
+      ]
+    },
+    "MediaOptions": {
+      "type": "object",
+      "properties": {
+        "crop": {
+          "type": "array",
+          "default": [
+            0.0,
+            0.0,
+            1.0,
+            1.0
+          ],
+          "items": {
+            "type": "number",
+            "format": "double"
+          },
+          "maxItems": 4,
+          "minItems": 4
+        },
+        "encoding": {
+          "type": "string"
+        },
+        "fit": {
+          "type": "string",
+          "default": "fill"
+        },
+        "jpeg_quality": {
+          "type": [
+            "integer",
+            "null"
+          ],
+          "format": "uint8",
+          "maximum": 255,
+          "minimum": 0
+        },
+        "letterbox": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "max_fps": {
+          "type": [
+            "number",
+            "null"
+          ],
+          "format": "double"
+        },
+        "max_frame_edge": {
+          "type": [
+            "integer",
+            "null"
+          ],
+          "format": "uint16",
+          "maximum": 65535,
+          "minimum": 0
+        },
+        "min_fps": {
+          "type": [
+            "number",
+            "null"
+          ],
+          "format": "double"
+        },
+        "min_frame_edge": {
+          "type": [
+            "integer",
+            "null"
+          ],
+          "format": "uint16",
+          "maximum": 65535,
+          "minimum": 0
+        },
+        "speed": {
+          "type": "number",
+          "format": "double",
+          "default": 1.0
+        },
+        "trim_end_ms": {
+          "type": [
+            "integer",
+            "null"
+          ],
+          "format": "uint32",
+          "default": null,
+          "minimum": 0
+        },
+        "trim_start_ms": {
+          "type": "integer",
+          "format": "uint32",
+          "default": 0,
+          "minimum": 0
+        }
+      },
+      "additionalProperties": false
+    },
+    "ModelManifest": {
+      "type": "object",
+      "properties": {
+        "capabilities": {
+          "$ref": "#/$defs/DeviceCapabilities"
+        },
+        "controls": {
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/Control"
+          }
+        },
+        "layout": {
+          "$ref": "#/$defs/Layout"
+        },
+        "model_id": {
+          "type": "string"
+        },
+        "name": {
+          "type": "string"
+        },
+        "profile_family": {
+          "description": "Canonical suggested-profile family; native identities and codecs stay model-owned",
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "protocol": {
+          "type": "string"
+        },
+        "schema_version": {
+          "type": "integer",
+          "format": "uint32",
+          "minimum": 0
+        },
+        "status": {
+          "type": "string"
+        },
+        "variants": {
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/Variant"
+          }
+        }
+      },
+      "additionalProperties": false,
+      "required": [
+        "schema_version",
+        "model_id",
+        "name",
+        "protocol",
+        "status",
+        "variants",
+        "capabilities",
+        "layout",
+        "controls"
+      ]
+    },
+    "NavigationDirection": {
+      "type": "string",
+      "enum": [
+        "previous",
+        "next"
+      ]
+    },
+    "NavigationTarget": {
+      "type": "string",
+      "enum": [
+        "page",
+        "profile"
+      ]
+    },
+    "OutputMode": {
+      "type": "string",
+      "enum": [
+        "individual_updates",
+        "frame_scheduling"
+      ]
+    },
+    "OutputPolicy": {
+      "type": "object",
+      "properties": {
+        "max_batch_bytes": {
+          "type": "integer",
+          "format": "uint",
+          "minimum": 0
+        },
+        "max_batch_estimated_ms": {
+          "type": "integer",
+          "format": "uint32",
+          "minimum": 0
+        },
+        "max_batch_surfaces": {
+          "type": "integer",
+          "format": "uint",
+          "minimum": 0
+        },
+        "max_pending_bytes": {
+          "type": "integer",
+          "format": "uint",
+          "minimum": 0
+        },
+        "max_surface_bytes": {
+          "type": "integer",
+          "format": "uint",
+          "minimum": 0
+        },
+        "mode": {
+          "$ref": "#/$defs/OutputMode"
+        },
+        "target_frame_hz": {
+          "type": "integer",
+          "format": "uint8",
+          "maximum": 255,
+          "minimum": 0
+        }
+      },
+      "additionalProperties": false,
+      "required": [
+        "mode",
+        "target_frame_hz",
+        "max_pending_bytes",
+        "max_batch_bytes",
+        "max_batch_estimated_ms",
+        "max_batch_surfaces",
+        "max_surface_bytes"
+      ]
+    },
+    "Page": {
+      "type": "object",
+      "properties": {
+        "bindings": {
+          "type": "object",
+          "additionalProperties": {
+            "$ref": "#/$defs/Binding"
+          }
+        },
+        "id": {
+          "type": "string"
+        },
+        "name": {
+          "type": "string"
+        }
+      },
+      "additionalProperties": false,
+      "required": [
+        "id",
+        "name",
+        "bindings"
+      ]
+    },
+    "PhysicalKey": {
+      "description": "DOM physical codes. Consumer, vendor, Fn and composition keys are absent",
+      "type": "string",
+      "enum": [
+        "KeyA",
+        "KeyB",
+        "KeyC",
+        "KeyD",
+        "KeyE",
+        "KeyF",
+        "KeyG",
+        "KeyH",
+        "KeyI",
+        "KeyJ",
+        "KeyK",
+        "KeyL",
+        "KeyM",
+        "KeyN",
+        "KeyO",
+        "KeyP",
+        "KeyQ",
+        "KeyR",
+        "KeyS",
+        "KeyT",
+        "KeyU",
+        "KeyV",
+        "KeyW",
+        "KeyX",
+        "KeyY",
+        "KeyZ",
+        "Digit0",
+        "Digit1",
+        "Digit2",
+        "Digit3",
+        "Digit4",
+        "Digit5",
+        "Digit6",
+        "Digit7",
+        "Digit8",
+        "Digit9",
+        "Backquote",
+        "Minus",
+        "Equal",
+        "BracketLeft",
+        "BracketRight",
+        "Backslash",
+        "Semicolon",
+        "Quote",
+        "Comma",
+        "Period",
+        "Slash",
+        "IntlBackslash",
+        "IntlRo",
+        "IntlYen",
+        "Backspace",
+        "Tab",
+        "Enter",
+        "Space",
+        "Escape",
+        "CapsLock",
+        "ShiftLeft",
+        "ShiftRight",
+        "ControlLeft",
+        "ControlRight",
+        "AltLeft",
+        "AltRight",
+        "MetaLeft",
+        "MetaRight",
+        "Insert",
+        "Delete",
+        "Home",
+        "End",
+        "PageUp",
+        "PageDown",
+        "ArrowLeft",
+        "ArrowRight",
+        "ArrowUp",
+        "ArrowDown",
+        "PrintScreen",
+        "ScrollLock",
+        "Pause",
+        "NumLock",
+        "F1",
+        "F2",
+        "F3",
+        "F4",
+        "F5",
+        "F6",
+        "F7",
+        "F8",
+        "F9",
+        "F10",
+        "F11",
+        "F12",
+        "F13",
+        "F14",
+        "F15",
+        "F16",
+        "F17",
+        "F18",
+        "F19",
+        "F20",
+        "F21",
+        "F22",
+        "F23",
+        "F24",
+        "Numpad0",
+        "Numpad1",
+        "Numpad2",
+        "Numpad3",
+        "Numpad4",
+        "Numpad5",
+        "Numpad6",
+        "Numpad7",
+        "Numpad8",
+        "Numpad9",
+        "NumpadAdd",
+        "NumpadSubtract",
+        "NumpadMultiply",
+        "NumpadDivide",
+        "NumpadDecimal",
+        "NumpadEnter",
+        "NumpadEqual",
+        "NumpadComma"
+      ]
+    },
+    "PluginAction": {
+      "type": "object",
+      "properties": {
+        "control_types": {
+          "description": "Normalized application control kinds declared by the package's controller metadata",
+          "type": "array",
+          "items": {
+            "type": "string"
+          }
+        },
+        "encoder_icon": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "has_settings": {
+          "type": "boolean",
+          "default": false
+        },
+        "icon": {
+          "type": [
+            "string",
+            "null"
+          ],
+          "default": null
+        },
+        "id": {
+          "type": "string"
+        },
+        "multi_action_images": {
+          "type": [
+            "array",
+            "null"
+          ],
+          "items": {
+            "type": [
+              "string",
+              "null"
+            ]
+          }
+        },
+        "name": {
+          "type": "string"
+        },
+        "state_names": {
+          "description": "Manifest state labels in index order (not the mutable current state)",
+          "type": "array",
+          "items": {
+            "type": "string"
+          }
+        },
+        "supported_in_key_logic_actions": {
+          "description": "Elgato key-logic eligibility, separate from multi-action eligibility",
+          "type": "boolean"
+        },
+        "supported_in_multi_actions": {
+          "description": "Vendor manifest defaults are true when the flag is omitted",
+          "type": "boolean"
+        },
+        "user_title_enabled": {
+          "type": "boolean"
+        },
+        "visible_in_actions_list": {
+          "type": "boolean"
+        }
+      },
+      "required": [
+        "id",
+        "name",
+        "control_types",
+        "supported_in_multi_actions",
+        "supported_in_key_logic_actions",
+        "visible_in_actions_list",
+        "user_title_enabled",
+        "state_names"
+      ]
+    },
+    "PluginAppearance": {
+      "type": "object",
+      "properties": {
+        "action_id": {
+          "type": "string"
+        },
+        "elements": {
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/ElementStyle"
+          }
+        },
+        "plugin_id": {
+          "type": "string"
+        },
+        "vendor_profile": {
+          "description": "Source-backed per-state title appearance from a bundled vendor profile",
+          "anyOf": [
+            {
+              "$ref": "#/$defs/VendorProfileAppearance"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        }
+      },
+      "additionalProperties": false,
+      "required": [
+        "plugin_id",
+        "action_id",
+        "elements"
+      ]
+    },
+    "PluginDemand": {
+      "type": "object",
+      "properties": {
+        "device_id": {
+          "type": "string"
+        },
+        "profile_id": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "device_id",
+        "profile_id"
+      ]
+    },
+    "PluginHealth": {
+      "type": "object",
+      "properties": {
+        "blocked_reason": {
+          "type": [
+            "string",
+            "null"
+          ],
+          "default": null
+        },
+        "events": {
+          "type": "array",
+          "default": [],
+          "items": {
+            "$ref": "#/$defs/HealthEvent"
+          }
+        },
+        "last_exit": {
+          "type": [
+            "string",
+            "null"
+          ],
+          "default": null
+        },
+        "last_exit_code": {
+          "type": [
+            "integer",
+            "null"
+          ],
+          "format": "int32",
+          "default": null
+        },
+        "last_exit_signal": {
+          "type": [
+            "integer",
+            "null"
+          ],
+          "format": "int32",
+          "default": null
+        },
+        "last_issue_ms": {
+          "type": [
+            "integer",
+            "null"
+          ],
+          "format": "uint64",
+          "default": null,
+          "minimum": 0
+        },
+        "last_registration_ms": {
+          "type": [
+            "integer",
+            "null"
+          ],
+          "format": "uint64",
+          "default": null,
+          "minimum": 0
+        },
+        "last_run_peak_resident_bytes": {
+          "type": [
+            "integer",
+            "null"
+          ],
+          "format": "uint64",
+          "default": null,
+          "minimum": 0
+        },
+        "last_unexpected_exit_ms": {
+          "type": [
+            "integer",
+            "null"
+          ],
+          "format": "uint64",
+          "default": null,
+          "minimum": 0
+        },
+        "missing_assets": {
+          "type": "array",
+          "default": [],
+          "items": {
+            "type": "string"
+          }
+        },
+        "recent_failures": {
+          "type": "array",
+          "default": [],
+          "items": {
+            "type": "string"
+          }
+        },
+        "restart_attempts": {
+          "type": "integer",
+          "format": "uint8",
+          "default": 0,
+          "maximum": 255,
+          "minimum": 0
+        },
+        "session": {
+          "$ref": "#/$defs/HealthCounts",
+          "default": {
+            "automatic_restarts": 0,
+            "crashes": 0,
+            "failed_starts": 0,
+            "issues": 0
+          }
+        },
+        "totals": {
+          "$ref": "#/$defs/HealthCounts",
+          "default": {
+            "automatic_restarts": 0,
+            "crashes": 0,
+            "failed_starts": 0,
+            "issues": 0
+          }
+        },
+        "unsupported_apis": {
+          "type": "array",
+          "default": [],
+          "items": {
+            "type": "string"
+          }
+        }
+      }
+    },
+    "PluginInfo": {
+      "type": "object",
+      "properties": {
+        "actions": {
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/PluginAction"
+          }
+        },
+        "appearance": {
+          "type": "string",
+          "default": ""
+        },
+        "author": {
+          "type": [
+            "string",
+            "null"
+          ],
+          "default": null
+        },
+        "capabilities": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/Capabilities"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null
+        },
+        "dialect": {
+          "type": "string"
+        },
+        "enabled": {
+          "type": "boolean"
+        },
+        "has_settings_interface": {
+          "type": "boolean",
+          "default": false
+        },
+        "health": {
+          "$ref": "#/$defs/PluginHealth"
+        },
+        "icon": {
+          "type": [
+            "string",
+            "null"
+          ],
+          "default": null
+        },
+        "id": {
+          "type": "string"
+        },
+        "kind": {
+          "type": "string"
+        },
+        "name": {
+          "type": "string"
+        },
+        "running_runtime": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/RuntimeInstallation"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null
+        },
+        "runtime": {
+          "$ref": "#/$defs/PluginRuntime",
+          "default": {
+            "demand": [],
+            "last_wake_at_ms": null,
+            "last_wake_reason": null,
+            "network": {
+              "coverage": "unavailable",
+              "download_bytes_per_second": null,
+              "received_bytes": null,
+              "sampled_at_ms": null,
+              "sent_bytes": null,
+              "source": "unavailable",
+              "state": "unavailable",
+              "upload_bytes_per_second": null
+            },
+            "reason": "disabled",
+            "resources": {
+              "cpu_percent": null,
+              "history": [],
+              "peak_cpu_percent": null,
+              "peak_resident_bytes": 0,
+              "process_count": null,
+              "resident_bytes": null,
+              "root_pid": null,
+              "sampled_at_ms": null,
+              "source": "unavailable",
+              "state": "not_running"
+            },
+            "run_id": null,
+            "started_at_ms": null,
+            "state": "disabled",
+            "uptime_ms": null
+          }
+        },
+        "sleep_when_hidden": {
+          "type": "boolean",
+          "default": false
+        },
+        "status": {
+          "type": "string"
+        },
+        "version": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "id",
+        "name",
+        "version",
+        "dialect",
+        "enabled",
+        "kind",
+        "status",
+        "actions",
+        "health"
+      ]
+    },
+    "PluginNetwork": {
+      "type": "object",
+      "properties": {
+        "coverage": {
+          "$ref": "#/$defs/MeasurementCoverage"
+        },
+        "download_bytes_per_second": {
+          "type": [
+            "number",
+            "null"
+          ],
+          "format": "double"
+        },
+        "received_bytes": {
+          "type": [
+            "integer",
+            "null"
+          ],
+          "format": "uint64",
+          "minimum": 0
+        },
+        "sampled_at_ms": {
+          "type": [
+            "integer",
+            "null"
+          ],
+          "format": "uint64",
+          "minimum": 0
+        },
+        "sent_bytes": {
+          "type": [
+            "integer",
+            "null"
+          ],
+          "format": "uint64",
+          "minimum": 0
+        },
+        "source": {
+          "$ref": "#/$defs/MeasurementSource"
+        },
+        "state": {
+          "$ref": "#/$defs/MeasurementState"
+        },
+        "upload_bytes_per_second": {
+          "type": [
+            "number",
+            "null"
+          ],
+          "format": "double"
+        }
+      },
+      "required": [
+        "state",
+        "source",
+        "coverage"
+      ]
+    },
+    "PluginResources": {
+      "type": "object",
+      "properties": {
+        "cpu_percent": {
+          "type": [
+            "number",
+            "null"
+          ],
+          "format": "double"
+        },
+        "history": {
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/ResourceSample"
+          }
+        },
+        "peak_cpu_percent": {
+          "type": [
+            "number",
+            "null"
+          ],
+          "format": "double",
+          "default": null
+        },
+        "peak_resident_bytes": {
+          "type": "integer",
+          "format": "uint64",
+          "minimum": 0
+        },
+        "process_count": {
+          "type": [
+            "integer",
+            "null"
+          ],
+          "format": "uint",
+          "minimum": 0
+        },
+        "resident_bytes": {
+          "type": [
+            "integer",
+            "null"
+          ],
+          "format": "uint64",
+          "minimum": 0
+        },
+        "root_pid": {
+          "type": [
+            "integer",
+            "null"
+          ],
+          "format": "uint32",
+          "minimum": 0
+        },
+        "sampled_at_ms": {
+          "type": [
+            "integer",
+            "null"
+          ],
+          "format": "uint64",
+          "minimum": 0
+        },
+        "source": {
+          "$ref": "#/$defs/MeasurementSource"
+        },
+        "state": {
+          "$ref": "#/$defs/MeasurementState"
+        }
+      },
+      "required": [
+        "state",
+        "source",
+        "peak_resident_bytes",
+        "history"
+      ]
+    },
+    "PluginRuntime": {
+      "type": "object",
+      "properties": {
+        "demand": {
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/PluginDemand"
+          }
+        },
+        "last_wake_at_ms": {
+          "type": [
+            "integer",
+            "null"
+          ],
+          "format": "uint64",
+          "default": null,
+          "minimum": 0
+        },
+        "last_wake_reason": {
+          "description": "Last admitted start in this Manager session; retains only categorical reasons",
+          "anyOf": [
+            {
+              "$ref": "#/$defs/RuntimeReason"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null
+        },
+        "network": {
+          "$ref": "#/$defs/PluginNetwork"
+        },
+        "reason": {
+          "$ref": "#/$defs/RuntimeReason"
+        },
+        "resources": {
+          "$ref": "#/$defs/PluginResources"
+        },
+        "run_id": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "started_at_ms": {
+          "type": [
+            "integer",
+            "null"
+          ],
+          "format": "uint64",
+          "minimum": 0
+        },
+        "state": {
+          "$ref": "#/$defs/RuntimeState"
+        },
+        "uptime_ms": {
+          "type": [
+            "integer",
+            "null"
+          ],
+          "format": "uint64",
+          "minimum": 0
+        }
+      },
+      "required": [
+        "state",
+        "reason",
+        "demand",
+        "resources",
+        "network"
+      ]
+    },
+    "Profile": {
+      "type": "object",
+      "properties": {
+        "active_page": {
+          "type": "string"
+        },
+        "background_asset": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "background_media": {
+          "$ref": "#/$defs/MediaOptions",
+          "default": {
+            "crop": [
+              0.0,
+              0.0,
+              1.0,
+              1.0
+            ],
+            "fit": "fill",
+            "speed": 1.0,
+            "trim_end_ms": null,
+            "trim_start_ms": 0
+          }
+        },
+        "id": {
+          "type": "string"
+        },
+        "model_id": {
+          "type": "string"
+        },
+        "name": {
+          "type": "string"
+        },
+        "pages": {
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/Page"
+          }
+        },
+        "palette": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/ProfilePalette"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "parameters": {
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/ProfileParameter"
+          }
+        }
+      },
+      "additionalProperties": false,
+      "required": [
+        "id",
+        "name",
+        "model_id",
+        "active_page",
+        "pages"
+      ]
+    },
+    "ProfilePalette": {
+      "type": "object",
+      "properties": {
+        "dark_palette": {
+          "type": "string",
+          "default": "default"
+        },
+        "light_palette": {
+          "type": "string",
+          "default": "default"
+        },
+        "target": {
+          "$ref": "#/$defs/ProfilePaletteTarget",
+          "default": "global"
+        }
+      },
+      "additionalProperties": false
+    },
+    "ProfilePaletteTarget": {
+      "type": "string",
+      "enum": [
+        "global",
+        "device",
+        "manager",
+        "both"
+      ]
+    },
+    "ProfileParameter": {
+      "type": "object",
+      "properties": {
+        "default": {
+          "default": null
+        },
+        "label": {
+          "type": "string"
+        },
+        "name": {
+          "type": "string"
+        },
+        "required": {
+          "type": "boolean",
+          "default": false
+        },
+        "sensitive": {
+          "type": "boolean"
+        },
+        "type": {
+          "type": "string"
+        }
+      },
+      "additionalProperties": false,
+      "required": [
+        "name",
+        "label",
+        "type"
+      ]
+    },
+    "RefreshPolicy": {
+      "type": "object",
+      "properties": {
+        "default_ms": {
+          "type": "integer",
+          "format": "uint32",
+          "minimum": 0
+        },
+        "maximum_ms": {
+          "type": "integer",
+          "format": "uint32",
+          "minimum": 0
+        },
+        "minimum_ms": {
+          "type": "integer",
+          "format": "uint32",
+          "minimum": 0
+        }
+      },
+      "additionalProperties": false,
+      "required": [
+        "default_ms",
+        "minimum_ms",
+        "maximum_ms"
+      ]
+    },
+    "ResourceSample": {
+      "type": "object",
+      "properties": {
+        "cpu_percent": {
+          "type": [
+            "number",
+            "null"
+          ],
+          "format": "double"
+        },
+        "resident_bytes": {
+          "type": [
+            "integer",
+            "null"
+          ],
+          "format": "uint64",
+          "minimum": 0
+        },
+        "timestamp_ms": {
+          "type": "integer",
+          "format": "uint64",
+          "minimum": 0
+        }
+      },
+      "required": [
+        "timestamp_ms"
+      ]
+    },
+    "RuntimeInstallation": {
+      "type": "object",
+      "properties": {
+        "channel": {
+          "type": "string"
+        },
+        "executable": {
+          "type": "string"
+        },
+        "id": {
+          "type": "string"
+        },
+        "kind": {
+          "$ref": "#/$defs/RuntimeKind"
+        },
+        "line": {
+          "type": "string"
+        },
+        "provenance": {
+          "type": "string"
+        },
+        "source": {
+          "type": "string"
+        },
+        "verification": {
+          "type": "string"
+        },
+        "version": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "id",
+        "kind",
+        "channel",
+        "line",
+        "version",
+        "executable",
+        "source",
+        "verification",
+        "provenance"
+      ]
+    },
+    "RuntimeKind": {
+      "type": "string",
+      "enum": [
+        "nodejs"
+      ]
+    },
+    "RuntimeReason": {
+      "type": "string",
+      "enum": [
+        "disabled",
+        "no_active_device",
+        "no_active_profile_demand",
+        "no_visible_actions",
+        "required_by_active_profile",
+        "manual_action",
+        "configuration",
+        "registration",
+        "missing_runtime",
+        "compatibility",
+        "unexpected_exit",
+        "registration_timeout",
+        "repeated_failures",
+        "user_restart",
+        "shutdown"
+      ]
+    },
+    "RuntimeState": {
+      "type": "string",
+      "enum": [
+        "disabled",
+        "idle",
+        "queued",
+        "starting",
+        "running",
+        "stopping",
+        "retrying",
+        "blocked"
+      ]
+    },
+    "SavedMacro": {
+      "type": "object",
+      "properties": {
+        "action": {
+          "$ref": "#/$defs/Action"
+        },
+        "id": {
+          "type": "string"
+        },
+        "inputs": {
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/MacroInput"
+          }
+        },
+        "name": {
+          "type": "string"
+        }
+      },
+      "additionalProperties": false,
+      "required": [
+        "id",
+        "name",
+        "action"
+      ]
+    },
+    "Schedule": {
+      "type": "object",
+      "properties": {
+        "days": {
+          "type": "array",
+          "items": {
+            "type": "integer",
+            "format": "uint8",
+            "maximum": 255,
+            "minimum": 0
+          }
+        },
+        "end": {
+          "type": "integer",
+          "format": "uint16",
+          "maximum": 65535,
+          "minimum": 0
+        },
+        "start": {
+          "type": "integer",
+          "format": "uint16",
+          "maximum": 65535,
+          "minimum": 0
+        }
+      },
+      "additionalProperties": false,
+      "required": [
+        "days",
+        "start",
+        "end"
+      ]
+    },
+    "ThemedAsset": {
+      "type": "object",
+      "properties": {
+        "dark": {
+          "type": "string"
+        },
+        "light": {
+          "type": "string"
+        }
+      },
+      "additionalProperties": false,
+      "required": [
+        "light",
+        "dark"
+      ]
+    },
+    "TitleCondition": {
+      "type": "object",
+      "properties": {
+        "case_sensitive": {
+          "type": "boolean"
+        },
+        "mode": {
+          "type": "string"
+        },
+        "value": {
+          "type": "string"
+        }
+      },
+      "additionalProperties": false,
+      "required": [
+        "value",
+        "mode",
+        "case_sensitive"
+      ]
+    },
+    "ToggleIcon": {
+      "type": "object",
+      "properties": {
+        "icon": {
+          "type": "string"
+        },
+        "icon_asset": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/IconAsset"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        }
+      },
+      "additionalProperties": false,
+      "required": [
+        "icon"
+      ]
+    },
+    "TouchPanelCapabilities": {
+      "description": "Host routing capabilities, independent of physical firmware qualification",
+      "type": "object",
+      "properties": {
+        "button_controls": {
+          "type": "array",
+          "items": {
+            "type": "string"
+          }
+        },
+        "gesture_control": {
+          "type": "string"
+        },
+        "swipe_directions": {
+          "type": "array",
+          "items": {
+            "type": "string"
+          }
+        }
+      },
+      "additionalProperties": false,
+      "required": [
+        "gesture_control",
+        "button_controls",
+        "swipe_directions"
+      ]
+    },
+    "Variant": {
+      "type": "object",
+      "properties": {
+        "available": {
+          "type": "boolean",
+          "default": true
+        },
+        "id": {
+          "type": "string"
+        },
+        "identity": {
+          "$ref": "#/$defs/HidSelector"
+        },
+        "name": {
+          "type": "string"
+        },
+        "unavailable_reason": {
+          "type": [
+            "string",
+            "null"
+          ]
+        }
+      },
+      "additionalProperties": false,
+      "required": [
+        "id",
+        "name",
+        "identity"
+      ]
+    },
+    "VendorProfileAppearance": {
+      "description": "Current owned representation, distinct from the external archive format",
+      "type": "object",
+      "properties": {
+        "initial_state": {
+          "type": "integer",
+          "format": "uint32",
+          "minimum": 0
+        },
+        "linked_title": {
+          "type": "boolean"
+        },
+        "states": {
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/VendorTitleStyle"
+          }
+        }
+      },
+      "additionalProperties": false,
+      "required": [
+        "linked_title",
+        "initial_state",
+        "states"
+      ]
+    },
+    "VendorTitleStyle": {
+      "type": "object",
+      "properties": {
+        "font_family": {
+          "type": "string"
+        },
+        "font_size": {
+          "type": "number",
+          "format": "double"
+        },
+        "font_style": {
+          "type": "string"
+        },
+        "font_underline": {
+          "type": "boolean"
+        },
+        "outline_thickness": {
+          "type": "number",
+          "format": "double"
+        },
+        "show_title": {
+          "type": "boolean"
+        },
+        "title_alignment": {
+          "type": "string"
+        },
+        "title_color": {
+          "type": "string"
+        }
+      },
+      "additionalProperties": false,
+      "required": [
+        "font_family",
+        "font_size",
+        "font_style",
+        "font_underline",
+        "outline_thickness",
+        "show_title",
+        "title_alignment",
+        "title_color"
+      ]
+    },
+    "VibrationCapabilities": {
+      "type": "object",
+      "properties": {
+        "configuration_fields": {
+          "description": "Other fields that the same hardware command must write explicitly",
+          "type": "array",
+          "default": [],
+          "items": {
+            "$ref": "#/$defs/DeviceConfigurationField"
+          }
+        },
+        "firmware_requirements": {
+          "type": "object",
+          "additionalProperties": {
+            "type": "string"
+          }
+        },
+        "strength": {
+          "type": "boolean"
+        },
+        "toggle": {
+          "type": "boolean"
+        },
+        "unavailable_reason": {
+          "type": "string"
+        },
+        "writable": {
+          "type": "boolean"
+        }
+      },
+      "additionalProperties": false,
+      "required": [
+        "toggle",
+        "strength",
+        "writable",
+        "unavailable_reason",
+        "firmware_requirements"
+      ]
+    }
+  }
+}

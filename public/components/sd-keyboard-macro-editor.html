@@ -1,0 +1,634 @@
+<div x-data="keyboardMacroEditor">
+    <dialog
+        x-ref="dialog"
+        class="feature-dialog wide-dialog keyboard-macro-dialog"
+        aria-labelledby="keyboard-macro-title"
+        @cancel="dismiss"
+    >
+        <header class="picker-header">
+            <div>
+                <h2 id="keyboard-macro-title">Keyboard macro</h2>
+            </div>
+            <button type="button" class="icon-button" aria-label="Cancel macro" @click="cancel">
+                ×
+            </button>
+        </header>
+        <section
+            class="keyboard-macro-session"
+            x-show="session && recordingMode !== 'in_app'"
+            aria-label="Recording session"
+        >
+            <div>
+                <strong role="status" x-text="recordingStatus"></strong>
+                <span
+                    x-text="eventCount + ' input events · ' + (elapsed / 1000).toFixed(1) + ' s'"
+                ></span>
+                <span x-text="'Emergency stop: ' + emergencyShortcut"></span>
+            </div>
+            <div class="button-row">
+                <button
+                    type="button"
+                    class="button"
+                    @pointerdown.prevent
+                    @click="stop"
+                    :disabled="!recording || busy"
+                >
+                    Stop recording
+                </button>
+                <button
+                    type="button"
+                    class="button"
+                    @pointerdown.prevent
+                    @click="cancelTake"
+                    :disabled="!session"
+                >
+                    Cancel recording
+                </button>
+            </div>
+        </section>
+        <section
+            class="keyboard-macro-session"
+            x-show="testSession || testBusy"
+            aria-label="Playback test session"
+        >
+            <div>
+                <strong role="status" x-text="testStatus"></strong>
+                <p
+                    x-show="testSession && testSession.target_label"
+                    x-text="testSession && testSession.target_label"
+                ></p>
+                <span>
+                    Test stops if the selected target changes. No automatic focus switching.
+                </span>
+            </div>
+            <div class="button-row">
+                <button
+                    type="button"
+                    class="button primary"
+                    x-show="testSession && testSession.state === 'target_ready'"
+                    :disabled="!canStartTest"
+                    @click="startTest"
+                >
+                    Test in this target
+                </button>
+                <button type="button" class="button" @click="cancelTest">Cancel test</button>
+            </div>
+        </section>
+        <div class="feature-body keyboard-macro-body">
+            <p class="field-help">
+                Do not record passwords. Saved keystrokes are included in exports and backups.
+            </p>
+            <p
+                class="field-help"
+                role="alert"
+                aria-label="Native input warning"
+                x-show="capabilities && capabilities.native_warning"
+                x-text="capabilities && capabilities.native_warning"
+            ></p>
+            <p
+                class="field-help"
+                role="note"
+                aria-label="Repeat mode required"
+                x-show="repeatModeRequired"
+                x-text="playbackHelp"
+            ></p>
+            <p class="danger-text" role="alert" x-show="error" x-text="error"></p>
+            <p class="field-help" role="status" x-show="notice" x-text="notice"></p>
+            <section class="keyboard-macro-capture-section" aria-label="Recording controls">
+                <div class="keyboard-macro-record-toolbar">
+                    <label class="field-group">
+                        Record keys
+                        <select
+                            x-model="recordingMode"
+                            aria-label="Record keys"
+                            :disabled="editingLocked"
+                            aria-describedby="keyboard-recording-mode-help"
+                        >
+                            <option
+                                value="in_app"
+                                :disabled="!capabilities || !capabilities.in_app_recording"
+                            >
+                                In Manager
+                            </option>
+                            <option
+                                value="global"
+                                :disabled="!capabilities || !capabilities.global_recording"
+                            >
+                                Another app
+                            </option>
+                        </select>
+                    </label>
+                    <div class="button-row">
+                        <button
+                            type="button"
+                            class="button"
+                            @click="requestRecord"
+                            :disabled="!recordAvailable"
+                        >
+                            Record
+                        </button>
+                    </div>
+                </div>
+                <p
+                    id="keyboard-recording-mode-help"
+                    class="field-help"
+                    x-show="recordingMode === 'global'"
+                >
+                    Switch to a blank scratch app during the three-second countdown. Password fields
+                    cannot always be detected. Returning here does not stop capture. Stop with
+                    <span x-text="emergencyShortcut"></span>
+                    .
+                </p>
+                <div
+                    class="field-group"
+                    x-show="confirmReplace"
+                    role="group"
+                    aria-label="Replace recording?"
+                >
+                    <p>Replace the recording in this draft? Cancel recording restores it.</p>
+                    <div class="button-row">
+                        <button type="button" class="button danger" @click="start">
+                            Replace and record
+                        </button>
+                        <button type="button" class="button" @click="keepRecording">
+                            Keep current recording
+                        </button>
+                    </div>
+                </div>
+                <p
+                    class="field-help"
+                    x-show="capabilities && !capabilities.global_recording"
+                    x-text="capabilities && capabilities.global_reason"
+                ></p>
+                <p class="field-help" x-show="capabilities && !capabilities.in_app_recording">
+                    In-app recording is unavailable in this session. You can still add and edit keys
+                    manually.
+                </p>
+            </section>
+            <template x-if="unsupported.length">
+                <section class="field-group" aria-label="Unsupported keys">
+                    <p class="danger-text" role="alert">
+                        Unsupported input was detected. Remove these entries before Apply. No text
+                        or IME conversion is performed.
+                    </p>
+                    <template x-for="(item, index) in unsupported" :key="item">
+                        <div class="button-row">
+                            <span x-text="item"></span>
+                            <button
+                                class="button"
+                                type="button"
+                                :data-index="index"
+                                @click="removeUnsupported"
+                                :disabled="recording"
+                            >
+                                Remove unsupported entry
+                            </button>
+                        </div>
+                    </template>
+                </section>
+            </template>
+            <template x-if="draft">
+                <div class="keyboard-macro-review">
+                    <details class="keyboard-macro-options">
+                        <summary>Add key or combination</summary>
+                        <fieldset
+                            class="parameter-editor"
+                            :disabled="editingLocked"
+                            aria-label="Add key or combination"
+                        >
+                            <div class="settings-form-grid keyboard-macro-add-grid">
+                                <label>
+                                    Physical key
+                                    <select x-model="manualKey" aria-label="Physical key">
+                                        <template x-for="key in keyChoices" :key="key">
+                                            <option :value="key" x-text="key"></option>
+                                        </template>
+                                    </select>
+                                </label>
+                                <label>
+                                    Modifiers
+                                    <select
+                                        multiple
+                                        size="4"
+                                        x-model="manualModifiers"
+                                        aria-label="Combination modifiers"
+                                    >
+                                        <template x-for="key in modifierChoices" :key="key">
+                                            <option :value="key" x-text="key"></option>
+                                        </template>
+                                    </select>
+                                    <span
+                                        class="field-help"
+                                        x-text="manualModifiers.length ? manualModifiers.join(' + ') : 'No modifiers'"
+                                    ></span>
+                                </label>
+                                <label>
+                                    Delay before (ms)
+                                    <input
+                                        type="number"
+                                        min="0"
+                                        max="300000"
+                                        step="1"
+                                        x-model.number="manualDelay"
+                                    />
+                                </label>
+                                <label>
+                                    Hold duration (ms)
+                                    <input
+                                        type="number"
+                                        min="0"
+                                        max="300000"
+                                        step="1"
+                                        x-model.number="manualHold"
+                                    />
+                                </label>
+                            </div>
+                            <button class="button" type="button" @click="addKey">Add key</button>
+                        </fieldset>
+                    </details>
+                    <p class="field-help keyboard-macro-summary" x-text="summary"></p>
+
+                    <p class="field-help" x-show="!draft.recording.events.length">
+                        No keys yet. Choose Record or Add key to create a sequence.
+                    </p>
+                    <section
+                        class="keyboard-macro-timeline"
+                        aria-labelledby="keyboard-timeline-heading"
+                    >
+                        <h3 id="keyboard-timeline-heading">Advanced event timeline</h3>
+                        <p class="field-help">
+                            Delays follow the previous event. Keep a release for every press;
+                            reordering keeps each event's delay.
+                        </p>
+                        <div
+                            class="runtime-table-scroll keyboard-macro-event-scroll"
+                            x-ref="timeline"
+                            role="region"
+                            aria-label="Keyboard event timeline"
+                            tabindex="0"
+                        >
+                            <table class="runtime-table">
+                                <thead>
+                                    <tr>
+                                        <th scope="col">Event</th>
+                                        <th scope="col">Physical key</th>
+                                        <th scope="col">Kind</th>
+                                        <th scope="col">Delay (ms)</th>
+                                        <th scope="col">Edit order</th>
+                                    </tr>
+                                </thead>
+                                <tbody>
+                                    <template x-for="item in timeline" :key="item.index">
+                                        <tr>
+                                            <th scope="row" x-text="item.index + 1"></th>
+                                            <td>
+                                                <select
+                                                    :aria-label="'Physical key for event ' + (item.index + 1)"
+                                                    :value="item.key"
+                                                    :data-index="item.index"
+                                                    data-field="key"
+                                                    @change="editEvent"
+                                                    :disabled="editingLocked"
+                                                >
+                                                    <template x-for="key in keyChoices" :key="key">
+                                                        <option
+                                                            :value="key"
+                                                            :selected="key === item.key"
+                                                            x-text="key"
+                                                        ></option>
+                                                    </template>
+                                                </select>
+                                            </td>
+                                            <td>
+                                                <select
+                                                    :aria-label="'Kind for event ' + (item.index + 1)"
+                                                    :value="item.kind"
+                                                    :data-index="item.index"
+                                                    data-field="kind"
+                                                    @change="editEvent"
+                                                    :disabled="editingLocked"
+                                                >
+                                                    <option value="key_down">Press</option>
+                                                    <option value="key_up">Release</option>
+                                                    <option value="repeat">Repeat</option>
+                                                </select>
+                                            </td>
+                                            <td>
+                                                <input
+                                                    type="number"
+                                                    min="0"
+                                                    max="300000"
+                                                    step="1"
+                                                    :aria-label="'Delay for event ' + (item.index + 1)"
+                                                    :value="item.delay_ms"
+                                                    :data-index="item.index"
+                                                    data-field="delay_ms"
+                                                    @change="editEvent"
+                                                    :disabled="editingLocked"
+                                                />
+                                            </td>
+                                            <td>
+                                                <div class="button-row">
+                                                    <button
+                                                        type="button"
+                                                        class="icon-button"
+                                                        :aria-label="'Move event ' + (item.index + 1) + ' up'"
+                                                        :data-index="item.index"
+                                                        data-op="up"
+                                                        @click="moveEvent"
+                                                        :disabled="editingLocked || item.index === 0"
+                                                    >
+                                                        ↑
+                                                    </button>
+                                                    <button
+                                                        type="button"
+                                                        class="icon-button"
+                                                        :aria-label="'Move event ' + (item.index + 1) + ' down'"
+                                                        :data-index="item.index"
+                                                        data-op="down"
+                                                        @click="moveEvent"
+                                                        :disabled="editingLocked || item.index === draft.recording.events.length - 1"
+                                                    >
+                                                        ↓
+                                                    </button>
+                                                    <button
+                                                        type="button"
+                                                        class="icon-button"
+                                                        :aria-label="'Remove event ' + (item.index + 1)"
+                                                        :data-index="item.index"
+                                                        data-op="remove"
+                                                        @click="moveEvent"
+                                                        :disabled="editingLocked"
+                                                    >
+                                                        ×
+                                                    </button>
+                                                </div>
+                                            </td>
+                                        </tr>
+                                    </template>
+                                </tbody>
+                            </table>
+                        </div>
+                        <div class="button-row" x-show="pageCount > 1">
+                            <button
+                                type="button"
+                                class="button"
+                                @click="previousPage"
+                                :disabled="timelinePage === 0"
+                            >
+                                Previous events
+                            </button>
+                            <span x-text="'Page ' + (timelinePage + 1) + ' of ' + pageCount"></span>
+                            <button
+                                type="button"
+                                class="button"
+                                @click="nextPage"
+                                :disabled="timelinePage + 1 >= pageCount"
+                            >
+                                Next events
+                            </button>
+                        </div>
+                    </section>
+                    <details class="keyboard-macro-options">
+                        <summary>Playback options</summary>
+                        <fieldset
+                            class="parameter-editor"
+                            :disabled="editingLocked"
+                            aria-label="Playback options"
+                        >
+                            <p
+                                class="field-help"
+                                x-show="platformWarning"
+                                x-text="platformWarning"
+                            ></p>
+                            <div class="settings-form-grid">
+                                <label>
+                                    Playback speed
+                                    <input
+                                        type="number"
+                                        min="0.25"
+                                        max="4"
+                                        step="0.25"
+                                        x-model.number="draft.playback.speed"
+                                    />
+                                </label>
+                                <label>
+                                    Focus policy
+                                    <select x-model="draft.playback.focus_policy">
+                                        <option value="stay_on_target">
+                                            Stop if the target changes
+                                        </option>
+                                        <option value="allow_focus_changes">
+                                            Allow focus changes
+                                        </option>
+                                    </select>
+                                </label>
+                                <label>
+                                    Repeat mode
+                                    <select
+                                        x-model="draft.playback.repeat_mode"
+                                        aria-label="Repeat mode"
+                                        aria-describedby="keyboard-repeat-help"
+                                    >
+                                        <option value="exact">Exact recorded repeats</option>
+                                        <option value="system">System repeat (Linux)</option>
+                                    </select>
+                                </label>
+                            </div>
+                            <p id="keyboard-repeat-help" class="field-help">
+                                Exact mode preserves the recorded repeat sequence where the backend
+                                supports it. System repeat is an explicit Linux compatibility mode;
+                                it does not change your keyboard settings.
+                            </p>
+                            <p
+                                class="field-help danger-text"
+                                role="note"
+                                aria-label="System repeat warning"
+                                x-show="systemRepeat"
+                            >
+                                The system generates repeats while a key is held. Recorded Repeat
+                                entries are not sent, so repeat count and timing may differ, even
+                                for recordings with no Repeat entries. Playback speed scales
+                                press/release timing, not the system repeat delay or rate.
+                            </p>
+                            <p
+                                class="field-help danger-text"
+                                x-show="draft.playback.focus_policy === 'allow_focus_changes'"
+                            >
+                                Subsequent keys may go to a different application. This does not
+                                switch or restore focus automatically.
+                            </p>
+                        </fieldset>
+                    </details>
+                    <p
+                        class="danger-text field-help"
+                        role="alert"
+                        x-show="validation && !recording"
+                        x-text="validation"
+                    ></p>
+                    <div class="button-row">
+                        <button
+                            type="button"
+                            class="button"
+                            @click="simulate"
+                            :disabled="!canApply"
+                        >
+                            Simulate
+                        </button>
+                        <button
+                            type="button"
+                            class="button"
+                            :disabled="!testAvailable"
+                            @click="requestTest"
+                            aria-describedby="keyboard-playback-help"
+                        >
+                            Test playback
+                        </button>
+                    </div>
+                    <p id="keyboard-playback-help" class="field-help" x-text="playbackHelp"></p>
+                    <section
+                        class="parameter-editor field-group"
+                        x-show="testSetup && !testSession && !testBusy"
+                        aria-label="Choose playback test target"
+                    >
+                        <h3>Choose a blank scratch window</h3>
+                        <p class="field-help">
+                            Test sends real keys. Open a blank scratch window with no sensitive
+                            content. Choose scratch target, then switch to that window within three
+                            seconds. Return here to confirm the identified target before any keys
+                            are sent.
+                        </p>
+                        <p class="field-help">
+                            After confirmation, you have another three seconds to switch back to the
+                            same target. Test always stops on target changes, even if this recording
+                            allows focus changes. Manager never switches focus for you.
+                        </p>
+                        <div class="button-row">
+                            <button
+                                type="button"
+                                class="button"
+                                :disabled="!testAvailable"
+                                @click="chooseTestTarget"
+                            >
+                                Choose scratch target
+                            </button>
+                            <button type="button" class="button" @click="cancelTest">
+                                Cancel test setup
+                            </button>
+                        </div>
+                    </section>
+                    <p
+                        class="danger-text field-help"
+                        role="alert"
+                        x-show="testError"
+                        x-text="testError"
+                    ></p>
+                    <p class="field-help" role="status" x-show="testNotice" x-text="testNotice"></p>
+                    <p role="status" class="field-help" x-show="simulation" x-text="simulation"></p>
+                </div>
+            </template>
+        </div>
+        <footer class="feature-footer">
+            <span class="field-help">Apply to draft, then Save binding or Save macro.</span>
+            <div class="button-row">
+                <button type="button" class="button" @click="cancel">Cancel</button>
+                <button type="button" class="button primary" :disabled="!canApply" @click="apply">
+                    Apply recording
+                </button>
+            </div>
+        </footer>
+        <dialog
+            x-ref="recordingDialog"
+            class="feature-dialog keyboard-macro-recording-dialog"
+            aria-labelledby="keyboard-recording-title"
+            @cancel="dismissRecording"
+        >
+            <header class="picker-header">
+                <h2 id="keyboard-recording-title">Record in Manager</h2>
+                <button
+                    tabindex="0"
+                    type="button"
+                    class="icon-button"
+                    aria-label="Close recording"
+                    @pointerdown.prevent
+                    @click="cancelTake"
+                >
+                    ×
+                </button>
+            </header>
+            <div class="feature-body">
+                <section class="keyboard-macro-session" aria-label="Recording session">
+                    <div>
+                        <strong role="status" x-text="recordingStatus"></strong>
+                        <span
+                            aria-label="Last recorded key"
+                            x-show="lastInput"
+                            x-text="'Last key: ' + lastInput"
+                        ></span>
+                        <span
+                            x-text="eventCount + ' input events · ' + (elapsed / 1000).toFixed(1) + ' s'"
+                        ></span>
+                    </div>
+                </section>
+                <label class="field-group">
+                    Try your keys here
+                    <textarea
+                        x-ref="capture"
+                        autofocus
+                        class="keyboard-macro-capture"
+                        rows="5"
+                        readonly
+                        :value="captureText"
+                        aria-label="Keyboard recording capture area"
+                        aria-describedby="keyboard-capture-help"
+                        @keydown="captureKey"
+                        @keyup="captureKey"
+                        @blur="blurCapture"
+                        :data-recording="recording && !paused"
+                        placeholder="Type keys or combinations…"
+                    ></textarea>
+                </label>
+                <p id="keyboard-capture-help" class="field-help">
+                    Keys and combinations are recorded only here. Escape is recorded; use
+                    <span x-text="emergencyShortcut"></span>
+                    to stop. Leaving the input stops recording. Do not type passwords.
+                </p>
+                <p class="danger-text" role="alert" x-show="error" x-text="error"></p>
+                <p class="field-help" x-show="unsupported.length">
+                    Some input is unsupported. Review it after stopping.
+                </p>
+            </div>
+            <footer class="picker-footer button-row">
+                <button
+                    tabindex="0"
+                    type="button"
+                    class="button"
+                    @pointerdown.prevent
+                    @click="cancelTake"
+                    :disabled="!session"
+                >
+                    Cancel recording
+                </button>
+                <button
+                    tabindex="0"
+                    type="button"
+                    class="button"
+                    @pointerdown.prevent
+                    @click="togglePause"
+                    :disabled="!recording || busy"
+                    x-text="paused ? 'Resume recording' : 'Pause recording'"
+                ></button>
+                <button
+                    tabindex="0"
+                    type="button"
+                    class="button primary"
+                    @pointerdown.prevent
+                    @click="stop"
+                    :disabled="!recording || busy"
+                >
+                    Stop recording
+                </button>
+            </footer>
+        </dialog>
+    </dialog>
+</div>

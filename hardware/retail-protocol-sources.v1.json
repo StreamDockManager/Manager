@@ -1,0 +1,47 @@
+{
+    "schema_version": 1,
+    "scope": "Read-only static identity inspection, not physical qualification. No manufacturer executable or library is redistributed or executed.",
+    "manufacturer_app": {
+        "version": "3.10.205.0918",
+        "architecture": "arm64",
+        "identity_function": "VpidToUUID::datasheet()",
+        "identity_function_address": "0x1006ef2e4",
+        "binaries": [
+            {
+                "path": "MacOS/VSD Craft",
+                "sha256": "e00fda52ef8b7a4482488fdff6a011f3c27f433d3543edb7c651096c11922825"
+            },
+            {
+                "path": "MacOS/libSDLibrary.1.0.25.dylib",
+                "sha256": "c08ca3b4eefaf2d7895253b3f3b9f02549ef12f521bf96a126b0d5592329e6e6"
+            }
+        ]
+    },
+    "registrations": [
+        {
+            "manufacturer_name": "VSD293V3",
+            "name_address": "0x1031b9a07",
+            "pair_address": "0x1030a8d30",
+            "usb_id": "5548:1003",
+            "model_id": "293-v3",
+            "protocol_evidence": "libSDLibrary Utilities::getDeviceInfo(QString) branches at 0x81d60/0x81d70 into the same 0x82c88 five-column, three-row branch as 293V3. Utilities::mapToDeviceLocation and getDevicePacketSize likewise group VSD293V3 with 293V3. The established 293 V3 codec remains unchanged."
+        },
+        {
+            "manufacturer_name": "VSDN1",
+            "name_address": "0x1031b69ca",
+            "pair_address": "0x1030a90c0",
+            "usb_id": "5548:1002",
+            "model_id": "n1-vsd",
+            "protocol_evidence": "Independent pinned N1 sources are recorded in hardware/n1-vsd/protocol-sources.v1.json. These establish the portrait layout, 96/64 pixel surfaces, software-mode wire byte 0x33 and encoder edges for this USB identity."
+        },
+        {
+            "manufacturer_name": "VSDXL",
+            "name_address": "0x1031ae054",
+            "pair_address": "0x1030a8ca8",
+            "usb_id": "5548:1034",
+            "model_id": "xl",
+            "protocol_evidence": "DeviceUUIDToOriginalInfoMap::_datasheet() maps XL/XLE/VSDXL to the same origin type 10: w22=10 at 0x1006ed32c, stored for VSDXL at 0x1006ed414. The established XL codec remains unchanged."
+        }
+    ],
+    "codec_refresh_scope": "The official SDK fc124cb5bc8fe0cd6c72d3f2af80588adc7dcffb refresh does not supersede these independent retail identity records or the n1-vsd/n3-vsd protocol inventories. No additional physical qualification is claimed."
+}

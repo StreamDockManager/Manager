@@ -1,0 +1,11 @@
+# Automatically generated - DO NOT EDIT!
+
+[[permission]]
+identifier = "allow-runtime-check"
+description = "Enables the runtime_check command without any pre-configured scope."
+commands.allow = ["runtime_check"]
+
+[[permission]]
+identifier = "deny-runtime-check"
+description = "Denies the runtime_check command without any pre-configured scope."
+commands.deny = ["runtime_check"]

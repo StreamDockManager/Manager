@@ -1,0 +1,11 @@
+# Automatically generated - DO NOT EDIT!
+
+[[permission]]
+identifier = "allow-acknowledge-plugin-profile-setup"
+description = "Enables the acknowledge_plugin_profile_setup command without any pre-configured scope."
+commands.allow = ["acknowledge_plugin_profile_setup"]
+
+[[permission]]
+identifier = "deny-acknowledge-plugin-profile-setup"
+description = "Denies the acknowledge_plugin_profile_setup command without any pre-configured scope."
+commands.deny = ["acknowledge_plugin_profile_setup"]

@@ -1,0 +1,10 @@
+{
+    "version": 1,
+    "groups": ["editor"],
+    "options": {
+        "shadow": false
+    },
+    "metadata": {
+        "description": "First-party sd-device-preview component. Controllers are registered by the trusted application bootstrap."
+    }
+}

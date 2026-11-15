@@ -1,0 +1,10 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<component type="desktop-application">
+  <id>app.streamdockmanager.manager</id>
+  <name>Stream Dock Manager</name>
+  <summary>Independent modular management for Stream Dock devices</summary>
+  <metadata_license>CC0-1.0</metadata_license>
+  <project_license>GPL-3.0-or-later</project_license>
+  <launchable type="desktop-id">app.streamdockmanager.manager.desktop</launchable>
+  <description><p>Configure local profiles, controls and actions for supported Stream Dock devices. Hardware support is tracked per model, firmware and platform.</p></description>
+</component>

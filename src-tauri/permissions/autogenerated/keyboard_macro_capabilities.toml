@@ -1,0 +1,11 @@
+# Automatically generated - DO NOT EDIT!
+
+[[permission]]
+identifier = "allow-keyboard-macro-capabilities"
+description = "Enables the keyboard_macro_capabilities command without any pre-configured scope."
+commands.allow = ["keyboard_macro_capabilities"]
+
+[[permission]]
+identifier = "deny-keyboard-macro-capabilities"
+description = "Denies the keyboard_macro_capabilities command without any pre-configured scope."
+commands.deny = ["keyboard_macro_capabilities"]

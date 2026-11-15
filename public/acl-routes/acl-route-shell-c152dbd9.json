@@ -1,0 +1,337 @@
+{
+  "version": 1,
+  "basePath": "..",
+  "components": {
+    "sd-application-data": {
+      "source": "components/sd-application-data.html",
+      "dependencies": [],
+      "options": {
+        "shadow": false,
+        "templateRevision": "sha256-WvpGRJ_rNy9iBDxyFIdYDwLIL8bqHXaKEdS2uTdYQ7s"
+      },
+      "metadata": {
+        "description": "Application data ownership, retention and recovery management."
+      }
+    },
+    "sd-media-options": {
+      "source": "components/sd-media-options.html",
+      "dependencies": [],
+      "options": {
+        "shadow": false,
+        "attributes": {
+          "asset": {
+            "type": "String",
+            "default": ""
+          },
+          "control": {
+            "type": "String",
+            "default": ""
+          },
+          "content": {
+            "type": "String",
+            "default": "{}",
+            "reflect": true
+          }
+        },
+        "templateRevision": "sha256--hdvv70XeBgMt6lAOGqNaufo7WyP9WwEmlGWfqYe4AM"
+      },
+      "metadata": {
+        "description": "Non-destructive media transforms shared with Rust playback."
+      }
+    },
+    "sd-background-editor": {
+      "source": "components/sd-background-editor.html",
+      "dependencies": [
+        "sd-media-options"
+      ],
+      "options": {
+        "shadow": false,
+        "templateRevision": "sha256-d6f1zVzfm9fBezWsQA6bdLxaIjFVsFlUYykV0rmYTiY"
+      },
+      "metadata": {
+        "description": "Shared, isolated device background editing dialog."
+      }
+    },
+    "sd-benchmark-progress": {
+      "source": "components/sd-benchmark-progress.html",
+      "dependencies": [],
+      "options": {
+        "shadow": false,
+        "templateRevision": "sha256-lxRamDm6_-2poDqwgkWdwD4ESmsimHCEeMU0KZBLNF4"
+      },
+      "metadata": {
+        "description": "Shared benchmark progress, cancellation and device restoration dialog."
+      }
+    },
+    "sd-export-review": {
+      "source": "components/sd-export-review.html",
+      "dependencies": [],
+      "options": {
+        "shadow": false,
+        "templateRevision": "sha256-ezc9-Yc5hZ62ZPpsM1mUa9C9eLu6ydwhPwZyBX16sSw"
+      },
+      "metadata": {
+        "description": "Immutable profile and macro export review with draft field changes."
+      }
+    },
+    "sd-plugin-catalog-dialog": {
+      "source": "components/sd-plugin-catalog-dialog.html",
+      "dependencies": [],
+      "options": {
+        "shadow": false,
+        "templateRevision": "sha256-ZmEbmLFDoNNQmtaA190XmIDtcjzYjHZ3f9IHpgM2TDc"
+      }
+    },
+    "sd-plugin-folder-import": {
+      "source": "components/sd-plugin-folder-import.html",
+      "dependencies": [],
+      "options": {
+        "shadow": false,
+        "templateRevision": "sha256-i7lEhnfp-FG1wOUejSMTOOScIZPIYswZcrAgnIQZKX4"
+      }
+    },
+    "sd-plugin-preflight": {
+      "source": "components/sd-plugin-preflight.html",
+      "dependencies": [],
+      "options": {
+        "shadow": false,
+        "templateRevision": "sha256-a9XUwJ0WeMZ1AoaiPilZn4zAOJ7m-F1nE3S3c8f6_Uc"
+      }
+    },
+    "sd-plugin-profile-suggestions": {
+      "source": "components/sd-plugin-profile-suggestions.html",
+      "dependencies": [],
+      "options": {
+        "shadow": false,
+        "templateRevision": "sha256-4nLy_CdekT8XG0jgqvTVdW2a45rwYGUaDV0MNrbfjOY"
+      }
+    },
+    "sd-profile-archive-import": {
+      "source": "components/sd-profile-archive-import.html",
+      "dependencies": [],
+      "options": {
+        "shadow": false,
+        "templateRevision": "sha256-jZmbAyBKTTweoQ1ngd-pKtgsLqFfj6OSmueHC0RjBUg"
+      }
+    },
+    "sd-profile-sharing-dialog": {
+      "source": "components/sd-profile-sharing-dialog.html",
+      "dependencies": [],
+      "options": {
+        "shadow": false,
+        "templateRevision": "sha256-8g4iQzHtQfgWTH5aL-IjVcDeREozGKbmkSf-gdVIiQc"
+      }
+    },
+    "sd-runtime-dialog": {
+      "source": "components/sd-runtime-dialog.html",
+      "dependencies": [],
+      "options": {
+        "shadow": false,
+        "templateRevision": "sha256-hf3V0NRyE_ZDUFUyL2fHjD0yaaa0XrhRdneYjshGy3Y"
+      }
+    },
+    "sd-setup-dialog": {
+      "source": "components/sd-setup-dialog.html",
+      "dependencies": [],
+      "options": {
+        "shadow": false,
+        "templateRevision": "sha256-2L-__fo28OWvha5eInGceq2WwtAoGTurt6c6q1F0J5A"
+      }
+    },
+    "sd-feature-dialogs": {
+      "source": "components/sd-feature-dialogs.html",
+      "dependencies": [
+        "sd-plugin-catalog-dialog",
+        "sd-plugin-folder-import",
+        "sd-plugin-preflight",
+        "sd-plugin-profile-suggestions",
+        "sd-profile-archive-import",
+        "sd-profile-sharing-dialog",
+        "sd-runtime-dialog",
+        "sd-setup-dialog"
+      ],
+      "options": {
+        "shadow": false,
+        "templateRevision": "sha256-kpLSrO7w6poHk4BJuLKteq_h0J0CD98Y8Sq1rTZaMak"
+      },
+      "metadata": {
+        "description": "Setup, plugin compatibility and staged import dialogs."
+      }
+    },
+    "sd-keyboard-macro-editor": {
+      "source": "components/sd-keyboard-macro-editor.html",
+      "dependencies": [],
+      "options": {
+        "shadow": false,
+        "templateRevision": "sha256-PBrOO5pFwR4iODt4jFLIE6I1i7qEnLjsEdw8JBrKVOs"
+      },
+      "metadata": {
+        "description": "Trusted, isolated keyboard recording draft with explicit Apply/Cancel."
+      }
+    },
+    "sd-library-organization": {
+      "source": "components/sd-library-organization.html",
+      "dependencies": [],
+      "options": {
+        "shadow": false,
+        "templateRevision": "sha256-g1lqJ_ESLtMqQKz44A8JWYoccAqYpXmwLhRingLUNrU"
+      },
+      "metadata": {
+        "description": "Installation-local library favorites and tag editor."
+      }
+    },
+    "sd-macro-sharing": {
+      "source": "components/sd-macro-sharing.html",
+      "dependencies": [],
+      "options": {
+        "shadow": false,
+        "templateRevision": "sha256-uiPqrEbfrOupB6xki9OtHmHZWuyBMK17EC7P2Yg4g7Y"
+      },
+      "metadata": {
+        "description": "Portable macro sharing with explicit privacy consent and import review."
+      }
+    },
+    "sd-media-library": {
+      "source": "components/sd-media-library.html",
+      "dependencies": [],
+      "options": {
+        "shadow": false,
+        "templateRevision": "sha256-pS3Z4Dp0cOXOGpQxbVXM2W3VUUYKe6zIzzadWQFPMhM"
+      },
+      "metadata": {
+        "description": "Managed media reuse and reviewed retention-safe cleanup."
+      }
+    },
+    "sd-plugin-logs": {
+      "source": "components/sd-plugin-logs.html",
+      "dependencies": [],
+      "options": {
+        "shadow": false,
+        "templateRevision": "sha256-in03RWTTKaqpADFpCraIXM8AqXeO36H0qNcc7dnK8Ps"
+      },
+      "metadata": {
+        "description": "Persistent nonmodal plugin capture reader."
+      }
+    },
+    "sd-plugin-management": {
+      "source": "components/sd-plugin-management.html",
+      "dependencies": [],
+      "options": {
+        "shadow": false,
+        "templateRevision": "sha256-gKLwNh9DUaNuCCAqRxpCcI_-FpI4ykS_Fv08FPt9mUY"
+      },
+      "metadata": {
+        "description": "Reviewed plugin rollback and installation-local update preferences."
+      }
+    },
+    "sd-profile-conversion": {
+      "source": "components/sd-profile-conversion.html",
+      "dependencies": [],
+      "options": {
+        "shadow": false,
+        "templateRevision": "sha256-juqtpEOUiZmokWqBqbwjPGFZIaq2vbdzIRwNvgmoU5I"
+      },
+      "metadata": {
+        "description": "Reviewed cross-model profile conversion. Native staging never executes actions."
+      }
+    },
+    "sd-profile-versions": {
+      "source": "components/sd-profile-versions.html",
+      "dependencies": [],
+      "options": {
+        "shadow": false,
+        "templateRevision": "sha256-Gd4RsUUkF0-Pn_E4BY4hgIDPg-eWerylaiHG83pb65g"
+      },
+      "metadata": {
+        "description": "Reviewed single-profile history comparison and atomic restoration."
+      }
+    },
+    "sd-toasts": {
+      "source": "components/sd-toasts.html",
+      "dependencies": [],
+      "options": {
+        "shadow": false,
+        "templateRevision": "sha256-MljBN1rdK-2BRuKszVyCp0Dk7TBYy6Gzu9SNp9Ces1A"
+      },
+      "metadata": {
+        "description": "Shared first-party notification stack."
+      }
+    },
+    "sd-video-editor": {
+      "source": "components/sd-video-editor.html",
+      "dependencies": [],
+      "options": {
+        "shadow": false,
+        "templateRevision": "sha256-FcldwgLAER0E1_k2pFlYr1v1lTZZcJmNCwk0fRZjMjs"
+      },
+      "metadata": {
+        "description": "Shared source-timed video clip editor with isolated drafts and contextual job feedback."
+      }
+    },
+    "sd-app-shell": {
+      "source": "components/sd-app-shell.html",
+      "dependencies": [
+        "sd-application-data",
+        "sd-background-editor",
+        "sd-benchmark-progress",
+        "sd-export-review",
+        "sd-feature-dialogs",
+        "sd-keyboard-macro-editor",
+        "sd-library-organization",
+        "sd-macro-sharing",
+        "sd-media-library",
+        "sd-plugin-logs",
+        "sd-plugin-management",
+        "sd-profile-conversion",
+        "sd-profile-versions",
+        "sd-toasts",
+        "sd-video-editor"
+      ],
+      "options": {
+        "shadow": false,
+        "templateRevision": "sha256-cNJpz54UOJ1NORZZUtfc9vH8IxVOYBEd70CK7ao3B3s"
+      },
+      "metadata": {
+        "description": "First-party sd-app-shell component. Controllers are registered by the trusted application bootstrap."
+      }
+    }
+  },
+  "groups": {
+    "editor": [
+      "sd-media-options"
+    ],
+    "shell": [
+      "sd-app-shell",
+      "sd-application-data",
+      "sd-background-editor",
+      "sd-benchmark-progress",
+      "sd-export-review",
+      "sd-feature-dialogs",
+      "sd-keyboard-macro-editor",
+      "sd-library-organization",
+      "sd-macro-sharing",
+      "sd-media-library",
+      "sd-plugin-catalog-dialog",
+      "sd-plugin-folder-import",
+      "sd-plugin-logs",
+      "sd-plugin-management",
+      "sd-plugin-preflight",
+      "sd-plugin-profile-suggestions",
+      "sd-profile-archive-import",
+      "sd-profile-conversion",
+      "sd-profile-sharing-dialog",
+      "sd-profile-versions",
+      "sd-runtime-dialog",
+      "sd-setup-dialog",
+      "sd-toasts",
+      "sd-video-editor"
+    ],
+    "settings": [
+      "sd-media-options"
+    ],
+    "plugin-logs": [
+      "sd-plugin-logs",
+      "sd-toasts"
+    ]
+  }
+}

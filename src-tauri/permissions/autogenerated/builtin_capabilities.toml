@@ -1,0 +1,11 @@
+# Automatically generated - DO NOT EDIT!
+
+[[permission]]
+identifier = "allow-builtin-capabilities"
+description = "Enables the builtin_capabilities command without any pre-configured scope."
+commands.allow = ["builtin_capabilities"]
+
+[[permission]]
+identifier = "deny-builtin-capabilities"
+description = "Denies the builtin_capabilities command without any pre-configured scope."
+commands.deny = ["builtin_capabilities"]

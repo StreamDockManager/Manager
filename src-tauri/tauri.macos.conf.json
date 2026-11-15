@@ -1,0 +1,11 @@
+{
+    "bundle": {
+        "macOS": {
+            "signingIdentity": "-",
+            "hardenedRuntime": false
+        },
+        "resources": {
+            "../packaging/install-instructions/macos/INSTALL-INSTRUCTIONS.md": "INSTALL-INSTRUCTIONS.md"
+        }
+    }
+}

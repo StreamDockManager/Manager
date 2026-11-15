@@ -1,0 +1,50 @@
+{
+    "name": "stream-dock-manager",
+    "version": "0.1.0",
+    "private": true,
+    "type": "module",
+    "license": "GPL-3.0-or-later",
+    "engines": {
+        "node": ">=26 <27"
+    },
+    "packageManager": "npm@12.2.2",
+    "allowScripts": {
+        "@swc/core": true,
+        "esbuild": true,
+        "fsevents": false
+    },
+    "scripts": {
+        "dev": "vite --host 127.0.0.1",
+        "build": "tsc --noEmit && vite build",
+        "build:public-preview": "npm run test:public-preview && npm run build -- --mode public-preview",
+        "test:public-preview": "node --test scripts/public-preview.test.mjs",
+        "build:native": "npm run build -- --mode native",
+        "acl:routes": "node scripts/acl-routes.ts",
+        "preview": "vite preview --host 127.0.0.1",
+        "tauri": "node scripts/tauri.mjs",
+        "desktop": "node scripts/tauri.mjs dev",
+        "check:syntax": "node scripts/check-syntax.mjs",
+        "check": "npm run check:syntax && cargo run --locked -p xtask -- types --check && npm run build && cargo run -p xtask -- hardware check",
+        "format": "npm run prepare:native && prettier --write . && cargo fmt --all",
+        "format:check": "npm run prepare:native && prettier --check . && cargo fmt --all -- --check",
+        "format:frontend": "prettier --write .",
+        "format:rust": "npm run prepare:native && cargo fmt --all",
+        "prepare:native": "node scripts/prepare-patched-deps.mjs"
+    },
+    "dependencies": {
+        "@alpinejs/csp": "3.17.5",
+        "@tauri-apps/api": "^2.12.4",
+        "@tauri-apps/plugin-dialog": "^2.8.4",
+        "@tauri-apps/plugin-notification": "^2.8.1",
+        "alpine-component-loader": "github:LouisT/alpine-component-loader#v1.2.0",
+        "mediabunny": "1.65.2"
+    },
+    "devDependencies": {
+        "@tauri-apps/cli": "2.12.4",
+        "@types/alpinejs": "^3.17.0",
+        "@types/node": "^26.6.6",
+        "prettier": "^3.10.1",
+        "typescript": "^7.0.2",
+        "vite": "^8.3.8"
+    }
+}

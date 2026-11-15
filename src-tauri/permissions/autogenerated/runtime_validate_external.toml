@@ -1,0 +1,11 @@
+# Automatically generated - DO NOT EDIT!
+
+[[permission]]
+identifier = "allow-runtime-validate-external"
+description = "Enables the runtime_validate_external command without any pre-configured scope."
+commands.allow = ["runtime_validate_external"]
+
+[[permission]]
+identifier = "deny-runtime-validate-external"
+description = "Denies the runtime_validate_external command without any pre-configured scope."
+commands.deny = ["runtime_validate_external"]

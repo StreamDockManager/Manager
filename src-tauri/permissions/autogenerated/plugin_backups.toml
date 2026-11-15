@@ -1,0 +1,11 @@
+# Automatically generated - DO NOT EDIT!
+
+[[permission]]
+identifier = "allow-plugin-backups"
+description = "Enables the plugin_backups command without any pre-configured scope."
+commands.allow = ["plugin_backups"]
+
+[[permission]]
+identifier = "deny-plugin-backups"
+description = "Denies the plugin_backups command without any pre-configured scope."
+commands.deny = ["plugin_backups"]

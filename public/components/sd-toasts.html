@@ -1,0 +1,31 @@
+<section class="toast-region" x-data="toasts" aria-label="Notifications" popover="manual">
+    <template x-for="toast in $store.app.toasts" :key="toast.id">
+        <div
+            class="toast"
+            :class="toast.level"
+            :role="toast.level === 'error' || toast.level === 'warning' ? 'alert' : 'status'"
+            :aria-live="toast.level === 'error' || toast.level === 'warning' ? 'assertive' : 'polite'"
+            aria-atomic="true"
+            @pointerenter="pause($event, toast.id)"
+            @pointerleave="pause($event, toast.id)"
+            @focusin="pause($event, toast.id)"
+            @focusout="pause($event, toast.id)"
+        >
+            <span class="toast-icon" aria-hidden="true" x-text="toast.icon"></span>
+            <div class="toast-content">
+                <strong class="toast-title" x-text="toast.title"></strong>
+                <p x-text="toast.message"></p>
+            </div>
+            <button
+                class="icon-button toast-dismiss"
+                :aria-label="'Dismiss ' + toast.title.toLowerCase() + ' notification'"
+                @click="$store.app.dismissToast(toast.id)"
+            >
+                ×
+            </button>
+            <span class="toast-progress-track" aria-hidden="true">
+                <span class="toast-progress" :data-toast-progress="toast.id"></span>
+            </span>
+        </div>
+    </template>
+</section>

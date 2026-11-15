@@ -1,0 +1,270 @@
+schema_version = 1
+model_id = "293s-v3"
+profile_family = "293s"
+name = "293s V3"
+protocol = "vendor-crt-1"
+status = "experimental"
+
+[capabilities]
+firmware_query = true
+boot_logo = { size = [854, 480] }
+sleep = true
+brightness = true
+lighting = false
+lighting_channels = []
+background = false
+reliable_button_release = true
+reliable_encoder_release = false
+image_formats = ["png", "jpeg"]
+media_formats = ["png", "jpeg", "gif", "mp4"]
+max_fps = 24
+frame_output = { frame_scheduling = true, grouped_key_updates = true }
+
+[layout]
+width = 624
+height = 528
+rotation = 0
+
+[[variants]]
+id = "usb-6603-1014"
+name = "293s V3 (6603:1014)"
+
+[variants.identity]
+vendor_id = 26115
+product_id = 4116
+usage_page_min = 1026
+usage = 1
+
+[[controls]]
+id = "key-1"
+label = "Key 1"
+kind = "button"
+x = 32
+y = 48
+width = 88
+height = 88
+semantics = ["press", "release"]
+image_slot = 13
+image_width = 96
+image_height = 96
+
+[[controls]]
+id = "key-2"
+label = "Key 2"
+kind = "button"
+x = 144
+y = 48
+width = 88
+height = 88
+semantics = ["press", "release"]
+image_slot = 10
+image_width = 96
+image_height = 96
+
+[[controls]]
+id = "key-3"
+label = "Key 3"
+kind = "button"
+x = 256
+y = 48
+width = 88
+height = 88
+semantics = ["press", "release"]
+image_slot = 7
+image_width = 96
+image_height = 96
+
+[[controls]]
+id = "key-4"
+label = "Key 4"
+kind = "button"
+x = 368
+y = 48
+width = 88
+height = 88
+semantics = ["press", "release"]
+image_slot = 4
+image_width = 96
+image_height = 96
+
+[[controls]]
+id = "key-5"
+label = "Key 5"
+kind = "button"
+x = 480
+y = 48
+width = 88
+height = 88
+semantics = ["press", "release"]
+image_slot = 1
+image_width = 96
+image_height = 96
+
+[[controls]]
+id = "key-6"
+label = "Key 6"
+kind = "button"
+x = 32
+y = 160
+width = 88
+height = 88
+semantics = ["press", "release"]
+image_slot = 14
+image_width = 96
+image_height = 96
+
+[[controls]]
+id = "key-7"
+label = "Key 7"
+kind = "button"
+x = 144
+y = 160
+width = 88
+height = 88
+semantics = ["press", "release"]
+image_slot = 11
+image_width = 96
+image_height = 96
+
+[[controls]]
+id = "key-8"
+label = "Key 8"
+kind = "button"
+x = 256
+y = 160
+width = 88
+height = 88
+semantics = ["press", "release"]
+image_slot = 8
+image_width = 96
+image_height = 96
+
+[[controls]]
+id = "key-9"
+label = "Key 9"
+kind = "button"
+x = 368
+y = 160
+width = 88
+height = 88
+semantics = ["press", "release"]
+image_slot = 5
+image_width = 96
+image_height = 96
+
+[[controls]]
+id = "key-10"
+label = "Key 10"
+kind = "button"
+x = 480
+y = 160
+width = 88
+height = 88
+semantics = ["press", "release"]
+image_slot = 2
+image_width = 96
+image_height = 96
+
+[[controls]]
+id = "key-11"
+label = "Key 11"
+kind = "button"
+x = 32
+y = 272
+width = 88
+height = 88
+semantics = ["press", "release"]
+image_slot = 15
+image_width = 96
+image_height = 96
+
+[[controls]]
+id = "key-12"
+label = "Key 12"
+kind = "button"
+x = 144
+y = 272
+width = 88
+height = 88
+semantics = ["press", "release"]
+image_slot = 12
+image_width = 96
+image_height = 96
+
+[[controls]]
+id = "key-13"
+label = "Key 13"
+kind = "button"
+x = 256
+y = 272
+width = 88
+height = 88
+semantics = ["press", "release"]
+image_slot = 9
+image_width = 96
+image_height = 96
+
+[[controls]]
+id = "key-14"
+label = "Key 14"
+kind = "button"
+x = 368
+y = 272
+width = 88
+height = 88
+semantics = ["press", "release"]
+image_slot = 6
+image_width = 96
+image_height = 96
+
+[[controls]]
+id = "key-15"
+label = "Key 15"
+kind = "button"
+x = 480
+y = 272
+width = 88
+height = 88
+semantics = ["press", "release"]
+image_slot = 3
+image_width = 96
+image_height = 96
+
+[[controls]]
+id = "key-16"
+label = "Display 16"
+kind = "display"
+x = 32
+y = 384
+width = 88
+height = 88
+semantics = ["display"]
+image_slot = 16
+image_width = 96
+image_height = 96
+
+[[controls]]
+id = "key-17"
+label = "Display 17"
+kind = "display"
+x = 144
+y = 384
+width = 88
+height = 88
+semantics = ["display"]
+image_slot = 17
+image_width = 96
+image_height = 96
+
+[[controls]]
+id = "key-18"
+label = "Display 18"
+kind = "display"
+x = 256
+y = 384
+width = 88
+height = 88
+semantics = ["display"]
+image_slot = 18
+image_width = 96
+image_height = 96

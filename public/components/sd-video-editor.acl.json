@@ -1,0 +1,9 @@
+{
+    "version": 1,
+    "groups": ["shell"],
+    "dependencies": [],
+    "options": { "shadow": false },
+    "metadata": {
+        "description": "Shared source-timed video clip editor with isolated drafts and contextual job feedback."
+    }
+}

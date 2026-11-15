@@ -1,0 +1,8 @@
+{
+    "version": 1,
+    "groups": ["shell"],
+    "options": { "shadow": false },
+    "metadata": {
+        "description": "Portable macro sharing with explicit privacy consent and import review."
+    }
+}

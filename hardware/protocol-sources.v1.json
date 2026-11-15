@@ -1,0 +1,993 @@
+{
+    "schema_version": 1,
+    "scope": "Revision-pinned source identities for the codec refresh. Historical references remain preserved; source-derived behavior and synthetic tests are not physical qualification.",
+    "sources": [
+        {
+            "repository": "MiraboxSpace/StreamDock-Device-SDK",
+            "revision": "7f0d47fe91033b0883edf29b574a6c74ea9bed00",
+            "path": "CPP-SDK/CMakeLists.txt",
+            "git_blob": "c17f4ef597a3681a74372e17f938c0edf90cc533",
+            "sha256": "596f30b04752dc89c2b69857c503cb525a7a48e136973cc363379bdccbfd60e7"
+        },
+        {
+            "repository": "MiraboxSpace/StreamDock-Device-SDK",
+            "revision": "7f0d47fe91033b0883edf29b574a6c74ea9bed00",
+            "path": "CPP-SDK/src/DeviceInfo/Feature/GifController/gifcontroller.cpp",
+            "git_blob": "4e1eeab7dbda89f488d325bf8d9472b1c3edb3c0",
+            "sha256": "6ea6d1cb4ebfd0688d1ae25176d359a708798bf82f67c8d87664934609776df0"
+        },
+        {
+            "repository": "MiraboxSpace/StreamDock-Device-SDK",
+            "revision": "7f0d47fe91033b0883edf29b574a6c74ea9bed00",
+            "path": "CPP-SDK/src/DeviceInfo/Feature/ReadController/readcontroller.cpp",
+            "git_blob": "6b490dcb2b8b91bfc8051ca7974c57d9808209ab",
+            "sha256": "9f797f67664fd3e8b1ae7318769c259de44096d40ba290d0ff8317a0531ed47a"
+        },
+        {
+            "repository": "MiraboxSpace/StreamDock-Device-SDK",
+            "revision": "7f0d47fe91033b0883edf29b574a6c74ea9bed00",
+            "path": "CPP-SDK/src/DeviceInfo/streamdock.cpp",
+            "git_blob": "1282f8b4fd63e8e7915a87323ef3b45786248658",
+            "sha256": "76781d95fe6eb46b1f52383e86adab14014a4fb9b2ceeeb039005834e84bb4f2"
+        },
+        {
+            "repository": "MiraboxSpace/StreamDock-Device-SDK",
+            "revision": "7f0d47fe91033b0883edf29b574a6c74ea9bed00",
+            "path": "CPP-SDK/src/DeviceInfo/streamdockconfigcmd.h",
+            "git_blob": "91401b855aa8eb9c929057bb801de8491ae2a01c",
+            "sha256": "ebae73f61666d13b2f0b58b9262cd76626d39514c22f669da7c3c1ce4047db74"
+        },
+        {
+            "repository": "MiraboxSpace/StreamDock-Device-SDK",
+            "revision": "7f0d47fe91033b0883edf29b574a6c74ea9bed00",
+            "path": "CPP-SDK/src/DeviceInfo/streamdockfactory.cpp",
+            "git_blob": "574759978eb5e447f51d481554c0a0fa212de208",
+            "sha256": "e775bbb662f37a2d6f252f100175aba0837295637d717f79e5ed9ea055066d1f"
+        },
+        {
+            "repository": "MiraboxSpace/StreamDock-Device-SDK",
+            "revision": "7f0d47fe91033b0883edf29b574a6c74ea9bed00",
+            "path": "CPP-SDK/src/DeviceManager/DeviceEnumerator/deviceenumerator.cpp",
+            "git_blob": "6e8d91e24bc842be2defadd6bc8c44ebf921c468",
+            "sha256": "f979512917b103a7def91961e887ddb17999a189b3d533b1ecbe668b03c511a0"
+        },
+        {
+            "repository": "MiraboxSpace/StreamDock-Device-SDK",
+            "revision": "7f0d47fe91033b0883edf29b574a6c74ea9bed00",
+            "path": "CPP-SDK/src/HotspotDevice/K1Pro/K1Pro.cpp",
+            "git_blob": "7b859a2663385b70c006fe21b7ab1d170f81ed31",
+            "sha256": "0dd14d311996c5b8128067a87c64f2e0a8aeccc5324636b75aec294f2d405c2f"
+        },
+        {
+            "repository": "MiraboxSpace/StreamDock-Device-SDK",
+            "revision": "7f0d47fe91033b0883edf29b574a6c74ea9bed00",
+            "path": "CPP-SDK/src/HotspotDevice/K1Pro/K1Pro.h",
+            "git_blob": "bde75a00ab9b05818e31b8acf3fa15255f8a30b0",
+            "sha256": "2de98fa6079ddafc6d0dc5045bca16aa08c7a7766d568b44c15bab221dbc2873"
+        },
+        {
+            "repository": "MiraboxSpace/StreamDock-Device-SDK",
+            "revision": "7f0d47fe91033b0883edf29b574a6c74ea9bed00",
+            "path": "CPP-SDK/src/HotspotDevice/StreamDock293V2/streamdock293V2.cpp",
+            "git_blob": "09c4aa0bea8e2fb4e2a8ddd8b19873df88ee5574",
+            "sha256": "cc52016456d73fac2aca86e669c52c10db192a9fdae1adec96370905604f91f1"
+        },
+        {
+            "repository": "MiraboxSpace/StreamDock-Device-SDK",
+            "revision": "7f0d47fe91033b0883edf29b574a6c74ea9bed00",
+            "path": "CPP-SDK/src/HotspotDevice/StreamDock293V2/streamdock293V2.h",
+            "git_blob": "c89368b2d173c5aa5731d2667e741937e5dc2c93",
+            "sha256": "7d9e989de83133264dc08c20a133f80361ab61a327dc89e307fc385a5d879929"
+        },
+        {
+            "repository": "MiraboxSpace/StreamDock-Device-SDK",
+            "revision": "7f0d47fe91033b0883edf29b574a6c74ea9bed00",
+            "path": "CPP-SDK/src/HotspotDevice/StreamDock293V3/streamdock293V3.cpp",
+            "git_blob": "152b5ad191f898c9148d90f619732209313f315b",
+            "sha256": "3a14bc572bc15b61b64dc53a92a83b958ec8f2cd41c8dbcf28c9bc7ba4e07d76"
+        },
+        {
+            "repository": "MiraboxSpace/StreamDock-Device-SDK",
+            "revision": "7f0d47fe91033b0883edf29b574a6c74ea9bed00",
+            "path": "CPP-SDK/src/HotspotDevice/StreamDock293V3/streamdock293V3.h",
+            "git_blob": "8caa26b5f3dd4fca1db675276dfdb6958dc2ab40",
+            "sha256": "57c9b38321d637768056487e81163df3770e112814f91f4c5b3acf499e3acbac"
+        },
+        {
+            "repository": "MiraboxSpace/StreamDock-Device-SDK",
+            "revision": "7f0d47fe91033b0883edf29b574a6c74ea9bed00",
+            "path": "CPP-SDK/src/HotspotDevice/StreamDock293sV2/streamdock293sV2.cpp",
+            "git_blob": "7c55917e90b06bc38e44301c940fed0a4dc22ff1",
+            "sha256": "ecdcb1c01d3406ba34d1d3d348ffa7ee9a3a059d32d6f7d9cbc740cdd7b028e7"
+        },
+        {
+            "repository": "MiraboxSpace/StreamDock-Device-SDK",
+            "revision": "7f0d47fe91033b0883edf29b574a6c74ea9bed00",
+            "path": "CPP-SDK/src/HotspotDevice/StreamDock293sV2/streamdock293sV2.h",
+            "git_blob": "1d24af64a779342ca66752383117e25523158b4e",
+            "sha256": "8a6fcf85662db6da38d1ce06963ddeaed410cddc633058c898304873cd6d648d"
+        },
+        {
+            "repository": "MiraboxSpace/StreamDock-Device-SDK",
+            "revision": "7f0d47fe91033b0883edf29b574a6c74ea9bed00",
+            "path": "CPP-SDK/src/HotspotDevice/StreamDock293sV3/streamdock293sV3.cpp",
+            "git_blob": "1c76c51822f863cc704811f8f03d9e5d4d09512b",
+            "sha256": "7d4b3b09fc01cdf6a6e05d297df792d63df40f62504b00d264aba4e2d3a2d882"
+        },
+        {
+            "repository": "MiraboxSpace/StreamDock-Device-SDK",
+            "revision": "7f0d47fe91033b0883edf29b574a6c74ea9bed00",
+            "path": "CPP-SDK/src/HotspotDevice/StreamDock293sV3/streamdock293sV3.h",
+            "git_blob": "b97578e422e4614afbe202b44d49d966af75381b",
+            "sha256": "3848fde7669fe1bc67708d4fb927ab8274dfd095f96d489382232a7d4648e302"
+        },
+        {
+            "repository": "MiraboxSpace/StreamDock-Device-SDK",
+            "revision": "7f0d47fe91033b0883edf29b574a6c74ea9bed00",
+            "path": "CPP-SDK/src/HotspotDevice/StreamDockH1Pro/streamdockH1Pro.cpp",
+            "git_blob": "ae05143a53dab8066c8801ad466a2cce2eda4e34",
+            "sha256": "da895120e9aea7e2bb90f1d5e130a98b41bab87d120bdb60e5016e8bdbbb7e82"
+        },
+        {
+            "repository": "MiraboxSpace/StreamDock-Device-SDK",
+            "revision": "7f0d47fe91033b0883edf29b574a6c74ea9bed00",
+            "path": "CPP-SDK/src/HotspotDevice/StreamDockH1Pro/streamdockH1Pro.h",
+            "git_blob": "47da2e8fcfa257e98a4065f311e16da88f9edad4",
+            "sha256": "a91889441133e7ae005db8849f4f9d111fbeba9356c1b86eba6fc7b77f4fabd7"
+        },
+        {
+            "repository": "MiraboxSpace/StreamDock-Device-SDK",
+            "revision": "7f0d47fe91033b0883edf29b574a6c74ea9bed00",
+            "path": "CPP-SDK/src/HotspotDevice/StreamDockM18/streamdockM18.cpp",
+            "git_blob": "2383332c1ce051e10afb14de9f856ec977a67ef6",
+            "sha256": "1a2ba9bdf936996448a8c02fe7f0e11ebbd9e1b4038d21bdc6e50f96dd41a117"
+        },
+        {
+            "repository": "MiraboxSpace/StreamDock-Device-SDK",
+            "revision": "7f0d47fe91033b0883edf29b574a6c74ea9bed00",
+            "path": "CPP-SDK/src/HotspotDevice/StreamDockM18/streamdockM18.h",
+            "git_blob": "7dff5580b9d87ea9a7aa012a37faa722a43d6f31",
+            "sha256": "78800d6b29608b361a884f8a1872b923863c32b916b42ca712b1b2b07a9c4608"
+        },
+        {
+            "repository": "MiraboxSpace/StreamDock-Device-SDK",
+            "revision": "7f0d47fe91033b0883edf29b574a6c74ea9bed00",
+            "path": "CPP-SDK/src/HotspotDevice/StreamDockM18V2/streamdockM18V2.h",
+            "git_blob": "1140731ddfee7258689614c2f4c87f2562944bef",
+            "sha256": "912a3ae4ae6b468920832b72fdec5e1652789a1cdecb92abe8fd4cca0c05b8ba"
+        },
+        {
+            "repository": "MiraboxSpace/StreamDock-Device-SDK",
+            "revision": "7f0d47fe91033b0883edf29b574a6c74ea9bed00",
+            "path": "CPP-SDK/src/HotspotDevice/StreamDockM18V25/streamdockM18V25.h",
+            "git_blob": "b517ffa43653d3d96410753e4876fd7d59a756a6",
+            "sha256": "7af4413398d29bed035ce0fa33e61189af74c66bcee18d3b18a888f9d00757e2"
+        },
+        {
+            "repository": "MiraboxSpace/StreamDock-Device-SDK",
+            "revision": "7f0d47fe91033b0883edf29b574a6c74ea9bed00",
+            "path": "CPP-SDK/src/HotspotDevice/StreamDockM18V3/streamdockM18V3.h",
+            "git_blob": "777dc36788837066538582346a167e54d24faae5",
+            "sha256": "69f7ab1d41dda1261870e081c8e2ecef15b0ed5b2db4a07fefae2f8dbb830c3c"
+        },
+        {
+            "repository": "MiraboxSpace/StreamDock-Device-SDK",
+            "revision": "7f0d47fe91033b0883edf29b574a6c74ea9bed00",
+            "path": "CPP-SDK/src/HotspotDevice/StreamDockM3/streamdockM3.cpp",
+            "git_blob": "c2b2cd06e53f4e241e8708e623b750cbe2d66fc7",
+            "sha256": "667a123b2e61edf47b574946f617c7ea9c484c5c4c6147c641b7afd5ff100b39"
+        },
+        {
+            "repository": "MiraboxSpace/StreamDock-Device-SDK",
+            "revision": "7f0d47fe91033b0883edf29b574a6c74ea9bed00",
+            "path": "CPP-SDK/src/HotspotDevice/StreamDockM3/streamdockM3.h",
+            "git_blob": "859bcd4fafdd2b5ca0d882a7ad09be11aa5115c3",
+            "sha256": "2fa53898507d964f2d8b31ea2a94ca0c1b2d303ca8e8c0951629f18c756cd1a5"
+        },
+        {
+            "repository": "MiraboxSpace/StreamDock-Device-SDK",
+            "revision": "7f0d47fe91033b0883edf29b574a6c74ea9bed00",
+            "path": "CPP-SDK/src/HotspotDevice/StreamDockMini/streamdockMini.cpp",
+            "git_blob": "d37250450ad71b52da940c7209ce64567290a5f7",
+            "sha256": "38596fd68a328ba6d0fdfe6b9751ed4775836852d3d15e79a6d0b1fb9190ffb0"
+        },
+        {
+            "repository": "MiraboxSpace/StreamDock-Device-SDK",
+            "revision": "7f0d47fe91033b0883edf29b574a6c74ea9bed00",
+            "path": "CPP-SDK/src/HotspotDevice/StreamDockMini/streamdockMini.h",
+            "git_blob": "278641aaea6ddaf3c010780b849b24435d6ac115",
+            "sha256": "d0a16cfb593be0ce2211c823777251f64d8ed3f46d0c3b664bb3bf654dd2a5ff"
+        },
+        {
+            "repository": "MiraboxSpace/StreamDock-Device-SDK",
+            "revision": "7f0d47fe91033b0883edf29b574a6c74ea9bed00",
+            "path": "CPP-SDK/src/HotspotDevice/StreamDockN1/streamdockN1.cpp",
+            "git_blob": "de0c9b6de484eeb089c270e3c236364fdb7bcb82",
+            "sha256": "2f5ca52c5af60d619018c4ac3f0a387c3ac5c88875f33e8763eab5b03412cab3"
+        },
+        {
+            "repository": "MiraboxSpace/StreamDock-Device-SDK",
+            "revision": "7f0d47fe91033b0883edf29b574a6c74ea9bed00",
+            "path": "CPP-SDK/src/HotspotDevice/StreamDockN1/streamdockN1.h",
+            "git_blob": "27bc9ee162d38e83cf5bc43abd0b28f304470903",
+            "sha256": "fa80d4f1824bb61cd405b39d119097945daac67602599890008a0fc975541380"
+        },
+        {
+            "repository": "MiraboxSpace/StreamDock-Device-SDK",
+            "revision": "7f0d47fe91033b0883edf29b574a6c74ea9bed00",
+            "path": "CPP-SDK/src/HotspotDevice/StreamDockN3V2/streamdockN3V2.cpp",
+            "git_blob": "65938453d0f94682c859101826977a218f9d6b1b",
+            "sha256": "dd40862da966870e73ec21a41ead364290f5854ba8cbac00d25b6c263bafd302"
+        },
+        {
+            "repository": "MiraboxSpace/StreamDock-Device-SDK",
+            "revision": "7f0d47fe91033b0883edf29b574a6c74ea9bed00",
+            "path": "CPP-SDK/src/HotspotDevice/StreamDockN3V2/streamdockN3V2.h",
+            "git_blob": "e00977d42d0dae85129e6605dcf10ed5cbec9f4f",
+            "sha256": "8358527940bf6a2250b11c6c021d910052dbf146ed7e5c8f280ab8858e759fab"
+        },
+        {
+            "repository": "MiraboxSpace/StreamDock-Device-SDK",
+            "revision": "7f0d47fe91033b0883edf29b574a6c74ea9bed00",
+            "path": "CPP-SDK/src/HotspotDevice/StreamDockN3V25/streamdockN3V25.cpp",
+            "git_blob": "48c75648cb2d88447d118a33c539546717e6b5b7",
+            "sha256": "2ed10b076da0130e015c1aa1e85213afac7520234f8f871a953139168ccbd931"
+        },
+        {
+            "repository": "MiraboxSpace/StreamDock-Device-SDK",
+            "revision": "7f0d47fe91033b0883edf29b574a6c74ea9bed00",
+            "path": "CPP-SDK/src/HotspotDevice/StreamDockN3V25/streamdockN3V25.h",
+            "git_blob": "ad66103b5f3e6e44c53592ddc96c2b9276e4aae3",
+            "sha256": "60c8b7f4c28eea79b844a59f217c071b0bf687abf724924d2d33f97832859b2a"
+        },
+        {
+            "repository": "MiraboxSpace/StreamDock-Device-SDK",
+            "revision": "7f0d47fe91033b0883edf29b574a6c74ea9bed00",
+            "path": "CPP-SDK/src/HotspotDevice/StreamDockN3V3/streamdockN3V3.h",
+            "git_blob": "f0c553af71e30c3c9a3735893527fea95ffbbffa",
+            "sha256": "f0b6ee46c3bdae7e897e51bb9778d101a55c3a3a43e3e309181cbdd7100727ab"
+        },
+        {
+            "repository": "MiraboxSpace/StreamDock-Device-SDK",
+            "revision": "7f0d47fe91033b0883edf29b574a6c74ea9bed00",
+            "path": "CPP-SDK/src/HotspotDevice/StreamDockN4/streamdockN4.cpp",
+            "git_blob": "9b547add83208e0dc06da7e71a606e44c583b2a6",
+            "sha256": "52cef7116e997a0788b743f154f7e992acdf47b08a29a8d43943331fe9b6b07e"
+        },
+        {
+            "repository": "MiraboxSpace/StreamDock-Device-SDK",
+            "revision": "7f0d47fe91033b0883edf29b574a6c74ea9bed00",
+            "path": "CPP-SDK/src/HotspotDevice/StreamDockN4/streamdockN4.h",
+            "git_blob": "5811b5480c72e1704e8d420fc670b9b8b3c10f57",
+            "sha256": "6bcb80a19a3a2a69f53007532b50ae4145e15c5923bb7a86616da7ad84587567"
+        },
+        {
+            "repository": "MiraboxSpace/StreamDock-Device-SDK",
+            "revision": "7f0d47fe91033b0883edf29b574a6c74ea9bed00",
+            "path": "CPP-SDK/src/HotspotDevice/StreamDockN4Pro/streamdockN4Pro.cpp",
+            "git_blob": "fbf40f7bd537fb926697b63dc30408c07b54c984",
+            "sha256": "596fbe8ca14d1057b2621fe5cda021b5075531796d033f5e8ba471c32cb2621b"
+        },
+        {
+            "repository": "MiraboxSpace/StreamDock-Device-SDK",
+            "revision": "7f0d47fe91033b0883edf29b574a6c74ea9bed00",
+            "path": "CPP-SDK/src/HotspotDevice/StreamDockN4Pro/streamdockN4Pro.h",
+            "git_blob": "adc8d836c900c4b39755eae07e2c3c105a7262c4",
+            "sha256": "e7e95d0347cb1be8f8d66e46be59aefc249e994a384eb865f3c9dcee0c09f8cb"
+        },
+        {
+            "repository": "MiraboxSpace/StreamDock-Device-SDK",
+            "revision": "7f0d47fe91033b0883edf29b574a6c74ea9bed00",
+            "path": "CPP-SDK/src/HotspotDevice/StreamDockXL/streamdockXL.cpp",
+            "git_blob": "49713db854cf754320140c7861a91d28c2c0a30b",
+            "sha256": "42fd5e057f269310e50bac26c640c76770a5232e70245b89f51975869bd2fe63"
+        },
+        {
+            "repository": "MiraboxSpace/StreamDock-Device-SDK",
+            "revision": "7f0d47fe91033b0883edf29b574a6c74ea9bed00",
+            "path": "CPP-SDK/src/HotspotDevice/StreamDockXL/streamdockXL.h",
+            "git_blob": "28b08b75b695978e65982a5c932701f268f1a7d3",
+            "sha256": "6f075d7f770c568bb06fd118816b1d48e288b6de46982f097292d17e3e042bee"
+        },
+        {
+            "repository": "MiraboxSpace/StreamDock-Device-SDK",
+            "revision": "7f0d47fe91033b0883edf29b574a6c74ea9bed00",
+            "path": "CPP-SDK/src/Transport/TransportDLL/transport_c.h",
+            "git_blob": "ded96e3fca843fa01e5a5822b1d3b2f1047c7d89",
+            "sha256": "d9970c2bb654f8097fdd2a5132bfa5416c41f2f7b2e9578e803ec37bd1f2ab65"
+        },
+        {
+            "repository": "MiraboxSpace/StreamDock-Device-SDK",
+            "revision": "7f0d47fe91033b0883edf29b574a6c74ea9bed00",
+            "path": "LICENSE",
+            "git_blob": "10ec242c069825ac1c44c9a92892ceac5ee1248e",
+            "sha256": "ab90d64cbe5d51523abedc8f2b053326646193f49aabfd8d4755b3a4c01193c8"
+        },
+        {
+            "repository": "MiraboxSpace/StreamDock-Device-SDK",
+            "revision": "7f0d47fe91033b0883edf29b574a6c74ea9bed00",
+            "path": "Python-SDK/src/StreamDock/DeviceConfig.py",
+            "git_blob": "da3720881e23461467290323a3fe39f4bef9490d",
+            "sha256": "056a99d9823d36da19efb129f68c714fa9f850b899266fd273d1a08809e3fb5c"
+        },
+        {
+            "repository": "MiraboxSpace/StreamDock-Device-SDK",
+            "revision": "7f0d47fe91033b0883edf29b574a6c74ea9bed00",
+            "path": "Python-SDK/src/StreamDock/Devices/GifController.py",
+            "git_blob": "970e32404c40e1a361c8c935d50739a7b352e3ad",
+            "sha256": "bb286d316c0fe0c57ffa64be296a42dc63ad22e4dab204581a48a151787065d9"
+        },
+        {
+            "repository": "MiraboxSpace/StreamDock-Device-SDK",
+            "revision": "7f0d47fe91033b0883edf29b574a6c74ea9bed00",
+            "path": "Python-SDK/src/StreamDock/Devices/K1Pro.py",
+            "git_blob": "482fed07ef9832c14bb6bb27a2fb7b55dac58d9e",
+            "sha256": "af29b71ba1189b0ab32b4a7b54e3a8ee536a3827d630fb705ac588cf89fdd947"
+        },
+        {
+            "repository": "MiraboxSpace/StreamDock-Device-SDK",
+            "revision": "7f0d47fe91033b0883edf29b574a6c74ea9bed00",
+            "path": "Python-SDK/src/StreamDock/Devices/StreamDock.py",
+            "git_blob": "9d5086b5e4c156ab385cb2166f0a59228630a000",
+            "sha256": "49cfe4335557f8734fe9c8a45d43dd61f2c263f492ced9189112e0872682ff49"
+        },
+        {
+            "repository": "MiraboxSpace/StreamDock-Device-SDK",
+            "revision": "7f0d47fe91033b0883edf29b574a6c74ea9bed00",
+            "path": "Python-SDK/src/StreamDock/Devices/StreamDock293.py",
+            "git_blob": "2030a37d004dd19a706ee4510f9ed0ee63118eb1",
+            "sha256": "b22f7006ff6955e93774e2a5a9fadd9ec2b5ddb59a0f32eb9c0ad252047e6047"
+        },
+        {
+            "repository": "MiraboxSpace/StreamDock-Device-SDK",
+            "revision": "7f0d47fe91033b0883edf29b574a6c74ea9bed00",
+            "path": "Python-SDK/src/StreamDock/Devices/StreamDock293V3.py",
+            "git_blob": "8112766375263375d83c89e29874343f5565bc93",
+            "sha256": "ddc1180b5a97d3a45847e16a79b7579c0ca393fab18269255670b15e1f17eb36"
+        },
+        {
+            "repository": "MiraboxSpace/StreamDock-Device-SDK",
+            "revision": "7f0d47fe91033b0883edf29b574a6c74ea9bed00",
+            "path": "Python-SDK/src/StreamDock/Devices/StreamDock293s.py",
+            "git_blob": "6691e9f5a9515ef7e8d1863995ffa91f1ee8f845",
+            "sha256": "a7a4f5b2f3159f3b091da385bba4ad51a6da2284a72a802e325fdaacb378d280"
+        },
+        {
+            "repository": "MiraboxSpace/StreamDock-Device-SDK",
+            "revision": "7f0d47fe91033b0883edf29b574a6c74ea9bed00",
+            "path": "Python-SDK/src/StreamDock/Devices/StreamDock293sV3.py",
+            "git_blob": "937b26e2c16d1ccbd95e83c59d14afe220560e03",
+            "sha256": "543da2cd6c55eda130b7785b9d2595c61b7938ff44d6871560503d40bbb739be"
+        },
+        {
+            "repository": "MiraboxSpace/StreamDock-Device-SDK",
+            "revision": "7f0d47fe91033b0883edf29b574a6c74ea9bed00",
+            "path": "Python-SDK/src/StreamDock/Devices/StreamDockH1Pro.py",
+            "git_blob": "8cad166f7785f55a78438f521de31a5d11376cf3",
+            "sha256": "d3dccd6e300b2f4d98ff536d4f32708fa87cb3754c80cf01253d7f4b7689e138"
+        },
+        {
+            "repository": "MiraboxSpace/StreamDock-Device-SDK",
+            "revision": "7f0d47fe91033b0883edf29b574a6c74ea9bed00",
+            "path": "Python-SDK/src/StreamDock/Devices/StreamDockM18.py",
+            "git_blob": "e321a4b5c9c1ac6480212aa1ebd7f031c1175d24",
+            "sha256": "0810eb436d23db9aaf3e0b53a51f2506b9850620e751c18d9faa52249a3e0cb8"
+        },
+        {
+            "repository": "MiraboxSpace/StreamDock-Device-SDK",
+            "revision": "7f0d47fe91033b0883edf29b574a6c74ea9bed00",
+            "path": "Python-SDK/src/StreamDock/Devices/StreamDockM3.py",
+            "git_blob": "f7205e70d46de464aa6c8fbce25dc13aebe020db",
+            "sha256": "7be090b2b41df811caf5ea50b12b30712b29a8cfa1d5097dda8027fea15cc4da"
+        },
+        {
+            "repository": "MiraboxSpace/StreamDock-Device-SDK",
+            "revision": "7f0d47fe91033b0883edf29b574a6c74ea9bed00",
+            "path": "Python-SDK/src/StreamDock/Devices/StreamDockMini.py",
+            "git_blob": "05aa2d4ff5573e054397e78fff5a2ec04ea3dab1",
+            "sha256": "3ba016567ca2fc127ee095bb225f6f048ee4bf7253afc8330b922a6941249254"
+        },
+        {
+            "repository": "MiraboxSpace/StreamDock-Device-SDK",
+            "revision": "7f0d47fe91033b0883edf29b574a6c74ea9bed00",
+            "path": "Python-SDK/src/StreamDock/Devices/StreamDockN1.py",
+            "git_blob": "91bf26752dc5d06b80040e4f9cfdb0775d7ddf2d",
+            "sha256": "cf02e50d02f0750c4f1ba18debf102f19e042fb182d0a9130bc6e7e7cf005baa"
+        },
+        {
+            "repository": "MiraboxSpace/StreamDock-Device-SDK",
+            "revision": "7f0d47fe91033b0883edf29b574a6c74ea9bed00",
+            "path": "Python-SDK/src/StreamDock/Devices/StreamDockN3.py",
+            "git_blob": "a9cf76065b035305528b0eda551771e2a68f91d5",
+            "sha256": "b95a3b5db2bd29fea312d3354b019e027c9e9017c395ad046419127ec2dd8cb9"
+        },
+        {
+            "repository": "MiraboxSpace/StreamDock-Device-SDK",
+            "revision": "7f0d47fe91033b0883edf29b574a6c74ea9bed00",
+            "path": "Python-SDK/src/StreamDock/Devices/StreamDockN4.py",
+            "git_blob": "68e7423cc7aa98e91cda50f28491e4060321eeb2",
+            "sha256": "5c54d3d0636cc84304e05b88837cf80dabb4ec0a0592442ba7524d1445ac5450"
+        },
+        {
+            "repository": "MiraboxSpace/StreamDock-Device-SDK",
+            "revision": "7f0d47fe91033b0883edf29b574a6c74ea9bed00",
+            "path": "Python-SDK/src/StreamDock/Devices/StreamDockN4Pro.py",
+            "git_blob": "a987262accda35643f3b9471e2cea788be95d5be",
+            "sha256": "f218c72afe520cb5b3b7dc133bece676bd196ee91853dec67533d75d28a7c394"
+        },
+        {
+            "repository": "MiraboxSpace/StreamDock-Device-SDK",
+            "revision": "7f0d47fe91033b0883edf29b574a6c74ea9bed00",
+            "path": "Python-SDK/src/StreamDock/Devices/StreamDockXL.py",
+            "git_blob": "9192056514c69f62343cdc8b3eb69ffb516b7b55",
+            "sha256": "dd1150a76666933b4880c69ce9ac4523f9f941ba8a39a50292fd9b057477d164"
+        },
+        {
+            "repository": "MiraboxSpace/StreamDock-Device-SDK",
+            "revision": "7f0d47fe91033b0883edf29b574a6c74ea9bed00",
+            "path": "Python-SDK/src/StreamDock/Devices/__init__.py",
+            "git_blob": "e69de29bb2d1d6434b8b29ae775ad8c2e48c5391",
+            "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+        },
+        {
+            "repository": "MiraboxSpace/StreamDock-Device-SDK",
+            "revision": "7f0d47fe91033b0883edf29b574a6c74ea9bed00",
+            "path": "Python-SDK/src/StreamDock/ImageHelpers/PILHelper.py",
+            "git_blob": "400a0ba3b6e9964c870b4e50c4a391004fc139bc",
+            "sha256": "305777c35d6b7bbffee97778048d352727411fb4485f04a824d555400878f5b4"
+        },
+        {
+            "repository": "MiraboxSpace/StreamDock-Device-SDK",
+            "revision": "7f0d47fe91033b0883edf29b574a6c74ea9bed00",
+            "path": "Python-SDK/src/StreamDock/InputTypes.py",
+            "git_blob": "5fab01bedb5a33e801538f35905a8f4f4f363c48",
+            "sha256": "400b14b1d4312c6b335499ce7833c0143283834f831205027d15206009d950de"
+        },
+        {
+            "repository": "MiraboxSpace/StreamDock-Device-SDK",
+            "revision": "7f0d47fe91033b0883edf29b574a6c74ea9bed00",
+            "path": "Python-SDK/src/StreamDock/ProductIDs.py",
+            "git_blob": "95f4bd4aab1034128dac26cb9f1576a65541f426",
+            "sha256": "ff172ef8004c937156b093b220972c918151495f2ca13c1e73cbc4255b267f0d"
+        },
+        {
+            "repository": "MiraboxSpace/StreamDock-Device-SDK",
+            "revision": "7f0d47fe91033b0883edf29b574a6c74ea9bed00",
+            "path": "Python-SDK/src/StreamDock/Transport/LibUSBHIDAPI.py",
+            "git_blob": "067b2a406ffbf0877bf8f3a2b9597f2f7f32df7f",
+            "sha256": "6b8b9dbb40fbfbc72c1c8cf62bcd35c5a658ad7cb883c06b048cc4cfaa62a10d"
+        },
+        {
+            "repository": "MiraboxSpace/StreamDock-Device-SDK",
+            "revision": "fc124cb5bc8fe0cd6c72d3f2af80588adc7dcffb",
+            "path": "CPP-SDK/CMakeLists.txt",
+            "git_blob": "2fe2992ab796d550a1bea22110a9d890901a135f",
+            "sha256": "649b6503ce4b22cca89690db467649541f5465ee8264f561e6cee91d83835f51"
+        },
+        {
+            "repository": "MiraboxSpace/StreamDock-Device-SDK",
+            "revision": "fc124cb5bc8fe0cd6c72d3f2af80588adc7dcffb",
+            "path": "CPP-SDK/src/DeviceInfo/Feature/GifController/gifcontroller.cpp",
+            "git_blob": "5f63dfd74dfa20eae621a067cf42d0a99c0d1afd",
+            "sha256": "76681b5335d3e997da00430b1cfb204d336f6ac67bb132805ca3323b3bac93dc"
+        },
+        {
+            "repository": "MiraboxSpace/StreamDock-Device-SDK",
+            "revision": "fc124cb5bc8fe0cd6c72d3f2af80588adc7dcffb",
+            "path": "CPP-SDK/src/DeviceInfo/Feature/ReadController/readcontroller.cpp",
+            "git_blob": "5f54178b9dffd3e360057a3ae3632e8850048b1e",
+            "sha256": "6e2d1b320247768ec1b9df87bf001b6f24d45b0534e8db75f43511237ee4df91"
+        },
+        {
+            "repository": "MiraboxSpace/StreamDock-Device-SDK",
+            "revision": "fc124cb5bc8fe0cd6c72d3f2af80588adc7dcffb",
+            "path": "CPP-SDK/src/DeviceInfo/streamdock.cpp",
+            "git_blob": "550944d4a7f41cc94234a7e8fafb889656e14561",
+            "sha256": "c74f2239589a9550862d731da5850a779558ffc4ec9f567c91852c6224e70b79"
+        },
+        {
+            "repository": "MiraboxSpace/StreamDock-Device-SDK",
+            "revision": "fc124cb5bc8fe0cd6c72d3f2af80588adc7dcffb",
+            "path": "CPP-SDK/src/DeviceInfo/streamdockconfigcmd.h",
+            "git_blob": "91401b855aa8eb9c929057bb801de8491ae2a01c",
+            "sha256": "ebae73f61666d13b2f0b58b9262cd76626d39514c22f669da7c3c1ce4047db74"
+        },
+        {
+            "repository": "MiraboxSpace/StreamDock-Device-SDK",
+            "revision": "fc124cb5bc8fe0cd6c72d3f2af80588adc7dcffb",
+            "path": "CPP-SDK/src/DeviceInfo/streamdockfactory.cpp",
+            "git_blob": "574759978eb5e447f51d481554c0a0fa212de208",
+            "sha256": "e775bbb662f37a2d6f252f100175aba0837295637d717f79e5ed9ea055066d1f"
+        },
+        {
+            "repository": "MiraboxSpace/StreamDock-Device-SDK",
+            "revision": "fc124cb5bc8fe0cd6c72d3f2af80588adc7dcffb",
+            "path": "CPP-SDK/src/DeviceManager/DeviceEnumerator/deviceenumerator.cpp",
+            "git_blob": "6e8d91e24bc842be2defadd6bc8c44ebf921c468",
+            "sha256": "f979512917b103a7def91961e887ddb17999a189b3d533b1ecbe668b03c511a0"
+        },
+        {
+            "repository": "MiraboxSpace/StreamDock-Device-SDK",
+            "revision": "fc124cb5bc8fe0cd6c72d3f2af80588adc7dcffb",
+            "path": "CPP-SDK/src/HotspotDevice/K1Pro/K1Pro.cpp",
+            "git_blob": "7b859a2663385b70c006fe21b7ab1d170f81ed31",
+            "sha256": "0dd14d311996c5b8128067a87c64f2e0a8aeccc5324636b75aec294f2d405c2f"
+        },
+        {
+            "repository": "MiraboxSpace/StreamDock-Device-SDK",
+            "revision": "fc124cb5bc8fe0cd6c72d3f2af80588adc7dcffb",
+            "path": "CPP-SDK/src/HotspotDevice/K1Pro/K1Pro.h",
+            "git_blob": "bde75a00ab9b05818e31b8acf3fa15255f8a30b0",
+            "sha256": "2de98fa6079ddafc6d0dc5045bca16aa08c7a7766d568b44c15bab221dbc2873"
+        },
+        {
+            "repository": "MiraboxSpace/StreamDock-Device-SDK",
+            "revision": "fc124cb5bc8fe0cd6c72d3f2af80588adc7dcffb",
+            "path": "CPP-SDK/src/HotspotDevice/StreamDock293V2/streamdock293V2.cpp",
+            "git_blob": "09c4aa0bea8e2fb4e2a8ddd8b19873df88ee5574",
+            "sha256": "cc52016456d73fac2aca86e669c52c10db192a9fdae1adec96370905604f91f1"
+        },
+        {
+            "repository": "MiraboxSpace/StreamDock-Device-SDK",
+            "revision": "fc124cb5bc8fe0cd6c72d3f2af80588adc7dcffb",
+            "path": "CPP-SDK/src/HotspotDevice/StreamDock293V2/streamdock293V2.h",
+            "git_blob": "c89368b2d173c5aa5731d2667e741937e5dc2c93",
+            "sha256": "7d9e989de83133264dc08c20a133f80361ab61a327dc89e307fc385a5d879929"
+        },
+        {
+            "repository": "MiraboxSpace/StreamDock-Device-SDK",
+            "revision": "fc124cb5bc8fe0cd6c72d3f2af80588adc7dcffb",
+            "path": "CPP-SDK/src/HotspotDevice/StreamDock293V3/streamdock293V3.cpp",
+            "git_blob": "152b5ad191f898c9148d90f619732209313f315b",
+            "sha256": "3a14bc572bc15b61b64dc53a92a83b958ec8f2cd41c8dbcf28c9bc7ba4e07d76"
+        },
+        {
+            "repository": "MiraboxSpace/StreamDock-Device-SDK",
+            "revision": "fc124cb5bc8fe0cd6c72d3f2af80588adc7dcffb",
+            "path": "CPP-SDK/src/HotspotDevice/StreamDock293V3/streamdock293V3.h",
+            "git_blob": "8caa26b5f3dd4fca1db675276dfdb6958dc2ab40",
+            "sha256": "57c9b38321d637768056487e81163df3770e112814f91f4c5b3acf499e3acbac"
+        },
+        {
+            "repository": "MiraboxSpace/StreamDock-Device-SDK",
+            "revision": "fc124cb5bc8fe0cd6c72d3f2af80588adc7dcffb",
+            "path": "CPP-SDK/src/HotspotDevice/StreamDock293sV2/streamdock293sV2.cpp",
+            "git_blob": "1d3ae8b75b0bd7d1781d821d978b36cbbd28767b",
+            "sha256": "47453cc7e66f7849f2edfc6ef01a40828c9d4aba4e6c121234f770815433e226"
+        },
+        {
+            "repository": "MiraboxSpace/StreamDock-Device-SDK",
+            "revision": "fc124cb5bc8fe0cd6c72d3f2af80588adc7dcffb",
+            "path": "CPP-SDK/src/HotspotDevice/StreamDock293sV2/streamdock293sV2.h",
+            "git_blob": "1d24af64a779342ca66752383117e25523158b4e",
+            "sha256": "8a6fcf85662db6da38d1ce06963ddeaed410cddc633058c898304873cd6d648d"
+        },
+        {
+            "repository": "MiraboxSpace/StreamDock-Device-SDK",
+            "revision": "fc124cb5bc8fe0cd6c72d3f2af80588adc7dcffb",
+            "path": "CPP-SDK/src/HotspotDevice/StreamDock293sV3/streamdock293sV3.cpp",
+            "git_blob": "49532e1c176846b81588ba8802fecf1c704932d0",
+            "sha256": "4fcd17dd66fe52285db86fccfc453d3458fa47d11d369b734e3e663f947e7307"
+        },
+        {
+            "repository": "MiraboxSpace/StreamDock-Device-SDK",
+            "revision": "fc124cb5bc8fe0cd6c72d3f2af80588adc7dcffb",
+            "path": "CPP-SDK/src/HotspotDevice/StreamDock293sV3/streamdock293sV3.h",
+            "git_blob": "b97578e422e4614afbe202b44d49d966af75381b",
+            "sha256": "3848fde7669fe1bc67708d4fb927ab8274dfd095f96d489382232a7d4648e302"
+        },
+        {
+            "repository": "MiraboxSpace/StreamDock-Device-SDK",
+            "revision": "fc124cb5bc8fe0cd6c72d3f2af80588adc7dcffb",
+            "path": "CPP-SDK/src/HotspotDevice/StreamDockH1Pro/streamdockH1Pro.cpp",
+            "git_blob": "4b24fa017da9056fb3855380bdd06602838cf9a0",
+            "sha256": "fa5685ebb635d061042b36abce6c23175e25c6926e1a8cdbab8d85cc7fc27fb1"
+        },
+        {
+            "repository": "MiraboxSpace/StreamDock-Device-SDK",
+            "revision": "fc124cb5bc8fe0cd6c72d3f2af80588adc7dcffb",
+            "path": "CPP-SDK/src/HotspotDevice/StreamDockH1Pro/streamdockH1Pro.h",
+            "git_blob": "47da2e8fcfa257e98a4065f311e16da88f9edad4",
+            "sha256": "a91889441133e7ae005db8849f4f9d111fbeba9356c1b86eba6fc7b77f4fabd7"
+        },
+        {
+            "repository": "MiraboxSpace/StreamDock-Device-SDK",
+            "revision": "fc124cb5bc8fe0cd6c72d3f2af80588adc7dcffb",
+            "path": "CPP-SDK/src/HotspotDevice/StreamDockM18/streamdockM18.cpp",
+            "git_blob": "2383332c1ce051e10afb14de9f856ec977a67ef6",
+            "sha256": "1a2ba9bdf936996448a8c02fe7f0e11ebbd9e1b4038d21bdc6e50f96dd41a117"
+        },
+        {
+            "repository": "MiraboxSpace/StreamDock-Device-SDK",
+            "revision": "fc124cb5bc8fe0cd6c72d3f2af80588adc7dcffb",
+            "path": "CPP-SDK/src/HotspotDevice/StreamDockM18/streamdockM18.h",
+            "git_blob": "7dff5580b9d87ea9a7aa012a37faa722a43d6f31",
+            "sha256": "78800d6b29608b361a884f8a1872b923863c32b916b42ca712b1b2b07a9c4608"
+        },
+        {
+            "repository": "MiraboxSpace/StreamDock-Device-SDK",
+            "revision": "fc124cb5bc8fe0cd6c72d3f2af80588adc7dcffb",
+            "path": "CPP-SDK/src/HotspotDevice/StreamDockM18V2/streamdockM18V2.h",
+            "git_blob": "1140731ddfee7258689614c2f4c87f2562944bef",
+            "sha256": "912a3ae4ae6b468920832b72fdec5e1652789a1cdecb92abe8fd4cca0c05b8ba"
+        },
+        {
+            "repository": "MiraboxSpace/StreamDock-Device-SDK",
+            "revision": "fc124cb5bc8fe0cd6c72d3f2af80588adc7dcffb",
+            "path": "CPP-SDK/src/HotspotDevice/StreamDockM18V25/streamdockM18V25.h",
+            "git_blob": "b517ffa43653d3d96410753e4876fd7d59a756a6",
+            "sha256": "7af4413398d29bed035ce0fa33e61189af74c66bcee18d3b18a888f9d00757e2"
+        },
+        {
+            "repository": "MiraboxSpace/StreamDock-Device-SDK",
+            "revision": "fc124cb5bc8fe0cd6c72d3f2af80588adc7dcffb",
+            "path": "CPP-SDK/src/HotspotDevice/StreamDockM18V3/streamdockM18V3.h",
+            "git_blob": "777dc36788837066538582346a167e54d24faae5",
+            "sha256": "69f7ab1d41dda1261870e081c8e2ecef15b0ed5b2db4a07fefae2f8dbb830c3c"
+        },
+        {
+            "repository": "MiraboxSpace/StreamDock-Device-SDK",
+            "revision": "fc124cb5bc8fe0cd6c72d3f2af80588adc7dcffb",
+            "path": "CPP-SDK/src/HotspotDevice/StreamDockM3/streamdockM3.cpp",
+            "git_blob": "c2b2cd06e53f4e241e8708e623b750cbe2d66fc7",
+            "sha256": "667a123b2e61edf47b574946f617c7ea9c484c5c4c6147c641b7afd5ff100b39"
+        },
+        {
+            "repository": "MiraboxSpace/StreamDock-Device-SDK",
+            "revision": "fc124cb5bc8fe0cd6c72d3f2af80588adc7dcffb",
+            "path": "CPP-SDK/src/HotspotDevice/StreamDockM3/streamdockM3.h",
+            "git_blob": "859bcd4fafdd2b5ca0d882a7ad09be11aa5115c3",
+            "sha256": "2fa53898507d964f2d8b31ea2a94ca0c1b2d303ca8e8c0951629f18c756cd1a5"
+        },
+        {
+            "repository": "MiraboxSpace/StreamDock-Device-SDK",
+            "revision": "fc124cb5bc8fe0cd6c72d3f2af80588adc7dcffb",
+            "path": "CPP-SDK/src/HotspotDevice/StreamDockMini/streamdockMini.cpp",
+            "git_blob": "d37250450ad71b52da940c7209ce64567290a5f7",
+            "sha256": "38596fd68a328ba6d0fdfe6b9751ed4775836852d3d15e79a6d0b1fb9190ffb0"
+        },
+        {
+            "repository": "MiraboxSpace/StreamDock-Device-SDK",
+            "revision": "fc124cb5bc8fe0cd6c72d3f2af80588adc7dcffb",
+            "path": "CPP-SDK/src/HotspotDevice/StreamDockMini/streamdockMini.h",
+            "git_blob": "278641aaea6ddaf3c010780b849b24435d6ac115",
+            "sha256": "d0a16cfb593be0ce2211c823777251f64d8ed3f46d0c3b664bb3bf654dd2a5ff"
+        },
+        {
+            "repository": "MiraboxSpace/StreamDock-Device-SDK",
+            "revision": "fc124cb5bc8fe0cd6c72d3f2af80588adc7dcffb",
+            "path": "CPP-SDK/src/HotspotDevice/StreamDockN1/streamdockN1.cpp",
+            "git_blob": "9f4e4e1dc21c58deaeec343e76fd02b985b27064",
+            "sha256": "ab61aa9daeb5baea5f7843ba9faee5e6c72e0158de161b5f1ba2cb6f1b61bf8c"
+        },
+        {
+            "repository": "MiraboxSpace/StreamDock-Device-SDK",
+            "revision": "fc124cb5bc8fe0cd6c72d3f2af80588adc7dcffb",
+            "path": "CPP-SDK/src/HotspotDevice/StreamDockN1/streamdockN1.h",
+            "git_blob": "27bc9ee162d38e83cf5bc43abd0b28f304470903",
+            "sha256": "fa80d4f1824bb61cd405b39d119097945daac67602599890008a0fc975541380"
+        },
+        {
+            "repository": "MiraboxSpace/StreamDock-Device-SDK",
+            "revision": "fc124cb5bc8fe0cd6c72d3f2af80588adc7dcffb",
+            "path": "CPP-SDK/src/HotspotDevice/StreamDockN3V2/streamdockN3V2.cpp",
+            "git_blob": "6d26ce217333b6fd5218e0d16f6b8510e98d6ed2",
+            "sha256": "59ccbda6ae2d633127575c2e9ef0debea7f240c6ab3b018c5fd92d53a184449c"
+        },
+        {
+            "repository": "MiraboxSpace/StreamDock-Device-SDK",
+            "revision": "fc124cb5bc8fe0cd6c72d3f2af80588adc7dcffb",
+            "path": "CPP-SDK/src/HotspotDevice/StreamDockN3V2/streamdockN3V2.h",
+            "git_blob": "e00977d42d0dae85129e6605dcf10ed5cbec9f4f",
+            "sha256": "8358527940bf6a2250b11c6c021d910052dbf146ed7e5c8f280ab8858e759fab"
+        },
+        {
+            "repository": "MiraboxSpace/StreamDock-Device-SDK",
+            "revision": "fc124cb5bc8fe0cd6c72d3f2af80588adc7dcffb",
+            "path": "CPP-SDK/src/HotspotDevice/StreamDockN3V25/streamdockN3V25.cpp",
+            "git_blob": "35ee25c70824270a41c72be30bcaae7eb6ad9332",
+            "sha256": "e60317215c4c94f336cd81be30bc0a8369edae8693adeacb524551a94c856158"
+        },
+        {
+            "repository": "MiraboxSpace/StreamDock-Device-SDK",
+            "revision": "fc124cb5bc8fe0cd6c72d3f2af80588adc7dcffb",
+            "path": "CPP-SDK/src/HotspotDevice/StreamDockN3V25/streamdockN3V25.h",
+            "git_blob": "ad66103b5f3e6e44c53592ddc96c2b9276e4aae3",
+            "sha256": "60c8b7f4c28eea79b844a59f217c071b0bf687abf724924d2d33f97832859b2a"
+        },
+        {
+            "repository": "MiraboxSpace/StreamDock-Device-SDK",
+            "revision": "fc124cb5bc8fe0cd6c72d3f2af80588adc7dcffb",
+            "path": "CPP-SDK/src/HotspotDevice/StreamDockN3V3/streamdockN3V3.h",
+            "git_blob": "f0c553af71e30c3c9a3735893527fea95ffbbffa",
+            "sha256": "f0b6ee46c3bdae7e897e51bb9778d101a55c3a3a43e3e309181cbdd7100727ab"
+        },
+        {
+            "repository": "MiraboxSpace/StreamDock-Device-SDK",
+            "revision": "fc124cb5bc8fe0cd6c72d3f2af80588adc7dcffb",
+            "path": "CPP-SDK/src/HotspotDevice/StreamDockN4/streamdockN4.cpp",
+            "git_blob": "1615b8e6b23265ee5b423f1add1db3b2a4c63861",
+            "sha256": "178efcf9c85f05d047e387a93d908847d2e317964537cee8906d9451d319583e"
+        },
+        {
+            "repository": "MiraboxSpace/StreamDock-Device-SDK",
+            "revision": "fc124cb5bc8fe0cd6c72d3f2af80588adc7dcffb",
+            "path": "CPP-SDK/src/HotspotDevice/StreamDockN4/streamdockN4.h",
+            "git_blob": "5811b5480c72e1704e8d420fc670b9b8b3c10f57",
+            "sha256": "6bcb80a19a3a2a69f53007532b50ae4145e15c5923bb7a86616da7ad84587567"
+        },
+        {
+            "repository": "MiraboxSpace/StreamDock-Device-SDK",
+            "revision": "fc124cb5bc8fe0cd6c72d3f2af80588adc7dcffb",
+            "path": "CPP-SDK/src/HotspotDevice/StreamDockN4Pro/streamdockN4Pro.cpp",
+            "git_blob": "43aecd47001828b3d123b633a1762d02ad4a60a9",
+            "sha256": "6d603b8388812f06a6b3a28847623736a688614662a5f409d6077b504c8a9858"
+        },
+        {
+            "repository": "MiraboxSpace/StreamDock-Device-SDK",
+            "revision": "fc124cb5bc8fe0cd6c72d3f2af80588adc7dcffb",
+            "path": "CPP-SDK/src/HotspotDevice/StreamDockN4Pro/streamdockN4Pro.h",
+            "git_blob": "adc8d836c900c4b39755eae07e2c3c105a7262c4",
+            "sha256": "e7e95d0347cb1be8f8d66e46be59aefc249e994a384eb865f3c9dcee0c09f8cb"
+        },
+        {
+            "repository": "MiraboxSpace/StreamDock-Device-SDK",
+            "revision": "fc124cb5bc8fe0cd6c72d3f2af80588adc7dcffb",
+            "path": "CPP-SDK/src/HotspotDevice/StreamDockXL/streamdockXL.cpp",
+            "git_blob": "49713db854cf754320140c7861a91d28c2c0a30b",
+            "sha256": "42fd5e057f269310e50bac26c640c76770a5232e70245b89f51975869bd2fe63"
+        },
+        {
+            "repository": "MiraboxSpace/StreamDock-Device-SDK",
+            "revision": "fc124cb5bc8fe0cd6c72d3f2af80588adc7dcffb",
+            "path": "CPP-SDK/src/HotspotDevice/StreamDockXL/streamdockXL.h",
+            "git_blob": "28b08b75b695978e65982a5c932701f268f1a7d3",
+            "sha256": "6f075d7f770c568bb06fd118816b1d48e288b6de46982f097292d17e3e042bee"
+        },
+        {
+            "repository": "MiraboxSpace/StreamDock-Device-SDK",
+            "revision": "fc124cb5bc8fe0cd6c72d3f2af80588adc7dcffb",
+            "path": "CPP-SDK/src/Transport/TransportCWrapper.cpp",
+            "git_blob": "71d64933c93b64e4b606ea89ab628477e1393395",
+            "sha256": "fc9157dc9df0edc1906dd1ef986eb6d96f6448a8e3f03bca239c1dc9a9cdb7ae"
+        },
+        {
+            "repository": "MiraboxSpace/StreamDock-Device-SDK",
+            "revision": "fc124cb5bc8fe0cd6c72d3f2af80588adc7dcffb",
+            "path": "CPP-SDK/src/Transport/TransportCWrapper.h",
+            "git_blob": "c9cbfbab6029f32d47bbc838f3d0bcbc9f16c128",
+            "sha256": "c121c97043595084d13582804d7b843a4cfb0e30c3658e5becd7d63be329b72e"
+        },
+        {
+            "repository": "MiraboxSpace/StreamDock-Device-SDK",
+            "revision": "fc124cb5bc8fe0cd6c72d3f2af80588adc7dcffb",
+            "path": "CPP-SDK/src/Transport/TransportDLL/transport_c.h",
+            "git_blob": "835125c03fa15a9e27333b59703c5d4a6c502353",
+            "sha256": "4e23c6855fea6a2ab7f33dfe2bd79777b6f4a06fbb7bbb2d1cf9144fcb8312c4"
+        },
+        {
+            "repository": "MiraboxSpace/StreamDock-Device-SDK",
+            "revision": "fc124cb5bc8fe0cd6c72d3f2af80588adc7dcffb",
+            "path": "LICENSE",
+            "git_blob": "10ec242c069825ac1c44c9a92892ceac5ee1248e",
+            "sha256": "ab90d64cbe5d51523abedc8f2b053326646193f49aabfd8d4755b3a4c01193c8"
+        },
+        {
+            "repository": "MiraboxSpace/StreamDock-Device-SDK",
+            "revision": "fc124cb5bc8fe0cd6c72d3f2af80588adc7dcffb",
+            "path": "Python-SDK/src/StreamDock/DeviceConfig.py",
+            "git_blob": "da3720881e23461467290323a3fe39f4bef9490d",
+            "sha256": "056a99d9823d36da19efb129f68c714fa9f850b899266fd273d1a08809e3fb5c"
+        },
+        {
+            "repository": "MiraboxSpace/StreamDock-Device-SDK",
+            "revision": "fc124cb5bc8fe0cd6c72d3f2af80588adc7dcffb",
+            "path": "Python-SDK/src/StreamDock/DeviceManager.py",
+            "git_blob": "8eaa6ea8e921f38f703a5cee02a03ac8ea8da61d",
+            "sha256": "82f64a861877be73bdb28b53e3a37bf46a5c3d0b8a0781f60a14c39590be025e"
+        },
+        {
+            "repository": "MiraboxSpace/StreamDock-Device-SDK",
+            "revision": "fc124cb5bc8fe0cd6c72d3f2af80588adc7dcffb",
+            "path": "Python-SDK/src/StreamDock/Devices/GifController.py",
+            "git_blob": "0cc5c14f9aed3770047ede6884bfa08d010aaefe",
+            "sha256": "b08cdfb91d17dbb9ec3be8ffe61451c70390fe245e3c45779acc970dd7e68108"
+        },
+        {
+            "repository": "MiraboxSpace/StreamDock-Device-SDK",
+            "revision": "fc124cb5bc8fe0cd6c72d3f2af80588adc7dcffb",
+            "path": "Python-SDK/src/StreamDock/Devices/K1Pro.py",
+            "git_blob": "505881dac1d3cf523038d0d75c33544924c92e66",
+            "sha256": "65d2ace25b7519e69fd6d568b43d97a984678a03747ad0d125ae3ebfaf0f4c7c"
+        },
+        {
+            "repository": "MiraboxSpace/StreamDock-Device-SDK",
+            "revision": "fc124cb5bc8fe0cd6c72d3f2af80588adc7dcffb",
+            "path": "Python-SDK/src/StreamDock/Devices/StreamDock.py",
+            "git_blob": "1cac98799a3cdc41d65232bbe64966962792c915",
+            "sha256": "5e1dd723bd3e86021f7fe881f2da2aa03e4cffd573b2565ff538234667a58d35"
+        },
+        {
+            "repository": "MiraboxSpace/StreamDock-Device-SDK",
+            "revision": "fc124cb5bc8fe0cd6c72d3f2af80588adc7dcffb",
+            "path": "Python-SDK/src/StreamDock/Devices/StreamDock293.py",
+            "git_blob": "6a7ed4b2255142e7971b50078fabfd92e15bc40c",
+            "sha256": "4c169a5c47ebf934170398defa5d218c87a36d9f5b5b011f6919116de3308b71"
+        },
+        {
+            "repository": "MiraboxSpace/StreamDock-Device-SDK",
+            "revision": "fc124cb5bc8fe0cd6c72d3f2af80588adc7dcffb",
+            "path": "Python-SDK/src/StreamDock/Devices/StreamDock293V3.py",
+            "git_blob": "133b4b595d038190762dc107d035bbb67a57d5d3",
+            "sha256": "df02af563079ba6a185a75af389aef0024c7899ba1865424dd0dd0d37d62f386"
+        },
+        {
+            "repository": "MiraboxSpace/StreamDock-Device-SDK",
+            "revision": "fc124cb5bc8fe0cd6c72d3f2af80588adc7dcffb",
+            "path": "Python-SDK/src/StreamDock/Devices/StreamDock293s.py",
+            "git_blob": "6e71d782dc5caa68f3a43295581583b0091f71e6",
+            "sha256": "77ff478ac85219dc46f921fab8109f3a0d50376d07eb8c9e47467e933a5ff099"
+        },
+        {
+            "repository": "MiraboxSpace/StreamDock-Device-SDK",
+            "revision": "fc124cb5bc8fe0cd6c72d3f2af80588adc7dcffb",
+            "path": "Python-SDK/src/StreamDock/Devices/StreamDock293sV3.py",
+            "git_blob": "dc7a4ba4999cc977e94592dd8d6d20ed99e57229",
+            "sha256": "c681a9bd511af21028d283d8e6693cc1add68b40e119fdaae290236af685f45e"
+        },
+        {
+            "repository": "MiraboxSpace/StreamDock-Device-SDK",
+            "revision": "fc124cb5bc8fe0cd6c72d3f2af80588adc7dcffb",
+            "path": "Python-SDK/src/StreamDock/Devices/StreamDockH1Pro.py",
+            "git_blob": "dd48cd78a34d70091b7d21c997e2118ccc8c3bd9",
+            "sha256": "c8d6578c42d83a02f26e7276c5b5e58072491aa2bafd9003e56a8fa2320b8f82"
+        },
+        {
+            "repository": "MiraboxSpace/StreamDock-Device-SDK",
+            "revision": "fc124cb5bc8fe0cd6c72d3f2af80588adc7dcffb",
+            "path": "Python-SDK/src/StreamDock/Devices/StreamDockM18.py",
+            "git_blob": "1f1a0b03f752a8190a07e018d3531b526ecdb56d",
+            "sha256": "66551e98357cd835812d0b50e7bc77d47312c475e94243f431d0670e629bc627"
+        },
+        {
+            "repository": "MiraboxSpace/StreamDock-Device-SDK",
+            "revision": "fc124cb5bc8fe0cd6c72d3f2af80588adc7dcffb",
+            "path": "Python-SDK/src/StreamDock/Devices/StreamDockM3.py",
+            "git_blob": "b44d8cb61b4abb8a3e301d7d1bc817a960dcf36b",
+            "sha256": "142e4d8f1051029858792ce0e52632e45e26073bb9ceaa75d8ca3afd51f89b1a"
+        },
+        {
+            "repository": "MiraboxSpace/StreamDock-Device-SDK",
+            "revision": "fc124cb5bc8fe0cd6c72d3f2af80588adc7dcffb",
+            "path": "Python-SDK/src/StreamDock/Devices/StreamDockMini.py",
+            "git_blob": "29fd63fd2016289a501abe0b64ed19a14eb2d39d",
+            "sha256": "34f7bc6a1b1777c436510e529de75562fdd2baa2617f66292b9f2349812afda7"
+        },
+        {
+            "repository": "MiraboxSpace/StreamDock-Device-SDK",
+            "revision": "fc124cb5bc8fe0cd6c72d3f2af80588adc7dcffb",
+            "path": "Python-SDK/src/StreamDock/Devices/StreamDockN1.py",
+            "git_blob": "73ed2342746d7609c85c69ac9c7aacfcb1b25710",
+            "sha256": "df890028bc489c71eddeb7ec03d2670c46000f4928699e07a60b9a7a078ba5fa"
+        },
+        {
+            "repository": "MiraboxSpace/StreamDock-Device-SDK",
+            "revision": "fc124cb5bc8fe0cd6c72d3f2af80588adc7dcffb",
+            "path": "Python-SDK/src/StreamDock/Devices/StreamDockN3.py",
+            "git_blob": "88c521622888c258da54a4f298047d2b8fc70605",
+            "sha256": "31b1b6571b8f9322aea5a2815ce0bf1b4270c54d7d0902af234db0435eec8ae2"
+        },
+        {
+            "repository": "MiraboxSpace/StreamDock-Device-SDK",
+            "revision": "fc124cb5bc8fe0cd6c72d3f2af80588adc7dcffb",
+            "path": "Python-SDK/src/StreamDock/Devices/StreamDockN4.py",
+            "git_blob": "53d085400470c5ddace2d5c4b20d902980866a9e",
+            "sha256": "19a80287e84261963592f1b9d3cf11346d6013acd93db0085226c1051fbcac06"
+        },
+        {
+            "repository": "MiraboxSpace/StreamDock-Device-SDK",
+            "revision": "fc124cb5bc8fe0cd6c72d3f2af80588adc7dcffb",
+            "path": "Python-SDK/src/StreamDock/Devices/StreamDockN4Pro.py",
+            "git_blob": "d432a17e7322b496f6183ecaaa464c4da6f9bb00",
+            "sha256": "7384a52cf9a4d52e7b9f2395d65eb5b79fc72e62aab1fa587a0dab0ce4e95807"
+        },
+        {
+            "repository": "MiraboxSpace/StreamDock-Device-SDK",
+            "revision": "fc124cb5bc8fe0cd6c72d3f2af80588adc7dcffb",
+            "path": "Python-SDK/src/StreamDock/Devices/StreamDockXL.py",
+            "git_blob": "d9ee3328d7e9286ae95f7a1f4b07579b18cf4f2a",
+            "sha256": "62dd6e944e26a54146b69c59722b0d34b997ec57e45cdc5f14fc3683f4b7783f"
+        },
+        {
+            "repository": "MiraboxSpace/StreamDock-Device-SDK",
+            "revision": "fc124cb5bc8fe0cd6c72d3f2af80588adc7dcffb",
+            "path": "Python-SDK/src/StreamDock/Devices/__init__.py",
+            "git_blob": "e69de29bb2d1d6434b8b29ae775ad8c2e48c5391",
+            "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+        },
+        {
+            "repository": "MiraboxSpace/StreamDock-Device-SDK",
+            "revision": "fc124cb5bc8fe0cd6c72d3f2af80588adc7dcffb",
+            "path": "Python-SDK/src/StreamDock/FeatrueOption.py",
+            "git_blob": "fa59df9129989099ed7a211ddf0c967e9afa8ea8",
+            "sha256": "a75404053758d8a3b0100065c11852af1e041c4aec5614811c3962ca91c3cb1c"
+        },
+        {
+            "repository": "MiraboxSpace/StreamDock-Device-SDK",
+            "revision": "fc124cb5bc8fe0cd6c72d3f2af80588adc7dcffb",
+            "path": "Python-SDK/src/StreamDock/ImageHelpers/PILHelper.py",
+            "git_blob": "eefdf0c74a01534cc6a53fcf96b1bf1f01c83ca8",
+            "sha256": "436f5305f8a87b45196c66296c6f9d5e828a3b8a974dea0c89d0ddf79f875059"
+        },
+        {
+            "repository": "MiraboxSpace/StreamDock-Device-SDK",
+            "revision": "fc124cb5bc8fe0cd6c72d3f2af80588adc7dcffb",
+            "path": "Python-SDK/src/StreamDock/ImageHelpers/__init__.py",
+            "git_blob": "e69de29bb2d1d6434b8b29ae775ad8c2e48c5391",
+            "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+        },
+        {
+            "repository": "MiraboxSpace/StreamDock-Device-SDK",
+            "revision": "fc124cb5bc8fe0cd6c72d3f2af80588adc7dcffb",
+            "path": "Python-SDK/src/StreamDock/InputTypes.py",
+            "git_blob": "5fab01bedb5a33e801538f35905a8f4f4f363c48",
+            "sha256": "400b14b1d4312c6b335499ce7833c0143283834f831205027d15206009d950de"
+        },
+        {
+            "repository": "MiraboxSpace/StreamDock-Device-SDK",
+            "revision": "fc124cb5bc8fe0cd6c72d3f2af80588adc7dcffb",
+            "path": "Python-SDK/src/StreamDock/ProductIDs.py",
+            "git_blob": "29d3e6b7fdb64ea947262216d30a26cfcf9e8efb",
+            "sha256": "7d6a7a711fce8732a607432e47b01e153bc5306d21a0a7eb8a9b23d28f16e500"
+        },
+        {
+            "repository": "MiraboxSpace/StreamDock-Device-SDK",
+            "revision": "fc124cb5bc8fe0cd6c72d3f2af80588adc7dcffb",
+            "path": "Python-SDK/src/StreamDock/Transport/LibUSBHIDAPI.py",
+            "git_blob": "9bec0640949f7610bf759449ed9dce51a1b78578",
+            "sha256": "d052cfe1fb979bcd5a45aaadb938602397b428b9e00c834cb6be67a73c5651ec"
+        },
+        {
+            "repository": "MiraboxSpace/StreamDock-Device-SDK",
+            "revision": "fc124cb5bc8fe0cd6c72d3f2af80588adc7dcffb",
+            "path": "Python-SDK/src/StreamDock/Transport/__init__.py",
+            "git_blob": "e69de29bb2d1d6434b8b29ae775ad8c2e48c5391",
+            "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+        },
+        {
+            "repository": "MiraboxSpace/StreamDock-Device-SDK",
+            "revision": "fc124cb5bc8fe0cd6c72d3f2af80588adc7dcffb",
+            "path": "Python-SDK/src/StreamDock/Transport/test.py",
+            "git_blob": "4db1acb93acbfbd76820f83eec49adb2954554ce",
+            "sha256": "c0c7fc030b5952d6035da55f6cfa66ec47572348c3d4a3ecea30f42fbb91c97a"
+        },
+        {
+            "repository": "MiraboxSpace/StreamDock-Device-SDK",
+            "revision": "fc124cb5bc8fe0cd6c72d3f2af80588adc7dcffb",
+            "path": "Python-SDK/src/StreamDock/__init__.py",
+            "git_blob": "e69de29bb2d1d6434b8b29ae775ad8c2e48c5391",
+            "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+        }
+    ],
+    "transport_static_reference": {
+        "repository": "MiraboxSpace/StreamDock-Device-SDK",
+        "revision": "7f0d47fe91033b0883edf29b574a6c74ea9bed00",
+        "path": "CPP-SDK/src/Transport/TransportDLL/libtransport.so",
+        "git_blob": "bcea43a54a1a001c200a4c145bd1bcab92e83f2f",
+        "sha256": "94ebce805493f3f45aa9dd3f49c0606a8e639ee1aec825aa27214697435033a1",
+        "bytes": 241752,
+        "method": "Read-only ELF symbol/constant/disassembly inspection; never executed or redistributed"
+    },
+    "upstream_check": {
+        "branch": "main",
+        "revision": "7f0d47fe91033b0883edf29b574a6c74ea9bed00",
+        "retrieved_on": "2026-10-27",
+        "method": "git ls-remote followed by immutable checkout; read-only AST/source/ELF inspection"
+    },
+    "current_revision": "fc124cb5bc8fe0cd6c72d3f2af80588adc7dcffb",
+    "current_source_review": {
+        "revision": "fc124cb5bc8fe0cd6c72d3f2af80588adc7dcffb",
+        "reviewed_on": "2026-11-07",
+        "method": "Read-only immutable Git source and AST inspection. Historical upstream_check and transport_static_reference retained unchanged; no vendor code executed."
+    }
+}

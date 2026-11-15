@@ -1,0 +1,275 @@
+{
+    "method": "simulated",
+    "provenance": "Synthetic reports reconstructed from MiraboxSpace/StreamDock-Device-SDK fc124cb5bc8fe0cd6c72d3f2af80588adc7dcffb source; never captured HID or physical qualification.",
+    "model_id": "n4",
+    "report_id": 0,
+    "report_size": 1025,
+    "usb_ids": ["6602:1001", "6603:1007"],
+    "inputs": [
+        {
+            "event": "button",
+            "code": 6,
+            "control_id": "key-1",
+            "states": [0, 1]
+        },
+        {
+            "event": "button",
+            "code": 7,
+            "control_id": "key-2",
+            "states": [0, 1]
+        },
+        {
+            "event": "button",
+            "code": 8,
+            "control_id": "key-3",
+            "states": [0, 1]
+        },
+        {
+            "event": "button",
+            "code": 9,
+            "control_id": "key-4",
+            "states": [0, 1]
+        },
+        {
+            "event": "button",
+            "code": 10,
+            "control_id": "key-5",
+            "states": [0, 1]
+        },
+        {
+            "event": "button",
+            "code": 1,
+            "control_id": "key-6",
+            "states": [0, 1]
+        },
+        {
+            "event": "button",
+            "code": 2,
+            "control_id": "key-7",
+            "states": [0, 1]
+        },
+        {
+            "event": "button",
+            "code": 3,
+            "control_id": "key-8",
+            "states": [0, 1]
+        },
+        {
+            "event": "button",
+            "code": 4,
+            "control_id": "key-9",
+            "states": [0, 1]
+        },
+        {
+            "event": "button",
+            "code": 5,
+            "control_id": "key-10",
+            "states": [0, 1]
+        },
+        {
+            "event": "button",
+            "code": 55,
+            "control_id": "dial-1",
+            "states": [0, 1]
+        },
+        {
+            "event": "rotate",
+            "code": 160,
+            "control_id": "dial-1",
+            "delta": -1,
+            "states": [0]
+        },
+        {
+            "event": "rotate",
+            "code": 161,
+            "control_id": "dial-1",
+            "delta": 1,
+            "states": [0]
+        },
+        {
+            "event": "button",
+            "code": 53,
+            "control_id": "dial-2",
+            "states": [0, 1]
+        },
+        {
+            "event": "rotate",
+            "code": 80,
+            "control_id": "dial-2",
+            "delta": -1,
+            "states": [0]
+        },
+        {
+            "event": "rotate",
+            "code": 81,
+            "control_id": "dial-2",
+            "delta": 1,
+            "states": [0]
+        },
+        {
+            "event": "button",
+            "code": 51,
+            "control_id": "dial-3",
+            "states": [0, 1]
+        },
+        {
+            "event": "rotate",
+            "code": 144,
+            "control_id": "dial-3",
+            "delta": -1,
+            "states": [0]
+        },
+        {
+            "event": "rotate",
+            "code": 145,
+            "control_id": "dial-3",
+            "delta": 1,
+            "states": [0]
+        },
+        {
+            "event": "button",
+            "code": 54,
+            "control_id": "dial-4",
+            "states": [0, 1]
+        },
+        {
+            "event": "rotate",
+            "code": 112,
+            "control_id": "dial-4",
+            "delta": -1,
+            "states": [0]
+        },
+        {
+            "event": "rotate",
+            "code": 113,
+            "control_id": "dial-4",
+            "delta": 1,
+            "states": [0]
+        },
+        {
+            "event": "button",
+            "code": 64,
+            "control_id": "aux-key-1",
+            "states": [0, 1]
+        },
+        {
+            "event": "button",
+            "code": 65,
+            "control_id": "aux-key-2",
+            "states": [0, 1]
+        },
+        {
+            "event": "button",
+            "code": 66,
+            "control_id": "aux-key-3",
+            "states": [0, 1]
+        },
+        {
+            "event": "button",
+            "code": 67,
+            "control_id": "aux-key-4",
+            "states": [0, 1]
+        },
+        {
+            "event": "swipe",
+            "code": 56,
+            "control_id": "touch-strip",
+            "direction": "left",
+            "states": [0]
+        },
+        {
+            "event": "swipe",
+            "code": 57,
+            "control_id": "touch-strip",
+            "direction": "right",
+            "states": [0]
+        }
+    ],
+    "surfaces": [
+        {
+            "control_id": "key-1",
+            "slot": 6,
+            "wire_size": [112, 112],
+            "encoding": "jpeg"
+        },
+        {
+            "control_id": "key-2",
+            "slot": 7,
+            "wire_size": [112, 112],
+            "encoding": "jpeg"
+        },
+        {
+            "control_id": "key-3",
+            "slot": 8,
+            "wire_size": [112, 112],
+            "encoding": "jpeg"
+        },
+        {
+            "control_id": "key-4",
+            "slot": 9,
+            "wire_size": [112, 112],
+            "encoding": "jpeg"
+        },
+        {
+            "control_id": "key-5",
+            "slot": 10,
+            "wire_size": [112, 112],
+            "encoding": "jpeg"
+        },
+        {
+            "control_id": "key-6",
+            "slot": 11,
+            "wire_size": [112, 112],
+            "encoding": "jpeg"
+        },
+        {
+            "control_id": "key-7",
+            "slot": 12,
+            "wire_size": [112, 112],
+            "encoding": "jpeg"
+        },
+        {
+            "control_id": "key-8",
+            "slot": 13,
+            "wire_size": [112, 112],
+            "encoding": "jpeg"
+        },
+        {
+            "control_id": "key-9",
+            "slot": 14,
+            "wire_size": [112, 112],
+            "encoding": "jpeg"
+        },
+        {
+            "control_id": "key-10",
+            "slot": 15,
+            "wire_size": [112, 112],
+            "encoding": "jpeg"
+        },
+        {
+            "control_id": "aux-key-1",
+            "slot": 1,
+            "wire_size": [176, 112],
+            "encoding": "jpeg"
+        },
+        {
+            "control_id": "aux-key-2",
+            "slot": 2,
+            "wire_size": [176, 112],
+            "encoding": "jpeg"
+        },
+        {
+            "control_id": "aux-key-3",
+            "slot": 3,
+            "wire_size": [176, 112],
+            "encoding": "jpeg"
+        },
+        {
+            "control_id": "aux-key-4",
+            "slot": 4,
+            "wire_size": [176, 112],
+            "encoding": "jpeg"
+        }
+    ],
+    "mode": null
+}

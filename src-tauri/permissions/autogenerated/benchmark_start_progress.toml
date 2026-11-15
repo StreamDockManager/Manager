@@ -1,0 +1,11 @@
+# Automatically generated - DO NOT EDIT!
+
+[[permission]]
+identifier = "allow-benchmark-start-progress"
+description = "Enables the benchmark_start_progress command without any pre-configured scope."
+commands.allow = ["benchmark_start_progress"]
+
+[[permission]]
+identifier = "deny-benchmark-start-progress"
+description = "Denies the benchmark_start_progress command without any pre-configured scope."
+commands.deny = ["benchmark_start_progress"]

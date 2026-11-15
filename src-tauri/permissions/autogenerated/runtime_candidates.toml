@@ -1,0 +1,11 @@
+# Automatically generated - DO NOT EDIT!
+
+[[permission]]
+identifier = "allow-runtime-candidates"
+description = "Enables the runtime_candidates command without any pre-configured scope."
+commands.allow = ["runtime_candidates"]
+
+[[permission]]
+identifier = "deny-runtime-candidates"
+description = "Denies the runtime_candidates command without any pre-configured scope."
+commands.deny = ["runtime_candidates"]

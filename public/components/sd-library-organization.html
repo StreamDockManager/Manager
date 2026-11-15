@@ -1,0 +1,53 @@
+<div x-data="libraryMarkEditor" @open-library-organization.window="open">
+    <dialog
+        x-ref="dialog"
+        class="feature-dialog"
+        aria-labelledby="library-organization-title"
+        @cancel.prevent="close"
+    >
+        <header class="picker-header">
+            <div>
+                <h2 id="library-organization-title">Favorite and tags</h2>
+                <p x-text="name"></p>
+            </div>
+            <button
+                type="button"
+                class="icon-button"
+                aria-label="Close favorite and tags"
+                @click="close"
+                :disabled="saving"
+            >
+                ×
+            </button>
+        </header>
+        <div class="feature-body" :inert="working">
+            <label class="preference-toggle">
+                <input type="checkbox" x-model="favorite" />
+                <span>Favorite</span>
+            </label>
+            <label>
+                Tags
+                <input type="text" x-model="tagText" maxlength="1600" placeholder="Work, travel" />
+            </label>
+            <p class="field-help">
+                Separate tags with commas. Favorites and tags stay in this installation and are
+                excluded from profile and macro exports.
+            </p>
+            <p role="alert" class="danger-text" x-show="error" x-text="error"></p>
+            <button type="button" class="button" x-show="error" @click="reload">
+                Reload personal organization
+            </button>
+        </div>
+        <footer class="feature-footer">
+            <button type="button" class="button" @click="close" :disabled="saving">Cancel</button>
+            <button
+                type="button"
+                class="button primary"
+                @click="save"
+                :disabled="working || !organization.loaded"
+            >
+                Save organization
+            </button>
+        </footer>
+    </dialog>
+</div>

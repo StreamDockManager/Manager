@@ -1,0 +1,22 @@
+{
+  "version": 1,
+  "basePath": "..",
+  "components": {
+    "sd-diagnostics": {
+      "source": "components/sd-diagnostics.html",
+      "dependencies": [],
+      "options": {
+        "shadow": false,
+        "templateRevision": "sha256-VhPstAA6IR3CJxUGs46N2ZqCEQ1NPfNbEkB3LVh0vxE"
+      },
+      "metadata": {
+        "description": "First-party sd-diagnostics component. Controllers are registered by the trusted application bootstrap."
+      }
+    }
+  },
+  "groups": {
+    "diagnostics": [
+      "sd-diagnostics"
+    ]
+  }
+}

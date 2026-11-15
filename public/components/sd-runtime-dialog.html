@@ -1,0 +1,187 @@
+<div x-data="runtimes" @open-runtime.window="open" @open-runtime-removal.window="openRemoval">
+    <div class="setup-banner" x-show="waiting.length">
+        <span
+            x-text="waiting.length + ' plugins need a compatible runtime. Saved enabled preferences are retained.'"
+        ></span>
+        <a href="#/settings" class="button">Manage runtimes</a>
+    </div>
+    <dialog
+        class="feature-dialog"
+        x-ref="runtimeDialog"
+        aria-labelledby="runtime-dialog-title"
+        @cancel="close"
+    >
+        <header class="picker-header">
+            <h2 id="runtime-dialog-title" x-text="title"></h2>
+            <button class="button" @click="close" aria-label="Close runtime selection">×</button>
+        </header>
+        <div class="feature-body">
+            <p
+                x-text="requirement ? 'Plugin requires ' + requirement.kind + ' ' + requirement.version + ' (' + requirement.channel + ')' : 'Choose a default for plugins without a declared version.'"
+            ></p>
+            <label>
+                Supported release line
+                <select x-model="line" @change="lineChange">
+                    <template x-for="entry in selectedLines" :key="entry.line">
+                        <option
+                            :value="entry.line"
+                            x-text="entry.line + ' · ' + entry.channel"
+                        ></option>
+                    </template>
+                </select>
+            </label>
+            <label>
+                Node.js version
+                <select x-model="version" @change="versionChange">
+                    <option value="">Choose an LTS version…</option>
+                    <template x-for="entry in selectedReleases" :key="entry.id">
+                        <option :value="entry.version" x-text="entry.version"></option>
+                    </template>
+                </select>
+            </label>
+            <label>
+                Installation source
+                <select x-model="source" @change="sourceChange">
+                    <option value="private">Private installation (recommended)</option>
+                    <template x-for="privateRuntime in installed" :key="privateRuntime.id">
+                        <option
+                            :value="privateRuntime.id"
+                            x-text="'Private: ' + privateRuntime.version + ' · ' + privateRuntime.channel"
+                        ></option>
+                    </template>
+                    <template x-for="candidate in candidates" :key="candidate.id">
+                        <option
+                            :value="candidate.id"
+                            x-text="'Use existing: ' + candidate.version + ' · ' + candidate.channel + ' · ' + candidate.executable"
+                        ></option>
+                    </template>
+                </select>
+            </label>
+            <button class="button" @click="pick">Choose executable…</button>
+            <p
+                x-text="release ? 'Selected release: ' + release.version + ' · ' + release.channel + ' · Download source: ' + release.url : 'Check for releases to download this line.'"
+            ></p>
+            <button class="button" @click="check" :disabled="busy">Check for updates</button>
+            <button
+                class="button primary"
+                @click="install"
+                :disabled="!canInstall"
+                x-text="installLabel"
+            ></button>
+            <template x-if="removableSelection">
+                <div>
+                    <button
+                        type="button"
+                        class="button danger"
+                        :data-id="removableSelection.id"
+                        @click="requestRemoval"
+                        :disabled="removing || !!removalBlock(removableSelection)"
+                    >
+                        Delete private runtime…
+                    </button>
+                    <p
+                        class="field-help"
+                        x-show="removalBlock(removableSelection)"
+                        x-text="removalBlock(removableSelection)"
+                    ></p>
+                </div>
+            </template>
+            <template x-for="job in jobs" :key="job.id">
+                <article role="status">
+                    <p x-text="runtimeJobTitle(job)"></p>
+                    <p x-text="job.state + ' · ' + job.downloaded + ' bytes'"></p>
+                    <progress
+                        :value="job.downloaded"
+                        :max="job.total || 268435456"
+                        aria-label="Runtime download progress"
+                    ></progress>
+                    <p x-show="job.error" x-text="job.error"></p>
+                    <button
+                        class="button"
+                        x-show="job.state === 'installing'"
+                        :data-id="job.id"
+                        @click="cancel"
+                    >
+                        Cancel installation
+                    </button>
+                    <button
+                        type="button"
+                        class="button"
+                        x-show="job.state === 'failed'"
+                        :aria-label="'Retry runtime installation ' + runtimeJobTitle(job)"
+                        :data-id="job.id"
+                        :data-release="job.release_id"
+                        @click="retry"
+                    >
+                        Retry installation
+                    </button>
+                </article>
+            </template>
+            <label x-show="pluginId" class="preference-toggle">
+                <input type="checkbox" x-model="acknowledged" />
+                I acknowledge that overriding the declared version may break this plugin.
+            </label>
+            <p x-show="saved" role="status">
+                Selection saved. Return to plugin review to enable a newly installed plugin.
+            </p>
+            <template x-for="item in affected" :key="item.plugin_id">
+                <p
+                    x-text="item.name + ': running ' + (item.running ? item.running.version : 'unknown') + ' → selected ' + (item.selected.selected ? item.selected.selected.version : 'unavailable')"
+                ></p>
+            </template>
+            <p class="danger-text" role="alert" x-show="error" x-text="error"></p>
+        </div>
+        <footer class="feature-footer">
+            <button class="button" @click="close">Cancel</button>
+            <button class="button" @click="close" x-show="saved && affected.length">
+                Apply on next restart
+            </button>
+            <button class="button" @click="restart" x-show="affected.length">Restart now</button>
+            <button class="button primary" @click="save">Use selected runtime</button>
+        </footer>
+    </dialog>
+    <dialog
+        x-ref="runtimeRemoval"
+        class="confirmation-dialog"
+        aria-labelledby="runtime-removal-title"
+        aria-describedby="runtime-removal-description"
+        @cancel.prevent="cancelRemoval"
+        @close="cancelRemoval"
+    >
+        <h2 id="runtime-removal-title">Delete private runtime?</h2>
+        <p x-text="removal ? 'Node.js ' + removal.version : ''"></p>
+        <div class="runtime-installation-path">
+            <span>Executable</span>
+            <code x-text="removal ? removal.executable : ''"></code>
+        </div>
+        <p id="runtime-removal-description">
+            This permanently deletes this private runtime's files. Existing installations outside
+            the app are not changed.
+        </p>
+        <p x-text="removalImpact"></p>
+        <p
+            class="danger-text"
+            x-show="removal && removalBlock(removal)"
+            x-text="removal ? removalBlock(removal) : ''"
+        ></p>
+        <p class="danger-text" role="alert" x-show="removalError" x-text="removalError"></p>
+        <div class="button-row">
+            <button
+                type="button"
+                class="button"
+                autofocus
+                @click="cancelRemoval"
+                :disabled="removing"
+            >
+                Cancel
+            </button>
+            <button
+                type="button"
+                class="button danger"
+                @click="confirmRemoval"
+                :disabled="removing || !removal || !!removalBlock(removal)"
+                x-text="removing ? 'Deleting…' : 'Delete runtime'"
+            ></button>
+        </div>
+    </dialog>
+</div>

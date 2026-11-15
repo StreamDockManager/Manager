@@ -1,0 +1,9 @@
+{
+    "version": 1,
+    "groups": ["shell"],
+    "dependencies": [],
+    "options": { "shadow": false },
+    "metadata": {
+        "description": "Reviewed plugin rollback and installation-local update preferences."
+    }
+}

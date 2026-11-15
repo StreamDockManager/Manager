@@ -1,0 +1,46 @@
+{
+    "version": 1,
+    "dependencies": [
+        {
+            "name": "glib",
+            "version": "0.18.5",
+            "sha256": "233daaf6e83ae6a12a52055f568f9d7cf4671dabb78ff9560ab6da230ce00ee5",
+            "tree_sha256": "a827ce230f52ad081a49de88e4b182a60f561fb3d695a5762790b55c3fe20ed3",
+            "patches": [
+                {
+                    "file": "patches/glib-0.18.5-variant-iter.patch",
+                    "sha256": "75eceb13b4489dc53f2b9b0f81c867d763b5d6295ee809e310834678cbb131d5",
+                    "strip": 2
+                },
+                {
+                    "file": "patches/glib-0.18.5-rust-syntax.patch",
+                    "sha256": "b8931e73cfd1d97712130376daf834ea7ebb9c7081b44f8e684148e6791815f1",
+                    "strip": 2
+                }
+            ]
+        },
+        {
+            "name": "wry",
+            "version": "0.57.2",
+            "sha256": "a490119196d02a51d0871df7b9119a1f3e46d75b7e90053a801454d5c6b3491c",
+            "tree_sha256": "30ddee666dab73c223f6e6c536ff4a2e8db3a5d37deeddeebc225147b7d99966",
+            "patches": [
+                {
+                    "file": "patches/wry-0.57.2-ipc-weak-reference.patch",
+                    "sha256": "3b11a1969fff05cb8342824ed31415f1953fe3de69a44f1f60cf16f66e128a23",
+                    "strip": 1
+                },
+                {
+                    "file": "patches/wry-0.57.2-check-cfg.patch",
+                    "sha256": "6fa3c5de5ebd771d8067ab943210692f1ce9e0faddbd109ebb721f57b30e12a8",
+                    "strip": 1
+                },
+                {
+                    "file": "patches/wry-0.57.2-platform-warnings.patch",
+                    "sha256": "de820a35fcd42d730eec9603e0472972b3645d2c80e816372e3973c86be0b9ce",
+                    "strip": 1
+                }
+            ]
+        }
+    ]
+}

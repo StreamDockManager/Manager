@@ -1,0 +1,16 @@
+{
+    "identifier": "action-popup",
+    "description": "First-party correlated action popup. No execution or workspace editing permissions.",
+    "windows": ["action-popup-*"],
+    "permissions": [
+        "allow-report-frontend-error",
+        "core:default",
+        "core:window:allow-close",
+        "core:window:allow-set-theme",
+        "core:window:allow-set-background-color",
+        "core:webview:allow-set-webview-background-color",
+        "allow-appearance-preferences",
+        "allow-action-ui-request",
+        "allow-action-ui-reply"
+    ]
+}

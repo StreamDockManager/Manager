@@ -1,0 +1,53 @@
+{
+    "UUID": "app.streamdockmanager.plugins.fixture.browser",
+    "Name": "Browser protocol fixture",
+    "Version": "1.0.0",
+    "SDKVersion": 1,
+    "CodePath": "plugin.html",
+    "Actions": [
+        {
+            "UUID": "app.streamdockmanager.plugins.fixture.browser.action",
+            "Name": "Browser action",
+            "Controllers": ["Keypad"],
+            "PropertyInspectorPath": "inspector.html",
+            "Icon": "icon.svg",
+            "States": [
+                {
+                    "Image": "icon.svg"
+                }
+            ]
+        }
+    ],
+    "Icon": "icon.svg",
+    "StreamDockManager": {
+        "ManifestDialect": "vsd",
+        "Capabilities": {
+            "version": 1,
+            "id": "app.streamdockmanager.plugins.fixture.browser",
+            "plugin_version": "1.0.0",
+            "theme_protocol": 0,
+            "settings_protocol": 1,
+            "input_protocol": 0,
+            "icon": {
+                "light": "icon.svg",
+                "dark": "icon.svg"
+            },
+            "actions": {
+                "app.streamdockmanager.plugins.fixture.browser.action": {
+                    "control_types": ["button"],
+                    "settings": "inspector.html",
+                    "icon": {
+                        "light": "icon.svg",
+                        "dark": "icon.svg"
+                    },
+                    "states": [
+                        {
+                            "light": "icon.svg",
+                            "dark": "icon.svg"
+                        }
+                    ]
+                }
+            }
+        }
+    }
+}

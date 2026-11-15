@@ -1,0 +1,11 @@
+# Automatically generated - DO NOT EDIT!
+
+[[permission]]
+identifier = "allow-set-device-output"
+description = "Enables the set_device_output command without any pre-configured scope."
+commands.allow = ["set_device_output"]
+
+[[permission]]
+identifier = "deny-set-device-output"
+description = "Denies the set_device_output command without any pre-configured scope."
+commands.deny = ["set_device_output"]

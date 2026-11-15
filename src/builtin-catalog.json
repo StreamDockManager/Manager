@@ -1,0 +1,1858 @@
+[
+    {
+        "id": "navigate",
+        "name": "Navigate pages or profiles",
+        "category": "Navigation",
+        "description": "Move to the previous or next page or compatible profile, wrapping at the ends",
+        "keywords": "dial encoder previous next left right cycle page profile",
+        "icon": "folder",
+        "capability": "",
+        "release": false,
+        "topLevel": true,
+        "fields": [],
+        "defaults": {
+            "target": "page",
+            "direction": "next"
+        },
+        "children": false
+    },
+    {
+        "id": "hotkey",
+        "name": "Keyboard shortcut",
+        "category": "Text",
+        "description": "Press a key combination",
+        "keywords": "hotkey Press a key combination",
+        "icon": "keyboard",
+        "capability": "",
+        "release": false,
+        "topLevel": true,
+        "fields": [],
+        "defaults": {
+            "keys": ["ctrl", "a"]
+        },
+        "children": false
+    },
+    {
+        "id": "keyboard_macro",
+        "name": "Keyboard macro",
+        "category": "Text",
+        "description": "Record and edit physical key presses, releases, combinations and timing",
+        "keywords": "keyboard recording sequence timed physical keys combinations",
+        "icon": "keyboard",
+        "capability": "keyboard_macro",
+        "release": false,
+        "fields": [],
+        "defaults": {
+            "recording": {
+                "version": 1,
+                "platform": "unknown",
+                "key_mode": "physical",
+                "events": []
+            },
+            "playback": {
+                "speed": 1,
+                "focus_policy": "stay_on_target",
+                "repeat_mode": "exact"
+            }
+        },
+        "children": false
+    },
+    {
+        "id": "open_url",
+        "name": "Open a website",
+        "category": "Applications",
+        "description": "Launch your default browser",
+        "keywords": "open url Launch your default browser",
+        "icon": "globe",
+        "capability": "",
+        "release": false,
+        "topLevel": true,
+        "fields": [],
+        "defaults": {
+            "url": "https://example.org"
+        },
+        "children": false
+    },
+    {
+        "id": "open_path",
+        "name": "Open file or folder",
+        "category": "Files",
+        "description": "Open a path using its default application",
+        "keywords": "open path Open a path using its default application",
+        "icon": "folder",
+        "capability": "",
+        "release": false,
+        "topLevel": true,
+        "fields": [],
+        "defaults": {
+            "path": ""
+        },
+        "children": false
+    },
+    {
+        "id": "application",
+        "name": "Open application",
+        "category": "Applications",
+        "description": "Launch an application",
+        "keywords": "application Launch an application",
+        "icon": "monitor",
+        "capability": "",
+        "release": false,
+        "topLevel": true,
+        "fields": [],
+        "defaults": {
+            "path": ""
+        },
+        "children": false
+    },
+    {
+        "id": "command",
+        "name": "Run a command",
+        "category": "Applications",
+        "description": "Start an executable with arguments",
+        "keywords": "command Start an executable with arguments",
+        "icon": "terminal",
+        "capability": "",
+        "release": false,
+        "topLevel": true,
+        "fields": [],
+        "defaults": {
+            "program": "",
+            "args": []
+        },
+        "children": false
+    },
+    {
+        "id": "media",
+        "name": "Media control",
+        "category": "Audio",
+        "description": "Play pause stop next or previous track",
+        "keywords": "media Play pause stop next or previous track",
+        "icon": "play",
+        "capability": "",
+        "release": false,
+        "topLevel": true,
+        "fields": [],
+        "defaults": {
+            "command": "play-pause"
+        },
+        "children": false
+    },
+    {
+        "id": "volume",
+        "name": "Volume",
+        "category": "Audio",
+        "description": "Adjust default output volume",
+        "keywords": "volume Adjust default output volume",
+        "icon": "volume-2",
+        "capability": "",
+        "release": false,
+        "topLevel": true,
+        "fields": [],
+        "defaults": {
+            "delta": 5
+        },
+        "children": false
+    },
+    {
+        "id": "mute",
+        "name": "Mute audio",
+        "category": "Audio",
+        "description": "Toggle output mute",
+        "keywords": "mute Toggle output mute",
+        "icon": "volume-x",
+        "capability": "",
+        "release": false,
+        "topLevel": true,
+        "fields": [],
+        "defaults": {},
+        "children": false
+    },
+    {
+        "id": "profile",
+        "name": "Switch profile",
+        "category": "Navigation",
+        "description": "Select a profile for this device",
+        "keywords": "profile Select a profile for this device",
+        "icon": "settings",
+        "capability": "",
+        "release": false,
+        "topLevel": true,
+        "fields": [],
+        "defaults": {
+            "profile_id": ""
+        },
+        "children": false
+    },
+    {
+        "id": "page",
+        "name": "Switch page",
+        "category": "Navigation",
+        "description": "Select a particular page",
+        "keywords": "page Select a particular page",
+        "icon": "folder",
+        "capability": "",
+        "release": false,
+        "topLevel": true,
+        "fields": [],
+        "defaults": {
+            "page_id": ""
+        },
+        "children": false
+    },
+    {
+        "id": "swipe_navigation",
+        "name": "Touch bar navigation",
+        "category": "Navigation",
+        "description": "Swipe between pages or profiles",
+        "keywords": "swipe navigation Swipe between pages or profiles",
+        "icon": "monitor",
+        "capability": "",
+        "release": false,
+        "topLevel": true,
+        "fields": [],
+        "defaults": {
+            "target": "page",
+            "wrap": true,
+            "reverse": false
+        },
+        "children": false
+    },
+    {
+        "id": "delay",
+        "name": "Delay",
+        "category": "Workflow",
+        "description": "Wait before the next sequence step",
+        "keywords": "delay Wait before the next sequence step",
+        "icon": "clock",
+        "capability": "",
+        "release": false,
+        "topLevel": true,
+        "fields": [],
+        "defaults": {
+            "milliseconds": 100
+        },
+        "children": false
+    },
+    {
+        "id": "macro",
+        "name": "Macro",
+        "category": "Workflow",
+        "description": "Run an ordered sequence",
+        "keywords": "macro Run an ordered sequence",
+        "icon": "terminal",
+        "capability": "",
+        "release": false,
+        "topLevel": true,
+        "fields": [],
+        "defaults": {
+            "actions": []
+        },
+        "children": false
+    },
+    {
+        "id": "toggle",
+        "name": "Toggle actions",
+        "category": "Workflow",
+        "description": "Alternate between on and off branches",
+        "keywords": "toggle Alternate between on and off branches",
+        "icon": "settings",
+        "capability": "",
+        "release": false,
+        "topLevel": true,
+        "fields": [],
+        "defaults": {
+            "on": {
+                "kind": "none"
+            },
+            "off": {
+                "kind": "none"
+            }
+        },
+        "children": false
+    },
+    {
+        "id": "brightness",
+        "name": "Device brightness",
+        "category": "Navigation",
+        "description": "Set device brightness",
+        "keywords": "brightness Set device brightness",
+        "icon": "sun",
+        "capability": "",
+        "release": false,
+        "topLevel": true,
+        "fields": [],
+        "defaults": {
+            "value": 65
+        },
+        "children": false
+    },
+    {
+        "id": "lighting",
+        "name": "Lighting",
+        "category": "Navigation",
+        "description": "Configure deck lighting colors",
+        "keywords": "lighting Configure deck lighting colors",
+        "icon": "sun",
+        "capability": "",
+        "release": false,
+        "topLevel": true,
+        "fields": [],
+        "defaults": {
+            "brightness": 65,
+            "colors": [[255, 0, 0]]
+        },
+        "children": false
+    },
+    {
+        "id": "sleep",
+        "name": "Sleep device",
+        "category": "Navigation",
+        "description": "Put this device to sleep",
+        "keywords": "sleep Put this device to sleep",
+        "icon": "moon",
+        "capability": "",
+        "release": false,
+        "topLevel": true,
+        "fields": [],
+        "defaults": {},
+        "children": false
+    },
+    {
+        "id": "type_text",
+        "name": "Type text",
+        "category": "Text",
+        "description": "Enter Unicode text and line breaks",
+        "keywords": "type text Enter Unicode text and line breaks typing multiline lines",
+        "icon": "keyboard",
+        "capability": "insertion",
+        "release": false,
+        "fields": [
+            {
+                "key": "text",
+                "label": "Text",
+                "type": "text"
+            },
+            {
+                "key": "template",
+                "label": "Insert run outputs",
+                "type": "boolean"
+            }
+        ],
+        "defaults": {
+            "text": "",
+            "template": false
+        },
+        "children": false
+    },
+    {
+        "id": "paste_text",
+        "name": "Paste text",
+        "category": "Text",
+        "description": "Paste a snippet and optionally restore the clipboard",
+        "keywords": "paste text Paste a snippet and optionally restore the clipboard",
+        "icon": "keyboard",
+        "capability": "paste",
+        "release": false,
+        "fields": [
+            {
+                "key": "text",
+                "label": "Text",
+                "type": "text"
+            },
+            {
+                "key": "template",
+                "label": "Insert run outputs",
+                "type": "boolean"
+            },
+            {
+                "key": "restore",
+                "label": "Restore",
+                "type": "boolean"
+            }
+        ],
+        "defaults": {
+            "text": "",
+            "template": false,
+            "restore": true
+        },
+        "children": false
+    },
+    {
+        "id": "set_clipboard",
+        "name": "Set clipboard",
+        "category": "Text",
+        "description": "Copy configured Unicode text",
+        "keywords": "set clipboard Copy configured Unicode text",
+        "icon": "keyboard",
+        "capability": "clipboard",
+        "release": false,
+        "fields": [
+            {
+                "key": "text",
+                "label": "Text",
+                "type": "text"
+            },
+            {
+                "key": "template",
+                "label": "Insert run outputs",
+                "type": "boolean"
+            }
+        ],
+        "defaults": {
+            "text": "",
+            "template": false
+        },
+        "children": false
+    },
+    {
+        "id": "clear_clipboard",
+        "name": "Clear clipboard",
+        "category": "Text",
+        "description": "Clear current clipboard contents",
+        "keywords": "clear clipboard Clear current clipboard contents",
+        "icon": "keyboard",
+        "capability": "clipboard",
+        "release": false,
+        "fields": [],
+        "defaults": {},
+        "children": false
+    },
+    {
+        "id": "hold_keys",
+        "name": "Hold keys",
+        "category": "Text",
+        "description": "Hold a chord until the button is released",
+        "keywords": "hold keys Hold a chord until the button is released",
+        "icon": "keyboard",
+        "capability": "keyboard",
+        "release": true,
+        "fields": [
+            {
+                "key": "keys",
+                "label": "Keys",
+                "type": "lines",
+                "help": "Record a shortcut, or enter one key per line. The keys are released when the control is released."
+            }
+        ],
+        "defaults": {
+            "keys": ["ctrl"]
+        },
+        "children": false
+    },
+    {
+        "id": "latch_keys",
+        "name": "Latch keys",
+        "category": "Text",
+        "description": "Toggle a held key chord",
+        "keywords": "latch keys Toggle a held key chord",
+        "icon": "keyboard",
+        "capability": "keyboard",
+        "release": false,
+        "fields": [
+            {
+                "key": "keys",
+                "label": "Keys",
+                "type": "lines",
+                "help": "Record a shortcut, or enter one key per line. The next activation releases the keys."
+            }
+        ],
+        "defaults": {
+            "keys": ["shift"]
+        },
+        "children": false
+    },
+    {
+        "id": "mouse_click",
+        "name": "Mouse click",
+        "category": "Pointer",
+        "description": "Left right middle back forward single or double click",
+        "keywords": "mouse click Left right middle back forward single or double click",
+        "icon": "monitor",
+        "capability": "pointer",
+        "release": false,
+        "fields": [
+            {
+                "key": "button",
+                "label": "Button",
+                "type": "select",
+                "options": ["left", "right", "middle", "back", "forward"]
+            },
+            {
+                "key": "clicks",
+                "label": "Clicks",
+                "type": "number",
+                "min": 1,
+                "max": 2
+            }
+        ],
+        "defaults": {
+            "button": "left",
+            "clicks": 1
+        },
+        "children": false
+    },
+    {
+        "id": "mouse_move",
+        "name": "Move pointer",
+        "category": "Pointer",
+        "description": "Move to absolute screen coordinates or relative offset",
+        "keywords": "mouse move Move to absolute screen coordinates or relative offset",
+        "icon": "monitor",
+        "capability": "pointer",
+        "release": false,
+        "fields": [
+            {
+                "key": "x",
+                "label": "Horizontal position or offset",
+                "type": "number"
+            },
+            {
+                "key": "y",
+                "label": "Vertical position or offset",
+                "type": "number"
+            },
+            {
+                "key": "relative",
+                "label": "Relative",
+                "type": "boolean",
+                "help": "Relative coordinates are offsets from the pointer. Absolute coordinates are screen pixels."
+            }
+        ],
+        "defaults": {
+            "x": 0,
+            "y": 0,
+            "relative": true
+        },
+        "children": false
+    },
+    {
+        "id": "mouse_scroll",
+        "name": "Mouse scroll",
+        "category": "Pointer",
+        "description": "Scroll horizontally and vertically with dial sensitivity",
+        "keywords": "mouse scroll Scroll horizontally and vertically with dial sensitivity",
+        "icon": "monitor",
+        "capability": "pointer",
+        "release": false,
+        "fields": [
+            {
+                "key": "x",
+                "label": "X",
+                "type": "number",
+                "help": "Horizontal scroll amount. A negative value reverses direction."
+            },
+            {
+                "key": "y",
+                "label": "Y",
+                "type": "number",
+                "help": "Vertical scroll amount. A negative value reverses direction."
+            }
+        ],
+        "defaults": {
+            "x": 0,
+            "y": 1
+        },
+        "children": false
+    },
+    {
+        "id": "mouse_drag",
+        "name": "Mouse drag",
+        "category": "Pointer",
+        "description": "Drag to configured coordinates",
+        "keywords": "mouse drag Drag to configured coordinates",
+        "icon": "monitor",
+        "capability": "pointer",
+        "release": false,
+        "fields": [
+            {
+                "key": "button",
+                "label": "Button",
+                "type": "select",
+                "options": ["left", "right", "middle"]
+            },
+            {
+                "key": "x",
+                "label": "Horizontal position or offset",
+                "type": "number"
+            },
+            {
+                "key": "y",
+                "label": "Vertical position or offset",
+                "type": "number"
+            },
+            {
+                "key": "relative",
+                "label": "Relative",
+                "type": "boolean",
+                "help": "Relative coordinates are offsets from the pointer. Absolute coordinates are screen pixels."
+            },
+            {
+                "key": "milliseconds",
+                "label": "Drag duration (ms)",
+                "type": "number",
+                "min": 0,
+                "max": 3600000
+            }
+        ],
+        "defaults": {
+            "button": "left",
+            "x": 100,
+            "y": 0,
+            "relative": true,
+            "milliseconds": 300
+        },
+        "children": false
+    },
+    {
+        "id": "open_link",
+        "name": "Open app link",
+        "category": "Applications",
+        "description": "Launch a registered application URI scheme",
+        "keywords": "open link Launch a registered application URI scheme",
+        "icon": "globe",
+        "capability": "",
+        "release": false,
+        "fields": [
+            {
+                "key": "url",
+                "label": "Application link or URL",
+                "type": "string",
+                "help": "Use an application link such as mailto: or an https:// address.",
+                "placeholder": "mailto:name@example.com"
+            },
+            {
+                "key": "template",
+                "label": "Insert run outputs",
+                "type": "boolean"
+            }
+        ],
+        "defaults": {
+            "url": "mailto:",
+            "template": false
+        },
+        "children": false
+    },
+    {
+        "id": "reveal_file",
+        "name": "Reveal file",
+        "category": "Files",
+        "description": "Select a file in its containing folder",
+        "keywords": "reveal file Select a file in its containing folder",
+        "icon": "folder",
+        "capability": "",
+        "release": false,
+        "fields": [
+            {
+                "key": "path",
+                "label": "Path",
+                "type": "string",
+                "help": "Choose an existing file or folder to reveal in the file manager."
+            },
+            {
+                "key": "template",
+                "label": "Insert run outputs",
+                "type": "boolean"
+            }
+        ],
+        "defaults": {
+            "path": "",
+            "template": false
+        },
+        "children": false
+    },
+    {
+        "id": "page_step",
+        "name": "Next or previous page",
+        "category": "Navigation",
+        "description": "Navigate relative to the current page",
+        "keywords": "page step Navigate relative to the current page",
+        "icon": "settings",
+        "capability": "",
+        "release": false,
+        "fields": [
+            {
+                "key": "direction",
+                "label": "Direction",
+                "type": "select",
+                "options": ["next", "previous"]
+            },
+            {
+                "key": "wrap",
+                "label": "Wrap",
+                "type": "boolean"
+            }
+        ],
+        "defaults": {
+            "direction": "next",
+            "wrap": true
+        },
+        "children": false
+    },
+    {
+        "id": "page_back",
+        "name": "Return to previous page",
+        "category": "Navigation",
+        "description": "Return through per-device page history",
+        "keywords": "page back Return through per-device page history",
+        "icon": "settings",
+        "capability": "",
+        "release": false,
+        "fields": [],
+        "defaults": {},
+        "children": false
+    },
+    {
+        "id": "momentary_page",
+        "name": "Momentary page",
+        "category": "Navigation",
+        "description": "Show another page while a button is held",
+        "keywords": "momentary page Show another page while a button is held",
+        "icon": "settings",
+        "capability": "",
+        "release": true,
+        "fields": [
+            {
+                "key": "page_id",
+                "label": "Page id",
+                "type": "page"
+            }
+        ],
+        "defaults": {
+            "page_id": ""
+        },
+        "children": false
+    },
+    {
+        "id": "cycle_actions",
+        "name": "Cycle actions",
+        "category": "Workflow",
+        "description": "Advance through actions after each successful activation",
+        "keywords": "cycle actions Advance through actions after each successful activation",
+        "icon": "clock",
+        "capability": "",
+        "release": false,
+        "fields": [],
+        "defaults": {
+            "children": [
+                {
+                    "kind": "none"
+                },
+                {
+                    "kind": "none"
+                },
+                {
+                    "kind": "none"
+                }
+            ]
+        },
+        "children": true
+    },
+    {
+        "id": "repeat_actions",
+        "name": "Repeat action",
+        "category": "Workflow",
+        "description": "Repeat a sequence a specified number of times",
+        "keywords": "repeat actions Repeat a sequence a specified number of times",
+        "icon": "clock",
+        "capability": "",
+        "release": false,
+        "fields": [
+            {
+                "key": "count",
+                "label": "Count",
+                "type": "number",
+                "min": 1,
+                "max": 1000
+            },
+            {
+                "key": "interval_ms",
+                "label": "Repeat interval (ms)",
+                "type": "number",
+                "help": "Time between repeats. Use 0 to repeat immediately.",
+                "min": 0,
+                "max": 3600000
+            }
+        ],
+        "defaults": {
+            "count": 1,
+            "interval_ms": 0,
+            "children": [
+                {
+                    "kind": "none"
+                }
+            ]
+        },
+        "children": true
+    },
+    {
+        "id": "repeat_held",
+        "name": "Repeat while held",
+        "category": "Workflow",
+        "description": "Repeat until the physical button is released",
+        "keywords": "repeat held Repeat until the physical button is released",
+        "icon": "clock",
+        "capability": "",
+        "release": true,
+        "fields": [
+            {
+                "key": "interval_ms",
+                "label": "Repeat interval (ms)",
+                "type": "number",
+                "min": 20,
+                "max": 3600000
+            }
+        ],
+        "defaults": {
+            "interval_ms": 100,
+            "children": [
+                {
+                    "kind": "none"
+                }
+            ]
+        },
+        "children": true
+    },
+    {
+        "id": "conditional",
+        "name": "Conditional action",
+        "category": "Workflow",
+        "description": "Choose true or false branch using a typed condition",
+        "keywords": "conditional Choose true or false branch using a typed condition",
+        "icon": "clock",
+        "capability": "",
+        "release": false,
+        "fields": [
+            {
+                "key": "condition",
+                "label": "Condition",
+                "type": "condition"
+            }
+        ],
+        "defaults": {
+            "condition": {
+                "source": "clipboard",
+                "subject": "",
+                "operator": "equals",
+                "value": ""
+            },
+            "children": [
+                {
+                    "kind": "none"
+                },
+                {
+                    "kind": "none"
+                }
+            ]
+        },
+        "children": true
+    },
+    {
+        "id": "wait_condition",
+        "name": "Wait for condition",
+        "category": "Workflow",
+        "description": "Wait for clipboard file process or application state",
+        "keywords": "wait condition Wait for clipboard file process or application state",
+        "icon": "clock",
+        "capability": "",
+        "release": false,
+        "fields": [
+            {
+                "key": "condition",
+                "label": "Condition",
+                "type": "condition"
+            },
+            {
+                "key": "timeout_ms",
+                "label": "Timeout (ms)",
+                "type": "number",
+                "help": "How long to wait for the condition to become true.",
+                "min": 0,
+                "max": 3600000
+            },
+            {
+                "key": "poll_ms",
+                "label": "Check interval (ms)",
+                "type": "number",
+                "help": "How often to recheck the condition. The minimum interval is 20 ms.",
+                "min": 20,
+                "max": 3600000
+            }
+        ],
+        "defaults": {
+            "condition": {
+                "source": "file",
+                "subject": "",
+                "operator": "exists",
+                "value": ""
+            },
+            "timeout_ms": 30000,
+            "poll_ms": 100
+        },
+        "children": false
+    },
+    {
+        "id": "cancel_macros",
+        "name": "Cancel running macros",
+        "category": "Workflow",
+        "description": "Stop pending and running action sequences",
+        "keywords": "cancel macros Stop pending and running action sequences",
+        "icon": "clock",
+        "capability": "",
+        "release": false,
+        "fields": [],
+        "defaults": {},
+        "children": false
+    },
+    {
+        "id": "brightness_step",
+        "name": "Adjust device brightness",
+        "category": "Navigation",
+        "description": "Change deck brightness relative to its current value",
+        "keywords": "brightness step Change deck brightness relative to its current value",
+        "icon": "settings",
+        "capability": "",
+        "release": false,
+        "fields": [
+            {
+                "key": "delta",
+                "label": "Brightness change (%)",
+                "type": "number",
+                "help": "Use a positive value to brighten or a negative value to dim."
+            }
+        ],
+        "defaults": {
+            "delta": 5
+        },
+        "children": false
+    },
+    {
+        "id": "automation_control",
+        "name": "Automatic profile switching",
+        "category": "Navigation",
+        "description": "Enable pause resume or disable automatic profile switching",
+        "keywords": "automation control Enable pause resume or disable automatic profile switching",
+        "icon": "settings",
+        "capability": "",
+        "release": false,
+        "fields": [
+            {
+                "key": "operation",
+                "label": "Operation",
+                "type": "select",
+                "options": ["toggle", "enable", "disable", "pause", "resume"]
+            }
+        ],
+        "defaults": {
+            "operation": "toggle"
+        },
+        "children": false
+    },
+    {
+        "id": "notification",
+        "name": "Show notification",
+        "category": "Applications",
+        "description": "Display a local desktop notification",
+        "keywords": "notification Display a local desktop notification",
+        "icon": "globe",
+        "capability": "desktop",
+        "release": false,
+        "fields": [
+            {
+                "key": "title",
+                "label": "Title",
+                "type": "string"
+            },
+            {
+                "key": "text",
+                "label": "Text",
+                "type": "text"
+            },
+            {
+                "key": "template",
+                "label": "Insert run outputs",
+                "type": "boolean"
+            }
+        ],
+        "defaults": {
+            "title": "Stream Dock Manager",
+            "text": "",
+            "template": false
+        },
+        "children": false
+    },
+    {
+        "id": "date_time",
+        "name": "Insert date and time",
+        "category": "Text",
+        "description": "Type formatted local or UTC date and time",
+        "keywords": "date time Type formatted local or UTC date and time",
+        "icon": "keyboard",
+        "capability": "insertion",
+        "release": false,
+        "fields": [
+            {
+                "key": "format",
+                "label": "Date and time format",
+                "type": "string",
+                "help": "Choose a preset or enter a custom format. For example, %Y-%m-%d produces 2026-11-03.",
+                "presets": [
+                    {
+                        "value": "%Y-%m-%d %H:%M",
+                        "label": "Date and time (2026-11-03 14:30)"
+                    },
+                    {
+                        "value": "%Y-%m-%d",
+                        "label": "Date (2026-11-03)"
+                    },
+                    {
+                        "value": "%H:%M",
+                        "label": "24-hour time (14:30)"
+                    },
+                    {
+                        "value": "%I:%M %p",
+                        "label": "12-hour time (02:30 PM)"
+                    },
+                    {
+                        "value": "%Y-%m-%dT%H:%M:%S%:z",
+                        "label": "ISO date and time with time zone"
+                    }
+                ]
+            },
+            {
+                "key": "utc",
+                "label": "Utc",
+                "type": "boolean"
+            }
+        ],
+        "defaults": {
+            "format": "%Y-%m-%d %H:%M",
+            "utc": false
+        },
+        "children": false
+    },
+    {
+        "id": "transform_text",
+        "name": "Transform selected text",
+        "category": "Text",
+        "description": "Change case trim whitespace or convert naming style",
+        "keywords": "transform text Change case trim whitespace or convert naming style",
+        "icon": "keyboard",
+        "capability": "selection",
+        "release": false,
+        "fields": [
+            {
+                "key": "operation",
+                "label": "Operation",
+                "type": "select",
+                "options": [
+                    "uppercase",
+                    "lowercase",
+                    "title",
+                    "trim",
+                    "snake_case",
+                    "kebab-case",
+                    "camelCase"
+                ]
+            }
+        ],
+        "defaults": {
+            "operation": "uppercase"
+        },
+        "children": false
+    },
+    {
+        "id": "search_selection",
+        "name": "Search selected text",
+        "category": "Text",
+        "description": "Search selected or clipboard text in a browser",
+        "keywords": "search selection Search selected or clipboard text in a browser",
+        "icon": "keyboard",
+        "capability": "selection",
+        "release": false,
+        "fields": [
+            {
+                "key": "url",
+                "label": "Search URL",
+                "type": "string",
+                "help": "Put {query} where the selected or clipboard text should appear in the search URL.",
+                "placeholder": "https://www.google.com/search?q={query}"
+            },
+            {
+                "key": "source",
+                "label": "Source",
+                "type": "select",
+                "options": ["selection", "clipboard"]
+            }
+        ],
+        "defaults": {
+            "url": "https://www.google.com/search?q={query}",
+            "source": "selection"
+        },
+        "children": false
+    },
+    {
+        "id": "clipboard_slot",
+        "name": "Clipboard slots",
+        "category": "Text",
+        "description": "Save restore or clear a named text clipboard slot",
+        "keywords": "clipboard slot Save restore or clear a named text clipboard slot",
+        "icon": "keyboard",
+        "capability": "clipboard",
+        "release": false,
+        "fields": [
+            {
+                "key": "name",
+                "label": "Slot name",
+                "type": "string",
+                "help": "Use the same slot name in steps that save, restore, or clear this clipboard value.",
+                "placeholder": "work_clipboard"
+            },
+            {
+                "key": "operation",
+                "label": "Operation",
+                "type": "select",
+                "options": ["save", "restore", "clear"]
+            },
+            {
+                "key": "persist",
+                "label": "Persist",
+                "type": "boolean"
+            }
+        ],
+        "defaults": {
+            "name": "default",
+            "operation": "save",
+            "persist": false
+        },
+        "children": false
+    },
+    {
+        "id": "input_prompt",
+        "name": "Input prompt",
+        "category": "Workflow",
+        "description": "Collect a value in a small desktop popup",
+        "keywords": "input prompt Collect a value in a small desktop popup",
+        "icon": "clock",
+        "capability": "desktop",
+        "release": false,
+        "fields": [
+            {
+                "key": "title",
+                "label": "Title",
+                "type": "string"
+            },
+            {
+                "key": "text",
+                "label": "Text",
+                "type": "string"
+            },
+            {
+                "key": "output",
+                "label": "Output name",
+                "type": "string",
+                "help": "Later steps can use ${run.input} when the entered value is named input.",
+                "placeholder": "input"
+            }
+        ],
+        "defaults": {
+            "title": "Enter a value",
+            "text": "",
+            "output": "input"
+        },
+        "children": false
+    },
+    {
+        "id": "action_menu",
+        "name": "Action chooser",
+        "category": "Workflow",
+        "description": "Show a popup menu and execute the selected action",
+        "keywords": "action menu Show a popup menu and execute the selected action",
+        "icon": "clock",
+        "capability": "desktop",
+        "release": false,
+        "fields": [
+            {
+                "key": "title",
+                "label": "Title",
+                "type": "string"
+            },
+            {
+                "key": "labels",
+                "label": "Menu labels",
+                "type": "lines",
+                "help": "Enter one label per line in the same order as the menu branches."
+            }
+        ],
+        "defaults": {
+            "title": "Choose an action",
+            "labels": ["First action", "Second action"],
+            "children": [
+                {
+                    "kind": "none"
+                },
+                {
+                    "kind": "none"
+                }
+            ]
+        },
+        "children": true
+    },
+    {
+        "id": "gesture",
+        "name": "Key logic (Manager)",
+        "category": "Workflow",
+        "description": "Assign press, double press and hold branches with Manager timing",
+        "keywords": "gesture key logic tap double-tap hold branches",
+        "icon": "clock",
+        "capability": "",
+        "release": true,
+        "fields": [
+            {
+                "key": "double_ms",
+                "label": "Double-tap window (ms)",
+                "type": "number",
+                "help": "Two releases within this window run Double press once. A third press starts a new pair. These are Manager timings, not verified Elgato host timings.",
+                "min": 0,
+                "max": 3600000
+            },
+            {
+                "key": "hold_ms",
+                "label": "Hold threshold (ms)",
+                "type": "number",
+                "help": "Runs Hold once after this duration and waits for release. Elgato plugin branches use Manager nested multi-action events and need both eligibility flags.",
+                "min": 0,
+                "max": 3600000
+            }
+        ],
+        "defaults": {
+            "double_ms": 300,
+            "hold_ms": 500,
+            "children": [
+                {
+                    "kind": "none"
+                },
+                {
+                    "kind": "none"
+                },
+                {
+                    "kind": "none"
+                }
+            ]
+        },
+        "children": true
+    },
+    {
+        "id": "press_release",
+        "name": "Press and release actions",
+        "category": "Workflow",
+        "description": "Execute separate button-down and button-up branches",
+        "keywords": "press release Execute separate button-down and button-up branches",
+        "icon": "clock",
+        "capability": "",
+        "release": true,
+        "fields": [],
+        "defaults": {
+            "children": [
+                {
+                    "kind": "none"
+                },
+                {
+                    "kind": "none"
+                }
+            ]
+        },
+        "children": true
+    },
+    {
+        "id": "wait_release",
+        "name": "Wait for release",
+        "category": "Workflow",
+        "description": "Pause a sequence until its originating button is released",
+        "keywords": "wait release Pause a sequence until its originating button is released",
+        "icon": "clock",
+        "capability": "",
+        "release": true,
+        "fields": [
+            {
+                "key": "timeout_ms",
+                "label": "Release timeout (ms)",
+                "type": "number",
+                "help": "Maximum time to wait for release. Use 0 to wait until release or cancellation.",
+                "min": 0,
+                "max": 3600000
+            }
+        ],
+        "defaults": {
+            "timeout_ms": 30000
+        },
+        "children": false
+    },
+    {
+        "id": "parallel",
+        "name": "Parallel actions",
+        "category": "Workflow",
+        "description": "Start branches together and optionally wait for all",
+        "keywords": "parallel Start branches together and optionally wait for all",
+        "icon": "clock",
+        "capability": "",
+        "release": false,
+        "fields": [
+            {
+                "key": "wait",
+                "label": "Wait",
+                "type": "boolean"
+            }
+        ],
+        "defaults": {
+            "wait": true,
+            "children": [
+                {
+                    "kind": "none"
+                },
+                {
+                    "kind": "none"
+                }
+            ]
+        },
+        "children": true
+    },
+    {
+        "id": "failure_policy",
+        "name": "Step failure policy",
+        "category": "Workflow",
+        "description": "Stop, continue, retry, or run a fallback after a failed step",
+        "keywords": "failure error retry fallback continue stop",
+        "icon": "clock",
+        "capability": "",
+        "release": false,
+        "fields": [
+            {
+                "key": "operation",
+                "label": "On failure",
+                "type": "select",
+                "options": ["stop", "continue", "retry", "fallback"]
+            },
+            {
+                "key": "retries",
+                "label": "Retries (0\u20135)",
+                "type": "number",
+                "min": 0,
+                "max": 5
+            },
+            {
+                "key": "delay_ms",
+                "label": "Time between retries (ms)",
+                "type": "number",
+                "min": 0,
+                "max": 60000
+            }
+        ],
+        "defaults": {
+            "operation": "stop",
+            "retries": 1,
+            "delay_ms": 100,
+            "children": [
+                {
+                    "kind": "none"
+                },
+                {
+                    "kind": "none"
+                }
+            ]
+        },
+        "children": true
+    },
+    {
+        "id": "saved_macro",
+        "name": "Run saved macro",
+        "category": "Workflow",
+        "description": "Execute a reusable macro by stable ID",
+        "keywords": "saved macro Execute a reusable macro by stable ID",
+        "icon": "clock",
+        "capability": "",
+        "release": false,
+        "fields": [
+            {
+                "key": "macro_id",
+                "label": "Macro id",
+                "type": "macro"
+            }
+        ],
+        "defaults": {
+            "macro_id": ""
+        },
+        "children": false
+    },
+    {
+        "id": "random_action",
+        "name": "Random action",
+        "category": "Workflow",
+        "description": "Execute one uniformly chosen branch",
+        "keywords": "random action Execute one uniformly chosen branch",
+        "icon": "clock",
+        "capability": "",
+        "release": false,
+        "fields": [],
+        "defaults": {
+            "children": [
+                {
+                    "kind": "none"
+                },
+                {
+                    "kind": "none"
+                }
+            ]
+        },
+        "children": true
+    },
+    {
+        "id": "reset_state",
+        "name": "Reset action state",
+        "category": "Workflow",
+        "description": "Reset toggles cycles all runtime state",
+        "keywords": "reset state Reset toggles cycles all runtime state",
+        "icon": "clock",
+        "capability": "",
+        "release": false,
+        "fields": [
+            {
+                "key": "scope",
+                "label": "Scope",
+                "type": "select",
+                "options": ["all", "actions"]
+            }
+        ],
+        "defaults": {
+            "scope": "all"
+        },
+        "children": false
+    },
+    {
+        "id": "cooldown",
+        "name": "Action cooldown",
+        "category": "Workflow",
+        "description": "Ignore repeated activations during a cooldown",
+        "keywords": "cooldown Ignore repeated activations during a cooldown",
+        "icon": "clock",
+        "capability": "",
+        "release": false,
+        "fields": [
+            {
+                "key": "milliseconds",
+                "label": "Cooldown (ms)",
+                "type": "number",
+                "min": 0,
+                "max": 3600000
+            }
+        ],
+        "defaults": {
+            "milliseconds": 1000,
+            "children": [
+                {
+                    "kind": "none"
+                }
+            ]
+        },
+        "children": true
+    },
+    {
+        "id": "binding_layer",
+        "name": "Temporary binding layer",
+        "category": "Navigation",
+        "description": "Overlay selected bindings from another page while held or toggled",
+        "keywords": "binding layer Overlay selected bindings from another page while held or toggled",
+        "icon": "settings",
+        "capability": "",
+        "release": true,
+        "fields": [
+            {
+                "key": "page_id",
+                "label": "Page id",
+                "type": "page"
+            },
+            {
+                "key": "controls",
+                "label": "Controls",
+                "type": "lines"
+            },
+            {
+                "key": "toggle",
+                "label": "Toggle",
+                "type": "boolean"
+            }
+        ],
+        "defaults": {
+            "page_id": "",
+            "controls": [],
+            "toggle": false
+        },
+        "children": false
+    },
+    {
+        "id": "trigger_binding",
+        "name": "Trigger another binding",
+        "category": "Navigation",
+        "description": "Execute a selected control on this or another device",
+        "keywords": "trigger binding Execute a selected control on this or another device",
+        "icon": "settings",
+        "capability": "",
+        "release": false,
+        "fields": [
+            {
+                "key": "device_id",
+                "label": "Device",
+                "type": "binding-target"
+            },
+            {
+                "key": "profile_id",
+                "label": "Profile",
+                "type": "binding-target"
+            },
+            {
+                "key": "page_id",
+                "label": "Page",
+                "type": "binding-target"
+            },
+            {
+                "key": "control_id",
+                "label": "Control",
+                "type": "binding-target"
+            }
+        ],
+        "defaults": {
+            "device_id": "",
+            "profile_id": "",
+            "page_id": "",
+            "control_id": ""
+        },
+        "children": false
+    },
+    {
+        "id": "show_manager",
+        "name": "Show Manager",
+        "category": "Navigation",
+        "description": "Bring the Manager window forward",
+        "keywords": "show manager Bring the Manager window forward",
+        "icon": "settings",
+        "capability": "desktop",
+        "release": false,
+        "fields": [],
+        "defaults": {},
+        "children": false
+    },
+    {
+        "id": "edit_binding",
+        "name": "Open binding editor",
+        "category": "Navigation",
+        "description": "Open a specific device page and control in Manager",
+        "keywords": "edit binding Open a specific device page and control in Manager",
+        "icon": "settings",
+        "capability": "desktop",
+        "release": false,
+        "fields": [
+            {
+                "key": "device_id",
+                "label": "Device",
+                "type": "binding-target"
+            },
+            {
+                "key": "profile_id",
+                "label": "Profile",
+                "type": "binding-target"
+            },
+            {
+                "key": "page_id",
+                "label": "Page",
+                "type": "binding-target"
+            },
+            {
+                "key": "control_id",
+                "label": "Control",
+                "type": "binding-target"
+            }
+        ],
+        "defaults": {
+            "device_id": "",
+            "profile_id": "",
+            "page_id": "",
+            "control_id": ""
+        },
+        "children": false
+    },
+    {
+        "id": "pause_bindings",
+        "name": "Pause bindings",
+        "category": "Navigation",
+        "description": "Suspend this device and retain an unlock control",
+        "keywords": "pause bindings Suspend this device and retain an unlock control",
+        "icon": "settings",
+        "capability": "",
+        "release": false,
+        "fields": [
+            {
+                "key": "operation",
+                "label": "Operation",
+                "type": "select",
+                "options": ["toggle", "pause", "resume"]
+            }
+        ],
+        "defaults": {
+            "operation": "toggle"
+        },
+        "children": false
+    },
+    {
+        "id": "open_with",
+        "name": "Open with application",
+        "category": "Applications",
+        "description": "Open a document using a chosen application",
+        "keywords": "open with Open a document using a chosen application",
+        "icon": "globe",
+        "capability": "",
+        "release": false,
+        "fields": [
+            {
+                "key": "application",
+                "label": "Application",
+                "type": "string",
+                "help": "Choose the application that should open the file or folder."
+            },
+            {
+                "key": "path",
+                "label": "Path",
+                "type": "string",
+                "help": "Choose the file or folder to pass to the application."
+            },
+            {
+                "key": "template",
+                "label": "Insert run outputs",
+                "type": "boolean"
+            }
+        ],
+        "defaults": {
+            "application": "",
+            "path": "",
+            "template": false
+        },
+        "children": false
+    },
+    {
+        "id": "open_terminal",
+        "name": "Open terminal here",
+        "category": "Applications",
+        "description": "Launch a configured terminal in a working directory",
+        "keywords": "open terminal Launch a configured terminal in a working directory",
+        "icon": "globe",
+        "capability": "",
+        "release": false,
+        "fields": [
+            {
+                "key": "program",
+                "label": "Program",
+                "type": "string",
+                "help": "Leave blank to use the platform default terminal, or choose an executable."
+            },
+            {
+                "key": "path",
+                "label": "Working directory",
+                "type": "string",
+                "help": "Choose the existing folder where the terminal should open."
+            },
+            {
+                "key": "template",
+                "label": "Insert run outputs",
+                "type": "boolean"
+            }
+        ],
+        "defaults": {
+            "program": "",
+            "path": "",
+            "template": false
+        },
+        "children": false
+    },
+    {
+        "id": "command_result",
+        "name": "Run command and collect result",
+        "category": "Applications",
+        "description": "Wait for an executable and store stdout stderr and exit status",
+        "keywords": "command result Wait for an executable and store stdout stderr and exit status",
+        "icon": "globe",
+        "capability": "",
+        "release": false,
+        "fields": [
+            {
+                "key": "program",
+                "label": "Program",
+                "type": "string",
+                "help": "Choose an executable or enter a command available on PATH.",
+                "placeholder": "python3"
+            },
+            {
+                "key": "args",
+                "label": "Arguments, one per line",
+                "type": "lines",
+                "help": "Enter one argument per line. Spaces within a line stay in that argument."
+            },
+            {
+                "key": "path",
+                "label": "Working directory",
+                "type": "string",
+                "help": "Choose a working folder, or leave blank to inherit Manager\u2019s working directory."
+            },
+            {
+                "key": "timeout_ms",
+                "label": "Command timeout (ms)",
+                "type": "number",
+                "min": 0,
+                "max": 3600000
+            },
+            {
+                "key": "output",
+                "label": "Result name",
+                "type": "string",
+                "help": "Later steps can use ${run.command.stdout}, ${run.command.stderr}, or ${run.command.exit_status} when the result is named command.",
+                "placeholder": "command"
+            },
+            {
+                "key": "template",
+                "label": "Insert run outputs",
+                "type": "boolean"
+            }
+        ],
+        "defaults": {
+            "program": "",
+            "args": [],
+            "path": "",
+            "timeout_ms": 30000,
+            "output": "command",
+            "template": false
+        },
+        "children": false
+    },
+    {
+        "id": "file_operation",
+        "name": "File operation",
+        "category": "Files",
+        "description": "Copy move rename or send a file or directory to trash",
+        "keywords": "file operation Copy move rename or send a file or directory to trash",
+        "icon": "folder",
+        "capability": "",
+        "release": false,
+        "fields": [
+            {
+                "key": "operation",
+                "label": "Operation",
+                "type": "select",
+                "options": ["copy", "move", "rename", "trash"]
+            },
+            {
+                "key": "source",
+                "label": "Source",
+                "type": "string",
+                "help": "Choose the existing file or folder to copy, move, rename, or trash."
+            },
+            {
+                "key": "destination",
+                "label": "Destination",
+                "type": "string",
+                "help": "Choose the full destination path, including the final file or folder name."
+            },
+            {
+                "key": "replace",
+                "label": "Replace",
+                "type": "boolean"
+            },
+            {
+                "key": "template",
+                "label": "Insert run outputs",
+                "type": "boolean"
+            }
+        ],
+        "defaults": {
+            "operation": "copy",
+            "source": "",
+            "destination": "",
+            "replace": false,
+            "template": false
+        },
+        "children": false
+    },
+    {
+        "id": "write_file",
+        "name": "Write text file",
+        "category": "Files",
+        "description": "Create replace or append UTF-8 text",
+        "keywords": "write file Create replace or append UTF-8 text",
+        "icon": "folder",
+        "capability": "",
+        "release": false,
+        "fields": [
+            {
+                "key": "path",
+                "label": "Path",
+                "type": "string",
+                "help": "Choose a destination or enter the complete file path. Replace and Append can also choose an existing file."
+            },
+            {
+                "key": "text",
+                "label": "Text",
+                "type": "text"
+            },
+            {
+                "key": "operation",
+                "label": "Operation",
+                "type": "select",
+                "options": ["create", "replace", "append"]
+            },
+            {
+                "key": "replace",
+                "label": "Replace",
+                "type": "boolean"
+            },
+            {
+                "key": "template",
+                "label": "Insert run outputs",
+                "type": "boolean"
+            }
+        ],
+        "defaults": {
+            "path": "",
+            "text": "",
+            "operation": "create",
+            "replace": false,
+            "template": false
+        },
+        "children": false
+    },
+    {
+        "id": "choose_path",
+        "name": "Choose file or folder",
+        "category": "Files",
+        "description": "Collect a path using the native picker",
+        "keywords": "choose path Collect a path using the native picker",
+        "icon": "folder",
+        "capability": "desktop",
+        "release": false,
+        "fields": [
+            {
+                "key": "directory",
+                "label": "Choose a folder instead of a file",
+                "type": "boolean"
+            },
+            {
+                "key": "output",
+                "label": "Output name",
+                "type": "string",
+                "help": "Later steps can use ${run.path} when the chosen path is named path.",
+                "placeholder": "path"
+            }
+        ],
+        "defaults": {
+            "directory": false,
+            "output": "path"
+        },
+        "children": false
+    }
+]

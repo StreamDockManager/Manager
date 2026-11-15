@@ -1,0 +1,108 @@
+{
+    "schema_version": 1,
+    "recorded_on": "2026-11-11",
+    "scope": "K1 Pro follows user-selected Python revision 82efe4d for input/image mapping and command payloads. Manager retains explicit HIDAPI report ID 4 and checked serialized writes rather than copying Python transport framing defects. Historical native sources retained for comparison, not the current keyboard payload authority. No physical qualification. RGB custom-color payload follows the pinned official web bundle after the Python payload failed on the user unit; independent physical confirmation of the correction remains pending. Named effects 0\u201315 follow official web list indexes, and background hue/saturation follows sendHs BASECO. Both remain source-derived, not hardware qualification. Keyboard brightness is raw 0\u2013100 percent from official web slider/sendLuminance, superseding old Python 0\u20136 documentation; saved bytes are preserved without rescaling. Speed now follows the same official web bundle: sendSpeed emits LSPD 00 speed, slider1 supports 0\u20135. This supersedes Python LSPE 0\u20137 following user reports of unchanged animation speed. No physical qualification. Timed sleep uses official web SLPT with unsigned big-endian seconds and 0xffffffff for Never; preset durations mirror installed VSD Craft 3.10.205.0918 screen-off choices. Apply-only, not immediate sleep, readback or physical qualification.",
+    "sources": [
+        {
+            "repository": "MiraboxSpace/StreamDock-Device-SDK",
+            "revision": "fc124cb5bc8fe0cd6c72d3f2af80588adc7dcffb",
+            "path": "Python-SDK/src/StreamDock/Devices/K1Pro.py",
+            "git_blob": "505881dac1d3cf523038d0d75c33544924c92e66",
+            "sha256": "65d2ace25b7519e69fd6d568b43d97a984678a03747ad0d125ae3ebfaf0f4c7c"
+        },
+        {
+            "repository": "MiraboxSpace/StreamDock-Device-SDK",
+            "revision": "fc124cb5bc8fe0cd6c72d3f2af80588adc7dcffb",
+            "path": "Python-SDK/src/StreamDock/Devices/StreamDock.py",
+            "git_blob": "1cac98799a3cdc41d65232bbe64966962792c915",
+            "sha256": "5e1dd723bd3e86021f7fe881f2da2aa03e4cffd573b2565ff538234667a58d35"
+        },
+        {
+            "repository": "MiraboxSpace/StreamDock-Device-SDK",
+            "revision": "fc124cb5bc8fe0cd6c72d3f2af80588adc7dcffb",
+            "path": "Python-SDK/src/StreamDock/ProductIDs.py",
+            "git_blob": "29d3e6b7fdb64ea947262216d30a26cfcf9e8efb",
+            "sha256": "7d6a7a711fce8732a607432e47b01e153bc5306d21a0a7eb8a9b23d28f16e500"
+        },
+        {
+            "repository": "MiraboxSpace/StreamDock-Device-SDK",
+            "revision": "fc124cb5bc8fe0cd6c72d3f2af80588adc7dcffb",
+            "path": "Python-SDK/src/StreamDock/Transport/LibUSBHIDAPI.py",
+            "git_blob": "9bec0640949f7610bf759449ed9dce51a1b78578",
+            "sha256": "d052cfe1fb979bcd5a45aaadb938602397b428b9e00c834cb6be67a73c5651ec"
+        },
+        {
+            "repository": "MiraboxSpace/StreamDock-Device-SDK",
+            "revision": "fc124cb5bc8fe0cd6c72d3f2af80588adc7dcffb",
+            "path": "CPP-SDK/src/HotspotDevice/K1Pro/K1Pro.cpp",
+            "git_blob": "7b859a2663385b70c006fe21b7ab1d170f81ed31",
+            "sha256": "0dd14d311996c5b8128067a87c64f2e0a8aeccc5324636b75aec294f2d405c2f"
+        },
+        {
+            "repository": "MiraboxSpace/StreamDock-Device-SDK",
+            "revision": "fc124cb5bc8fe0cd6c72d3f2af80588adc7dcffb",
+            "path": "CPP-SDK/src/Transport/TransportCWrapper.cpp",
+            "git_blob": "71d64933c93b64e4b606ea89ab628477e1393395",
+            "sha256": "fc9157dc9df0edc1906dd1ef986eb6d96f6448a8e3f03bca239c1dc9a9cdb7ae"
+        },
+        {
+            "repository": "MiraboxSpace/StreamDock-Device-SDK",
+            "revision": "fc124cb5bc8fe0cd6c72d3f2af80588adc7dcffb",
+            "path": "CPP-SDK/src/Transport/TransportCWrapper.h",
+            "git_blob": "c9cbfbab6029f32d47bbc838f3d0bcbc9f16c128",
+            "sha256": "c121c97043595084d13582804d7b843a4cfb0e30c3658e5becd7d63be329b72e"
+        },
+        {
+            "repository": "MiraboxSpace/StreamDock-Device-SDK",
+            "revision": "fc124cb5bc8fe0cd6c72d3f2af80588adc7dcffb",
+            "path": "Python-SDK/src/StreamDock/Transport/TransportDLL/libtransport.so",
+            "git_blob": "bcea43a54a1a001c200a4c145bd1bcab92e83f2f",
+            "sha256": "94ebce805493f3f45aa9dd3f49c0606a8e639ee1aec825aa27214697435033a1",
+            "size_bytes": 241752,
+            "evidence": "Static binary inspection only; never executed; not physical evidence."
+        },
+        {
+            "repository": "MiraboxSpace/StreamDock-Device-SDK",
+            "revision": "fc124cb5bc8fe0cd6c72d3f2af80588adc7dcffb",
+            "path": "Python-SDK/src/StreamDock/Transport/TransportDLL/libtransport.dylib",
+            "git_blob": "ca0a5d401a9c8adb0abc2e9afc2597c9d390ad5b",
+            "sha256": "29be8e616742495476d1b8e3c8b8697e7b89a6178a741c993f2b9525288ced60",
+            "size_bytes": 470576,
+            "evidence": "Static binary inspection only; never executed; not physical evidence."
+        },
+        {
+            "repository": "MiraboxSpace/StreamDock-Device-SDK",
+            "revision": "82efe4d97e6bdbb9b10cbf1a80fd53d8393b278e",
+            "path": "Python-SDK/src/StreamDock/Devices/K1Pro.py",
+            "sha256": "322fbd8d53f046dba672c19223de6b47689226938389b8c981f88d6f4b241ea4"
+        },
+        {
+            "repository": "MiraboxSpace/StreamDock-Device-SDK",
+            "revision": "82efe4d97e6bdbb9b10cbf1a80fd53d8393b278e",
+            "path": "Python-SDK/src/StreamDock/Transport/LibUSBHIDAPI.py",
+            "sha256": "9036c06695f1a38584c6a97e97a042ac827f44e1f88968b6d3b36216cea7f4d3"
+        },
+        {
+            "url": "https://app.mirabox.net/assets/index-DmfhZ_Gy.js",
+            "sha256": "d93b13c54beb799a9e900b4b529992168bc8f5c7233b4c347da2f84da907592d",
+            "evidence": "Static source inspection; sendColor custom flag/RGB/HSV and sendHs BASECO hue/saturation. Isolated sendHs executed against fake sink for fixtures. Not physical evidence. sendLuminance writes raw percentage in LLUM; isolated fake-sink comparison covers 0..100. sendSpeed uses LSPD 00 speed, source-derived comparison covers 0..5. sendColor flag 0/1 toggles built-in/custom palette while retaining RGB/HSV. sendSleepTime builds CRT 00 00 SLPT 00 followed by caller-supplied four timer bytes and sends report 4. Its device registry maps all three Manager K1 Pro VID/PIDs to k1Pro; the k1-W variants excluded by the vendor timer UI use different PIDs and are not registered here. Factory reset handler calls sendResetEffect then sendResetImage for supportsLayers; all three registered K1 Pro variants have supportsLayers true, producing LYRST ff then REREC. sendGetLightData emits INFO 00; DEVC handler decodes binary offsets or JSON led_info/os/slpt. Missing values are not hardware defaults."
+        },
+        {
+            "url": "https://app.mirabox.net/assets/pressKey-ms0tZ_QU.js",
+            "sha256": "4f7b728542db02711019413fa9a7b0b0dc5089a64273ccf223fccd3f7346e516",
+            "evidence": "Static source inspection; ordered effect list sent by DOM array index, background picker enabled at index 14, color wheel sends hue/saturation only. Not physical evidence. slider2 initializes continuous max 100 and forwards directly to sendLuminance. slider1 initializes discrete max 5, initial 0, and forwards to sendSpeed. Color switch checkedValue 1/unCheckedValue 0 forwards through de handler to sendColor with retained RGB/HSV. modeSetting serializes seconds big-endian and Never as ff ff ff ff; web choices are 1,5,10,15,30 minutes,Never. Manager instead offers the installed VSD Craft timed presets requested by the user."
+        },
+        {
+            "url": "https://app.mirabox.net/assets/en-DeA5S5ef.js",
+            "sha256": "25c44aa783e2b38a738cfff042f67cd7dd2a12d7574ca413462a2aa225e9b569",
+            "evidence": "Official English labels for ordered lighting effects. Not physical evidence."
+        },
+        {
+            "application": "VSD Craft",
+            "version": "3.10.205.0918",
+            "path": "Contents/MacOS/VSD Craft",
+            "sha256": "e00fda52ef8b7a4482488fdff6a011f3c27f433d3543edb7c651096c11922825",
+            "evidence": "Read-only bundled English resource inspection: AutomaticScreenOff_ group contains 1Minute,5Minute,15Minute,30Minute,1Hour,2Hour,Never,FollowSystem. Manager mirrors the timed choices and Never; FollowSystem is not a firmware timer and is not offered by this control. No proprietary binary or resource copy included; source-derived presets and generic SLPT encoding do not establish physical timer behavior."
+        }
+    ]
+}

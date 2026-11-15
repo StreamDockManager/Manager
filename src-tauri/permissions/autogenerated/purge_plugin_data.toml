@@ -1,0 +1,11 @@
+# Automatically generated - DO NOT EDIT!
+
+[[permission]]
+identifier = "allow-purge-plugin-data"
+description = "Enables the purge_plugin_data command without any pre-configured scope."
+commands.allow = ["purge_plugin_data"]
+
+[[permission]]
+identifier = "deny-purge-plugin-data"
+description = "Denies the purge_plugin_data command without any pre-configured scope."
+commands.deny = ["purge_plugin_data"]

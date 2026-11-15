@@ -1,0 +1,522 @@
+<div x-data="mediaLibrary" @open-media-library.window="open">
+    <dialog
+        data-media-drop-target
+        @media-file-drop="dropMedia"
+        x-ref="dialog"
+        class="feature-dialog wide-dialog media-library-dialog"
+        aria-labelledby="media-library-title"
+        aria-describedby="media-library-description"
+        @cancel.prevent="close"
+    >
+        <header class="picker-header">
+            <div>
+                <h2 id="media-library-title" x-text="heading"></h2>
+                <p
+                    id="media-library-description"
+                    x-text="request ? 'Choose an imported image or clip for your current edit.' : 'Review imported media, usage and storage.'"
+                ></p>
+            </div>
+            <button
+                type="button"
+                class="icon-button"
+                aria-label="Close media library"
+                @click="close"
+                :disabled="working"
+            >
+                ×
+            </button>
+        </header>
+        <div class="picker-toolbar media-library-toolbar">
+            <label class="search-field">
+                <span aria-hidden="true">⌕</span>
+                <input
+                    type="search"
+                    aria-label="Search media by clip name, recording, usage or ID"
+                    placeholder="Search clips, recordings or usage…"
+                    x-model="query"
+                    @input.debounce.250ms="search"
+                    :disabled="working"
+                />
+            </label>
+            <button
+                type="button"
+                class="button"
+                x-ref="refresh"
+                aria-label="Refresh media"
+                @click="load"
+                :disabled="busy || working"
+            >
+                Refresh
+            </button>
+        </div>
+        <div class="feature-body">
+            <div class="media-drop-target">
+                <span>Drop one image or video here</span>
+                <button
+                    type="button"
+                    class="button"
+                    :disabled="importing || working"
+                    @click="chooseFile"
+                >
+                    Choose media file
+                </button>
+            </div>
+            <p role="status" x-show="importing">Importing media…</p>
+            <p role="status" x-show="busy">Inspecting media and retained references…</p>
+            <p role="status" x-show="notice" x-text="notice"></p>
+            <p role="alert" class="danger-text" x-show="error" x-text="error"></p>
+            <template x-if="data">
+                <div class="media-library-content">
+                    <section class="media-library-storage" aria-label="Media storage summary">
+                        <dl class="media-library-stats">
+                            <div>
+                                <dt>Assets</dt>
+                                <dd x-text="data.total"></dd>
+                            </div>
+                            <div>
+                                <dt>Logical size</dt>
+                                <dd x-text="size(data.logical_bytes)"></dd>
+                            </div>
+                            <div>
+                                <dt>Estimated reclaimable</dt>
+                                <dd
+                                    x-text="data.storage_estimate_available ? size(data.estimated_reclaimable_bytes) : 'Unavailable on this platform'"
+                                ></dd>
+                            </div>
+                        </dl>
+                        <details class="media-library-storage-help">
+                            <summary>How storage estimates work</summary>
+                            <p class="field-help">
+                                Shared content can occupy the same storage. Estimates account for
+                                known storage links; filesystem compression and copy-on-write can
+                                affect space recovered.
+                            </p>
+                        </details>
+                    </section>
+                    <div x-show="data.scan_errors.length">
+                        <h3>Cleanup and deletion are unavailable</h3>
+                        <ul role="alert">
+                            <template x-for="error in data.scan_errors" :key="error">
+                                <li class="danger-text" x-text="error"></li>
+                            </template>
+                        </ul>
+                    </div>
+                    <div
+                        class="media-library-list"
+                        role="list"
+                        aria-label="Managed media"
+                        x-show="data.entries.length"
+                        :aria-busy="busy"
+                    >
+                        <template x-for="entry in data.entries" :key="entry.id">
+                            <article
+                                class="media-library-row"
+                                role="listitem"
+                                :data-asset="entry.id"
+                            >
+                                <div class="media-library-thumbnail">
+                                    <img
+                                        x-show="thumbs[entry.id]"
+                                        :src="thumbs[entry.id] || ''"
+                                        alt=""
+                                        decoding="async"
+                                    />
+                                    <small
+                                        x-show="!thumbs[entry.id]"
+                                        x-text="thumbErrors[entry.id] ? 'No preview' : 'Loading…'"
+                                    ></small>
+                                </div>
+                                <div class="media-library-info">
+                                    <strong
+                                        class="media-library-identity"
+                                        x-text="identity(entry)"
+                                    ></strong>
+                                    <small
+                                        x-text="'Logical size: ' + size(entry.logical_bytes)"
+                                    ></small>
+                                    <small
+                                        x-show="entry.clip_info"
+                                        x-text="entry.clip_info ? entry.clip_info.recording.name + ' · ' + (entry.clip_info.start_us / 1000000).toFixed(2) + '–' + (entry.clip_info.end_us / 1000000).toFixed(2) + ' s' : ''"
+                                    ></small>
+                                    <p
+                                        class="field-help"
+                                        x-show="entry.protection.length"
+                                        x-text="'Referenced by: ' + entry.protection.join(', ')"
+                                    ></p>
+                                    <p class="field-help" x-show="!entry.protection.length">
+                                        Unused managed media
+                                    </p>
+                                    <p
+                                        class="danger-text field-help"
+                                        role="alert"
+                                        x-show="entry.error"
+                                        x-text="entry.error"
+                                    ></p>
+                                    <p
+                                        class="field-help"
+                                        x-show="optimizationGuidance(entry)"
+                                        x-text="optimizationGuidance(entry)"
+                                    ></p>
+                                    <details class="media-library-details">
+                                        <summary
+                                            :aria-label="'Details and usage for media ' + entry.id"
+                                        >
+                                            Asset details and usage
+                                        </summary>
+                                        <div class="media-library-detail-body">
+                                            <span class="field-help">Asset ID</span>
+                                            <span class="media-asset-id" x-text="entry.id"></span>
+                                            <span
+                                                class="field-help"
+                                                x-show="entry.usages.length"
+                                                x-text="'Used in ' + entry.usages.length + ' locations'"
+                                            ></span>
+                                            <ul x-show="entry.usages.length">
+                                                <template
+                                                    x-for="usage in entry.usages"
+                                                    :key="usage"
+                                                >
+                                                    <li x-text="usage"></li>
+                                                </template>
+                                            </ul>
+                                        </div>
+                                    </details>
+                                </div>
+                                <div class="media-library-actions">
+                                    <button
+                                        type="button"
+                                        class="button"
+                                        x-show="request"
+                                        :data-id="entry.id"
+                                        @click="choose"
+                                        :disabled="busy || working || !compatible(entry)"
+                                        :aria-label="'Use media ' + entry.id"
+                                    >
+                                        Use media
+                                    </button>
+                                    <label class="preference-toggle" x-show="!request">
+                                        <input
+                                            type="checkbox"
+                                            :data-id="entry.id"
+                                            :aria-label="'Select media ' + entry.id"
+                                            :checked="selected.includes(entry.id)"
+                                            @change="toggle"
+                                            :disabled="busy || working || !entry.can_delete"
+                                        />
+                                        <span>Select</span>
+                                    </label>
+                                    <button
+                                        type="button"
+                                        class="button"
+                                        x-show="entry.format === 'mp4' || entry.format === 'gif'"
+                                        :data-id="entry.id"
+                                        @click="editVideo"
+                                        :disabled="busy || working"
+                                        :aria-label="(entry.format === 'gif' ? 'Edit GIF ' : 'Edit video ') + (entry.clip_info ? entry.clip_info.name : entry.id)"
+                                        x-text="entry.format === 'gif' ? 'Edit GIF' : 'Edit video'"
+                                    >
+                                        Edit video
+                                    </button>
+                                    <button
+                                        type="button"
+                                        class="button"
+                                        x-show="canOptimize(entry)"
+                                        :data-id="entry.id"
+                                        @click="optimize"
+                                        :disabled="busy || working"
+                                        :aria-label="'Optimize copy of media ' + entry.id"
+                                    >
+                                        Optimize copy…
+                                    </button>
+                                    <button
+                                        type="button"
+                                        class="button danger"
+                                        :data-id="entry.id"
+                                        :aria-label="'Delete media ' + entry.id"
+                                        @click="reviewDeletion"
+                                        :disabled="busy || working || thumbnailBusy || !data.cleanup_available"
+                                    >
+                                        Delete media
+                                    </button>
+                                    <small
+                                        class="field-help"
+                                        x-show="request && !compatible(entry)"
+                                    >
+                                        Unavailable for this device
+                                    </small>
+                                </div>
+                            </article>
+                        </template>
+                    </div>
+                    <div
+                        class="background-editor-empty media-library-empty"
+                        role="status"
+                        x-show="!data.entries.length"
+                    >
+                        <span aria-hidden="true">▧</span>
+                        <h3>No matching media</h3>
+                        <p class="field-help">
+                            Try another search, or import an image or clip from the control or
+                            background editor.
+                        </p>
+                    </div>
+
+                    <p class="field-help" x-show="!request">
+                        Select unused assets on this page for cleanup. Referenced media stays
+                        protected from cleanup. Use a row’s Delete media action to review deletion
+                        and unassignment of an asset in use. Edit history is kept.
+                    </p>
+                </div>
+            </template>
+        </div>
+        <footer class="feature-footer media-library-footer">
+            <template x-if="data">
+                <nav class="pagination media-library-pagination" aria-label="Media library pages">
+                    <label class="page-size">
+                        <span>Per page</span>
+                        <select
+                            aria-label="Media per page"
+                            x-model="pageSize"
+                            @change="search"
+                            :disabled="working"
+                        >
+                            <option value="12">12</option>
+                            <option value="24">24</option>
+                            <option value="48">48</option>
+                        </select>
+                    </label>
+                    <span
+                        role="status"
+                        x-text="'Page ' + data.page + ' of ' + pages + ' · ' + data.total + ' assets'"
+                    ></span>
+                    <div class="button-row">
+                        <button
+                            type="button"
+                            class="button"
+                            @click="previous"
+                            aria-label="Previous media"
+                            :disabled="busy || working || data.page <= 1"
+                        >
+                            Previous
+                        </button>
+                        <button
+                            type="button"
+                            class="button"
+                            @click="next"
+                            aria-label="Next media"
+                            :disabled="busy || working || data.page >= pages"
+                        >
+                            Next
+                        </button>
+                    </div>
+                </nav>
+            </template>
+            <div class="button-row media-library-footer-actions">
+                <button type="button" class="button" @click="close" :disabled="working">
+                    Close
+                </button>
+                <button
+                    type="button"
+                    class="button danger"
+                    x-show="!request"
+                    @click="reviewCleanup"
+                    :disabled="!canReview"
+                    x-text="'Review cleanup (' + selected.length + ')'"
+                ></button>
+            </div>
+        </footer>
+    </dialog>
+    <dialog
+        x-ref="deletion"
+        class="feature-dialog"
+        aria-labelledby="media-deletion-title"
+        @cancel.prevent="cancelDeletion"
+    >
+        <header class="picker-header">
+            <h2 id="media-deletion-title">Delete media?</h2>
+            <button
+                type="button"
+                class="icon-button"
+                aria-label="Close media deletion review"
+                @click="cancelDeletion"
+                :disabled="working"
+            >
+                ×
+            </button>
+        </header>
+        <div class="feature-body">
+            <p>
+                Delete this media file and unassign it everywhere it is used? Text, icons, actions
+                and other media stay unchanged.
+            </p>
+            <template x-if="deletion">
+                <div class="settings-section">
+                    <p class="media-asset-id" x-text="deletion.asset"></p>
+                    <div x-show="deletion.usages.length">
+                        <h3>Currently assigned to</h3>
+                        <ul>
+                            <template x-for="usage in deletion.usages" :key="usage">
+                                <li x-text="usage"></li>
+                            </template>
+                        </ul>
+                    </div>
+                    <div x-show="deletion.active_devices.length">
+                        <h3>Active device output will update immediately</h3>
+                        <ul>
+                            <template x-for="device in deletion.active_devices" :key="device">
+                                <li x-text="device"></li>
+                            </template>
+                        </ul>
+                    </div>
+                    <div x-show="deletion.retained_by.length">
+                        <h3>Also referenced by</h3>
+                        <ul>
+                            <template x-for="reason in deletion.retained_by" :key="reason">
+                                <li x-text="reason"></li>
+                            </template>
+                        </ul>
+                    </div>
+                </div>
+            </template>
+            <p>
+                Deletion is permanent. Edit history is kept, but Undo and saved drafts cannot
+                restore deleted media.
+            </p>
+            <p role="alert" class="danger-text" x-show="deletionError" x-text="deletionError"></p>
+            <p role="status" x-show="working">Deleting media and updating assignments…</p>
+        </div>
+        <footer class="feature-footer">
+            <button
+                type="button"
+                class="button"
+                x-ref="cancelDeletion"
+                @click="cancelDeletion"
+                :disabled="working"
+            >
+                Cancel deletion
+            </button>
+            <button
+                type="button"
+                class="button danger"
+                @click="confirmDeletion"
+                :disabled="working || !deletion || deletionError !== ''"
+            >
+                Delete and unassign
+            </button>
+        </footer>
+    </dialog>
+    <dialog
+        x-ref="cleanup"
+        class="feature-dialog"
+        aria-labelledby="media-cleanup-title"
+        @cancel.prevent="cancelCleanup"
+    >
+        <header class="picker-header">
+            <h2 id="media-cleanup-title">Delete unused media?</h2>
+            <button
+                type="button"
+                class="icon-button"
+                aria-label="Close media cleanup review"
+                @click="cancelCleanup"
+                :disabled="working"
+            >
+                ×
+            </button>
+        </header>
+        <div class="feature-body">
+            <p x-text="cleanupDescription"></p>
+            <p class="field-help" x-text="cleanupEstimate"></p>
+            <p>
+                Deletion cannot be undone. Retained history, recovery and active owners are checked
+                again before removal.
+            </p>
+            <details>
+                <summary>Selected asset IDs</summary>
+                <ul>
+                    <template x-for="id in review ? review.assets : []" :key="id">
+                        <li class="media-asset-id" x-text="id"></li>
+                    </template>
+                </ul>
+            </details>
+            <p role="alert" class="danger-text" x-show="cleanupError" x-text="cleanupError"></p>
+            <p role="status" x-show="working">Removing unused media…</p>
+        </div>
+        <footer class="feature-footer">
+            <button
+                type="button"
+                class="button"
+                x-ref="cancelCleanup"
+                @click="cancelCleanup"
+                :disabled="working"
+            >
+                Cancel cleanup
+            </button>
+            <button
+                type="button"
+                class="button danger"
+                @click="deleteConfirmed"
+                :disabled="working || !review || cleanupError !== ''"
+            >
+                Delete unused media
+            </button>
+        </footer>
+    </dialog>
+    <dialog
+        x-ref="optimization"
+        class="feature-dialog"
+        aria-labelledby="media-optimization-title"
+        @cancel.prevent="cancelOptimization"
+    >
+        <header class="picker-header">
+            <h2 id="media-optimization-title">Optimize a copy</h2>
+        </header>
+        <div class="feature-body">
+            <label>
+                Longest edge
+                <select
+                    x-model="optimizationEdge"
+                    @change="previewOptimization"
+                    :disabled="working"
+                >
+                    <option value="512">512 px: smaller, less fine detail</option>
+                    <option value="1024">1024 px: more detail, larger file</option>
+                </select>
+            </label>
+            <p>
+                Compare the measured size and preview before saving. Small originals are not
+                enlarged. Saving does not apply the copy to any binding.
+            </p>
+            <p role="status" x-show="optimizationBusy">Preparing preview…</p>
+            <template x-if="optimization">
+                <div>
+                    <img
+                        class="media-edit-preview"
+                        :src="optimization.image"
+                        alt="Optimized copy preview"
+                    />
+                    <p x-text="optimizationSummary"></p>
+                    <p class="field-help" x-text="optimization.warning"></p>
+                </div>
+            </template>
+            <p
+                role="alert"
+                class="danger-text"
+                x-show="optimizationError"
+                x-text="optimizationError"
+            ></p>
+        </div>
+        <footer class="feature-footer">
+            <button type="button" class="button" @click="cancelOptimization" :disabled="working">
+                Cancel
+            </button>
+            <button
+                type="button"
+                class="button"
+                @click="saveOptimization"
+                :disabled="working || optimizationBusy || !optimization"
+            >
+                Save optimized copy
+            </button>
+        </footer>
+    </dialog>
+</div>

@@ -1,0 +1,725 @@
+{
+    "schema_version": 1,
+    "method": "replay",
+    "provenance": "Replay of complete raw reports from one physical VSDInside N4 Pro on macOS ARM64, with human-confirmed up/down/up/down/left/right order. This fixture is replay coverage, not full hardware qualification.",
+    "cases": [
+        {
+            "name": "physical_1_up",
+            "expected_direction": "up",
+            "capture_sequence_start": 1,
+            "capture_sequence_end": 6,
+            "reports": [
+                {
+                    "capture_sequence": 1,
+                    "observed_ms": 0.24449999999999997,
+                    "length": 512,
+                    "prefix_hex": "41434b00004f4b0000000101a900",
+                    "zero_padding_bytes": 498,
+                    "sha256": "0870171272e661f8b6738a9e6d6ed4369bafdbc3eb4e7d4ebe1e34cef81a28dc"
+                },
+                {
+                    "capture_sequence": 2,
+                    "observed_ms": 33.551833,
+                    "length": 512,
+                    "prefix_hex": "41434b0041525800000001a90069",
+                    "zero_padding_bytes": 498,
+                    "sha256": "af8be5d0a3d98d3636b7314b3992209f6a55926eea8f522eebd154faba0d52de"
+                },
+                {
+                    "capture_sequence": 3,
+                    "observed_ms": 68.53983299999999,
+                    "length": 512,
+                    "prefix_hex": "41434b0041525800000001a90069",
+                    "zero_padding_bytes": 498,
+                    "sha256": "af8be5d0a3d98d3636b7314b3992209f6a55926eea8f522eebd154faba0d52de"
+                },
+                {
+                    "capture_sequence": 4,
+                    "observed_ms": 103.63491699999999,
+                    "length": 512,
+                    "prefix_hex": "41434b0041525800000001a9005d",
+                    "zero_padding_bytes": 498,
+                    "sha256": "4dfd74c8c150a53a289ce5e82dac2d22011a8544f12b0e2b86bf2f0d2549430a"
+                },
+                {
+                    "capture_sequence": 5,
+                    "observed_ms": 138.60883299999998,
+                    "length": 512,
+                    "prefix_hex": "41434b0041525800000001a90035",
+                    "zero_padding_bytes": 498,
+                    "sha256": "d5e2ac516ca049f46fd014d1ac62a9f2a4d5774475a2bf5966615a8a4d2482f0"
+                },
+                {
+                    "capture_sequence": 6,
+                    "observed_ms": 179.90925,
+                    "length": 512,
+                    "prefix_hex": "41434b00004f4b0000b100000000",
+                    "zero_padding_bytes": 498,
+                    "sha256": "4d807e4d8fc279ffc9666562d3613fe9b02d610777c2fd3fb22cee01900f0cab"
+                }
+            ],
+            "capture_id": "vertical-pair"
+        },
+        {
+            "name": "physical_2_down",
+            "expected_direction": "down",
+            "capture_sequence_start": 7,
+            "capture_sequence_end": 10,
+            "reports": [
+                {
+                    "capture_sequence": 7,
+                    "observed_ms": 2128.867625,
+                    "length": 512,
+                    "prefix_hex": "41434b00004f4b0000000101aa00",
+                    "zero_padding_bytes": 498,
+                    "sha256": "4edff896e1b7de444cf48bc4f72301103a55138c22277384c4ad18767c67ae4b"
+                },
+                {
+                    "capture_sequence": 8,
+                    "observed_ms": 2303.5636670000004,
+                    "length": 512,
+                    "prefix_hex": "41434b0041525800000001aa0011",
+                    "zero_padding_bytes": 498,
+                    "sha256": "bb164ade9ffbdc7c8d8b9cfcf5d87e36aa3433a2ab8251d5d7559516a5f57a24"
+                },
+                {
+                    "capture_sequence": 9,
+                    "observed_ms": 2338.5779169999996,
+                    "length": 512,
+                    "prefix_hex": "41434b0041525800000001aa003c",
+                    "zero_padding_bytes": 498,
+                    "sha256": "ba98daa1a64725c82943519a30b4c105d6022bf9483bad3e5be4e9080e7cedc0"
+                },
+                {
+                    "capture_sequence": 10,
+                    "observed_ms": 2338.8000829999996,
+                    "length": 512,
+                    "prefix_hex": "41434b00004f4b0000b200000000",
+                    "zero_padding_bytes": 498,
+                    "sha256": "3bb717ebec6830f543e4008db0180ac6ea99d7df219a9fb7bc7db995f5df63f0"
+                }
+            ],
+            "capture_id": "vertical-pair"
+        },
+        {
+            "name": "physical_3_up",
+            "expected_direction": "up",
+            "capture_sequence_start": 11,
+            "capture_sequence_end": 18,
+            "reports": [
+                {
+                    "capture_sequence": 11,
+                    "observed_ms": 4259.184083,
+                    "length": 512,
+                    "prefix_hex": "41434b00004f4b0000000101a200",
+                    "zero_padding_bytes": 498,
+                    "sha256": "d3b4c0d42121be6ed4182d9c91ad18f852c63534115c3da6e21b44b1422ef759"
+                },
+                {
+                    "capture_sequence": 12,
+                    "observed_ms": 4293.6207079999995,
+                    "length": 512,
+                    "prefix_hex": "41434b0041525800000001a20076",
+                    "zero_padding_bytes": 498,
+                    "sha256": "a51b923ff4242c5cc421d368e812e8cf27b387770e72b67305d679cad1a7b79b"
+                },
+                {
+                    "capture_sequence": 13,
+                    "observed_ms": 4328.565958,
+                    "length": 512,
+                    "prefix_hex": "41434b0041525800000001a20076",
+                    "zero_padding_bytes": 498,
+                    "sha256": "a51b923ff4242c5cc421d368e812e8cf27b387770e72b67305d679cad1a7b79b"
+                },
+                {
+                    "capture_sequence": 14,
+                    "observed_ms": 4363.555458000001,
+                    "length": 512,
+                    "prefix_hex": "41434b0041525800000001a20076",
+                    "zero_padding_bytes": 498,
+                    "sha256": "a51b923ff4242c5cc421d368e812e8cf27b387770e72b67305d679cad1a7b79b"
+                },
+                {
+                    "capture_sequence": 15,
+                    "observed_ms": 4398.586667,
+                    "length": 512,
+                    "prefix_hex": "41434b0041525800000001a20076",
+                    "zero_padding_bytes": 498,
+                    "sha256": "a51b923ff4242c5cc421d368e812e8cf27b387770e72b67305d679cad1a7b79b"
+                },
+                {
+                    "capture_sequence": 16,
+                    "observed_ms": 4433.610833000001,
+                    "length": 512,
+                    "prefix_hex": "41434b0041525800000001a20054",
+                    "zero_padding_bytes": 498,
+                    "sha256": "a5ba17aa3aee0a968cdda887fd383a1ac8b4fe4118dd80f6992e5922833acf36"
+                },
+                {
+                    "capture_sequence": 17,
+                    "observed_ms": 4468.42025,
+                    "length": 512,
+                    "prefix_hex": "41434b0041525800000001a20023",
+                    "zero_padding_bytes": 498,
+                    "sha256": "1e9c31e8c17da0cabafb15d5d5002cc81736c15a06d24126ecd9766cbf7eda68"
+                },
+                {
+                    "capture_sequence": 18,
+                    "observed_ms": 4468.586083,
+                    "length": 512,
+                    "prefix_hex": "41434b00004f4b0000b100000000",
+                    "zero_padding_bytes": 498,
+                    "sha256": "4d807e4d8fc279ffc9666562d3613fe9b02d610777c2fd3fb22cee01900f0cab"
+                }
+            ],
+            "capture_id": "vertical-pair"
+        },
+        {
+            "name": "physical_4_down",
+            "expected_direction": "down",
+            "capture_sequence_start": 19,
+            "capture_sequence_end": 22,
+            "reports": [
+                {
+                    "capture_sequence": 19,
+                    "observed_ms": 6178.773417,
+                    "length": 512,
+                    "prefix_hex": "41434b00004f4b00000001019300",
+                    "zero_padding_bytes": 498,
+                    "sha256": "dd15e20a5c6ad206d01c401d4c9dc6e680c2f5a6abb3fe3cadaa6d1a021ef41b"
+                },
+                {
+                    "capture_sequence": 20,
+                    "observed_ms": 6423.703417000001,
+                    "length": 512,
+                    "prefix_hex": "41434b0041525800000001930035",
+                    "zero_padding_bytes": 498,
+                    "sha256": "0b73f064c32ad81c51e3edf869fcd104093142d12faec134bccd44bbb8384b7a"
+                },
+                {
+                    "capture_sequence": 21,
+                    "observed_ms": 6458.569208,
+                    "length": 512,
+                    "prefix_hex": "41434b0041525800000001930057",
+                    "zero_padding_bytes": 498,
+                    "sha256": "68f9ff4bdceba71baa54d61465da51594fb10ed9d998a094937ac781f4c96368"
+                },
+                {
+                    "capture_sequence": 22,
+                    "observed_ms": 6478.674083,
+                    "length": 512,
+                    "prefix_hex": "41434b00004f4b0000b200000000",
+                    "zero_padding_bytes": 498,
+                    "sha256": "3bb717ebec6830f543e4008db0180ac6ea99d7df219a9fb7bc7db995f5df63f0"
+                }
+            ],
+            "capture_id": "vertical-pair"
+        },
+        {
+            "name": "physical_5_left",
+            "expected_direction": "left",
+            "capture_sequence_start": 23,
+            "capture_sequence_end": 31,
+            "reports": [
+                {
+                    "capture_sequence": 23,
+                    "observed_ms": 7768.968,
+                    "length": 512,
+                    "prefix_hex": "41434b00004f4b00000001020f00",
+                    "zero_padding_bytes": 498,
+                    "sha256": "0de25afd12ca8608b0ac76ab94947b477c27a3d8cf5c1496a90dc14bbe9126a9"
+                },
+                {
+                    "capture_sequence": 24,
+                    "observed_ms": 7803.4339580000005,
+                    "length": 512,
+                    "prefix_hex": "41434b00415258000000020f003e",
+                    "zero_padding_bytes": 498,
+                    "sha256": "7b8d12b18dc3330196c0570afd35af7c8a8a914772badfb488370497474db224"
+                },
+                {
+                    "capture_sequence": 25,
+                    "observed_ms": 7838.4105,
+                    "length": 512,
+                    "prefix_hex": "41434b00415258000000020f003e",
+                    "zero_padding_bytes": 498,
+                    "sha256": "7b8d12b18dc3330196c0570afd35af7c8a8a914772badfb488370497474db224"
+                },
+                {
+                    "capture_sequence": 26,
+                    "observed_ms": 7873.43575,
+                    "length": 512,
+                    "prefix_hex": "41434b00415258000000020d003e",
+                    "zero_padding_bytes": 498,
+                    "sha256": "639b88e26a0683f02d152784d69a8d829447b51fbafeac58998e162293469ee1"
+                },
+                {
+                    "capture_sequence": 27,
+                    "observed_ms": 7908.503,
+                    "length": 512,
+                    "prefix_hex": "41434b0041525800000001fd003b",
+                    "zero_padding_bytes": 498,
+                    "sha256": "a5183057108884023059d1b1e3f68de2e60fbf85578a0d7bbac550a244b9471a"
+                },
+                {
+                    "capture_sequence": 28,
+                    "observed_ms": 7943.60625,
+                    "length": 512,
+                    "prefix_hex": "41434b0041525800000001e30037",
+                    "zero_padding_bytes": 498,
+                    "sha256": "d6dbf8038c489021ce801d63268107414db55c883c53d4a33c91849a35a4d20b"
+                },
+                {
+                    "capture_sequence": 29,
+                    "observed_ms": 7978.932833,
+                    "length": 512,
+                    "prefix_hex": "41434b0041525800000001b30031",
+                    "zero_padding_bytes": 498,
+                    "sha256": "caef68543d08c7d66c4ee7bfbf96022b7a527365cdf8115958c1a1fa99948828"
+                },
+                {
+                    "capture_sequence": 30,
+                    "observed_ms": 8013.535083000001,
+                    "length": 512,
+                    "prefix_hex": "41434b00415258000000013b0027",
+                    "zero_padding_bytes": 498,
+                    "sha256": "cc2f55ea58b0ac2267831e83d9e3fbcd2277cbc129cb46220461ae6129070f63"
+                },
+                {
+                    "capture_sequence": 31,
+                    "observed_ms": 8038.736916999999,
+                    "length": 512,
+                    "prefix_hex": "41434b00004f4b00003900000000",
+                    "zero_padding_bytes": 498,
+                    "sha256": "d0d75dc0739e7439bbd2ebbcdc381d73f68f18dc03b835df2b16a8d5f87dff74"
+                }
+            ],
+            "capture_id": "vertical-pair"
+        },
+        {
+            "name": "physical_6_right",
+            "expected_direction": "right",
+            "capture_sequence_start": 32,
+            "capture_sequence_end": 39,
+            "reports": [
+                {
+                    "capture_sequence": 32,
+                    "observed_ms": 9359.033500000001,
+                    "length": 512,
+                    "prefix_hex": "41434b00004f4b00000001007000",
+                    "zero_padding_bytes": 498,
+                    "sha256": "87f52ef561142d4bacaff714ab2a524e164fb5ad0aeb9e97af4c7cca58fb2904"
+                },
+                {
+                    "capture_sequence": 33,
+                    "observed_ms": 9393.71825,
+                    "length": 512,
+                    "prefix_hex": "41434b0041525800000000700032",
+                    "zero_padding_bytes": 498,
+                    "sha256": "935998f9fc6ab492e77010849f31b9db7a00fd964acc85666b53314e4c018d71"
+                },
+                {
+                    "capture_sequence": 34,
+                    "observed_ms": 9428.565125000001,
+                    "length": 512,
+                    "prefix_hex": "41434b0041525800000000830030",
+                    "zero_padding_bytes": 498,
+                    "sha256": "197aca157ed19d0965b33ecc18f09c8e4dd0fd0939ffea3e576071714fc3d74b"
+                },
+                {
+                    "capture_sequence": 35,
+                    "observed_ms": 9463.426375,
+                    "length": 512,
+                    "prefix_hex": "41434b0041525800000000af002d",
+                    "zero_padding_bytes": 498,
+                    "sha256": "abc38a41118b34621353c3a1c6ec4699eea82880165614854a3e955c80a13692"
+                },
+                {
+                    "capture_sequence": 36,
+                    "observed_ms": 9498.444792,
+                    "length": 512,
+                    "prefix_hex": "41434b0041525800000000e6002a",
+                    "zero_padding_bytes": 498,
+                    "sha256": "c13f38072fee0f9b0cc110e611fe7a23c803992a2673c89f658001a21ca46029"
+                },
+                {
+                    "capture_sequence": 37,
+                    "observed_ms": 9533.402833,
+                    "length": 512,
+                    "prefix_hex": "41434b0041525800000001230029",
+                    "zero_padding_bytes": 498,
+                    "sha256": "b0855a089c96ca4de467bacf5e564dc96c82bf08fddb3e913934f33e8725446d"
+                },
+                {
+                    "capture_sequence": 38,
+                    "observed_ms": 9568.394042,
+                    "length": 512,
+                    "prefix_hex": "41434b004152580000000181002a",
+                    "zero_padding_bytes": 498,
+                    "sha256": "440b1a150bb0b82fbf67e640b7f9988eed167b66e76b142de75a7d5932c70918"
+                },
+                {
+                    "capture_sequence": 39,
+                    "observed_ms": 9568.550417,
+                    "length": 512,
+                    "prefix_hex": "41434b00004f4b00003800000000",
+                    "zero_padding_bytes": 498,
+                    "sha256": "170c6ea9946b1d124c08310ee57ae3e7660546a360dedac50ec06ab035ff7f64"
+                }
+            ],
+            "capture_id": "vertical-pair"
+        },
+        {
+            "name": "physical_quick_up",
+            "capture_id": "quick-pair-retry",
+            "expected_direction": "up",
+            "capture_sequence_start": 1,
+            "capture_sequence_end": 3,
+            "reports": [
+                {
+                    "capture_sequence": 1,
+                    "observed_ms": 0.14366600000000002,
+                    "length": 512,
+                    "prefix_hex": "41434b00004f4b00000001019f00",
+                    "zero_padding_bytes": 498,
+                    "sha256": "eecb6156bf465fcf653a675c663d5d554eccd48fa5f2c141cad6b58fd8837cd0"
+                },
+                {
+                    "capture_sequence": 2,
+                    "observed_ms": 34.300333,
+                    "length": 512,
+                    "prefix_hex": "41434b0041525800000001a1004d",
+                    "zero_padding_bytes": 498,
+                    "sha256": "2aea06f805bce4797369b96fbf02a3f8abbac2aff6e957e0b0378624c00d4389"
+                },
+                {
+                    "capture_sequence": 3,
+                    "observed_ms": 59.4385,
+                    "length": 512,
+                    "prefix_hex": "41434b00004f4b0000b100000000",
+                    "zero_padding_bytes": 498,
+                    "sha256": "4d807e4d8fc279ffc9666562d3613fe9b02d610777c2fd3fb22cee01900f0cab"
+                }
+            ]
+        },
+        {
+            "name": "physical_quick_down",
+            "capture_id": "quick-pair-retry",
+            "expected_direction": "down",
+            "capture_sequence_start": 4,
+            "capture_sequence_end": 7,
+            "reports": [
+                {
+                    "capture_sequence": 4,
+                    "observed_ms": 4139.769541,
+                    "length": 512,
+                    "prefix_hex": "41434b00004f4b0000000101ad00",
+                    "zero_padding_bytes": 498,
+                    "sha256": "a1ac0650a123f6785224a2b70f2959ac36d8e8ac3d2dffbde4e99bc61009d156"
+                },
+                {
+                    "capture_sequence": 5,
+                    "observed_ms": 4174.56675,
+                    "length": 512,
+                    "prefix_hex": "41434b0041525800000001ad0007",
+                    "zero_padding_bytes": 498,
+                    "sha256": "48f512251dab83315b3a4f4d188bbaf1cab19680e311fef093b2fac41dbe3645"
+                },
+                {
+                    "capture_sequence": 6,
+                    "observed_ms": 4209.497458000001,
+                    "length": 512,
+                    "prefix_hex": "41434b0041525800000001af0035",
+                    "zero_padding_bytes": 498,
+                    "sha256": "01bf751917a129118a4afc513af731fd4660760ef1d50678f7d7400f3f9dde60"
+                },
+                {
+                    "capture_sequence": 7,
+                    "observed_ms": 4230.739958,
+                    "length": 512,
+                    "prefix_hex": "41434b00004f4b0000b200000000",
+                    "zero_padding_bytes": 498,
+                    "sha256": "3bb717ebec6830f543e4008db0180ac6ea99d7df219a9fb7bc7db995f5df63f0"
+                }
+            ]
+        },
+        {
+            "name": "confirmed_quick_1_up",
+            "capture_id": "quick-up-series-retry",
+            "expected_direction": "up",
+            "capture_sequence_start": 1,
+            "capture_sequence_end": 3,
+            "reports": [
+                {
+                    "capture_sequence": 1,
+                    "observed_ms": 0.16179200000000002,
+                    "length": 512,
+                    "prefix_hex": "41434b00004f4b0000000101ca00",
+                    "zero_padding_bytes": 498,
+                    "sha256": "3107ddb16503fe0915a8627a4e1e9754c20988fa5459e569a32cf77cf9db2e3c"
+                },
+                {
+                    "capture_sequence": 2,
+                    "observed_ms": 31.540499999999998,
+                    "length": 512,
+                    "prefix_hex": "41434b0041525800000001c50030",
+                    "zero_padding_bytes": 498,
+                    "sha256": "fc7d752a6330e48624465bc490bd3ae2b8eb33070146970361cc46662034cada"
+                },
+                {
+                    "capture_sequence": 3,
+                    "observed_ms": 56.769208,
+                    "length": 512,
+                    "prefix_hex": "41434b00004f4b0000b100000000",
+                    "zero_padding_bytes": 498,
+                    "sha256": "4d807e4d8fc279ffc9666562d3613fe9b02d610777c2fd3fb22cee01900f0cab"
+                }
+            ]
+        },
+        {
+            "name": "confirmed_quick_2_up",
+            "capture_id": "quick-up-series-retry",
+            "expected_direction": "up",
+            "capture_sequence_start": 4,
+            "capture_sequence_end": 6,
+            "reports": [
+                {
+                    "capture_sequence": 4,
+                    "observed_ms": 447.436208,
+                    "length": 512,
+                    "prefix_hex": "41434b00004f4b0000000101bd00",
+                    "zero_padding_bytes": 498,
+                    "sha256": "c247d528af354d7445c9b1a8c9a97a6cca0f963a0177d4c51bfdf6355c506eca"
+                },
+                {
+                    "capture_sequence": 5,
+                    "observed_ms": 481.72766700000005,
+                    "length": 512,
+                    "prefix_hex": "41434b0041525800000001bb0045",
+                    "zero_padding_bytes": 498,
+                    "sha256": "8d42aaed25f8a81d875db0c61db16682e456a2cf4d532bddac745fd779e14830"
+                },
+                {
+                    "capture_sequence": 6,
+                    "observed_ms": 507.013583,
+                    "length": 512,
+                    "prefix_hex": "41434b00004f4b0000b100000000",
+                    "zero_padding_bytes": 498,
+                    "sha256": "4d807e4d8fc279ffc9666562d3613fe9b02d610777c2fd3fb22cee01900f0cab"
+                }
+            ]
+        },
+        {
+            "name": "confirmed_quick_3_up",
+            "capture_id": "quick-up-series-retry",
+            "expected_direction": "up",
+            "capture_sequence_start": 7,
+            "capture_sequence_end": 9,
+            "reports": [
+                {
+                    "capture_sequence": 7,
+                    "observed_ms": 1166.912333,
+                    "length": 512,
+                    "prefix_hex": "41434b00004f4b0000000101c800",
+                    "zero_padding_bytes": 498,
+                    "sha256": "7b2c1eeece1156f1b08b98fae49cce102bd29a8fbe3711028f1d4e420339b17a"
+                },
+                {
+                    "capture_sequence": 8,
+                    "observed_ms": 1201.694,
+                    "length": 512,
+                    "prefix_hex": "41434b0041525800000001c30049",
+                    "zero_padding_bytes": 498,
+                    "sha256": "24fbfc149372ab6242f4f6aa2d830f50a4888f3b2bec43c89568daf8e2f9ddfd"
+                },
+                {
+                    "capture_sequence": 9,
+                    "observed_ms": 1256.916542,
+                    "length": 512,
+                    "prefix_hex": "41434b00004f4b0000b100000000",
+                    "zero_padding_bytes": 498,
+                    "sha256": "4d807e4d8fc279ffc9666562d3613fe9b02d610777c2fd3fb22cee01900f0cab"
+                }
+            ]
+        },
+        {
+            "name": "confirmed_quick_4_down",
+            "capture_id": "quick-up-series-retry",
+            "expected_direction": "down",
+            "capture_sequence_start": 10,
+            "capture_sequence_end": 12,
+            "reports": [
+                {
+                    "capture_sequence": 10,
+                    "observed_ms": 35307.330041999994,
+                    "length": 512,
+                    "prefix_hex": "41434b00004f4b00000001018700",
+                    "zero_padding_bytes": 498,
+                    "sha256": "288300cf684f932a96b9f9ca5e67a5be4b249952bc118c9c1719886eec070d45"
+                },
+                {
+                    "capture_sequence": 11,
+                    "observed_ms": 35341.596625,
+                    "length": 512,
+                    "prefix_hex": "41434b004152580000000188002e",
+                    "zero_padding_bytes": 498,
+                    "sha256": "6f1190583e36a725cc80e993e3db5b4fa8da0a05531207a33e0589fa21fefd17"
+                },
+                {
+                    "capture_sequence": 12,
+                    "observed_ms": 35366.623042,
+                    "length": 512,
+                    "prefix_hex": "41434b00004f4b0000b200000000",
+                    "zero_padding_bytes": 498,
+                    "sha256": "3bb717ebec6830f543e4008db0180ac6ea99d7df219a9fb7bc7db995f5df63f0"
+                }
+            ]
+        },
+        {
+            "name": "confirmed_quick_5_left",
+            "capture_id": "quick-up-series-retry",
+            "expected_direction": "left",
+            "capture_sequence_start": 13,
+            "capture_sequence_end": 18,
+            "reports": [
+                {
+                    "capture_sequence": 13,
+                    "observed_ms": 38487.189999999995,
+                    "length": 512,
+                    "prefix_hex": "41434b00004f4b00000001021500",
+                    "zero_padding_bytes": 498,
+                    "sha256": "503e4b23c76cee7b1b538ac3bd0b0503feee7eafae7d3794da87086647dac37e"
+                },
+                {
+                    "capture_sequence": 14,
+                    "observed_ms": 38521.729833000005,
+                    "length": 512,
+                    "prefix_hex": "41434b004152580000000215002e",
+                    "zero_padding_bytes": 498,
+                    "sha256": "faa5182affb153cb985e0f343b4e0ac33a5157292c51c8dc8d1a42e85f17e903"
+                },
+                {
+                    "capture_sequence": 15,
+                    "observed_ms": 38556.713833,
+                    "length": 512,
+                    "prefix_hex": "41434b00415258000000020a002d",
+                    "zero_padding_bytes": 498,
+                    "sha256": "0c2279e2b02a37f24f157b48c1fd8dade64bc18689a267c4d9c63d114c36a133"
+                },
+                {
+                    "capture_sequence": 16,
+                    "observed_ms": 38591.776458,
+                    "length": 512,
+                    "prefix_hex": "41434b0041525800000001e9002a",
+                    "zero_padding_bytes": 498,
+                    "sha256": "085760838ea5abf73fe561307bc4eee50a614fefc051efd436e6f3418b33ebd6"
+                },
+                {
+                    "capture_sequence": 17,
+                    "observed_ms": 38626.507832999996,
+                    "length": 512,
+                    "prefix_hex": "41434b00415258000000019b002a",
+                    "zero_padding_bytes": 498,
+                    "sha256": "8384b4e7dedf35f0aa198b006dff049f804e74232b0bcbf3739f8cfe95876144"
+                },
+                {
+                    "capture_sequence": 18,
+                    "observed_ms": 38636.748542,
+                    "length": 512,
+                    "prefix_hex": "41434b00004f4b00003900000000",
+                    "zero_padding_bytes": 498,
+                    "sha256": "d0d75dc0739e7439bbd2ebbcdc381d73f68f18dc03b835df2b16a8d5f87dff74"
+                }
+            ]
+        },
+        {
+            "name": "confirmed_quick_6_right",
+            "capture_id": "quick-up-series-retry",
+            "expected_direction": "right",
+            "capture_sequence_start": 19,
+            "capture_sequence_end": 22,
+            "reports": [
+                {
+                    "capture_sequence": 19,
+                    "observed_ms": 44817.375667,
+                    "length": 512,
+                    "prefix_hex": "41434b00004f4b00000001010e00",
+                    "zero_padding_bytes": 498,
+                    "sha256": "f7a7ab7cbc46d315419c6330cba2575f8070784865ab6339bc7d4ac303b478ff"
+                },
+                {
+                    "capture_sequence": 20,
+                    "observed_ms": 44851.47275,
+                    "length": 512,
+                    "prefix_hex": "41434b00415258000000012b002b",
+                    "zero_padding_bytes": 498,
+                    "sha256": "b8fd45db67010606535ce960b8a6b95eeb676ae473dd575049dfe99de772bf68"
+                },
+                {
+                    "capture_sequence": 21,
+                    "observed_ms": 44886.2895,
+                    "length": 512,
+                    "prefix_hex": "41434b00415258000000017d001f",
+                    "zero_padding_bytes": 498,
+                    "sha256": "ab8ecdf2145d019af9651d246faaf897b8958055faf0e23890cd1dc66897094f"
+                },
+                {
+                    "capture_sequence": 22,
+                    "observed_ms": 44906.694041999996,
+                    "length": 512,
+                    "prefix_hex": "41434b00004f4b00003800000000",
+                    "zero_padding_bytes": 498,
+                    "sha256": "170c6ea9946b1d124c08310ee57ae3e7660546a360dedac50ec06ab035ff7f64"
+                }
+            ]
+        }
+    ],
+    "provenance_details": {
+        "capture_id": "touch-panel-20261028-vertical-pair",
+        "date_local": "2026-10-28",
+        "variant": "vsdinside",
+        "usb_vendor_id": 21832,
+        "usb_product_id": 4131,
+        "firmware": "unmeasured",
+        "os": "macOS 26.6.2 arm64",
+        "recorder_source_commit": "0b4d237cf93b40f75086645dd6cd44952f7d1b49",
+        "recorder_binary_sha256": "15aa0d647e61db39233fce5ed624932d4fcc8261abd826a34b699af173503ea7",
+        "raw_capture_sha256": "ca4cfba349069bcb06e2c77537787029fd102799d130ce93b32937fd3357a339",
+        "raw_reports": 39,
+        "normal_shutdown": true,
+        "queue_or_limit_drops": 0,
+        "user_confirmation": "Done in that exact order: up, down, up, down, left, right.",
+        "scope": "Actual complete report sequences, with zero-only padding removed and verified hashes. Raw bytes copied before the unchanged historical decoder; historical direction labels are not used as expected directions. Replay and one observed unit do not qualify other firmware, variants, platforms or playback timing.",
+        "additional_captures": [
+            {
+                "capture_id": "quick-pair-retry",
+                "raw_reports": 7,
+                "raw_capture_sha256": "f6992231438d362944d510ddb32d236927d36f48fae6f79704817a834f14c6c9",
+                "binary_sha256": "57a75ce015cd83c83c3fb46edd2c02d588f964f066219534ccb88fcf1aa17786",
+                "instrumented_reader_sha256": "d321a60a1d49223d1c242d88c599f0d3b3f57bcd0049bda2b0a41b629cce4f0a",
+                "raw_observer_sha256": "2589daef951d5a52be7267a6de676f2baa02701782a782e3ac85a3ee2b1f52ef",
+                "production_source_unchanged": true,
+                "scope": "Single current production reader with a raw-before-decode observer. The user confirmed one or both quick gestures were missed. Coordinates and terminal reports establish the failed up case; fixed decoder replay must emit up/down."
+            },
+            {
+                "capture_id": "quick-up-series-retry",
+                "raw_reports": 22,
+                "raw_capture_sha256": "f4efa4af49398831c5d4ab1c6240f86777a860c6172d75ccffa7e8fed41c78ef",
+                "binary_sha256": "65008687051efe8190a3158b666ad313522035a665e3545b8d28c36bcd3542e8",
+                "instrumented_reader_sha256": "d321a60a1d49223d1c242d88c599f0d3b3f57bcd0049bda2b0a41b629cce4f0a",
+                "raw_observer_sha256": "2589daef951d5a52be7267a6de676f2baa02701782a782e3ac85a3ee2b1f52ef",
+                "codec_sha256": "fa8855c21f34d9fcf69c2956243b2686033059dd68c6edbbbd6fae309fc955eb",
+                "production_source_unchanged": true,
+                "normal_shutdown": true,
+                "queue_or_limit_drops": 0,
+                "recognized_swipes": ["up", "up", "up", "down", "left", "right"],
+                "user_confirmation": {
+                    "upward_flicks": "finished, it went to bar 1",
+                    "down_left_right": "it went back to buttons with page 1",
+                    "scope": "User confirmed visible transition to BAR and final BUTTON/PAGE 1. Recorded runtime states establish intermediate PAGE 2; user did not separately confirm that intermediate label."
+                },
+                "scope": "Bounded physical recording with a single production HID reader and raw-before-decode observer. Three upward flicks and down/left/right each decoded once. State changed to Control Bar, Button, Page 2, Page 1. Observer overhead is present; this is no playback or latency measurement."
+            }
+        ]
+    }
+}

@@ -1,0 +1,160 @@
+<dialog
+    class="feature-dialog wide-dialog macro-debugger"
+    x-ref="macroTestDialog"
+    :aria-labelledby="'macro-test-title-' + editorId"
+    @cancel.prevent.stop="closeTest"
+>
+    <header class="picker-header">
+        <div>
+            <h2 :id="'macro-test-title-' + editorId">Test macro</h2>
+            <p>Run the current draft and inspect its output.</p>
+        </div>
+        <button type="button" class="icon-button" aria-label="Close macro test" @click="closeTest">
+            ×
+        </button>
+    </header>
+    <div class="feature-body">
+        <div class="macro-test-status">
+            <strong x-text="debugRun.mode === 'live' ? 'Live debugging' : 'Simulation'"></strong>
+            <span role="status" x-text="debugRun.status"></span>
+        </div>
+        <p class="field-help" x-show="debugRun.mode === 'simulation'">
+            Simulation uses isolated clipboard, files, navigation, input, and plugin responses.
+        </p>
+        <p role="alert" class="danger-text" x-show="debugRun.error" x-text="debugRun.error"></p>
+        <label x-show="debugRun.canStep">
+            Paused branch
+            <select x-model="debugRun.selectedPausedPath">
+                <template x-for="path in debugRun.pausedPaths" :key="path">
+                    <option :value="path" x-text="debugPathLabel(path)"></option>
+                </template>
+            </select>
+        </label>
+        <div class="button-row" role="group" aria-label="Debug controls">
+            <button
+                type="button"
+                class="button"
+                @click="debugRun.command('pause')"
+                :disabled="!debugRun.active || debugRun.busy"
+            >
+                Pause
+            </button>
+            <button
+                type="button"
+                class="button"
+                @click="debugRun.command('step_into')"
+                :disabled="!debugRun.canStep"
+            >
+                Step into
+            </button>
+            <button
+                type="button"
+                class="button"
+                @click="debugRun.command('step_over')"
+                :disabled="!debugRun.canStep"
+            >
+                Step over
+            </button>
+            <button
+                type="button"
+                class="button"
+                @click="debugRun.command('continue')"
+                :disabled="!debugRun.canContinue"
+            >
+                Continue
+            </button>
+            <button
+                type="button"
+                class="button danger"
+                @click="debugRun.command('stop')"
+                :disabled="!debugRun.active || debugRun.busy"
+            >
+                Stop
+            </button>
+        </div>
+        <section class="macro-test-results" :aria-labelledby="'macro-test-output-' + editorId">
+            <h3 :id="'macro-test-output-' + editorId">Steps, decisions, and output</h3>
+            <p class="field-help" x-show="!debugRun.events.length">
+                Step events appear here as the test runs.
+            </p>
+            <p class="field-help" x-show="debugRun.truncated">
+                Showing the most recent 256 events.
+            </p>
+            <ol
+                class="macro-debug-events"
+                aria-label="Debug step events"
+                x-show="debugRun.events.length"
+            >
+                <template x-for="event in debugRun.events" :key="event.sequence">
+                    <li class="event-row">
+                        <button
+                            type="button"
+                            class="text-button"
+                            @click="debugRun.selectEvent(event.sequence)"
+                            :aria-pressed="event.sequence === debugRun.selectedSequence"
+                            x-text="debugEventLabel(event)"
+                        ></button>
+                    </li>
+                </template>
+            </ol>
+            <pre
+                class="macro-debug-output"
+                aria-label="Debug output"
+                tabindex="0"
+                x-show="debugRun.events.length"
+                x-text="debugRun.output"
+            ></pre>
+        </section>
+        <details class="macro-test-options">
+            <summary>Test options</summary>
+            <div class="settings-form-grid">
+                <label>
+                    Input values (JSON object)
+                    <textarea
+                        x-model="debugRun.inputValues"
+                        rows="3"
+                        :disabled="debugRun.active || debugRun.busy"
+                        spellcheck="false"
+                    ></textarea>
+                </label>
+                <label>
+                    Simulation values (JSON object)
+                    <textarea
+                        x-model="debugRun.simulation"
+                        rows="3"
+                        :disabled="debugRun.active || debugRun.busy"
+                        spellcheck="false"
+                    ></textarea>
+                </label>
+            </div>
+            <p class="field-help" x-show="canRunLive">
+                Live debugging performs the configured actions on the active target. Stop cancels
+                future steps. Effects already dispatched may persist.
+            </p>
+            <p class="field-help" x-show="!canRunLive">
+                Live debugging requires a connected device and its active profile and page.
+            </p>
+            <button
+                type="button"
+                class="button"
+                @click="startLive"
+                :disabled="!canRunLive || debugRun.active || debugRun.busy"
+            >
+                Run live
+            </button>
+        </details>
+    </div>
+    <footer class="feature-footer">
+        <div class="button-row">
+            <button type="button" class="button" @click="closeTest">Close</button>
+            <button
+                type="button"
+                class="button primary"
+                @click="startSimulation"
+                :disabled="debugRun.active || debugRun.busy"
+            >
+                Run simulation
+            </button>
+        </div>
+    </footer>
+</dialog>

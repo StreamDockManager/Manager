@@ -1,0 +1,26 @@
+# Shared metadata for desktop and CLI installers on Linux, macOS and Windows. See packaging/README.md
+# These declarations do not change the source/dependency licenses or sign packages
+[package]
+publisher = "Stream Dock Manager contributors"
+copyright = "Stream Dock Manager contributors"
+website = "https://github.com/StreamDockManager/Manager"
+license = "GPL-3.0-or-later"
+# Release date (YYYY-MM-DD), not the build/installation time. Leave empty while unreleased
+last_updated = ""
+
+[desktop]
+name = "Stream Dock Manager"
+summary = "Independent, modular Stream Dock device manager"
+description = "Manage Stream Dock devices, profiles, actions and plugins from a native desktop application."
+developer_id = "app.streamdockmanager"
+
+[cli]
+summary = "Standalone Stream Dock Manager command-line tools"
+description = "Local Stream Dock device management and diagnostics. No desktop app is included."
+# Preserve the existing CLI package's aggregate license declaration
+license = "GPL-3.0-or-later AND MIT AND Apache-2.0"
+
+[linux]
+section = "utils"
+priority = "optional"
+rpm_release = "1"

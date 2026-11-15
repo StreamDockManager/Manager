@@ -1,0 +1,11 @@
+# Automatically generated - DO NOT EDIT!
+
+[[permission]]
+identifier = "allow-append-media-drop"
+description = "Enables the append_media_drop command without any pre-configured scope."
+commands.allow = ["append_media_drop"]
+
+[[permission]]
+identifier = "deny-append-media-drop"
+description = "Denies the append_media_drop command without any pre-configured scope."
+commands.deny = ["append_media_drop"]

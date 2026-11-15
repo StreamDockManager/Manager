@@ -1,0 +1,112 @@
+<div x-data="pluginFolderImport" @open-plugin-import.window="openPluginImport">
+    <dialog
+        class="feature-dialog wide-dialog"
+        x-ref="pluginImportDialog"
+        aria-labelledby="plugin-import-title"
+        @cancel.prevent="closePluginImport"
+    >
+        <header class="picker-header">
+            <div>
+                <h2 id="plugin-import-title">Import installed plugins</h2>
+                <p>Copy selected standalone plugins into Manager. Source files stay intact.</p>
+            </div>
+            <button
+                class="icon-button"
+                aria-label="Close plugin import"
+                @click="closePluginImport"
+                :disabled="working"
+            >
+                ×
+            </button>
+        </header>
+        <div class="feature-body">
+            <label>
+                Source application
+                <select x-model="source" @change="changeSource" :disabled="working">
+                    <option value="vsd">VSD Craft</option>
+                    <option value="opendeck">OpenDeck</option>
+                </select>
+            </label>
+            <div class="button-row">
+                <button class="button" @click="choosePluginFolder" :disabled="working">
+                    Choose plugin folder
+                </button>
+                <button class="button" @click="scanPlugins" :disabled="working">Scan again</button>
+                <button class="text-button" @click="selectAvailable" :disabled="working">
+                    Select available
+                </button>
+            </div>
+            <p
+                class="field-help"
+                x-text="sourceRoot || 'Detected installation and user plugin folders'"
+            ></p>
+            <label>
+                Search discovered plugins
+                <input type="search" aria-label="Search discovered plugins" x-model="query" />
+            </label>
+            <p x-show="working" role="status">Inspecting packages…</p>
+            <p x-show="!working && !candidates.length">
+                No plugins found. Choose a VSD Craft, OpenDeck, or SDK plugin folder, or an
+                individual .sdPlugin directory.
+            </p>
+            <template x-for="candidate in filteredCandidates" :key="candidate.source">
+                <article class="import-candidate">
+                    <label class="preference-toggle import-candidate-heading">
+                        <input
+                            type="checkbox"
+                            :value="candidate.source"
+                            x-model="selected"
+                            :disabled="working || !candidate.can_install || (selected.length >= 4 && !selected.includes(candidate.source))"
+                        />
+                        <strong x-text="candidate.name"></strong>
+                        <span class="import-candidate-meta">
+                            <span
+                                x-text="candidate.version === 'unknown' ? 'Version unavailable' : 'v' + candidate.version"
+                            ></span>
+                            <span
+                                class="chip"
+                                x-text="candidate.installed ? 'Already installed' : candidate.kind === 'vendor_builtin' ? 'Requires VSD Craft' : candidate.kind"
+                            ></span>
+                        </span>
+                    </label>
+                    <small class="source-path" x-text="candidate.source"></small>
+                    <details>
+                        <summary>Compatibility checks</summary>
+                        <template
+                            x-for="check in candidate.checks"
+                            :key="check.code + check.message"
+                        >
+                            <p>
+                                <strong x-text="check.level + ': '"></strong>
+                                <span x-text="check.message"></span>
+                                <small class="field-help" x-text="check.remedy"></small>
+                            </p>
+                        </template>
+                    </details>
+                </article>
+            </template>
+            <template x-for="result in results" :key="result.source">
+                <p role="status">
+                    <strong x-text="result.status + ': '"></strong>
+                    <span x-text="result.message"></span>
+                </p>
+            </template>
+            <p class="danger-text" role="alert" x-show="error" x-text="error"></p>
+            <p>
+                Select up to four plugins per review. New imports stay disabled after permission
+                review until you enable them. Replacing an existing plugin preserves its enabled
+                state. Vendor built-ins, licensed or platform-specific plugins may not work in
+                Manager.
+            </p>
+        </div>
+        <footer class="feature-footer">
+            <button class="button" @click="closePluginImport" :disabled="working">Close</button>
+            <button
+                class="button primary"
+                @click="importSelectedPlugins"
+                :disabled="working || selected.length === 0 || selected.length > 4"
+                x-text="'Import selected (' + selected.length + ')'"
+            ></button>
+        </footer>
+    </dialog>
+</div>

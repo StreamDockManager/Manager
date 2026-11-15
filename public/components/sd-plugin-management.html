@@ -1,0 +1,353 @@
+<div x-data="pluginManagement" @open-plugin-management.window="open">
+    <dialog
+        x-ref="dialog"
+        class="feature-dialog wide-dialog"
+        aria-labelledby="plugin-management-title"
+        @cancel.prevent="close"
+    >
+        <header class="picker-header">
+            <div>
+                <h2 id="plugin-management-title">Plugin versions</h2>
+                <p class="source-path" x-text="name"></p>
+            </div>
+            <button
+                type="button"
+                class="icon-button"
+                aria-label="Close plugin versions"
+                @click="close"
+                :disabled="writing"
+            >
+                ×
+            </button>
+        </header>
+        <div class="feature-body feature-fields">
+            <div class="button-row" role="group" aria-label="Plugin version views">
+                <button
+                    type="button"
+                    class="button"
+                    :class="{primary: tab === 'backups'}"
+                    :aria-pressed="tab === 'backups'"
+                    @click="showBackups"
+                    :disabled="writing"
+                >
+                    Backups
+                </button>
+                <button
+                    type="button"
+                    class="button"
+                    :class="{primary: tab === 'policy'}"
+                    :aria-pressed="tab === 'policy'"
+                    @click="showPolicy"
+                    :disabled="writing"
+                >
+                    Update preferences
+                </button>
+                <button
+                    type="button"
+                    class="button"
+                    x-ref="refresh"
+                    @click="load"
+                    :disabled="busy || writing || preparing"
+                >
+                    Reload versions
+                </button>
+            </div>
+            <p role="status" x-show="busy">Inspecting version metadata…</p>
+            <p role="alert" class="danger-text source-path" x-show="error" x-text="error"></p>
+            <section
+                class="feature-fields"
+                x-show="tab === 'backups'"
+                aria-labelledby="plugin-backups-title"
+            >
+                <h3 id="plugin-backups-title">Retained package backups</h3>
+                <p class="field-help">
+                    Inventory receipts describe retained bytes and origin. Review verifies the
+                    selected files and currently installed package before any replacement.
+                </p>
+                <template x-if="backups">
+                    <div class="feature-fields">
+                        <p x-show="backups.total === 0">
+                            No retained package backups are available.
+                        </p>
+                        <div class="button-row" x-show="backups.total > 0">
+                            <button
+                                type="button"
+                                class="button danger"
+                                @click="requestBackupDeletion"
+                                :disabled="busy || preparing || writing"
+                            >
+                                Delete all backups
+                            </button>
+                        </div>
+                        <div
+                            class="runtime-table-scroll"
+                            role="region"
+                            tabindex="0"
+                            aria-label="Retained plugin backups"
+                            x-show="backups.total > 0"
+                        >
+                            <table class="runtime-table">
+                                <thead>
+                                    <tr>
+                                        <th scope="col">Version</th>
+                                        <th scope="col">Retained</th>
+                                        <th scope="col">Origin</th>
+                                        <th scope="col">Inventory</th>
+                                        <th scope="col">Manage</th>
+                                    </tr>
+                                </thead>
+                                <tbody>
+                                    <template x-for="backup in backups.entries" :key="backup.id">
+                                        <tr>
+                                            <th
+                                                scope="row"
+                                                x-text="backup.version || 'Not recorded'"
+                                            ></th>
+                                            <td x-text="date(backup)"></td>
+                                            <td x-text="trust(backup)"></td>
+                                            <td>
+                                                <span
+                                                    x-text="backup.recorded ? backup.file_count + ' files' : 'Not indexed'"
+                                                ></span>
+                                                <p
+                                                    class="danger-text"
+                                                    x-show="backup.error"
+                                                    x-text="backup.error"
+                                                ></p>
+                                            </td>
+                                            <td>
+                                                <div class="button-row">
+                                                    <button
+                                                        type="button"
+                                                        class="button"
+                                                        :data-backup="backup.id"
+                                                        :aria-label="'Review backup ' + (backup.version || backup.id)"
+                                                        @click="reviewBackup"
+                                                        :disabled="!canReviewBackup(backup)"
+                                                    >
+                                                        Review backup
+                                                    </button>
+                                                    <button
+                                                        type="button"
+                                                        class="button danger"
+                                                        :data-backup="backup.id"
+                                                        :aria-label="'Delete backup ' + (backup.version || backup.id)"
+                                                        @click="requestBackupDeletion"
+                                                        :disabled="busy || preparing || writing"
+                                                    >
+                                                        Delete backup
+                                                    </button>
+                                                </div>
+                                            </td>
+                                        </tr>
+                                    </template>
+                                </tbody>
+                            </table>
+                        </div>
+                        <div class="button-row" x-show="backups.total > 0">
+                            <button
+                                type="button"
+                                class="button"
+                                @click="previous"
+                                :disabled="page <= 1 || busy || writing"
+                            >
+                                Previous backups
+                            </button>
+                            <span
+                                role="status"
+                                x-text="'Page ' + page + ' of ' + pages + ' · ' + backups.total + ' backups'"
+                            ></span>
+                            <button
+                                type="button"
+                                class="button"
+                                @click="next"
+                                :disabled="page >= pages || busy || writing"
+                            >
+                                Next backups
+                            </button>
+                        </div>
+                    </div>
+                </template>
+            </section>
+            <section
+                class="feature-fields"
+                x-show="tab === 'policy'"
+                aria-labelledby="plugin-update-policy-title"
+            >
+                <h3 id="plugin-update-policy-title">Update preferences</h3>
+                <template x-if="policy">
+                    <div class="feature-fields">
+                        <p
+                            class="source-path"
+                            x-show="policy.managed"
+                            x-text="policy.repository + ' · ' + policy.channel"
+                        ></p>
+                        <p class="field-help" x-show="!policy.managed">
+                            This installation is manually managed. Source-aware catalog preferences
+                            become available after an explicit verified catalog install.
+                        </p>
+                        <label class="preference-toggle">
+                            <input type="checkbox" x-model="held" :disabled="!canSavePolicy" />
+                            <span>Hold this installed version</span>
+                        </label>
+                        <label>
+                            Skipped versions (one per line)
+                            <textarea
+                                rows="3"
+                                x-model="skipped"
+                                :disabled="!canSavePolicy"
+                                aria-label="Skipped plugin versions"
+                            ></textarea>
+                        </label>
+                        <p class="field-help">
+                            Use up to 32 stable semantic versions. Holds and skips suppress update
+                            suggestions for this source and installation. These preferences do not
+                            block explicit installation; existing source, version and compatibility
+                            checks still apply. Replacement clears these preferences.
+                        </p>
+                        <div class="button-row">
+                            <button
+                                type="button"
+                                class="button primary"
+                                @click="savePolicy"
+                                :disabled="!canSavePolicy"
+                            >
+                                Save update preferences
+                            </button>
+                        </div>
+                    </div>
+                </template>
+            </section>
+        </div>
+        <footer class="feature-footer button-row">
+            <button type="button" class="button" @click="close" :disabled="writing">
+                Close versions
+            </button>
+        </footer>
+    </dialog>
+    <dialog
+        x-ref="backupConfirmation"
+        class="confirmation-dialog"
+        aria-labelledby="backup-deletion-title"
+        aria-describedby="backup-deletion-description"
+        @cancel.prevent="cancelBackupDeletion"
+    >
+        <h2 id="backup-deletion-title" x-text="backupDeletionTitle"></h2>
+        <p id="backup-deletion-description" x-text="backupDeletionDescription"></p>
+        <div class="button-row">
+            <button
+                type="button"
+                class="button"
+                autofocus
+                @click="cancelBackupDeletion"
+                :disabled="writing"
+            >
+                Cancel
+            </button>
+            <button
+                type="button"
+                class="button danger"
+                @click="confirmBackupDeletion"
+                :disabled="writing"
+                x-text="writing ? 'Deleting…' : backupDeletion && backupDeletion.id ? 'Delete backup' : 'Delete all backups'"
+            ></button>
+        </div>
+    </dialog>
+    <dialog
+        x-ref="review"
+        class="feature-dialog"
+        aria-labelledby="rollback-review-title"
+        @cancel.prevent="cancelReview"
+    >
+        <header class="picker-header">
+            <h2 id="rollback-review-title">Review plugin rollback</h2>
+            <button
+                type="button"
+                class="icon-button"
+                aria-label="Cancel plugin rollback"
+                @click="cancelReview"
+                :disabled="writing"
+            >
+                ×
+            </button>
+        </header>
+        <div class="feature-body feature-fields">
+            <p role="status" x-show="preparing">
+                Verifying the backup and staging an independent copy…
+            </p>
+            <p
+                role="alert"
+                class="danger-text source-path"
+                x-show="reviewError"
+                x-text="reviewError"
+            ></p>
+            <template x-if="report">
+                <div class="feature-fields">
+                    <p>
+                        <strong x-text="name"></strong>
+                        <span
+                            x-text="report.package.installed.version + ' → ' + report.package.backup.version"
+                        ></span>
+                    </p>
+                    <p class="field-help" x-text="trust(report.package.backup)"></p>
+                    <template x-for="warning in report.package.warnings" :key="warning">
+                        <p class="field-help" x-text="warning"></p>
+                    </template>
+                    <details>
+                        <summary>Inventory and compatibility</summary>
+                        <div class="feature-fields">
+                            <p
+                                class="source-path"
+                                x-text="'Installed inventory: ' + report.package.installed.inventory_sha256"
+                            ></p>
+                            <p
+                                class="source-path"
+                                x-text="'Backup inventory: ' + report.package.backup.inventory_sha256"
+                            ></p>
+                            <template
+                                x-for="(check, index) in report.package.compatibility.checks"
+                                :key="check.code + index"
+                            >
+                                <p
+                                    x-text="check.level + ': ' + check.message + ' ' + check.remedy"
+                                ></p>
+                            </template>
+                        </div>
+                    </details>
+                    <label class="preference-toggle">
+                        <input type="checkbox" x-model="acknowledgeSettings" :disabled="writing" />
+                        <span>
+                            I understand that current settings may be incompatible with the restored
+                            code.
+                        </span>
+                    </label>
+                    <label class="preference-toggle" x-show="!report.package.backup.trusted_origin">
+                        <input type="checkbox" x-model="allowUnverified" :disabled="writing" />
+                        <span>I accept the backup’s unverified provenance.</span>
+                    </label>
+                    <p role="alert" class="danger-text" x-show="!report.can_restore">
+                        Compatibility checks block this restoration.
+                    </p>
+                </div>
+            </template>
+        </div>
+        <footer class="feature-footer button-row">
+            <button
+                type="button"
+                class="button"
+                x-ref="cancelRollback"
+                @click="cancelReview"
+                :disabled="writing"
+            >
+                Cancel rollback
+            </button>
+            <button
+                type="button"
+                class="button primary"
+                @click="restore"
+                :disabled="!canRestore"
+                x-text="writing ? 'Restoring…' : 'Restore backup and disable'"
+            ></button>
+        </footer>
+    </dialog>
+</div>

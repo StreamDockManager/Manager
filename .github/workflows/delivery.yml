@@ -1,0 +1,64 @@
+name: independent delivery
+on:
+    push:
+        branches: [package-build]
+    workflow_dispatch:
+        inputs:
+            build_product:
+                description: 'package-build product selection'
+                type: choice
+                default: all
+                options: [all, desktop, cli]
+            build_targets:
+                description: 'package-build native targets'
+                type: choice
+                default: all
+                options: [all, linux-windows, linux, windows, macos-arm64, macos-amd64]
+            operation:
+                description: 'package-build operation; installer qualification is explicitly selected'
+                type: choice
+                default: build
+                options: [build, windows-cli, linux-deb, inspect-windows-cli]
+            qualification_build:
+                description: 'Completed candidate package-build run'
+                type: string
+            qualification_commit:
+                description: 'Exact candidate commit'
+                type: string
+            qualification_older_build:
+                description: 'Completed compatible baseline build'
+                type: string
+            qualification_older_commit:
+                description: 'Exact baseline commit'
+                type: string
+permissions:
+    contents: read
+    actions: read
+concurrency:
+    group: ${{ (inputs.operation != '' && inputs.operation != 'build') && format('manager-qualification-caller-{0}', (inputs.operation == 'linux-deb' && 'linux-deb' || 'windows-cli')) || (github.ref == 'refs/heads/package-build' && format('manager-package-{0}-{1}-{2}', github.ref, inputs.build_product || 'all', inputs.build_targets || 'all')) || format('manager-delivery-{0}', github.ref) }}
+    cancel-in-progress: ${{ github.ref == 'refs/heads/package-build' && (inputs.operation == '' || inputs.operation == 'build') }}
+jobs:
+    development:
+        if: github.ref == 'refs/heads/package-build' && (github.event_name == 'workflow_dispatch' || (github.event_name == 'push' && !github.event.created)) && (inputs.operation == '' || inputs.operation == 'build') && (inputs.build_product == '' || inputs.build_product == 'all' || inputs.build_product == 'desktop')
+        uses: ./.github/workflows/build-installers.yml
+        with:
+            commit: ${{ github.sha }}
+            mode: build-only
+            targets: ${{ inputs.build_targets || 'all' }}
+    development_cli:
+        if: github.ref == 'refs/heads/package-build' && (github.event_name == 'workflow_dispatch' || (github.event_name == 'push' && !github.event.created)) && (inputs.operation == '' || inputs.operation == 'build') && (inputs.build_product == '' || inputs.build_product == 'all' || inputs.build_product == 'cli')
+        uses: ./.github/workflows/build-cli.yml
+        with:
+            commit: ${{ github.sha }}
+            mode: build-only
+            targets: ${{ inputs.build_targets || 'all' }}
+    installer-qualification:
+        if: github.ref == 'refs/heads/package-build' && github.event_name == 'workflow_dispatch' && (inputs.operation != '' && inputs.operation != 'build')
+        uses: ./.github/workflows/installer-qualification.yml
+        with:
+            target: ${{ (inputs.operation == 'linux-deb' && 'linux-deb' || 'windows-cli') }}
+            build: ${{ inputs.qualification_build }}
+            commit: ${{ inputs.qualification_commit }}
+            older_build: ${{ inputs.qualification_older_build }}
+            older_commit: ${{ inputs.qualification_older_commit }}
+            inspect_only: ${{ inputs.operation == 'inspect-windows-cli' }}

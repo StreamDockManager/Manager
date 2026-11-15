@@ -1,0 +1,11 @@
+# Automatically generated - DO NOT EDIT!
+
+[[permission]]
+identifier = "allow-restore-plugin-data"
+description = "Enables the restore_plugin_data command without any pre-configured scope."
+commands.allow = ["restore_plugin_data"]
+
+[[permission]]
+identifier = "deny-restore-plugin-data"
+description = "Denies the restore_plugin_data command without any pre-configured scope."
+commands.deny = ["restore_plugin_data"]

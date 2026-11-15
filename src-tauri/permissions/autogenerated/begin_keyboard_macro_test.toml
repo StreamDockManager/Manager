@@ -1,0 +1,11 @@
+# Automatically generated - DO NOT EDIT!
+
+[[permission]]
+identifier = "allow-begin-keyboard-macro-test"
+description = "Enables the begin_keyboard_macro_test command without any pre-configured scope."
+commands.allow = ["begin_keyboard_macro_test"]
+
+[[permission]]
+identifier = "deny-begin-keyboard-macro-test"
+description = "Denies the begin_keyboard_macro_test command without any pre-configured scope."
+commands.deny = ["begin_keyboard_macro_test"]

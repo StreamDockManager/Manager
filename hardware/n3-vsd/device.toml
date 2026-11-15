@@ -1,0 +1,187 @@
+schema_version = 1
+model_id = "n3-vsd"
+profile_family = "n3"
+name = "N3 (VSDinside / TreasLin)"
+protocol = "vendor-crt-1"
+status = "experimental"
+
+[capabilities]
+firmware_query = true
+firmware_report = { kind = "feature", report_id = 1, length = 20, windows_supported = false }
+sleep = true
+brightness = true
+lighting = false
+lighting_channels = []
+background = false
+reliable_button_release = true
+reliable_encoder_release = true
+image_formats = ["png", "jpeg"]
+media_formats = ["png", "jpeg", "gif", "mp4"]
+max_fps = 24
+frame_output = { frame_scheduling = true, grouped_key_updates = true }
+
+[layout]
+width = 624
+height = 288
+rotation = 0
+
+[[variants]]
+id = "usb-5548-1001"
+name = "N3 (VSDinside / TreasLin)"
+
+[variants.identity]
+vendor_id = 21832
+product_id = 4097
+interface = 0
+usage_page = 65440
+usage = 1
+
+[[controls]]
+id = "key-1"
+label = "LCD key 1"
+kind = "button"
+minimum_manager = "0.1.0"
+x = 32
+y = 32
+width = 72
+height = 72
+semantics = ["press", "release"]
+image_slot = 1
+image_width = 64
+image_height = 64
+
+[[controls]]
+id = "key-2"
+label = "LCD key 2"
+kind = "button"
+minimum_manager = "0.1.0"
+x = 120
+y = 32
+width = 72
+height = 72
+semantics = ["press", "release"]
+image_slot = 2
+image_width = 64
+image_height = 64
+
+[[controls]]
+id = "key-3"
+label = "LCD key 3"
+kind = "button"
+minimum_manager = "0.1.0"
+x = 208
+y = 32
+width = 72
+height = 72
+semantics = ["press", "release"]
+image_slot = 3
+image_width = 64
+image_height = 64
+
+[[controls]]
+id = "key-4"
+label = "LCD key 4"
+kind = "button"
+minimum_manager = "0.1.0"
+x = 32
+y = 120
+width = 72
+height = 72
+semantics = ["press", "release"]
+image_slot = 4
+image_width = 64
+image_height = 64
+
+[[controls]]
+id = "key-5"
+label = "LCD key 5"
+kind = "button"
+minimum_manager = "0.1.0"
+x = 120
+y = 120
+width = 72
+height = 72
+semantics = ["press", "release"]
+image_slot = 5
+image_width = 64
+image_height = 64
+
+[[controls]]
+id = "key-6"
+label = "LCD key 6"
+kind = "button"
+minimum_manager = "0.1.0"
+x = 208
+y = 120
+width = 72
+height = 72
+semantics = ["press", "release"]
+image_slot = 6
+image_width = 64
+image_height = 64
+
+[[controls]]
+id = "key-7"
+label = "Button 1"
+kind = "button"
+minimum_manager = "0.1.0"
+x = 44
+y = 208
+width = 48
+height = 48
+semantics = ["press", "release"]
+
+[[controls]]
+id = "key-8"
+label = "Button 2"
+kind = "button"
+minimum_manager = "0.1.0"
+x = 132
+y = 208
+width = 48
+height = 48
+semantics = ["press", "release"]
+
+[[controls]]
+id = "key-9"
+label = "Button 3"
+kind = "button"
+minimum_manager = "0.1.0"
+x = 220
+y = 208
+width = 48
+height = 48
+semantics = ["press", "release"]
+
+[[controls]]
+id = "dial-1"
+label = "Left knob"
+kind = "encoder"
+minimum_manager = "0.1.0"
+x = 352
+y = 152
+width = 72
+height = 72
+semantics = ["press", "release", "rotate"]
+
+[[controls]]
+id = "dial-2"
+label = "Right knob"
+kind = "encoder"
+minimum_manager = "0.1.0"
+x = 496
+y = 152
+width = 72
+height = 72
+semantics = ["press", "release", "rotate"]
+
+[[controls]]
+id = "dial-3"
+label = "Top knob"
+kind = "encoder"
+minimum_manager = "0.1.0"
+x = 408
+y = 32
+width = 104
+height = 104
+semantics = ["press", "release", "rotate"]

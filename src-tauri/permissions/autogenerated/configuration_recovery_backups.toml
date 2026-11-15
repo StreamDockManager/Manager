@@ -1,0 +1,11 @@
+# Automatically generated - DO NOT EDIT!
+
+[[permission]]
+identifier = "allow-configuration-recovery-backups"
+description = "Enables the configuration_recovery_backups command without any pre-configured scope."
+commands.allow = ["configuration_recovery_backups"]
+
+[[permission]]
+identifier = "deny-configuration-recovery-backups"
+description = "Denies the configuration_recovery_backups command without any pre-configured scope."
+commands.deny = ["configuration_recovery_backups"]

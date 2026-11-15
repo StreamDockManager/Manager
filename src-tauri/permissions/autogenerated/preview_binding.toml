@@ -1,0 +1,11 @@
+# Automatically generated - DO NOT EDIT!
+
+[[permission]]
+identifier = "allow-preview-binding"
+description = "Enables the preview_binding command without any pre-configured scope."
+commands.allow = ["preview_binding"]
+
+[[permission]]
+identifier = "deny-preview-binding"
+description = "Denies the preview_binding command without any pre-configured scope."
+commands.deny = ["preview_binding"]

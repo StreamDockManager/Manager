@@ -1,0 +1,33 @@
+{
+    "UUID": "com.elgato.lightsout",
+    "Name": "Manager synthetic profile SDK driver",
+    "Version": "0.1.0.0",
+    "Author": "Stream Dock Manager contributors",
+    "Description": "Independently authored disposable profile driver, not the upstream Lights-Out executable",
+    "Icon": "plugin-icon",
+    "SDKVersion": 3,
+    "CodePath": "plugin.js",
+    "Software": { "MinimumVersion": "7.1" },
+    "Nodejs": { "Version": "24" },
+    "OS": [
+        { "Platform": "mac", "MinimumVersion": "12" },
+        { "Platform": "windows", "MinimumVersion": "10" }
+    ],
+    "Actions": [
+        {
+            "UUID": "com.elgato.lightsout.gamepiece",
+            "Name": "Play Piece",
+            "Icon": "action-icon",
+            "Controllers": ["Keypad"],
+            "States": [{ "Image": "key" }, { "Image": "key" }]
+        },
+        {
+            "UUID": "com.elgato.lightsout.reset",
+            "Name": "Reset",
+            "Icon": "action-icon",
+            "Controllers": ["Keypad"],
+            "States": [{ "Image": "key" }]
+        }
+    ],
+    "Profiles": [{ "Name": "sd", "DeviceType": 0, "AutoInstall": false }]
+}

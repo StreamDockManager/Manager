@@ -1,0 +1,11 @@
+# Automatically generated - DO NOT EDIT!
+
+[[permission]]
+identifier = "allow-condition-target-path"
+description = "Enables the condition_target_path command without any pre-configured scope."
+commands.allow = ["condition_target_path"]
+
+[[permission]]
+identifier = "deny-condition-target-path"
+description = "Denies the condition_target_path command without any pre-configured scope."
+commands.deny = ["condition_target_path"]

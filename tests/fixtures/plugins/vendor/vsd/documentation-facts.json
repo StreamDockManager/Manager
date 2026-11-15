@@ -1,0 +1,288 @@
+{
+    "schema_version": 1,
+    "provenance": "Official VSD repository README links creator.key123.vip, whose Getting Started page links sdk.key123.vip. Only factual identifiers/requiredness are retained. Website prose and executable scripts are not redistributed.",
+    "limitations": "Mutable documentation snapshot, not a versioned complete vendor schema. Source response hashes identify reviewed pages but their original HTML is not packaged. Native/reference-host semantics and undocumented APIs remain unqualified.",
+    "pages": [
+        {
+            "page": "manifest",
+            "source_url": "https://sdk.key123.vip/en/guide/manifest.html",
+            "source_sha256": "bec6a82dbb44c77cae1d9f05c1bf483b7879b0bf027151f2a5c4b012e8961d55",
+            "reviewed_at": "2026-11-09",
+            "members": [
+                {
+                    "section": "Members",
+                    "name": "Actions",
+                    "requiredness": "Required"
+                },
+                {
+                    "section": "Members",
+                    "name": "Author",
+                    "requiredness": "Required"
+                },
+                {
+                    "section": "Members",
+                    "name": "CodePath",
+                    "requiredness": "Required"
+                },
+                {
+                    "section": "Members",
+                    "name": "Description",
+                    "requiredness": "Required"
+                },
+                {
+                    "section": "Members",
+                    "name": "Icon",
+                    "requiredness": "Required"
+                },
+                {
+                    "section": "Members",
+                    "name": "Name",
+                    "requiredness": "Required"
+                },
+                {
+                    "section": "Members",
+                    "name": "Version",
+                    "requiredness": "Required"
+                },
+                {
+                    "section": "Members",
+                    "name": "SDKVersion",
+                    "requiredness": "Required"
+                },
+                {
+                    "section": "Members",
+                    "name": "OS",
+                    "requiredness": "Required"
+                },
+                {
+                    "section": "Members",
+                    "name": "Software",
+                    "requiredness": "Optional"
+                },
+                {
+                    "section": "Members",
+                    "name": "Category",
+                    "requiredness": "Optional"
+                },
+                {
+                    "section": "Members",
+                    "name": "CategoryIcon",
+                    "requiredness": "Optional"
+                },
+                {
+                    "section": "Members",
+                    "name": "CodePathMac",
+                    "requiredness": "Optional"
+                },
+                {
+                    "section": "Members",
+                    "name": "CodePathWin",
+                    "requiredness": "Optional"
+                },
+                {
+                    "section": "Members",
+                    "name": "PropertyInspectorPath",
+                    "requiredness": "Optional"
+                },
+                {
+                    "section": "Members",
+                    "name": "URL",
+                    "requiredness": "Optional"
+                },
+                {
+                    "section": "Members",
+                    "name": "ApplicationsToMonitor",
+                    "requiredness": "Optional"
+                },
+                {
+                    "section": "Members",
+                    "name": "Nodejs",
+                    "requiredness": "Optional"
+                },
+                {
+                    "section": "Actions",
+                    "name": "UUID",
+                    "requiredness": "Required"
+                },
+                {
+                    "section": "Actions",
+                    "name": "Icon",
+                    "requiredness": "Required"
+                },
+                {
+                    "section": "Actions",
+                    "name": "Name",
+                    "requiredness": "Required"
+                },
+                {
+                    "section": "Actions",
+                    "name": "state",
+                    "requiredness": "Optional"
+                },
+                {
+                    "section": "Actions",
+                    "name": "States",
+                    "requiredness": "Required"
+                },
+                {
+                    "section": "Actions",
+                    "name": "PropertyInspectorPath",
+                    "requiredness": "Optional"
+                },
+                {
+                    "section": "Actions",
+                    "name": "SupportedInMultiActions",
+                    "requiredness": "Optional"
+                },
+                {
+                    "section": "Actions",
+                    "name": "Tooltip",
+                    "requiredness": "Optional"
+                },
+                {
+                    "section": "Actions",
+                    "name": "Settings",
+                    "requiredness": "Optional"
+                },
+                {
+                    "section": "Actions",
+                    "name": "UserTitleEnabled",
+                    "requiredness": "Optional"
+                },
+                {
+                    "section": "Actions",
+                    "name": "Controllers",
+                    "requiredness": "Optional"
+                },
+                {
+                    "section": "Actions",
+                    "name": "VisibleInActionsList",
+                    "requiredness": "Optional"
+                },
+                {
+                    "section": "Actions",
+                    "name": "OS",
+                    "requiredness": "Optional"
+                },
+                {
+                    "section": "States",
+                    "name": "Image",
+                    "requiredness": "Required"
+                },
+                {
+                    "section": "States",
+                    "name": "Title",
+                    "requiredness": "Optional"
+                },
+                {
+                    "section": "States",
+                    "name": "ShowTitle",
+                    "requiredness": "Optional"
+                },
+                {
+                    "section": "States",
+                    "name": "TitleColor",
+                    "requiredness": "Optional"
+                },
+                {
+                    "section": "States",
+                    "name": "TitleAlignment",
+                    "requiredness": "Optional"
+                },
+                {
+                    "section": "States",
+                    "name": "FontFamily",
+                    "requiredness": "Optional"
+                },
+                {
+                    "section": "States",
+                    "name": "FontStyle",
+                    "requiredness": "Optional"
+                },
+                {
+                    "section": "States",
+                    "name": "FontSize",
+                    "requiredness": "Optional"
+                },
+                {
+                    "section": "States",
+                    "name": "FontUnderline",
+                    "requiredness": "Optional"
+                },
+                {
+                    "section": "OS",
+                    "name": "Platform",
+                    "requiredness": "Required"
+                },
+                {
+                    "section": "OS",
+                    "name": "MinimumVersion",
+                    "requiredness": "Required"
+                },
+                {
+                    "section": "Software",
+                    "name": "MinimumVersion",
+                    "requiredness": "Required"
+                },
+                {
+                    "section": "Nodejs",
+                    "name": "Version",
+                    "requiredness": "Required"
+                },
+                {
+                    "section": "Nodejs",
+                    "name": "Debug",
+                    "requiredness": "Optional"
+                }
+            ]
+        },
+        {
+            "page": "events-sent",
+            "source_url": "https://sdk.key123.vip/en/guide/events-sent.html",
+            "source_sha256": "fb4546fc9c66a72356cee478c10c765127fd8fe588a80798a11fbc4434691bdd",
+            "reviewed_at": "2026-11-09",
+            "events": [
+                "setSettings",
+                "getSettings",
+                "setGlobalSettings",
+                "getGlobalSettings",
+                "openUrl",
+                "logMessage",
+                "setTitle",
+                "setImage",
+                "showAlert",
+                "showOk",
+                "setState",
+                "sendToPropertyInspector",
+                "sendToPlugin"
+            ]
+        },
+        {
+            "page": "events-received",
+            "source_url": "https://sdk.key123.vip/en/guide/events-received.html",
+            "source_sha256": "98980f73ece214c8208a294d0e73e08fa6faa69c7700472329d87dfd593c4cff",
+            "reviewed_at": "2026-11-09",
+            "events": [
+                "didReceiveSettings",
+                "didReceiveGlobalSettings",
+                "dialDown",
+                "dialUp",
+                "dialRotate",
+                "keyDown",
+                "keyUp",
+                "willAppear",
+                "willDisappear",
+                "titleParametersDidChange",
+                "deviceDidConnect",
+                "deviceDidDisconnect",
+                "applicationDidLaunch",
+                "applicationDidTerminate",
+                "systemDidWakeUp",
+                "propertyInspectorDidAppear",
+                "propertyInspectorDidDisappear",
+                "sendToPlugin",
+                "sendToPropertyInspector"
+            ]
+        }
+    ]
+}

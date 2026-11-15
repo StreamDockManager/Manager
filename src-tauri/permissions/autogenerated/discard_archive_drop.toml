@@ -1,0 +1,11 @@
+# Automatically generated - DO NOT EDIT!
+
+[[permission]]
+identifier = "allow-discard-archive-drop"
+description = "Enables the discard_archive_drop command without any pre-configured scope."
+commands.allow = ["discard_archive_drop"]
+
+[[permission]]
+identifier = "deny-discard-archive-drop"
+description = "Denies the discard_archive_drop command without any pre-configured scope."
+commands.deny = ["discard_archive_drop"]

@@ -1,0 +1,11 @@
+{
+    "version": 1,
+    "groups": ["editor"],
+    "dependencies": ["sd-action-fields", "sd-macro-inputs", "sd-macro-debugger"],
+    "options": {
+        "shadow": false
+    },
+    "metadata": {
+        "description": "Shared action and macro workspace; the parent adapter owns content, events, and lifetime."
+    }
+}

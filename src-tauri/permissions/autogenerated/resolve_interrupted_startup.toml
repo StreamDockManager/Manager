@@ -1,0 +1,11 @@
+# Automatically generated - DO NOT EDIT!
+
+[[permission]]
+identifier = "allow-resolve-interrupted-startup"
+description = "Enables the resolve_interrupted_startup command without any pre-configured scope."
+commands.allow = ["resolve_interrupted_startup"]
+
+[[permission]]
+identifier = "deny-resolve-interrupted-startup"
+description = "Denies the resolve_interrupted_startup command without any pre-configured scope."
+commands.deny = ["resolve_interrupted_startup"]

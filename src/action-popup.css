@@ -1,0 +1,27 @@
+body.action-popup {
+    min-height: 100dvh;
+}
+.action-popup main {
+    padding: var(--surface-padding);
+    display: grid;
+    gap: var(--section-gap);
+    align-content: start;
+}
+.action-popup h1 {
+    font-size: calc(20px * var(--ui-text-scale, 1));
+}
+.action-popup p:empty,
+.action-popup [hidden] {
+    display: none;
+}
+.action-popup form,
+#choices:not(:empty) {
+    display: grid;
+    gap: var(--field-gap);
+}
+.action-popup #error {
+    border-inline-start: 3px solid var(--danger-text);
+    background: var(--surface-raised);
+    padding: var(--label-gap) var(--field-gap);
+    color: var(--danger-text);
+}

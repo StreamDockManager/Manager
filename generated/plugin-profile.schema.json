@@ -1,0 +1,3134 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "title": "PluginProfileDocument",
+  "description": "Schema for package-authored JSON; import-only fields never enter ProfileData",
+  "type": "object",
+  "properties": {
+    "active_profile": {
+      "type": "string"
+    },
+    "configuration_revision": {
+      "type": "integer",
+      "format": "uint64",
+      "minimum": 0
+    },
+    "history": {
+      "$ref": "#/$defs/HistoryIndex"
+    },
+    "minimum_manager": {
+      "type": [
+        "string",
+        "null"
+      ]
+    },
+    "plugin_configuration": {
+      "anyOf": [
+        {
+          "$ref": "#/$defs/PluginConfiguration"
+        },
+        {
+          "type": "null"
+        }
+      ],
+      "default": null
+    },
+    "profiles": {
+      "type": "array",
+      "items": {
+        "$ref": "#/$defs/Profile"
+      }
+    },
+    "rules": {
+      "type": "array",
+      "items": {
+        "$ref": "#/$defs/AppRule"
+      }
+    },
+    "saved_macros": {
+      "type": "array",
+      "items": {
+        "$ref": "#/$defs/SavedMacro"
+      }
+    },
+    "schema_version": {
+      "type": "integer",
+      "format": "uint32",
+      "minimum": 0
+    },
+    "styles": {
+      "type": "array",
+      "default": [],
+      "items": {
+        "$ref": "#/$defs/AppearancePreset"
+      }
+    },
+    "unavailable_actions": {
+      "type": "array",
+      "default": [],
+      "items": {
+        "type": "string"
+      }
+    }
+  },
+  "required": [
+    "saved_macros",
+    "schema_version",
+    "active_profile",
+    "profiles",
+    "configuration_revision",
+    "rules",
+    "history"
+  ],
+  "$defs": {
+    "Action": {
+      "oneOf": [
+        {
+          "type": "object",
+          "properties": {
+            "kind": {
+              "type": "string",
+              "const": "none"
+            }
+          },
+          "additionalProperties": false,
+          "required": [
+            "kind"
+          ]
+        },
+        {
+          "type": "object",
+          "properties": {
+            "action": {
+              "$ref": "#/$defs/BuiltinAction"
+            },
+            "kind": {
+              "type": "string",
+              "const": "builtin"
+            }
+          },
+          "additionalProperties": false,
+          "required": [
+            "kind",
+            "action"
+          ]
+        },
+        {
+          "type": "object",
+          "properties": {
+            "keys": {
+              "type": "array",
+              "items": {
+                "type": "string"
+              }
+            },
+            "kind": {
+              "type": "string",
+              "const": "hotkey"
+            }
+          },
+          "additionalProperties": false,
+          "required": [
+            "kind",
+            "keys"
+          ]
+        },
+        {
+          "type": "object",
+          "properties": {
+            "kind": {
+              "type": "string",
+              "const": "open_url"
+            },
+            "url": {
+              "type": "string"
+            }
+          },
+          "additionalProperties": false,
+          "required": [
+            "kind",
+            "url"
+          ]
+        },
+        {
+          "type": "object",
+          "properties": {
+            "kind": {
+              "type": "string",
+              "const": "open_path"
+            },
+            "path": {
+              "type": "string"
+            }
+          },
+          "additionalProperties": false,
+          "required": [
+            "kind",
+            "path"
+          ]
+        },
+        {
+          "type": "object",
+          "properties": {
+            "kind": {
+              "type": "string",
+              "const": "application"
+            },
+            "path": {
+              "type": "string"
+            }
+          },
+          "additionalProperties": false,
+          "required": [
+            "kind",
+            "path"
+          ]
+        },
+        {
+          "type": "object",
+          "properties": {
+            "command": {
+              "type": "string"
+            },
+            "kind": {
+              "type": "string",
+              "const": "media"
+            }
+          },
+          "additionalProperties": false,
+          "required": [
+            "kind",
+            "command"
+          ]
+        },
+        {
+          "type": "object",
+          "properties": {
+            "delta": {
+              "type": "integer",
+              "format": "int32"
+            },
+            "kind": {
+              "type": "string",
+              "const": "volume"
+            }
+          },
+          "additionalProperties": false,
+          "required": [
+            "kind",
+            "delta"
+          ]
+        },
+        {
+          "type": "object",
+          "properties": {
+            "kind": {
+              "type": "string",
+              "const": "mute"
+            }
+          },
+          "additionalProperties": false,
+          "required": [
+            "kind"
+          ]
+        },
+        {
+          "type": "object",
+          "properties": {
+            "args": {
+              "type": "array",
+              "items": {
+                "type": "string"
+              }
+            },
+            "kind": {
+              "type": "string",
+              "const": "command"
+            },
+            "program": {
+              "type": "string"
+            }
+          },
+          "additionalProperties": false,
+          "required": [
+            "kind",
+            "program",
+            "args"
+          ]
+        },
+        {
+          "type": "object",
+          "properties": {
+            "kind": {
+              "type": "string",
+              "const": "profile"
+            },
+            "profile_id": {
+              "type": "string"
+            }
+          },
+          "additionalProperties": false,
+          "required": [
+            "kind",
+            "profile_id"
+          ]
+        },
+        {
+          "type": "object",
+          "properties": {
+            "kind": {
+              "type": "string",
+              "const": "page"
+            },
+            "page_id": {
+              "type": "string"
+            }
+          },
+          "additionalProperties": false,
+          "required": [
+            "kind",
+            "page_id"
+          ]
+        },
+        {
+          "type": "object",
+          "properties": {
+            "direction": {
+              "$ref": "#/$defs/NavigationDirection"
+            },
+            "kind": {
+              "type": "string",
+              "const": "navigate"
+            },
+            "target": {
+              "$ref": "#/$defs/NavigationTarget"
+            }
+          },
+          "additionalProperties": false,
+          "required": [
+            "kind",
+            "target",
+            "direction"
+          ]
+        },
+        {
+          "type": "object",
+          "properties": {
+            "kind": {
+              "type": "string",
+              "const": "swipe_navigation"
+            },
+            "reverse": {
+              "type": "boolean"
+            },
+            "target": {
+              "type": "string"
+            },
+            "wrap": {
+              "type": "boolean"
+            }
+          },
+          "additionalProperties": false,
+          "required": [
+            "kind",
+            "target",
+            "wrap",
+            "reverse"
+          ]
+        },
+        {
+          "type": "object",
+          "properties": {
+            "kind": {
+              "type": "string",
+              "const": "delay"
+            },
+            "milliseconds": {
+              "type": "integer",
+              "format": "uint64",
+              "minimum": 0
+            }
+          },
+          "additionalProperties": false,
+          "required": [
+            "kind",
+            "milliseconds"
+          ]
+        },
+        {
+          "type": "object",
+          "properties": {
+            "actions": {
+              "type": "array",
+              "items": {
+                "$ref": "#/$defs/Action"
+              }
+            },
+            "kind": {
+              "type": "string",
+              "const": "macro"
+            }
+          },
+          "additionalProperties": false,
+          "required": [
+            "kind",
+            "actions"
+          ]
+        },
+        {
+          "description": "Independent dial actions: turn left, turn right, and press",
+          "type": "object",
+          "properties": {
+            "actions": {
+              "type": "array",
+              "items": {
+                "$ref": "#/$defs/Action"
+              }
+            },
+            "kind": {
+              "type": "string",
+              "const": "dial"
+            },
+            "linked_turns": {
+              "description": "Keep turn-lane editing synchronized without changing independent runtime contexts",
+              "type": "boolean",
+              "default": false
+            }
+          },
+          "additionalProperties": false,
+          "required": [
+            "kind",
+            "actions"
+          ]
+        },
+        {
+          "type": "object",
+          "properties": {
+            "kind": {
+              "type": "string",
+              "const": "toggle"
+            },
+            "off": {
+              "$ref": "#/$defs/Action"
+            },
+            "on": {
+              "$ref": "#/$defs/Action"
+            }
+          },
+          "additionalProperties": false,
+          "required": [
+            "kind",
+            "on",
+            "off"
+          ]
+        },
+        {
+          "type": "object",
+          "properties": {
+            "kind": {
+              "type": "string",
+              "const": "brightness"
+            },
+            "value": {
+              "type": "integer",
+              "format": "uint8",
+              "maximum": 255,
+              "minimum": 0
+            }
+          },
+          "additionalProperties": false,
+          "required": [
+            "kind",
+            "value"
+          ]
+        },
+        {
+          "type": "object",
+          "properties": {
+            "brightness": {
+              "type": "integer",
+              "format": "uint8",
+              "maximum": 255,
+              "minimum": 0
+            },
+            "colors": {
+              "type": "array",
+              "items": {
+                "type": "array",
+                "items": {
+                  "type": "integer",
+                  "format": "uint8",
+                  "maximum": 255,
+                  "minimum": 0
+                },
+                "maxItems": 3,
+                "minItems": 3
+              }
+            },
+            "kind": {
+              "type": "string",
+              "const": "lighting"
+            }
+          },
+          "additionalProperties": false,
+          "required": [
+            "kind",
+            "brightness",
+            "colors"
+          ]
+        },
+        {
+          "type": "object",
+          "properties": {
+            "kind": {
+              "type": "string",
+              "const": "sleep"
+            }
+          },
+          "additionalProperties": false,
+          "required": [
+            "kind"
+          ]
+        },
+        {
+          "type": "object",
+          "properties": {
+            "action_id": {
+              "type": "string"
+            },
+            "kind": {
+              "type": "string",
+              "const": "plugin"
+            },
+            "plugin_id": {
+              "type": "string"
+            },
+            "resources": {
+              "type": "object",
+              "additionalProperties": {
+                "type": "string"
+              }
+            },
+            "settings": true,
+            "user_desired_state": {
+              "description": "Explicit Elgato multi-action state selection; plugin settings stay opaque",
+              "type": [
+                "integer",
+                "null"
+              ],
+              "format": "uint8",
+              "maximum": 255,
+              "minimum": 0
+            }
+          },
+          "additionalProperties": false,
+          "required": [
+            "kind",
+            "plugin_id",
+            "action_id",
+            "settings"
+          ]
+        }
+      ]
+    },
+    "ActivationPolicy": {
+      "type": "string",
+      "enum": [
+        "queue",
+        "ignore_busy",
+        "replace_pending"
+      ]
+    },
+    "AppRule": {
+      "type": "object",
+      "properties": {
+        "application": {
+          "type": "string"
+        },
+        "device_key": {
+          "type": "string"
+        },
+        "id": {
+          "type": "string"
+        },
+        "page_id": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "profile_id": {
+          "type": "string"
+        },
+        "schedule": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/Schedule"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "title": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/TitleCondition"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        }
+      },
+      "additionalProperties": false,
+      "required": [
+        "id",
+        "device_key",
+        "application",
+        "profile_id"
+      ]
+    },
+    "Appearance": {
+      "type": "object",
+      "properties": {
+        "align": {
+          "type": "string",
+          "default": "center"
+        },
+        "font": {
+          "type": "string",
+          "default": "sans"
+        },
+        "foreground": {
+          "type": "string",
+          "default": "#ffffff"
+        },
+        "icon": {
+          "type": "string",
+          "default": ""
+        },
+        "icon_asset": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/IconAsset"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "icon_position": {
+          "type": "string",
+          "default": "center"
+        },
+        "icon_size": {
+          "type": "integer",
+          "format": "uint8",
+          "default": 42,
+          "maximum": 255,
+          "minimum": 0
+        },
+        "position": {
+          "type": "string",
+          "default": "bottom"
+        },
+        "show_title": {
+          "type": "boolean",
+          "default": true
+        },
+        "size": {
+          "description": "Font size as a percentage of surface height",
+          "type": "integer",
+          "format": "uint8",
+          "default": 18,
+          "maximum": 255,
+          "minimum": 0
+        },
+        "toggle_icon": {
+          "description": "Alternate icon selected after each successful binding execution",
+          "anyOf": [
+            {
+              "$ref": "#/$defs/ToggleIcon"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        }
+      },
+      "additionalProperties": false
+    },
+    "AppearancePreset": {
+      "type": "object",
+      "properties": {
+        "appearance": {
+          "$ref": "#/$defs/Appearance"
+        },
+        "background_source": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/BackgroundSource"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "color": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "composition": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/DisplayComposition"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "id": {
+          "type": "string"
+        },
+        "name": {
+          "type": "string"
+        },
+        "overlay_enabled": {
+          "type": [
+            "boolean",
+            "null"
+          ]
+        },
+        "plugin_appearance": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/PluginAppearance"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        }
+      },
+      "additionalProperties": false,
+      "required": [
+        "id",
+        "name",
+        "appearance"
+      ]
+    },
+    "BackgroundSource": {
+      "description": "Selects a background without discarding the saved custom color or media",
+      "type": "string",
+      "enum": [
+        "palette",
+        "custom"
+      ]
+    },
+    "Binding": {
+      "type": "object",
+      "properties": {
+        "action": {
+          "$ref": "#/$defs/Action"
+        },
+        "activation_policy": {
+          "$ref": "#/$defs/ActivationPolicy"
+        },
+        "appearance": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/Appearance"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "asset": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "background_source": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/BackgroundSource"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "color": {
+          "type": "string"
+        },
+        "composition": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/DisplayComposition"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "custom_background": {
+          "description": "Distinguishes an explicit color (including transparent) from the original default",
+          "type": "boolean"
+        },
+        "dial_response": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/DialResponse"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "disabled": {
+          "type": "boolean",
+          "default": false
+        },
+        "feedback": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "media": {
+          "$ref": "#/$defs/MediaOptions",
+          "default": {
+            "crop": [
+              0.0,
+              0.0,
+              1.0,
+              1.0
+            ],
+            "fit": "fill",
+            "speed": 1.0,
+            "trim_end_ms": null,
+            "trim_start_ms": 0
+          }
+        },
+        "plugin_appearance": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/PluginAppearance"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "title": {
+          "type": "string"
+        }
+      },
+      "additionalProperties": false,
+      "required": [
+        "title",
+        "color",
+        "action"
+      ]
+    },
+    "BuiltinAction": {
+      "oneOf": [
+        {
+          "type": "object",
+          "properties": {
+            "kind": {
+              "type": "string",
+              "const": "type_text"
+            },
+            "template": {
+              "type": "boolean"
+            },
+            "text": {
+              "type": "string"
+            }
+          },
+          "additionalProperties": false,
+          "required": [
+            "kind",
+            "text",
+            "template"
+          ]
+        },
+        {
+          "type": "object",
+          "properties": {
+            "kind": {
+              "type": "string",
+              "const": "paste_text"
+            },
+            "restore": {
+              "type": "boolean"
+            },
+            "template": {
+              "type": "boolean"
+            },
+            "text": {
+              "type": "string"
+            }
+          },
+          "additionalProperties": false,
+          "required": [
+            "kind",
+            "text",
+            "template",
+            "restore"
+          ]
+        },
+        {
+          "type": "object",
+          "properties": {
+            "kind": {
+              "type": "string",
+              "const": "set_clipboard"
+            },
+            "template": {
+              "type": "boolean"
+            },
+            "text": {
+              "type": "string"
+            }
+          },
+          "additionalProperties": false,
+          "required": [
+            "kind",
+            "text",
+            "template"
+          ]
+        },
+        {
+          "type": "object",
+          "properties": {
+            "kind": {
+              "type": "string",
+              "const": "clear_clipboard"
+            }
+          },
+          "additionalProperties": false,
+          "required": [
+            "kind"
+          ]
+        },
+        {
+          "type": "object",
+          "properties": {
+            "kind": {
+              "type": "string",
+              "const": "keyboard_macro"
+            },
+            "playback": {
+              "$ref": "#/$defs/KeyboardMacroPlayback"
+            },
+            "recording": {
+              "$ref": "#/$defs/KeyboardMacroRecording"
+            }
+          },
+          "additionalProperties": false,
+          "required": [
+            "kind",
+            "recording",
+            "playback"
+          ]
+        },
+        {
+          "type": "object",
+          "properties": {
+            "keys": {
+              "type": "array",
+              "items": {
+                "type": "string"
+              }
+            },
+            "kind": {
+              "type": "string",
+              "const": "hold_keys"
+            }
+          },
+          "additionalProperties": false,
+          "required": [
+            "kind",
+            "keys"
+          ]
+        },
+        {
+          "type": "object",
+          "properties": {
+            "keys": {
+              "type": "array",
+              "items": {
+                "type": "string"
+              }
+            },
+            "kind": {
+              "type": "string",
+              "const": "latch_keys"
+            }
+          },
+          "additionalProperties": false,
+          "required": [
+            "kind",
+            "keys"
+          ]
+        },
+        {
+          "type": "object",
+          "properties": {
+            "button": {
+              "type": "string"
+            },
+            "clicks": {
+              "type": "integer",
+              "format": "int32"
+            },
+            "kind": {
+              "type": "string",
+              "const": "mouse_click"
+            }
+          },
+          "additionalProperties": false,
+          "required": [
+            "kind",
+            "button",
+            "clicks"
+          ]
+        },
+        {
+          "type": "object",
+          "properties": {
+            "kind": {
+              "type": "string",
+              "const": "mouse_move"
+            },
+            "relative": {
+              "type": "boolean"
+            },
+            "x": {
+              "type": "integer",
+              "format": "int32"
+            },
+            "y": {
+              "type": "integer",
+              "format": "int32"
+            }
+          },
+          "additionalProperties": false,
+          "required": [
+            "kind",
+            "x",
+            "y",
+            "relative"
+          ]
+        },
+        {
+          "type": "object",
+          "properties": {
+            "kind": {
+              "type": "string",
+              "const": "mouse_scroll"
+            },
+            "x": {
+              "type": "integer",
+              "format": "int32"
+            },
+            "y": {
+              "type": "integer",
+              "format": "int32"
+            }
+          },
+          "additionalProperties": false,
+          "required": [
+            "kind",
+            "x",
+            "y"
+          ]
+        },
+        {
+          "type": "object",
+          "properties": {
+            "button": {
+              "type": "string"
+            },
+            "kind": {
+              "type": "string",
+              "const": "mouse_drag"
+            },
+            "milliseconds": {
+              "type": "integer",
+              "format": "int32"
+            },
+            "relative": {
+              "type": "boolean"
+            },
+            "x": {
+              "type": "integer",
+              "format": "int32"
+            },
+            "y": {
+              "type": "integer",
+              "format": "int32"
+            }
+          },
+          "additionalProperties": false,
+          "required": [
+            "kind",
+            "button",
+            "x",
+            "y",
+            "relative",
+            "milliseconds"
+          ]
+        },
+        {
+          "type": "object",
+          "properties": {
+            "kind": {
+              "type": "string",
+              "const": "open_link"
+            },
+            "template": {
+              "type": "boolean"
+            },
+            "url": {
+              "type": "string"
+            }
+          },
+          "additionalProperties": false,
+          "required": [
+            "kind",
+            "url",
+            "template"
+          ]
+        },
+        {
+          "type": "object",
+          "properties": {
+            "kind": {
+              "type": "string",
+              "const": "reveal_file"
+            },
+            "path": {
+              "type": "string"
+            },
+            "template": {
+              "type": "boolean"
+            }
+          },
+          "additionalProperties": false,
+          "required": [
+            "kind",
+            "path",
+            "template"
+          ]
+        },
+        {
+          "type": "object",
+          "properties": {
+            "direction": {
+              "type": "string"
+            },
+            "kind": {
+              "type": "string",
+              "const": "page_step"
+            },
+            "wrap": {
+              "type": "boolean"
+            }
+          },
+          "additionalProperties": false,
+          "required": [
+            "kind",
+            "direction",
+            "wrap"
+          ]
+        },
+        {
+          "type": "object",
+          "properties": {
+            "kind": {
+              "type": "string",
+              "const": "page_back"
+            }
+          },
+          "additionalProperties": false,
+          "required": [
+            "kind"
+          ]
+        },
+        {
+          "type": "object",
+          "properties": {
+            "kind": {
+              "type": "string",
+              "const": "momentary_page"
+            },
+            "page_id": {
+              "type": "string"
+            }
+          },
+          "additionalProperties": false,
+          "required": [
+            "kind",
+            "page_id"
+          ]
+        },
+        {
+          "type": "object",
+          "properties": {
+            "children": {
+              "type": "array",
+              "items": {
+                "$ref": "#/$defs/Action"
+              }
+            },
+            "kind": {
+              "type": "string",
+              "const": "cycle_actions"
+            }
+          },
+          "additionalProperties": false,
+          "required": [
+            "kind",
+            "children"
+          ]
+        },
+        {
+          "type": "object",
+          "properties": {
+            "children": {
+              "type": "array",
+              "items": {
+                "$ref": "#/$defs/Action"
+              }
+            },
+            "count": {
+              "type": "integer",
+              "format": "int32"
+            },
+            "interval_ms": {
+              "type": "integer",
+              "format": "int32"
+            },
+            "kind": {
+              "type": "string",
+              "const": "repeat_actions"
+            }
+          },
+          "additionalProperties": false,
+          "required": [
+            "kind",
+            "count",
+            "interval_ms",
+            "children"
+          ]
+        },
+        {
+          "type": "object",
+          "properties": {
+            "children": {
+              "type": "array",
+              "items": {
+                "$ref": "#/$defs/Action"
+              }
+            },
+            "interval_ms": {
+              "type": "integer",
+              "format": "int32"
+            },
+            "kind": {
+              "type": "string",
+              "const": "repeat_held"
+            }
+          },
+          "additionalProperties": false,
+          "required": [
+            "kind",
+            "interval_ms",
+            "children"
+          ]
+        },
+        {
+          "type": "object",
+          "properties": {
+            "children": {
+              "type": "array",
+              "items": {
+                "$ref": "#/$defs/Action"
+              }
+            },
+            "condition": {
+              "$ref": "#/$defs/Condition"
+            },
+            "kind": {
+              "type": "string",
+              "const": "conditional"
+            }
+          },
+          "additionalProperties": false,
+          "required": [
+            "kind",
+            "condition",
+            "children"
+          ]
+        },
+        {
+          "type": "object",
+          "properties": {
+            "condition": {
+              "$ref": "#/$defs/Condition"
+            },
+            "kind": {
+              "type": "string",
+              "const": "wait_condition"
+            },
+            "poll_ms": {
+              "type": "integer",
+              "format": "int32"
+            },
+            "timeout_ms": {
+              "type": "integer",
+              "format": "int32"
+            }
+          },
+          "additionalProperties": false,
+          "required": [
+            "kind",
+            "condition",
+            "timeout_ms",
+            "poll_ms"
+          ]
+        },
+        {
+          "type": "object",
+          "properties": {
+            "kind": {
+              "type": "string",
+              "const": "cancel_macros"
+            }
+          },
+          "additionalProperties": false,
+          "required": [
+            "kind"
+          ]
+        },
+        {
+          "type": "object",
+          "properties": {
+            "delta": {
+              "type": "integer",
+              "format": "int32"
+            },
+            "kind": {
+              "type": "string",
+              "const": "brightness_step"
+            }
+          },
+          "additionalProperties": false,
+          "required": [
+            "kind",
+            "delta"
+          ]
+        },
+        {
+          "type": "object",
+          "properties": {
+            "kind": {
+              "type": "string",
+              "const": "automation_control"
+            },
+            "operation": {
+              "type": "string"
+            }
+          },
+          "additionalProperties": false,
+          "required": [
+            "kind",
+            "operation"
+          ]
+        },
+        {
+          "type": "object",
+          "properties": {
+            "kind": {
+              "type": "string",
+              "const": "notification"
+            },
+            "template": {
+              "type": "boolean"
+            },
+            "text": {
+              "type": "string"
+            },
+            "title": {
+              "type": "string"
+            }
+          },
+          "additionalProperties": false,
+          "required": [
+            "kind",
+            "title",
+            "text",
+            "template"
+          ]
+        },
+        {
+          "type": "object",
+          "properties": {
+            "format": {
+              "type": "string"
+            },
+            "kind": {
+              "type": "string",
+              "const": "date_time"
+            },
+            "utc": {
+              "type": "boolean"
+            }
+          },
+          "additionalProperties": false,
+          "required": [
+            "kind",
+            "format",
+            "utc"
+          ]
+        },
+        {
+          "type": "object",
+          "properties": {
+            "kind": {
+              "type": "string",
+              "const": "transform_text"
+            },
+            "operation": {
+              "type": "string"
+            }
+          },
+          "additionalProperties": false,
+          "required": [
+            "kind",
+            "operation"
+          ]
+        },
+        {
+          "type": "object",
+          "properties": {
+            "kind": {
+              "type": "string",
+              "const": "search_selection"
+            },
+            "source": {
+              "type": "string"
+            },
+            "url": {
+              "type": "string"
+            }
+          },
+          "additionalProperties": false,
+          "required": [
+            "kind",
+            "url",
+            "source"
+          ]
+        },
+        {
+          "type": "object",
+          "properties": {
+            "kind": {
+              "type": "string",
+              "const": "clipboard_slot"
+            },
+            "name": {
+              "type": "string"
+            },
+            "operation": {
+              "type": "string"
+            },
+            "persist": {
+              "type": "boolean"
+            }
+          },
+          "additionalProperties": false,
+          "required": [
+            "kind",
+            "name",
+            "operation",
+            "persist"
+          ]
+        },
+        {
+          "type": "object",
+          "properties": {
+            "kind": {
+              "type": "string",
+              "const": "input_prompt"
+            },
+            "output": {
+              "type": "string"
+            },
+            "text": {
+              "type": "string"
+            },
+            "title": {
+              "type": "string"
+            }
+          },
+          "additionalProperties": false,
+          "required": [
+            "kind",
+            "title",
+            "text",
+            "output"
+          ]
+        },
+        {
+          "type": "object",
+          "properties": {
+            "children": {
+              "type": "array",
+              "items": {
+                "$ref": "#/$defs/Action"
+              }
+            },
+            "kind": {
+              "type": "string",
+              "const": "action_menu"
+            },
+            "labels": {
+              "type": "array",
+              "items": {
+                "type": "string"
+              }
+            },
+            "title": {
+              "type": "string"
+            }
+          },
+          "additionalProperties": false,
+          "required": [
+            "kind",
+            "title",
+            "labels",
+            "children"
+          ]
+        },
+        {
+          "type": "object",
+          "properties": {
+            "children": {
+              "type": "array",
+              "items": {
+                "$ref": "#/$defs/Action"
+              }
+            },
+            "double_ms": {
+              "type": "integer",
+              "format": "int32"
+            },
+            "hold_ms": {
+              "type": "integer",
+              "format": "int32"
+            },
+            "kind": {
+              "type": "string",
+              "const": "gesture"
+            }
+          },
+          "additionalProperties": false,
+          "required": [
+            "kind",
+            "double_ms",
+            "hold_ms",
+            "children"
+          ]
+        },
+        {
+          "type": "object",
+          "properties": {
+            "children": {
+              "type": "array",
+              "items": {
+                "$ref": "#/$defs/Action"
+              }
+            },
+            "kind": {
+              "type": "string",
+              "const": "press_release"
+            }
+          },
+          "additionalProperties": false,
+          "required": [
+            "kind",
+            "children"
+          ]
+        },
+        {
+          "type": "object",
+          "properties": {
+            "kind": {
+              "type": "string",
+              "const": "wait_release"
+            },
+            "timeout_ms": {
+              "type": "integer",
+              "format": "int32"
+            }
+          },
+          "additionalProperties": false,
+          "required": [
+            "kind",
+            "timeout_ms"
+          ]
+        },
+        {
+          "type": "object",
+          "properties": {
+            "children": {
+              "type": "array",
+              "items": {
+                "$ref": "#/$defs/Action"
+              }
+            },
+            "kind": {
+              "type": "string",
+              "const": "parallel"
+            },
+            "wait": {
+              "type": "boolean"
+            }
+          },
+          "additionalProperties": false,
+          "required": [
+            "kind",
+            "wait",
+            "children"
+          ]
+        },
+        {
+          "type": "object",
+          "properties": {
+            "children": {
+              "type": "array",
+              "items": {
+                "$ref": "#/$defs/Action"
+              }
+            },
+            "delay_ms": {
+              "type": "integer",
+              "format": "int32"
+            },
+            "kind": {
+              "type": "string",
+              "const": "failure_policy"
+            },
+            "operation": {
+              "type": "string"
+            },
+            "retries": {
+              "type": "integer",
+              "format": "int32"
+            }
+          },
+          "additionalProperties": false,
+          "required": [
+            "kind",
+            "operation",
+            "retries",
+            "delay_ms",
+            "children"
+          ]
+        },
+        {
+          "type": "object",
+          "properties": {
+            "arguments": {
+              "type": "object",
+              "additionalProperties": {
+                "$ref": "#/$defs/MacroArgument"
+              }
+            },
+            "kind": {
+              "type": "string",
+              "const": "saved_macro"
+            },
+            "macro_id": {
+              "type": "string"
+            }
+          },
+          "additionalProperties": false,
+          "required": [
+            "kind",
+            "macro_id"
+          ]
+        },
+        {
+          "type": "object",
+          "properties": {
+            "children": {
+              "type": "array",
+              "items": {
+                "$ref": "#/$defs/Action"
+              }
+            },
+            "kind": {
+              "type": "string",
+              "const": "random_action"
+            }
+          },
+          "additionalProperties": false,
+          "required": [
+            "kind",
+            "children"
+          ]
+        },
+        {
+          "type": "object",
+          "properties": {
+            "kind": {
+              "type": "string",
+              "const": "reset_state"
+            },
+            "scope": {
+              "type": "string"
+            }
+          },
+          "additionalProperties": false,
+          "required": [
+            "kind",
+            "scope"
+          ]
+        },
+        {
+          "type": "object",
+          "properties": {
+            "children": {
+              "type": "array",
+              "items": {
+                "$ref": "#/$defs/Action"
+              }
+            },
+            "kind": {
+              "type": "string",
+              "const": "cooldown"
+            },
+            "milliseconds": {
+              "type": "integer",
+              "format": "int32"
+            }
+          },
+          "additionalProperties": false,
+          "required": [
+            "kind",
+            "milliseconds",
+            "children"
+          ]
+        },
+        {
+          "type": "object",
+          "properties": {
+            "controls": {
+              "type": "array",
+              "items": {
+                "type": "string"
+              }
+            },
+            "kind": {
+              "type": "string",
+              "const": "binding_layer"
+            },
+            "page_id": {
+              "type": "string"
+            },
+            "toggle": {
+              "type": "boolean"
+            }
+          },
+          "additionalProperties": false,
+          "required": [
+            "kind",
+            "page_id",
+            "controls",
+            "toggle"
+          ]
+        },
+        {
+          "type": "object",
+          "properties": {
+            "control_id": {
+              "type": "string"
+            },
+            "device_id": {
+              "type": "string"
+            },
+            "kind": {
+              "type": "string",
+              "const": "trigger_binding"
+            },
+            "page_id": {
+              "type": "string"
+            },
+            "profile_id": {
+              "type": "string"
+            }
+          },
+          "additionalProperties": false,
+          "required": [
+            "kind",
+            "device_id",
+            "profile_id",
+            "page_id",
+            "control_id"
+          ]
+        },
+        {
+          "type": "object",
+          "properties": {
+            "kind": {
+              "type": "string",
+              "const": "show_manager"
+            }
+          },
+          "additionalProperties": false,
+          "required": [
+            "kind"
+          ]
+        },
+        {
+          "type": "object",
+          "properties": {
+            "control_id": {
+              "type": "string"
+            },
+            "device_id": {
+              "type": "string"
+            },
+            "kind": {
+              "type": "string",
+              "const": "edit_binding"
+            },
+            "page_id": {
+              "type": "string"
+            },
+            "profile_id": {
+              "type": "string"
+            }
+          },
+          "additionalProperties": false,
+          "required": [
+            "kind",
+            "device_id",
+            "profile_id",
+            "page_id",
+            "control_id"
+          ]
+        },
+        {
+          "type": "object",
+          "properties": {
+            "kind": {
+              "type": "string",
+              "const": "pause_bindings"
+            },
+            "operation": {
+              "type": "string"
+            }
+          },
+          "additionalProperties": false,
+          "required": [
+            "kind",
+            "operation"
+          ]
+        },
+        {
+          "type": "object",
+          "properties": {
+            "application": {
+              "type": "string"
+            },
+            "kind": {
+              "type": "string",
+              "const": "open_with"
+            },
+            "path": {
+              "type": "string"
+            },
+            "template": {
+              "type": "boolean"
+            }
+          },
+          "additionalProperties": false,
+          "required": [
+            "kind",
+            "application",
+            "path",
+            "template"
+          ]
+        },
+        {
+          "type": "object",
+          "properties": {
+            "kind": {
+              "type": "string",
+              "const": "open_terminal"
+            },
+            "path": {
+              "type": "string"
+            },
+            "program": {
+              "type": "string"
+            },
+            "template": {
+              "type": "boolean"
+            }
+          },
+          "additionalProperties": false,
+          "required": [
+            "kind",
+            "program",
+            "path",
+            "template"
+          ]
+        },
+        {
+          "type": "object",
+          "properties": {
+            "args": {
+              "type": "array",
+              "items": {
+                "type": "string"
+              }
+            },
+            "kind": {
+              "type": "string",
+              "const": "command_result"
+            },
+            "output": {
+              "type": "string"
+            },
+            "path": {
+              "type": "string"
+            },
+            "program": {
+              "type": "string"
+            },
+            "template": {
+              "type": "boolean"
+            },
+            "timeout_ms": {
+              "type": "integer",
+              "format": "int32"
+            }
+          },
+          "additionalProperties": false,
+          "required": [
+            "kind",
+            "program",
+            "args",
+            "path",
+            "timeout_ms",
+            "output",
+            "template"
+          ]
+        },
+        {
+          "type": "object",
+          "properties": {
+            "destination": {
+              "type": "string"
+            },
+            "kind": {
+              "type": "string",
+              "const": "file_operation"
+            },
+            "operation": {
+              "type": "string"
+            },
+            "replace": {
+              "type": "boolean"
+            },
+            "source": {
+              "type": "string"
+            },
+            "template": {
+              "type": "boolean"
+            }
+          },
+          "additionalProperties": false,
+          "required": [
+            "kind",
+            "operation",
+            "source",
+            "destination",
+            "replace",
+            "template"
+          ]
+        },
+        {
+          "type": "object",
+          "properties": {
+            "kind": {
+              "type": "string",
+              "const": "write_file"
+            },
+            "operation": {
+              "type": "string"
+            },
+            "path": {
+              "type": "string"
+            },
+            "replace": {
+              "type": "boolean"
+            },
+            "template": {
+              "type": "boolean"
+            },
+            "text": {
+              "type": "string"
+            }
+          },
+          "additionalProperties": false,
+          "required": [
+            "kind",
+            "path",
+            "text",
+            "operation",
+            "replace",
+            "template"
+          ]
+        },
+        {
+          "type": "object",
+          "properties": {
+            "directory": {
+              "type": "boolean"
+            },
+            "kind": {
+              "type": "string",
+              "const": "choose_path"
+            },
+            "output": {
+              "type": "string"
+            }
+          },
+          "additionalProperties": false,
+          "required": [
+            "kind",
+            "directory",
+            "output"
+          ]
+        }
+      ]
+    },
+    "Condition": {
+      "type": "object",
+      "properties": {
+        "operator": {
+          "type": "string"
+        },
+        "source": {
+          "type": "string"
+        },
+        "subject": {
+          "type": "string"
+        },
+        "value": true
+      },
+      "additionalProperties": false,
+      "required": [
+        "source",
+        "subject",
+        "operator",
+        "value"
+      ]
+    },
+    "DialCurve": {
+      "type": "string",
+      "enum": [
+        "linear",
+        "gentle",
+        "fast"
+      ]
+    },
+    "DialResponse": {
+      "type": "object",
+      "properties": {
+        "curve": {
+          "$ref": "#/$defs/DialCurve"
+        },
+        "max_steps": {
+          "type": "integer",
+          "format": "uint8",
+          "maximum": 255,
+          "minimum": 0
+        }
+      },
+      "additionalProperties": false,
+      "required": [
+        "curve",
+        "max_steps"
+      ]
+    },
+    "DisplayComposition": {
+      "type": "object",
+      "properties": {
+        "layers": {
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/DisplayLayer"
+          }
+        }
+      },
+      "additionalProperties": false,
+      "required": [
+        "layers"
+      ]
+    },
+    "DisplayLayer": {
+      "type": "object",
+      "properties": {
+        "id": {
+          "type": "string"
+        },
+        "label": {
+          "type": "string"
+        },
+        "source": {
+          "$ref": "#/$defs/DisplaySource"
+        },
+        "style": {
+          "$ref": "#/$defs/ElementStyle"
+        },
+        "text": {
+          "type": "string",
+          "default": ""
+        }
+      },
+      "additionalProperties": false,
+      "required": [
+        "id",
+        "label",
+        "source",
+        "style"
+      ]
+    },
+    "DisplaySource": {
+      "type": "object",
+      "properties": {
+        "action_id": {
+          "type": "string",
+          "default": ""
+        },
+        "element_kind": {
+          "type": "string",
+          "default": ""
+        },
+        "key": {
+          "type": "string",
+          "default": ""
+        },
+        "kind": {
+          "type": "string",
+          "default": ""
+        },
+        "layout": {
+          "type": "string",
+          "default": ""
+        },
+        "plugin_id": {
+          "type": "string",
+          "default": ""
+        }
+      },
+      "additionalProperties": false
+    },
+    "ElementStyle": {
+      "type": "object",
+      "properties": {
+        "align": {
+          "type": "string",
+          "default": "center"
+        },
+        "font": {
+          "type": "string",
+          "default": "sans"
+        },
+        "foreground": {
+          "type": "string",
+          "default": "#ffffff"
+        },
+        "icon_asset": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/IconAsset"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "key": {
+          "type": "string",
+          "default": ""
+        },
+        "kind": {
+          "type": "string",
+          "default": "text"
+        },
+        "layout": {
+          "type": "string",
+          "default": ""
+        },
+        "rect": {
+          "description": "X, Y, width and height, as percentages of the surface",
+          "type": "array",
+          "default": [
+            0.0,
+            0.0,
+            100.0,
+            100.0
+          ],
+          "items": {
+            "type": "number",
+            "format": "double"
+          },
+          "maxItems": 4,
+          "minItems": 4
+        },
+        "size": {
+          "type": "number",
+          "format": "double",
+          "default": 12.0
+        },
+        "state_icons": {
+          "type": "object",
+          "additionalProperties": {
+            "$ref": "#/$defs/IconAsset"
+          },
+          "default": {}
+        },
+        "vertical_align": {
+          "type": "string",
+          "default": "center"
+        },
+        "visible": {
+          "type": "boolean",
+          "default": true
+        },
+        "wrap": {
+          "type": "boolean",
+          "default": true
+        }
+      },
+      "additionalProperties": false
+    },
+    "HistoryIndex": {
+      "type": "object",
+      "properties": {
+        "redo": {
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/HistoryItem"
+          }
+        },
+        "undo": {
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/HistoryItem"
+          }
+        }
+      },
+      "additionalProperties": false,
+      "required": [
+        "undo",
+        "redo"
+      ]
+    },
+    "HistoryItem": {
+      "type": "object",
+      "properties": {
+        "bytes": {
+          "type": "integer",
+          "format": "uint",
+          "minimum": 0
+        },
+        "description": {
+          "type": "string"
+        },
+        "id": {
+          "type": "string"
+        },
+        "timestamp_ms": {
+          "type": "integer",
+          "format": "uint64",
+          "minimum": 0
+        }
+      },
+      "required": [
+        "id",
+        "description",
+        "timestamp_ms",
+        "bytes"
+      ]
+    },
+    "IconAsset": {
+      "description": "The vector and attribution travel with bindings and presets, independently of the disk cache",
+      "type": "object",
+      "properties": {
+        "author": {
+          "type": "string"
+        },
+        "collection": {
+          "type": "string"
+        },
+        "id": {
+          "type": "string"
+        },
+        "license": {
+          "type": "string"
+        },
+        "license_url": {
+          "type": "string"
+        },
+        "svg": {
+          "type": "string"
+        }
+      },
+      "additionalProperties": false,
+      "required": [
+        "id",
+        "svg",
+        "collection",
+        "author",
+        "license",
+        "license_url"
+      ]
+    },
+    "KeyboardMacroEvent": {
+      "type": "object",
+      "properties": {
+        "delay_ms": {
+          "type": "integer",
+          "format": "uint32",
+          "minimum": 0
+        },
+        "key": {
+          "$ref": "#/$defs/PhysicalKey"
+        },
+        "kind": {
+          "$ref": "#/$defs/KeyboardMacroEventKind"
+        }
+      },
+      "additionalProperties": false,
+      "required": [
+        "kind",
+        "key",
+        "delay_ms"
+      ]
+    },
+    "KeyboardMacroEventKind": {
+      "type": "string",
+      "enum": [
+        "key_down",
+        "key_up",
+        "repeat"
+      ]
+    },
+    "KeyboardMacroFocusPolicy": {
+      "type": "string",
+      "enum": [
+        "stay_on_target",
+        "allow_focus_changes"
+      ]
+    },
+    "KeyboardMacroKeyMode": {
+      "type": "string",
+      "enum": [
+        "physical"
+      ]
+    },
+    "KeyboardMacroPlatform": {
+      "type": "string",
+      "enum": [
+        "macos",
+        "windows",
+        "linux",
+        "unknown"
+      ]
+    },
+    "KeyboardMacroPlayback": {
+      "type": "object",
+      "properties": {
+        "focus_policy": {
+          "$ref": "#/$defs/KeyboardMacroFocusPolicy"
+        },
+        "repeat_mode": {
+          "$ref": "#/$defs/KeyboardMacroRepeatMode",
+          "default": "exact"
+        },
+        "speed": {
+          "type": "number",
+          "format": "double"
+        }
+      },
+      "additionalProperties": false,
+      "required": [
+        "speed",
+        "focus_policy"
+      ]
+    },
+    "KeyboardMacroRecording": {
+      "type": "object",
+      "properties": {
+        "events": {
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/KeyboardMacroEvent"
+          }
+        },
+        "key_mode": {
+          "$ref": "#/$defs/KeyboardMacroKeyMode"
+        },
+        "layout": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "platform": {
+          "$ref": "#/$defs/KeyboardMacroPlatform"
+        },
+        "version": {
+          "type": "integer",
+          "format": "uint32",
+          "minimum": 0
+        }
+      },
+      "additionalProperties": false,
+      "required": [
+        "version",
+        "platform",
+        "key_mode",
+        "events"
+      ]
+    },
+    "KeyboardMacroRepeatMode": {
+      "description": "Repeat behavior is explicit saved action intent, never a platform fallback",
+      "oneOf": [
+        {
+          "type": "string",
+          "enum": [
+            "exact"
+          ]
+        },
+        {
+          "description": "Linux X11 supplies repeats from the user's existing keyboard controls\nRecorded Repeat events retain their timing but are not injected",
+          "type": "string",
+          "const": "system"
+        }
+      ]
+    },
+    "MacroArgument": {
+      "oneOf": [
+        {
+          "type": "object",
+          "properties": {
+            "kind": {
+              "type": "string",
+              "const": "literal"
+            },
+            "value": true
+          },
+          "additionalProperties": false,
+          "required": [
+            "kind",
+            "value"
+          ]
+        },
+        {
+          "type": "object",
+          "properties": {
+            "kind": {
+              "type": "string",
+              "const": "parameter"
+            },
+            "name": {
+              "type": "string"
+            }
+          },
+          "additionalProperties": false,
+          "required": [
+            "kind",
+            "name"
+          ]
+        },
+        {
+          "type": "object",
+          "properties": {
+            "kind": {
+              "type": "string",
+              "const": "input"
+            },
+            "name": {
+              "type": "string"
+            }
+          },
+          "additionalProperties": false,
+          "required": [
+            "kind",
+            "name"
+          ]
+        },
+        {
+          "type": "object",
+          "properties": {
+            "kind": {
+              "type": "string",
+              "const": "output"
+            },
+            "name": {
+              "type": "string"
+            }
+          },
+          "additionalProperties": false,
+          "required": [
+            "kind",
+            "name"
+          ]
+        }
+      ]
+    },
+    "MacroInput": {
+      "type": "object",
+      "properties": {
+        "default": {
+          "default": null
+        },
+        "label": {
+          "type": "string"
+        },
+        "name": {
+          "type": "string"
+        },
+        "required": {
+          "type": "boolean",
+          "default": false
+        },
+        "type": {
+          "type": "string"
+        }
+      },
+      "additionalProperties": false,
+      "required": [
+        "name",
+        "label",
+        "type"
+      ]
+    },
+    "MediaOptions": {
+      "type": "object",
+      "properties": {
+        "crop": {
+          "type": "array",
+          "default": [
+            0.0,
+            0.0,
+            1.0,
+            1.0
+          ],
+          "items": {
+            "type": "number",
+            "format": "double"
+          },
+          "maxItems": 4,
+          "minItems": 4
+        },
+        "encoding": {
+          "type": "string"
+        },
+        "fit": {
+          "type": "string",
+          "default": "fill"
+        },
+        "jpeg_quality": {
+          "type": [
+            "integer",
+            "null"
+          ],
+          "format": "uint8",
+          "maximum": 255,
+          "minimum": 0
+        },
+        "letterbox": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "max_fps": {
+          "type": [
+            "number",
+            "null"
+          ],
+          "format": "double"
+        },
+        "max_frame_edge": {
+          "type": [
+            "integer",
+            "null"
+          ],
+          "format": "uint16",
+          "maximum": 65535,
+          "minimum": 0
+        },
+        "min_fps": {
+          "type": [
+            "number",
+            "null"
+          ],
+          "format": "double"
+        },
+        "min_frame_edge": {
+          "type": [
+            "integer",
+            "null"
+          ],
+          "format": "uint16",
+          "maximum": 65535,
+          "minimum": 0
+        },
+        "speed": {
+          "type": "number",
+          "format": "double",
+          "default": 1.0
+        },
+        "trim_end_ms": {
+          "type": [
+            "integer",
+            "null"
+          ],
+          "format": "uint32",
+          "default": null,
+          "minimum": 0
+        },
+        "trim_start_ms": {
+          "type": "integer",
+          "format": "uint32",
+          "default": 0,
+          "minimum": 0
+        }
+      },
+      "additionalProperties": false
+    },
+    "NavigationDirection": {
+      "type": "string",
+      "enum": [
+        "previous",
+        "next"
+      ]
+    },
+    "NavigationTarget": {
+      "type": "string",
+      "enum": [
+        "page",
+        "profile"
+      ]
+    },
+    "Page": {
+      "type": "object",
+      "properties": {
+        "bindings": {
+          "type": "object",
+          "additionalProperties": {
+            "$ref": "#/$defs/Binding"
+          }
+        },
+        "id": {
+          "type": "string"
+        },
+        "name": {
+          "type": "string"
+        }
+      },
+      "additionalProperties": false,
+      "required": [
+        "id",
+        "name",
+        "bindings"
+      ]
+    },
+    "PhysicalKey": {
+      "description": "DOM physical codes. Consumer, vendor, Fn and composition keys are absent",
+      "type": "string",
+      "enum": [
+        "KeyA",
+        "KeyB",
+        "KeyC",
+        "KeyD",
+        "KeyE",
+        "KeyF",
+        "KeyG",
+        "KeyH",
+        "KeyI",
+        "KeyJ",
+        "KeyK",
+        "KeyL",
+        "KeyM",
+        "KeyN",
+        "KeyO",
+        "KeyP",
+        "KeyQ",
+        "KeyR",
+        "KeyS",
+        "KeyT",
+        "KeyU",
+        "KeyV",
+        "KeyW",
+        "KeyX",
+        "KeyY",
+        "KeyZ",
+        "Digit0",
+        "Digit1",
+        "Digit2",
+        "Digit3",
+        "Digit4",
+        "Digit5",
+        "Digit6",
+        "Digit7",
+        "Digit8",
+        "Digit9",
+        "Backquote",
+        "Minus",
+        "Equal",
+        "BracketLeft",
+        "BracketRight",
+        "Backslash",
+        "Semicolon",
+        "Quote",
+        "Comma",
+        "Period",
+        "Slash",
+        "IntlBackslash",
+        "IntlRo",
+        "IntlYen",
+        "Backspace",
+        "Tab",
+        "Enter",
+        "Space",
+        "Escape",
+        "CapsLock",
+        "ShiftLeft",
+        "ShiftRight",
+        "ControlLeft",
+        "ControlRight",
+        "AltLeft",
+        "AltRight",
+        "MetaLeft",
+        "MetaRight",
+        "Insert",
+        "Delete",
+        "Home",
+        "End",
+        "PageUp",
+        "PageDown",
+        "ArrowLeft",
+        "ArrowRight",
+        "ArrowUp",
+        "ArrowDown",
+        "PrintScreen",
+        "ScrollLock",
+        "Pause",
+        "NumLock",
+        "F1",
+        "F2",
+        "F3",
+        "F4",
+        "F5",
+        "F6",
+        "F7",
+        "F8",
+        "F9",
+        "F10",
+        "F11",
+        "F12",
+        "F13",
+        "F14",
+        "F15",
+        "F16",
+        "F17",
+        "F18",
+        "F19",
+        "F20",
+        "F21",
+        "F22",
+        "F23",
+        "F24",
+        "Numpad0",
+        "Numpad1",
+        "Numpad2",
+        "Numpad3",
+        "Numpad4",
+        "Numpad5",
+        "Numpad6",
+        "Numpad7",
+        "Numpad8",
+        "Numpad9",
+        "NumpadAdd",
+        "NumpadSubtract",
+        "NumpadMultiply",
+        "NumpadDivide",
+        "NumpadDecimal",
+        "NumpadEnter",
+        "NumpadEqual",
+        "NumpadComma"
+      ]
+    },
+    "PluginAppearance": {
+      "type": "object",
+      "properties": {
+        "action_id": {
+          "type": "string"
+        },
+        "elements": {
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/ElementStyle"
+          }
+        },
+        "plugin_id": {
+          "type": "string"
+        },
+        "vendor_profile": {
+          "description": "Source-backed per-state title appearance from a bundled vendor profile",
+          "anyOf": [
+            {
+              "$ref": "#/$defs/VendorProfileAppearance"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        }
+      },
+      "additionalProperties": false,
+      "required": [
+        "plugin_id",
+        "action_id",
+        "elements"
+      ]
+    },
+    "PluginConfiguration": {
+      "type": "object",
+      "properties": {
+        "action_defaults": {
+          "type": "object",
+          "additionalProperties": true,
+          "default": {}
+        },
+        "settings": {
+          "default": {}
+        }
+      },
+      "additionalProperties": false
+    },
+    "Profile": {
+      "type": "object",
+      "properties": {
+        "active_page": {
+          "type": "string"
+        },
+        "background_asset": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "background_media": {
+          "$ref": "#/$defs/MediaOptions",
+          "default": {
+            "crop": [
+              0.0,
+              0.0,
+              1.0,
+              1.0
+            ],
+            "fit": "fill",
+            "speed": 1.0,
+            "trim_end_ms": null,
+            "trim_start_ms": 0
+          }
+        },
+        "id": {
+          "type": "string"
+        },
+        "model_id": {
+          "type": "string"
+        },
+        "name": {
+          "type": "string"
+        },
+        "pages": {
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/Page"
+          }
+        },
+        "palette": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/ProfilePalette"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "parameters": {
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/ProfileParameter"
+          }
+        }
+      },
+      "additionalProperties": false,
+      "required": [
+        "id",
+        "name",
+        "model_id",
+        "active_page",
+        "pages"
+      ]
+    },
+    "ProfilePalette": {
+      "type": "object",
+      "properties": {
+        "dark_palette": {
+          "type": "string",
+          "default": "default"
+        },
+        "light_palette": {
+          "type": "string",
+          "default": "default"
+        },
+        "target": {
+          "$ref": "#/$defs/ProfilePaletteTarget",
+          "default": "global"
+        }
+      },
+      "additionalProperties": false
+    },
+    "ProfilePaletteTarget": {
+      "type": "string",
+      "enum": [
+        "global",
+        "device",
+        "manager",
+        "both"
+      ]
+    },
+    "ProfileParameter": {
+      "type": "object",
+      "properties": {
+        "default": {
+          "default": null
+        },
+        "label": {
+          "type": "string"
+        },
+        "name": {
+          "type": "string"
+        },
+        "required": {
+          "type": "boolean",
+          "default": false
+        },
+        "sensitive": {
+          "type": "boolean"
+        },
+        "type": {
+          "type": "string"
+        }
+      },
+      "additionalProperties": false,
+      "required": [
+        "name",
+        "label",
+        "type"
+      ]
+    },
+    "SavedMacro": {
+      "type": "object",
+      "properties": {
+        "action": {
+          "$ref": "#/$defs/Action"
+        },
+        "id": {
+          "type": "string"
+        },
+        "inputs": {
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/MacroInput"
+          }
+        },
+        "name": {
+          "type": "string"
+        }
+      },
+      "additionalProperties": false,
+      "required": [
+        "id",
+        "name",
+        "action"
+      ]
+    },
+    "Schedule": {
+      "type": "object",
+      "properties": {
+        "days": {
+          "type": "array",
+          "items": {
+            "type": "integer",
+            "format": "uint8",
+            "maximum": 255,
+            "minimum": 0
+          }
+        },
+        "end": {
+          "type": "integer",
+          "format": "uint16",
+          "maximum": 65535,
+          "minimum": 0
+        },
+        "start": {
+          "type": "integer",
+          "format": "uint16",
+          "maximum": 65535,
+          "minimum": 0
+        }
+      },
+      "additionalProperties": false,
+      "required": [
+        "days",
+        "start",
+        "end"
+      ]
+    },
+    "TitleCondition": {
+      "type": "object",
+      "properties": {
+        "case_sensitive": {
+          "type": "boolean"
+        },
+        "mode": {
+          "type": "string"
+        },
+        "value": {
+          "type": "string"
+        }
+      },
+      "additionalProperties": false,
+      "required": [
+        "value",
+        "mode",
+        "case_sensitive"
+      ]
+    },
+    "ToggleIcon": {
+      "type": "object",
+      "properties": {
+        "icon": {
+          "type": "string"
+        },
+        "icon_asset": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/IconAsset"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        }
+      },
+      "additionalProperties": false,
+      "required": [
+        "icon"
+      ]
+    },
+    "VendorProfileAppearance": {
+      "description": "Current owned representation, distinct from the external archive format",
+      "type": "object",
+      "properties": {
+        "initial_state": {
+          "type": "integer",
+          "format": "uint32",
+          "minimum": 0
+        },
+        "linked_title": {
+          "type": "boolean"
+        },
+        "states": {
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/VendorTitleStyle"
+          }
+        }
+      },
+      "additionalProperties": false,
+      "required": [
+        "linked_title",
+        "initial_state",
+        "states"
+      ]
+    },
+    "VendorTitleStyle": {
+      "type": "object",
+      "properties": {
+        "font_family": {
+          "type": "string"
+        },
+        "font_size": {
+          "type": "number",
+          "format": "double"
+        },
+        "font_style": {
+          "type": "string"
+        },
+        "font_underline": {
+          "type": "boolean"
+        },
+        "outline_thickness": {
+          "type": "number",
+          "format": "double"
+        },
+        "show_title": {
+          "type": "boolean"
+        },
+        "title_alignment": {
+          "type": "string"
+        },
+        "title_color": {
+          "type": "string"
+        }
+      },
+      "additionalProperties": false,
+      "required": [
+        "font_family",
+        "font_size",
+        "font_style",
+        "font_underline",
+        "outline_thickness",
+        "show_title",
+        "title_alignment",
+        "title_color"
+      ]
+    }
+  }
+}

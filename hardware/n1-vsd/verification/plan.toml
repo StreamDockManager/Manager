@@ -1,0 +1,17 @@
+revision = "3"
+model_id = "n1-vsd"
+features = [
+  "identity-firmware-usage-interface",
+  "all-seventeen-button-edges",
+  "encoder-press-release-rotation",
+  "first-input-after-connect",
+  "eighteen-image-slots-and-portrait-layout",
+  "jpeg-geometry-orientation",
+  "software-mode-three-and-wake",
+  "heartbeat-and-thirty-five-second-idle",
+  "brightness-sleep-wake",
+  "twenty-reconnects",
+  "multiple-device-isolation",
+  "animation-cancellation-and-output-bounds",
+  "eight-hour-soak",
+]

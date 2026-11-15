@@ -1,0 +1,1208 @@
+<section
+    class="secondary-screen"
+    x-data="plugins"
+    x-effect="refreshCustomPluginAppearances"
+    @resize.window="resetPluginMenus"
+    @resolved-theme.window="resetPluginMenus"
+    @focusin.window="rememberPluginFocus"
+>
+    <div class="page-heading">
+        <div>
+            <h1>Plugins</h1>
+            <p class="plugin-summary" x-text="summary"></p>
+        </div>
+        <div class="heading-actions">
+            <button
+                type="button"
+                class="button primary"
+                @click="$store.updates.openCatalog('browse', $event)"
+            >
+                Browse catalog
+            </button>
+            <button type="button" class="button" @click="install" :disabled="app.busy">
+                Import plugin
+            </button>
+            <details
+                class="utility-actions"
+                x-ref="utilityMenu"
+                @click.outside="closeUtilities"
+                @keydown.escape.stop.prevent="closeUtilities"
+            >
+                <summary class="button">
+                    More
+                    <svg class="plugin-disclosure-icon" viewBox="0 0 16 16" aria-hidden="true">
+                        <path d="M4 6h8l-4 5z" fill="currentColor" />
+                    </svg>
+                </summary>
+                <div class="utility-menu" @click="closeUtilities">
+                    <button
+                        type="button"
+                        class="button"
+                        @click="$dispatch('open-application-data')"
+                    >
+                        Manage stored data
+                    </button>
+                    <button type="button" class="button" @click="importFolder" :disabled="app.busy">
+                        Import plugin folder
+                    </button>
+                    <button
+                        type="button"
+                        class="button"
+                        @click="reload"
+                        :disabled="app.busy || reloading"
+                        x-text="reloading ? 'Reloading…' : 'Reload plugins folder'"
+                    ></button>
+                    <button
+                        type="button"
+                        class="button"
+                        @click="app.openDataFolder()"
+                        :disabled="app.busy"
+                    >
+                        Open application data folder
+                    </button>
+                    <button type="button" class="button" @click="$dispatch('open-plugin-import')">
+                        Import installed plugins
+                    </button>
+                </div>
+            </details>
+        </div>
+    </div>
+    <div class="feature-notice" x-show="$store.recovery.status.active">
+        <p>
+            Plugins stay paused in recovery mode. Enable or disable them below to choose which
+            plugins can run after you exit recovery mode.
+        </p>
+    </div>
+    <div class="feature-notice">
+        <p>
+            Plugins are a work in progress. Some are more complete and reliable than others, and
+            functionality and performance may vary between operating systems.
+        </p>
+    </div>
+    <div class="card plugin-toolbar" x-show="installedCount > 0">
+        <label class="search-field plugin-search">
+            <span aria-hidden="true">⌕</span>
+            <input
+                type="search"
+                aria-label="Search plugins"
+                placeholder="Search plugins or actions…"
+                x-model="query"
+            />
+        </label>
+        <select class="plugin-filter" aria-label="Filter plugins by status" x-model="statusFilter">
+            <option value="all">All plugins</option>
+            <option value="enabled">Enabled</option>
+            <option value="disabled">Disabled</option>
+            <option value="running">Running</option>
+            <option value="idle">Idle</option>
+            <option value="attention">Needs attention</option>
+        </select>
+        <select
+            class="plugin-filter"
+            aria-label="Filter actions by control type"
+            x-model="controlFilter"
+        >
+            <option value="all">All controls</option>
+            <template x-for="group in controlGroups" :key="group.id">
+                <option :value="group.id" x-text="group.label"></option>
+            </template>
+        </select>
+        <label class="preference-toggle">
+            <input type="checkbox" x-model="favoritesOnly" :disabled="!organization.loaded" />
+            <span>Favorite plugin actions only</span>
+        </label>
+        <span class="plugin-results" aria-live="polite" x-text="resultsLabel"></span>
+        <button class="text-button" x-show="hasFilters" @click="resetFilters">Clear filters</button>
+    </div>
+    <div class="plugin-update-count" x-show="$store.updates.count > 0">
+        <span x-text="$store.updates.count"></span>
+        updates available.
+        <button type="button" class="button" @click="$store.updates.openCatalog('updates', $event)">
+            Review updates
+        </button>
+    </div>
+    <div class="plugin-list" aria-label="Installed plugins">
+        <template x-for="plugin in pluginPage.items" :key="plugin.id">
+            <article class="card plugin-card" :aria-label="plugin.name">
+                <div class="plugin-card-header">
+                    <img class="plugin-avatar" x-show="plugin.icon" :src="plugin.icon" alt="" />
+                    <span
+                        class="plugin-avatar"
+                        x-show="!plugin.icon"
+                        aria-hidden="true"
+                        x-text="initials(plugin)"
+                    ></span>
+                    <div class="plugin-identity">
+                        <h2 x-text="plugin.name"></h2>
+                        <p class="plugin-author" x-text="authorLabel(plugin)"></p>
+                        <div class="plugin-meta">
+                            <span x-text="'v' + plugin.version"></span>
+                            <button
+                                class="button"
+                                x-show="$store.updates.badge(plugin.id)"
+                                :data-id="plugin.id"
+                                @click="$store.updates.reviewOne($event)"
+                                x-text="$store.updates.badge(plugin.id)"
+                            ></button>
+                            <span x-text="dialectLabel(plugin)"></span>
+                            <span class="chip" x-text="runtimeLabel(plugin)"></span>
+                            <span class="chip" x-text="runtimeStatus(plugin)"></span>
+                            <span class="chip" x-text="healthLabel(plugin)"></span>
+                        </div>
+                    </div>
+                    <div
+                        class="plugin-recovery-controls button-row"
+                        x-show="$store.recovery.status.active"
+                    >
+                        <button
+                            type="button"
+                            class="button plugin-recovery-toggle"
+                            x-show="$store.recovery.status.active"
+                            :class="{primary: !plugin.enabled}"
+                            :data-id="plugin.id"
+                            :data-enabled="plugin.enabled"
+                            :aria-label="(plugin.enabled ? 'Disable ' : 'Enable ') + plugin.name"
+                            :disabled="app.busy"
+                            @click="toggle"
+                            x-text="plugin.enabled ? 'Disable plugin' : 'Enable plugin'"
+                        ></button>
+                    </div>
+                    <div
+                        class="plugin-options plugin-menu"
+                        :class="{ 'is-open': pluginMenuOpen(plugin.id, 'options') }"
+                        :data-id="plugin.id"
+                        data-menu="options"
+                        @click.outside="closePluginMenu($event, $el)"
+                        @keydown.escape.stop.prevent="closePluginMenu($event, $el)"
+                    >
+                        <button
+                            type="button"
+                            class="icon-button plugin-menu-trigger"
+                            :data-id="plugin.id"
+                            data-menu="options"
+                            :aria-label="'Options for ' + plugin.name"
+                            :aria-expanded="pluginMenuOpen(plugin.id, 'options')"
+                            :aria-controls="'plugin-options-' + plugin.id"
+                            @click="togglePluginMenu"
+                        >
+                            <img
+                                src="/appearance/icons/settings.svg"
+                                width="20"
+                                height="20"
+                                alt=""
+                            />
+                        </button>
+                        <div
+                            class="plugin-controls plugin-menu-panel"
+                            :id="'plugin-options-' + plugin.id"
+                            @click.capture="dismissPluginOptions"
+                        >
+                            <div class="button-row plugin-settings-actions">
+                                <label
+                                    class="preference-toggle"
+                                    data-tooltip="Enabled by default. Stop this plugin when none of its actions are visible on any device or simulator to save memory and CPU. It restarts when shown or needed for settings or testing. Background activity stops while sleeping."
+                                >
+                                    <input
+                                        type="checkbox"
+                                        :data-id="plugin.id"
+                                        :checked="plugin.sleep_when_hidden"
+                                        :disabled="app.busy"
+                                        :aria-label="'Sleep ' + plugin.name + ' when hidden'"
+                                        @change="sleep"
+                                    />
+                                    <span>Sleep</span>
+                                </label>
+                                <label x-show="plugin.capabilities" class="plugin-appearance">
+                                    Appearance
+                                    <select
+                                        :data-id="plugin.id"
+                                        :value="pluginAppearanceSelection(plugin)"
+                                        @change="appearance"
+                                        :aria-label="plugin.name + ' appearance'"
+                                    >
+                                        <option value="follow-ui">Follow UI</option>
+                                        <option value="light">Light</option>
+                                        <option value="dark">Dark</option>
+                                        <option
+                                            value="custom"
+                                            :hidden="!customPluginAppearances.has(plugin.id)"
+                                            x-text="customPluginAppearanceLabel(plugin)"
+                                        ></option>
+                                    </select>
+                                </label>
+                                <button
+                                    class="button"
+                                    x-show="plugin.capabilities && plugin.capabilities.plugin_settings"
+                                    :data-id="plugin.id"
+                                    @click="settings"
+                                >
+                                    Plugin settings
+                                </button>
+                                <button
+                                    type="button"
+                                    class="button"
+                                    x-show="plugin.has_settings_interface"
+                                    :disabled="!canShowSettingsInterface(plugin)"
+                                    :data-id="plugin.id"
+                                    @click="showSettingsInterface"
+                                    :aria-label="'Open settings interface for ' + plugin.name"
+                                >
+                                    Open settings interface
+                                </button>
+                                <button
+                                    class="button"
+                                    :data-id="plugin.id"
+                                    @click="suggestedProfiles"
+                                    :aria-label="'Suggested profiles and setup for ' + plugin.name"
+                                >
+                                    Suggested profiles &amp; setup
+                                </button>
+                            </div>
+                            <div class="button-row plugin-lifecycle-actions">
+                                <button
+                                    type="button"
+                                    class="button"
+                                    :data-id="plugin.id"
+                                    :data-name="plugin.name"
+                                    :aria-label="'Export package for ' + plugin.name"
+                                    @click="exportInstalled"
+                                >
+                                    Export package
+                                </button>
+                                <button
+                                    type="button"
+                                    class="button"
+                                    :data-id="plugin.id"
+                                    :aria-label="'Reset styles for ' + plugin.name"
+                                    :disabled="app.busy"
+                                    @click="requestStyleReset"
+                                >
+                                    Reset styles
+                                </button>
+                                <button
+                                    class="button"
+                                    x-show="!$store.recovery.status.active"
+                                    :class="{primary: !plugin.enabled}"
+                                    :data-id="plugin.id"
+                                    :data-enabled="plugin.enabled"
+                                    :aria-label="(plugin.enabled ? 'Disable ' : 'Enable ') + plugin.name"
+                                    :disabled="app.busy"
+                                    @click="toggle"
+                                    x-text="plugin.enabled ? 'Disable plugin' : 'Enable plugin'"
+                                ></button>
+                                <button
+                                    class="button danger"
+                                    :data-id="plugin.id"
+                                    :aria-label="'Delete ' + plugin.name"
+                                    :disabled="app.busy"
+                                    @click="requestDeletion"
+                                >
+                                    Delete plugin
+                                </button>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+                <div
+                    class="plugin-runtime-summary"
+                    :aria-label="plugin.name + ' runtime status'"
+                    role="group"
+                >
+                    <div class="plugin-runtime-metrics" aria-label="Current runtime measurements">
+                        <span x-text="cpuLabel(plugin)"></span>
+                        <span x-text="memoryLabel(plugin)"></span>
+                        <span x-text="uptimeLabel(plugin)"></span>
+                    </div>
+                    <p
+                        class="plugin-status-detail"
+                        x-show="runtimeDetail(plugin)"
+                        x-text="runtimeDetail(plugin)"
+                    ></p>
+                    <div class="plugin-network" aria-label="Tracked network payload">
+                        <span
+                            class="plugin-network-coverage"
+                            x-text="networkSummary(plugin).coverage"
+                        ></span>
+                        <span
+                            class="plugin-network-rates"
+                            x-show="networkSummary(plugin).rates"
+                            x-text="networkSummary(plugin).rates"
+                        ></span>
+                        <span
+                            class="plugin-network-totals"
+                            x-show="networkSummary(plugin).totals"
+                            x-text="networkSummary(plugin).totals"
+                        ></span>
+                    </div>
+                </div>
+                <div class="plugin-actions-toolbar">
+                    <button
+                        class="text-button"
+                        :data-id="plugin.id"
+                        :aria-expanded="isExpanded(plugin.id)"
+                        :aria-controls="'plugin-actions-' + plugin.id"
+                        :aria-label="(isExpanded(plugin.id) ? 'Hide actions for ' : 'Show actions for ') + plugin.name"
+                        @click="toggleActions"
+                    >
+                        <svg class="plugin-disclosure-icon" viewBox="0 0 16 16" aria-hidden="true">
+                            <path d="M4 6h8l-4 5z" fill="currentColor" />
+                        </svg>
+                        <span
+                            class="plugin-actions-label"
+                            x-text="isExpanded(plugin.id) ? 'Hide actions' : 'View actions'"
+                        ></span>
+                        <span
+                            class="plugin-actions-short-label"
+                            x-text="isExpanded(plugin.id) ? 'Hide' : 'Actions'"
+                        ></span>
+                        <span class="plugin-action-count" x-text="plugin.actions.length"></span>
+                    </button>
+                    <div
+                        class="plugin-tools plugin-menu"
+                        :class="{ 'is-open': pluginMenuOpen(plugin.id, 'tools') }"
+                        :data-id="plugin.id"
+                        data-menu="tools"
+                        @click="rememberPluginMenu"
+                        @click.outside="closePluginMenu($event, $el)"
+                        @keydown.escape.stop.prevent="closePluginMenu($event, $el)"
+                    >
+                        <button
+                            type="button"
+                            class="text-button plugin-menu-trigger"
+                            :data-id="plugin.id"
+                            data-menu="tools"
+                            :aria-label="'More tools for ' + plugin.name"
+                            :aria-expanded="pluginMenuOpen(plugin.id, 'tools')"
+                            :aria-controls="'plugin-tools-' + plugin.id"
+                            @click="togglePluginMenu"
+                        >
+                            <span class="plugin-tools-label">More</span>
+                            <svg
+                                class="plugin-disclosure-icon plugin-tools-chevron"
+                                viewBox="0 0 16 16"
+                                aria-hidden="true"
+                            >
+                                <path d="M4 6h8l-4 5z" fill="currentColor" />
+                            </svg>
+                            <svg
+                                class="plugin-tools-icon"
+                                width="20"
+                                height="20"
+                                viewBox="0 0 20 20"
+                                fill="currentColor"
+                                aria-hidden="true"
+                            >
+                                <circle cx="4" cy="10" r="1.5" />
+                                <circle cx="10" cy="10" r="1.5" />
+                                <circle cx="16" cy="10" r="1.5" />
+                            </svg>
+                        </button>
+                        <div
+                            class="plugin-tools-panel plugin-menu-panel"
+                            :id="'plugin-tools-' + plugin.id"
+                        >
+                            <button
+                                type="button"
+                                class="text-button"
+                                :data-id="plugin.id"
+                                :aria-label="'Health and compatibility for ' + plugin.name"
+                                @click="openHealth"
+                            >
+                                Health and compatibility
+                            </button>
+                            <button
+                                type="button"
+                                class="text-button"
+                                :data-id="plugin.id"
+                                :aria-label="'Manage versions for ' + plugin.name"
+                                @click="manageVersions"
+                            >
+                                Manage versions
+                            </button>
+                            <button
+                                type="button"
+                                class="text-button"
+                                data-log-trigger
+                                :data-id="plugin.id"
+                                :aria-label="'Logs for ' + plugin.name"
+                                :aria-expanded="$store.pluginLogs.isOpen(plugin.id)"
+                                @click="$store.pluginLogs.openFor($event)"
+                            >
+                                Logs
+                                <svg
+                                    class="plugin-disclosure-icon"
+                                    viewBox="0 0 16 16"
+                                    aria-hidden="true"
+                                >
+                                    <path d="M4 6h8l-4 5z" fill="currentColor" />
+                                </svg>
+                            </button>
+                        </div>
+                    </div>
+                    <small role="status" x-show="$store.pluginLogs.capturing(plugin.id)">
+                        Capturing logs
+                    </small>
+                    <p x-show="isExpanded(plugin.id)">
+                        Choose an action to configure the selected control.
+                    </p>
+                    <div class="field-help" x-show="repeatedFailure(plugin)">
+                        <p x-text="failureSummary(plugin)"></p>
+                        <p>
+                            Automatic recovery is limited to three attempts per launch session. It
+                            does not reset after a short successful run. Retry or Restart
+                            deliberately starts a new budget.
+                        </p>
+                        <button
+                            class="button"
+                            @click="toggle"
+                            :data-id="plugin.id"
+                            data-enabled="true"
+                            :disabled="app.busy"
+                            x-show="plugin.enabled"
+                        >
+                            Disable for now
+                        </button>
+                        <p>Disabling keeps the package and settings. Enable it again when ready.</p>
+                    </div>
+                    <div
+                        class="button-row plugin-runtime-actions"
+                        x-show="canRetry(plugin) || canRestart(plugin)"
+                    >
+                        <button
+                            type="button"
+                            class="button"
+                            :data-id="plugin.id"
+                            :aria-label="'Retry ' + plugin.name"
+                            data-operation="retry"
+                            @click="recover"
+                            x-show="canRetry(plugin)"
+                            :disabled="app.busy"
+                        >
+                            Retry
+                        </button>
+                        <button
+                            type="button"
+                            class="button danger"
+                            :data-id="plugin.id"
+                            :aria-label="'Restart ' + plugin.name"
+                            data-operation="restart"
+                            @click="recover"
+                            x-show="canRestart(plugin)"
+                            :disabled="app.busy"
+                        >
+                            Restart
+                        </button>
+                    </div>
+                </div>
+                <div
+                    class="plugin-actions-panel"
+                    :id="'plugin-actions-' + plugin.id"
+                    x-show="isExpanded(plugin.id)"
+                >
+                    <div class="settings-section" x-show="settingsActions(plugin).length">
+                        <div class="button-row">
+                            <label class="settings-field">
+                                Defaults for new bindings
+                                <select
+                                    :aria-label="'Action defaults for ' + plugin.name"
+                                    :data-id="plugin.id"
+                                    :value="defaultActionId(plugin)"
+                                    @change="chooseDefaults"
+                                >
+                                    <template
+                                        x-for="action in settingsActions(plugin)"
+                                        :key="action.id"
+                                    >
+                                        <option
+                                            :value="action.id"
+                                            :selected="action.id === defaultActionId(plugin)"
+                                            x-text="action.name"
+                                        ></option>
+                                    </template>
+                                </select>
+                            </label>
+                            <button
+                                type="button"
+                                class="button"
+                                :data-id="plugin.id"
+                                :aria-label="'Edit action defaults for ' + plugin.name"
+                                @click="editDefaults"
+                            >
+                                Edit action defaults
+                            </button>
+                        </div>
+                        <p class="field-help">
+                            Defaults are saved separately for each action. Configure a binding to
+                            use another location or value.
+                        </p>
+                    </div>
+                    <template x-for="group in groupsFor(plugin)" :key="group.id">
+                        <sd-plugin-action-group></sd-plugin-action-group>
+                    </template>
+                    <p class="field-help" x-show="groupsFor(plugin).length === 0">
+                        No matching actions in this plugin.
+                    </p>
+                    <p class="field-help" x-show="!app.control">
+                        Select a device control in the editor to assign an action.
+                    </p>
+                </div>
+            </article>
+        </template>
+    </div>
+    <nav
+        class="pagination plugin-pagination"
+        aria-label="Plugin pages"
+        x-show="filteredPlugins.length > 0"
+    >
+        <label class="page-size">
+            Per page
+            <select aria-label="Plugins per page" x-model="pageSize">
+                <option value="6">6</option>
+                <option value="12">12</option>
+                <option value="24">24</option>
+            </select>
+        </label>
+        <span
+            aria-live="polite"
+            x-text="pluginPage.start + '–' + pluginPage.end + ' of ' + pluginPage.total + ' · Page ' + pluginPage.page + ' of ' + pluginPage.pages"
+        ></span>
+        <div class="button-row">
+            <button
+                class="button"
+                data-direction="-1"
+                :disabled="pluginPage.page === 1"
+                @click="changePage"
+            >
+                Previous plugins
+            </button>
+            <button
+                class="button"
+                data-direction="1"
+                :disabled="pluginPage.page === pluginPage.pages"
+                @click="changePage"
+            >
+                Next plugins
+            </button>
+        </div>
+    </nav>
+    <div
+        class="empty-state plugin-empty-results"
+        x-show="installedCount > 0 && filteredPlugins.length === 0"
+    >
+        <span aria-hidden="true">⌕</span>
+        <h2>No matching plugins</h2>
+        <p>Try a different name, action, or status filter.</p>
+        <button class="button" @click="resetFilters">Reset search</button>
+    </div>
+    <div class="empty-state card" x-show="installedCount === 0">
+        <span aria-hidden="true">◇</span>
+        <h2>No plugins installed</h2>
+        <p>
+            Import VSD Craft / Stream Deck / OpenActionsAPI plugins from .streamDeckPlugin or .zip
+            archives, or .sdPlugin folders.
+        </p>
+        <button class="button primary" @click="install">Import plugin</button>
+    </div>
+    <div class="plugin-install-note">
+        <span>
+            New imports stay disabled. Enabled plugins run with your user permissions when an active
+            device profile uses them.
+        </span>
+        <span>
+            All pages of active profiles count; editor selection and monitoring do not start
+            plugins.
+        </span>
+    </div>
+    <dialog
+        x-ref="deleteDialog"
+        class="confirmation-dialog"
+        aria-labelledby="plugin-deletion-title"
+        aria-describedby="plugin-deletion-description"
+        @cancel.prevent="cancelDeletion"
+        @close="cancelDeletion"
+    >
+        <h2 id="plugin-deletion-title" x-text="deletionTitle"></h2>
+        <p id="plugin-deletion-description">
+            This deletes the plugin and its custom styles. Clearing Keep also removes its settings,
+            private data, local backups, logs, and direct control bindings. Macros that use the
+            plugin require reinstallation. This cannot be undone.
+        </p>
+        <label class="preference-toggle">
+            <input type="checkbox" x-model="keepPluginData" />
+            <span>Keep plugin settings, private data, and bindings for reinstallation</span>
+        </label>
+        <p class="field-help">Retained data can be deleted later in Manage stored data.</p>
+        <div class="button-row">
+            <button type="button" class="button" autofocus @click="cancelDeletion">Cancel</button>
+            <button
+                type="button"
+                class="button danger"
+                @click="confirmDeletion"
+                :disabled="app.busy"
+            >
+                Delete plugin
+            </button>
+        </div>
+    </dialog>
+    <dialog
+        x-ref="resetStylesDialog"
+        class="confirmation-dialog"
+        aria-labelledby="plugin-reset-styles-title"
+        aria-describedby="plugin-reset-styles-description"
+        @cancel.prevent="cancelStyleReset"
+        @close="cancelStyleReset"
+    >
+        <h2 id="plugin-reset-styles-title" x-text="styleResetTitle"></h2>
+        <p id="plugin-reset-styles-description">
+            Return to Follow UI and remove custom control styles and plugin-linked presets. Bindings
+            and action settings are kept.
+        </p>
+        <div class="button-row">
+            <button type="button" class="button" autofocus @click="cancelStyleReset">Cancel</button>
+            <button
+                type="button"
+                class="button danger"
+                @click="confirmStyleReset"
+                :disabled="app.busy"
+            >
+                Reset styles
+            </button>
+        </div>
+    </dialog>
+    <dialog
+        x-ref="healthDialog"
+        class="feature-dialog health-dialog"
+        :aria-label="healthTitle"
+        @cancel.prevent="closeHealth"
+    >
+        <header class="picker-header">
+            <div>
+                <h2>Health and compatibility</h2>
+                <p
+                    x-text="healthPlugin ? healthPlugin.name + ' · v' + healthPlugin.version : ''"
+                ></p>
+            </div>
+            <button
+                type="button"
+                class="icon-button"
+                aria-label="Close health and compatibility"
+                @click="closeHealth"
+            >
+                ×
+            </button>
+        </header>
+        <div
+            class="catalog-tabs health-tabs"
+            role="tablist"
+            aria-label="Plugin health views"
+            @keydown="navigateHealthTabs"
+        >
+            <template x-for="tab in healthTabs" :key="tab.id">
+                <button
+                    type="button"
+                    role="tab"
+                    :id="'health-tab-' + tab.id"
+                    :data-tab="tab.id"
+                    :aria-controls="'health-panel-' + tab.id"
+                    :aria-selected="healthTab === tab.id"
+                    :tabindex="healthTab === tab.id ? 0 : -1"
+                    @click="selectHealthTab"
+                    x-text="tab.label"
+                ></button>
+            </template>
+        </div>
+        <template x-for="plugin in healthPlugins" :key="plugin.id">
+            <div class="health-content">
+                <template x-if="healthTab === 'overview'">
+                    <section
+                        id="health-panel-overview"
+                        class="feature-body health-panel"
+                        role="tabpanel"
+                        aria-labelledby="health-tab-overview"
+                        tabindex="0"
+                    >
+                        <div class="runtime-metadata">
+                            <div class="button-row">
+                                <span class="chip" x-text="runtimeStatus(plugin)"></span>
+                                <span class="field-help" x-text="runtimeLabel(plugin)"></span>
+                            </div>
+                            <p x-show="runtimeDetail(plugin)" x-text="runtimeDetail(plugin)"></p>
+                            <p class="field-help" x-text="sleepPolicy(plugin)"></p>
+                            <p class="field-help" x-text="lastWake(plugin)"></p>
+                        </div>
+                        <div class="health-metrics" aria-label="Current resource use">
+                            <strong x-text="cpuLabel(plugin)"></strong>
+                            <strong x-text="memoryLabel(plugin)"></strong>
+                            <strong x-text="uptimeLabel(plugin)"></strong>
+                        </div>
+                        <div
+                            class="runtime-table-scroll"
+                            role="region"
+                            aria-label="Plugin health history"
+                            tabindex="0"
+                        >
+                            <table
+                                class="runtime-table health-counts"
+                                aria-label="Plugin health counts"
+                            >
+                                <thead>
+                                    <tr>
+                                        <th scope="col">History</th>
+                                        <th scope="col">This session</th>
+                                        <th scope="col">Since install</th>
+                                    </tr>
+                                </thead>
+                                <tbody>
+                                    <template
+                                        x-for="count in healthCounts(plugin)"
+                                        :key="count.label"
+                                    >
+                                        <tr>
+                                            <th scope="row" x-text="count.label"></th>
+                                            <td x-text="count.session"></td>
+                                            <td x-text="count.total"></td>
+                                        </tr>
+                                    </template>
+                                </tbody>
+                            </table>
+                        </div>
+                        <p class="field-help" x-text="resourcePeaks(plugin)"></p>
+                        <p class="field-help">
+                            CPU is normalized across logical processors. Memory is process-tree
+                            resident memory, not private memory. Gaps mean unavailable readings;
+                            peaks reset with each run.
+                        </p>
+                        <div
+                            class="plugin-trends"
+                            x-show="runtimeFor(plugin).resources.history.length"
+                        >
+                            <figure>
+                                <figcaption>CPU · last five minutes</figcaption>
+                                <svg
+                                    viewBox="0 0 280 55"
+                                    role="img"
+                                    aria-label="CPU measurements over the last five minutes"
+                                >
+                                    <path
+                                        fill="none"
+                                        stroke="currentColor"
+                                        stroke-width="2"
+                                        :d="trendPoints(plugin, 'cpu')"
+                                    ></path>
+                                </svg>
+                            </figure>
+                            <figure>
+                                <figcaption>Resident memory · last five minutes</figcaption>
+                                <svg
+                                    viewBox="0 0 280 55"
+                                    role="img"
+                                    aria-label="Resident memory measurements over the last five minutes"
+                                >
+                                    <path
+                                        fill="none"
+                                        stroke="currentColor"
+                                        stroke-width="2"
+                                        :d="trendPoints(plugin, 'memory')"
+                                    ></path>
+                                </svg>
+                            </figure>
+                        </div>
+                        <div class="runtime-metadata">
+                            <h3 x-text="networkSummary(plugin).coverage"></h3>
+                            <p
+                                x-show="networkSummary(plugin).rates"
+                                x-text="networkSummary(plugin).rates"
+                            ></p>
+                            <p
+                                x-show="networkSummary(plugin).totals"
+                                x-text="networkSummary(plugin).totals"
+                            ></p>
+                        </div>
+                        <details class="disclosure">
+                            <summary>Process and measurement details</summary>
+                            <div class="disclosure-body">
+                                <dl class="health-details">
+                                    <template
+                                        x-for="detail in healthProcessDetails(plugin)"
+                                        :key="detail.label"
+                                    >
+                                        <div>
+                                            <dt x-text="detail.label"></dt>
+                                            <dd x-text="detail.value"></dd>
+                                        </div>
+                                    </template>
+                                </dl>
+                                <p class="field-help">
+                                    Browser CPU and memory are unavailable when the webview shares
+                                    processes. Network measurements cover HTTP bodies and owned TCP
+                                    probes, excluding control messages, TLS overhead, and
+                                    uninstrumented transports.
+                                </p>
+                            </div>
+                        </details>
+                    </section>
+                </template>
+                <template x-if="healthTab === 'events'">
+                    <section
+                        id="health-panel-events"
+                        class="feature-body health-panel health-events-panel"
+                        role="tabpanel"
+                        aria-labelledby="health-tab-events"
+                        tabindex="0"
+                    >
+                        <div class="runtime-toolbar">
+                            <h3 x-text="plugin.health.events.length + ' recorded events'"></h3>
+                            <small>Newest first · Local time</small>
+                        </div>
+                        <div
+                            class="health-event-log"
+                            role="region"
+                            aria-label="Health event log"
+                            tabindex="0"
+                        >
+                            <div
+                                class="health-empty"
+                                x-show="!plugin.health.events.length && !plugin.health.recent_failures.length"
+                            >
+                                <h3>No recorded events</h3>
+                                <p>Crashes, failures, and resource warnings will appear here.</p>
+                            </div>
+                            <ol class="health-events">
+                                <template x-for="event in healthEvents(plugin)" :key="event.id">
+                                    <li class="health-event">
+                                        <div class="health-event-meta">
+                                            <span
+                                                class="chip"
+                                                :class="event.severity === 'error' ? 'danger-text' : ''"
+                                                x-text="event.severity"
+                                            ></span>
+                                            <strong x-text="event.category"></strong>
+                                            <time :datetime="event.iso" x-text="event.time"></time>
+                                            <span x-text="'v' + event.version"></span>
+                                            <span
+                                                x-show="event.occurrences > 1"
+                                                x-text="'×' + event.occurrences"
+                                            ></span>
+                                        </div>
+                                        <p x-text="event.message"></p>
+                                    </li>
+                                </template>
+                            </ol>
+                            <details
+                                class="disclosure health-failures"
+                                x-show="plugin.health.recent_failures.length"
+                            >
+                                <summary
+                                    x-text="'Recent failure messages (' + plugin.health.recent_failures.length + ')'"
+                                ></summary>
+                                <ul class="disclosure-body health-message-list">
+                                    <template
+                                        x-for="(failure, index) in plugin.health.recent_failures"
+                                        :key="index"
+                                    >
+                                        <li x-text="failure"></li>
+                                    </template>
+                                </ul>
+                            </details>
+                        </div>
+                        <p class="field-help">
+                            Up to 100 recent events. Totals in Overview also include older history.
+                        </p>
+                    </section>
+                </template>
+                <template x-if="healthTab === 'compatibility'">
+                    <section
+                        id="health-panel-compatibility"
+                        class="feature-body health-panel"
+                        role="tabpanel"
+                        aria-labelledby="health-tab-compatibility"
+                        tabindex="0"
+                    >
+                        <section class="settings-section">
+                            <h3>Compatibility findings</h3>
+                            <p class="field-help" x-show="!compatibilityIssues(plugin).length">
+                                No missing assets or unsupported APIs recorded.
+                            </p>
+                            <template
+                                x-for="group in compatibilityIssues(plugin)"
+                                :key="group.label"
+                            >
+                                <div class="settings-section">
+                                    <h3 x-text="group.label"></h3>
+                                    <ul class="health-message-list">
+                                        <template
+                                            x-for="(message, index) in group.messages"
+                                            :key="index"
+                                        >
+                                            <li class="danger-text" x-text="message"></li>
+                                        </template>
+                                    </ul>
+                                </div>
+                            </template>
+                        </section>
+                        <section class="settings-section">
+                            <h3>Package evidence</h3>
+                            <div class="health-empty" x-show="!evidenceFor(plugin).length">
+                                <h3>Untested package version</h3>
+                                <p>No reference test record matches this plugin version.</p>
+                            </div>
+                            <template
+                                x-for="record in evidenceFor(plugin)"
+                                :key="record.revision + record.platform + record.architecture"
+                            >
+                                <details class="disclosure">
+                                    <summary>
+                                        <span class="runtime-metadata">
+                                            <strong
+                                                x-text="'Reference baseline: ' + record.outcome"
+                                            ></strong>
+                                            <small
+                                                x-text="record.platform + ' / ' + record.architecture"
+                                            ></small>
+                                        </span>
+                                    </summary>
+                                    <div class="disclosure-body">
+                                        <dl class="health-details">
+                                            <div>
+                                                <dt>Method</dt>
+                                                <dd x-text="record.method"></dd>
+                                            </div>
+                                            <div>
+                                                <dt>Revision</dt>
+                                                <dd x-text="record.revision"></dd>
+                                            </div>
+                                        </dl>
+                                        <p x-text="record.scope"></p>
+                                        <ul
+                                            class="health-message-list"
+                                            x-show="record.limitations.length"
+                                        >
+                                            <template
+                                                x-for="(limitation, index) in record.limitations"
+                                                :key="index"
+                                            >
+                                                <li x-text="limitation"></li>
+                                            </template>
+                                        </ul>
+                                    </div>
+                                </details>
+                            </template>
+                            <p class="field-help" x-show="evidenceFor(plugin).length">
+                                Records apply to pinned reference packages. Installed contents and
+                                physical hardware are not qualified by them.
+                            </p>
+                        </section>
+                    </section>
+                </template>
+                <template x-if="healthTab === 'alerts'">
+                    <section
+                        id="health-panel-alerts"
+                        class="feature-body health-panel"
+                        role="tabpanel"
+                        aria-labelledby="health-tab-alerts"
+                        tabindex="0"
+                    >
+                        <fieldset class="parameter-editor settings-section">
+                            <legend>Resource alerts</legend>
+                            <p class="field-help">
+                                Get notified when resource use stays above a threshold.
+                            </p>
+                            <p role="status" x-show="resourceAlerts.loading">
+                                Loading alert preferences…
+                            </p>
+                            <label class="preference-toggle">
+                                <input
+                                    type="checkbox"
+                                    x-model="resourceAlerts.enabled"
+                                    :disabled="resourceAlerts.loading || resourceAlerts.writing || !resourceAlerts.settings"
+                                />
+                                <span>Enable resource warnings</span>
+                            </label>
+                            <div class="settings-form-grid">
+                                <label class="settings-field">
+                                    <span>CPU threshold (%)</span>
+                                    <input
+                                        type="number"
+                                        min="0"
+                                        max="100"
+                                        step="any"
+                                        x-model="resourceAlerts.cpu"
+                                        :disabled="!resourceAlerts.enabled || resourceAlerts.loading || resourceAlerts.writing || !resourceAlerts.settings"
+                                    />
+                                </label>
+                                <label class="settings-field">
+                                    <span>Memory threshold (MiB)</span>
+                                    <input
+                                        type="number"
+                                        min="1"
+                                        max="1048576"
+                                        step="1"
+                                        x-model="resourceAlerts.memory"
+                                        :disabled="!resourceAlerts.enabled || resourceAlerts.loading || resourceAlerts.writing || !resourceAlerts.settings"
+                                    />
+                                </label>
+                            </div>
+                            <p class="field-help">
+                                Leave a threshold empty to ignore it. Turning warnings off keeps
+                                your thresholds.
+                            </p>
+                            <p
+                                role="alert"
+                                class="danger-text"
+                                x-show="resourceAlerts.error"
+                                x-text="resourceAlerts.error"
+                            ></p>
+                            <div class="button-row">
+                                <button
+                                    type="button"
+                                    class="button primary"
+                                    @click="saveResourceAlerts"
+                                    :disabled="!resourceAlerts.canSave"
+                                >
+                                    Save resource alerts
+                                </button>
+                                <button
+                                    type="button"
+                                    class="button"
+                                    @click="reloadResourceAlerts"
+                                    :disabled="resourceAlerts.loading || resourceAlerts.writing"
+                                >
+                                    Reload alert preferences
+                                </button>
+                            </div>
+                        </fieldset>
+                        <details class="disclosure">
+                            <summary>How resource warnings work</summary>
+                            <div class="disclosure-body">
+                                <p>
+                                    Warnings begin after a 30-second startup grace and 30 seconds at
+                                    or above a threshold. Gaps reset that timing.
+                                </p>
+                                <p>
+                                    One warning per incident. Recovery rearms alerts with a
+                                    five-minute cooldown. Alerts do not restart plugins.
+                                </p>
+                                <p>
+                                    CPU 100% represents the whole host. Memory is approximate
+                                    process-tree resident memory. Unavailable or shared-webview
+                                    measurements cannot trigger alerts.
+                                </p>
+                            </div>
+                        </details>
+                    </section>
+                </template>
+            </div>
+        </template>
+        <footer class="feature-footer health-footer">
+            <small x-show="resourceAlerts.dirty">Unsaved alert changes</small>
+            <button type="button" class="button" @click="closeHealth">Close</button>
+        </footer>
+    </dialog>
+    <div x-data="installedPackageExport" @open-installed-package-export.window="open">
+        <dialog
+            x-ref="dialog"
+            class="feature-dialog"
+            aria-labelledby="installed-export-title"
+            @cancel.prevent="close"
+        >
+            <header class="picker-header">
+                <div>
+                    <h2 id="installed-export-title">Export installed plugin</h2>
+                    <p x-text="label"></p>
+                </div>
+                <button type="button" class="icon-button" aria-label="Close export" @click="close">
+                    ×
+                </button>
+            </header>
+            <div class="feature-body feature-fields">
+                <p role="status" x-show="busy && !review">Reading installed files…</p>
+                <p role="alert" class="danger-text" x-show="error" x-text="error"></p>
+                <div class="feature-fields" x-show="review && !receipt">
+                    <p class="warning-card">
+                        Plugins can write data beside their code. Select only files you intend to
+                        share.
+                    </p>
+                    <p class="field-help">
+                        The manifest is required. Include the plugin code and any assets or
+                        dependencies the package needs.
+                    </p>
+                    <label class="field-group">
+                        Filter package files
+                        <input type="search" x-model="query" />
+                    </label>
+                    <p role="status" x-text="selected.length + ' selected'"></p>
+                    <ul class="macro-library" aria-label="Installed package files">
+                        <template x-for="file in filePage.items" :key="file">
+                            <li>
+                                <label class="preference-toggle" x-show="file !== 'manifest.json'">
+                                    <input
+                                        type="checkbox"
+                                        :value="file"
+                                        x-model="selected"
+                                        :disabled="busy"
+                                    />
+                                    <span class="source-path" x-text="file"></span>
+                                </label>
+                                <template x-if="file === 'manifest.json'">
+                                    <p>manifest.json · Required</p>
+                                </template>
+                            </li>
+                        </template>
+                    </ul>
+                    <div class="button-row" x-show="filePage.pages > 1">
+                        <button
+                            type="button"
+                            class="button"
+                            @click="previous"
+                            :disabled="filePage.page <= 1"
+                        >
+                            Previous files
+                        </button>
+                        <p
+                            role="status"
+                            x-text="'Page ' + filePage.page + ' of ' + filePage.pages"
+                        ></p>
+                        <button
+                            type="button"
+                            class="button"
+                            @click="next"
+                            :disabled="filePage.page >= filePage.pages"
+                        >
+                            Next files
+                        </button>
+                    </div>
+                </div>
+                <p role="status" x-show="receipt">Local, unverified plugin ZIP ready to save.</p>
+            </div>
+            <footer class="feature-footer button-row">
+                <button type="button" class="button" @click="close">Close</button>
+                <button
+                    type="button"
+                    class="button primary"
+                    x-show="review && !receipt"
+                    @click="build"
+                    :disabled="busy"
+                    x-text="busy ? 'Building ZIP…' : 'Build ZIP'"
+                ></button>
+                <button
+                    type="button"
+                    class="button"
+                    x-show="receipt && dragSupported"
+                    @mousedown="drag"
+                >
+                    Drag ZIP
+                </button>
+                <button
+                    type="button"
+                    class="button primary"
+                    x-show="receipt"
+                    x-ref="save"
+                    @click="save"
+                    :disabled="busy"
+                >
+                    Save ZIP
+                </button>
+            </footer>
+        </dialog>
+    </div>
+</section>

@@ -1,0 +1,29 @@
+{
+    "reviewed_at": "2026-11-09",
+    "ownership": "Project-owned factual summary, GPL-3.0-or-later; no copied upstream implementation or documentation excerpt.",
+    "sources": [
+        "https://www.elgato.com/uk/en/explorer/products/stream-deck/key-logic-stream-deck/",
+        "https://docs.elgato.com/streamdeck/sdk/references/manifest/",
+        "https://docs.elgato.com/streamdeck/sdk/guides/keys/",
+        "https://docs.elgato.com/streamdeck/sdk/references/websocket/plugin/",
+        "https://docs.elgato.com/streamdeck/sdk/references/websocket/changelog/"
+    ],
+    "pinned_contracts": [
+        "manifest-schema/latest.ts:SupportedInKeyLogicActions",
+        "manifest-schema/manifest.json",
+        "core-src/events/keypad.ts",
+        "core-src/events/action.ts"
+    ],
+    "established_facts": [
+        "Stream Deck 7.0 introduced a key container with separate single-press, double-press and hold actions.",
+        "SupportedInKeyLogicActions is an optional action eligibility boolean with an upstream default of true; it is independent of SupportedInMultiActions.",
+        "The pinned schema only permits the explicit key-logic eligibility field in Software.MinimumVersion branches starting at 7.0.",
+        "The current SDK documents keypad single-action and multi-action payloads, but the reviewed sources do not identify a separate key-logic payload contract."
+    ],
+    "not_established": [
+        "Exact vendor timing thresholds, deadlines and ambiguous press/release ordering.",
+        "Whether every Key Logic child uses multi-action payloads, coordinates, desired state and automatic-state timing identical to a Multi Action.",
+        "Synthetic release timing, branch context identity and lifecycle behavior against a reference host."
+    ],
+    "manager_boundary": "The existing Gesture payload is exposed as Key logic (Manager), using configurable timings and existing nested action contexts and pulse dispatch. Elgato plugin descendants require both eligibility flags; two-state descendants retain explicit desired-state selection. This is a Manager feature, not verified Stream Deck Key Logic parity. Explicit 7.0 packages remain subject to the unchanged production host-minimum gate."
+}

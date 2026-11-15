@@ -1,0 +1,18 @@
+{
+    "version": 1,
+    "groups": ["editor"],
+    "dependencies": ["sd-action-workspace"],
+    "options": {
+        "shadow": false,
+        "attributes": {
+            "content": {
+                "type": "String",
+                "default": "[]",
+                "reflect": true
+            }
+        }
+    },
+    "metadata": {
+        "description": "Ordered macro actions with stable draft IDs and explicit teardown of the prop observer."
+    }
+}

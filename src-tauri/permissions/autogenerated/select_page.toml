@@ -1,0 +1,11 @@
+# Automatically generated - DO NOT EDIT!
+
+[[permission]]
+identifier = "allow-select-page"
+description = "Enables the select_page command without any pre-configured scope."
+commands.allow = ["select_page"]
+
+[[permission]]
+identifier = "deny-select-page"
+description = "Denies the select_page command without any pre-configured scope."
+commands.deny = ["select_page"]

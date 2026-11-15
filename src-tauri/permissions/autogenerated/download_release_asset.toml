@@ -1,0 +1,11 @@
+# Automatically generated - DO NOT EDIT!
+
+[[permission]]
+identifier = "allow-download-release-asset"
+description = "Enables the download_release_asset command without any pre-configured scope."
+commands.allow = ["download_release_asset"]
+
+[[permission]]
+identifier = "deny-download-release-asset"
+description = "Denies the download_release_asset command without any pre-configured scope."
+commands.deny = ["download_release_asset"]

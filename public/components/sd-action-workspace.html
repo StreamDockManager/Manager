@@ -1,0 +1,288 @@
+<button type="button" class="button" x-show="dialogMode && !namedMode" @click="openEditor">
+    <span x-text="editorTitle"></span>
+    <small x-text="editorSummary"></small>
+</button>
+<template x-if="!dialogMode"><sd-action-fields></sd-action-fields></template>
+<template x-if="dialogMode">
+    <dialog
+        x-ref="macroDialog"
+        class="feature-dialog macro-dialog"
+        :aria-labelledby="'macro-title-' + editorId"
+        @cancel.prevent="closeEditor"
+    >
+        <header class="picker-header macro-editor-header">
+            <div class="macro-editor-heading">
+                <span class="macro-heading-icon" aria-hidden="true">
+                    <img class="action-icon" src="/appearance/icons/zap.svg" alt="" />
+                </span>
+                <div>
+                    <h2 :id="'macro-title-' + editorId" x-text="editorTitle"></h2>
+                    <p>Arrange your steps. Configure each action and branch.</p>
+                </div>
+            </div>
+            <button
+                type="button"
+                class="icon-button"
+                aria-label="Close macro editor"
+                @click="closeEditor"
+                :disabled="saving"
+            >
+                ×
+            </button>
+        </header>
+        <div class="feature-body macro-editor-body" :inert="saving">
+            <template x-if="namedMode">
+                <div class="macro-name-bar" :inert="debugRun.active">
+                    <label class="settings-field">
+                        Macro name
+                        <input
+                            aria-label="Saved macro name"
+                            x-model="macroName"
+                            placeholder="e.g. Start streaming"
+                            maxlength="160"
+                        />
+                    </label>
+                    <p>Save this sequence to use it across your profiles.</p>
+                </div>
+            </template>
+            <p class="macro-error" role="alert" x-show="editorError" x-text="editorError"></p>
+            <div class="macro-workspace" :inert="debugRun.active">
+                <aside class="macro-steps-panel" aria-label="Macro steps">
+                    <div class="macro-steps-heading">
+                        <h3>
+                            Steps
+                            <span class="macro-step-count" x-text="rows.length"></span>
+                        </h3>
+                        <button
+                            type="button"
+                            class="button macro-add-step"
+                            x-show="sequenceMode"
+                            @click="add"
+                            :disabled="action.actions && action.actions.length >= 100"
+                        >
+                            <span aria-hidden="true">＋</span>
+                            Add step
+                        </button>
+                    </div>
+                    <p class="macro-steps-help">Runs from top to bottom. Drag steps to reorder.</p>
+                    <div class="macro-tree">
+                        <template x-for="row in treeRows" :key="row.id">
+                            <div
+                                class="macro-tree-row"
+                                :class="{active: row.id === selectedId}"
+                                :style="'margin-left:' + (row.depth * 16) + 'px'"
+                                :data-node="row.id"
+                                :draggable="isSequenceChild(row.path)"
+                                @dragstart="dragStart"
+                                @dragend="endDrag"
+                                @dragover="dragOver"
+                                @drop.stop="dropStep"
+                            >
+                                <button
+                                    type="button"
+                                    class="macro-tree-select"
+                                    :data-node="row.id"
+                                    @click="selectNode"
+                                    :aria-current="row.id === selectedId ? 'step' : false"
+                                >
+                                    <span class="macro-step-icon" aria-hidden="true">
+                                        <img
+                                            class="action-icon"
+                                            :src="row.image || '/appearance/icons/' + row.icon + '.svg'"
+                                            :class="{ 'macro-plugin-image': row.image }"
+                                            alt=""
+                                        />
+                                    </span>
+                                    <span class="macro-step-copy">
+                                        <span class="macro-step-label" x-text="row.label"></span>
+                                        <strong x-text="selectedActionLabel(row.action)"></strong>
+                                        <small x-text="row.summary"></small>
+                                    </span>
+                                    <span
+                                        class="macro-drag-handle"
+                                        aria-hidden="true"
+                                        x-show="isSequenceChild(row.path)"
+                                    >
+                                        ⠿
+                                    </span>
+                                </button>
+                                <button
+                                    type="button"
+                                    class="icon-button macro-branch-toggle"
+                                    :aria-label="'Collapse or expand ' + row.label"
+                                    :aria-expanded="row.expanded"
+                                    :data-node="row.id"
+                                    @click="toggleBranch"
+                                    x-show="row.hasChildren"
+                                    x-text="row.expanded ? '⌄' : '›'"
+                                ></button>
+                            </div>
+                        </template>
+                        <p class="macro-tree-empty" x-show="!rows.length">
+                            Your steps will appear here.
+                        </p>
+                    </div>
+                </aside>
+                <section class="macro-detail" aria-label="Selected step">
+                    <div class="macro-detail-content" x-show="selectedRow">
+                        <nav class="macro-breadcrumbs" aria-label="Step path">
+                            <span>Macro</span>
+                            <template x-for="crumb in breadcrumbItems" :key="crumb.id">
+                                <span class="macro-crumb">
+                                    <span aria-hidden="true">/</span>
+                                    <button
+                                        type="button"
+                                        :data-node="crumb.id"
+                                        @click="selectNode"
+                                        :aria-current="crumb.id === selectedId ? 'step' : false"
+                                        x-text="crumb.label"
+                                    ></button>
+                                </span>
+                            </template>
+                        </nav>
+                        <div class="macro-step-heading">
+                            <h3 x-text="selectedTitle"></h3>
+                            <p x-text="selectedDescription"></p>
+                        </div>
+                        <div
+                            class="macro-step-tools"
+                            x-show="selectedCanReorder"
+                            role="group"
+                            aria-label="Step controls"
+                        >
+                            <span>Step order</span>
+                            <div class="button-row">
+                                <button
+                                    type="button"
+                                    class="icon-button"
+                                    aria-label="Move step up"
+                                    data-tooltip="Move step up"
+                                    :disabled="!canMove(-1)"
+                                    :data-path="selectedPath"
+                                    data-op="up"
+                                    @click="operation"
+                                >
+                                    ↑
+                                </button>
+                                <button
+                                    type="button"
+                                    class="icon-button"
+                                    aria-label="Move step down"
+                                    data-tooltip="Move step down"
+                                    :disabled="!canMove(1)"
+                                    :data-path="selectedPath"
+                                    data-op="down"
+                                    @click="operation"
+                                >
+                                    ↓
+                                </button>
+                                <span class="macro-tool-divider" aria-hidden="true"></span>
+                                <button
+                                    type="button"
+                                    class="button"
+                                    aria-label="Duplicate step"
+                                    :disabled="!canDuplicate"
+                                    :data-path="selectedPath"
+                                    data-op="copy"
+                                    @click="operation"
+                                >
+                                    Duplicate
+                                </button>
+                                <button
+                                    type="button"
+                                    class="icon-button danger-text"
+                                    aria-label="Remove step"
+                                    data-tooltip="Remove step"
+                                    :data-path="selectedPath"
+                                    data-op="remove"
+                                    @click="operation"
+                                >
+                                    <svg
+                                        viewBox="0 0 24 24"
+                                        width="17"
+                                        height="17"
+                                        fill="none"
+                                        stroke="currentColor"
+                                        stroke-width="1.6"
+                                        aria-hidden="true"
+                                    >
+                                        <path
+                                            d="M3 6h18M9 6V3h6v3M5 6l1 15h12l1-15M10 10v7m4-7v7"
+                                        />
+                                    </svg>
+                                </button>
+                            </div>
+                        </div>
+                        <p
+                            class="macro-branch-note"
+                            x-show="selectedRow && selectedPath !== '' && !selectedCanReorder"
+                        >
+                            This branch stays in its assigned position. Choose an action or a nested
+                            sequence.
+                        </p>
+                        <sd-action-fields></sd-action-fields>
+                        <div class="button-row">
+                            <button
+                                type="button"
+                                class="text-button"
+                                @click="toggleDebugBreakpoint"
+                                :aria-pressed="selectedDebugBreakpoint"
+                            >
+                                Breakpoint
+                            </button>
+                        </div>
+                    </div>
+                    <div class="macro-editor-empty" x-show="!rows.length">
+                        <span class="macro-empty-icon" aria-hidden="true">
+                            <img class="action-icon" src="/appearance/icons/zap.svg" alt="" />
+                        </span>
+                        <h3>Start your macro</h3>
+                        <p>Add an action, then build a sequence that works for you.</p>
+                        <button type="button" class="button primary" @click="add">
+                            ＋ Add first step
+                        </button>
+                    </div>
+                </section>
+            </div>
+        </div>
+        <footer class="feature-footer macro-editor-footer">
+            <span
+                class="macro-footer-summary"
+                x-text="rows.length + (rows.length === 1 ? ' step' : ' steps') + ' · ' + (namedMode ? 'Reusable in any profile' : 'Runs in execution order')"
+            ></span>
+            <div class="button-row">
+                <button
+                    type="button"
+                    class="button"
+                    x-show="namedMode"
+                    @click="openMacroSettings"
+                    :disabled="saving"
+                    aria-haspopup="dialog"
+                >
+                    Macro settings
+                </button>
+                <button
+                    type="button"
+                    class="button"
+                    @click="openTest"
+                    :disabled="saving || hasInvalidPluginJson || hasInvalidPluginState"
+                    aria-haspopup="dialog"
+                >
+                    Test
+                </button>
+                <button type="button" class="button" @click="closeEditor" :disabled="saving">
+                    Cancel
+                </button>
+                <button
+                    type="button"
+                    class="button primary"
+                    @click="applyEditor"
+                    :disabled="saving || app.busy || hasInvalidPluginJson || hasInvalidPluginState"
+                    x-text="saving ? 'Saving…' : namedMode ? 'Save macro' : 'Apply macro'"
+                ></button>
+            </div>
+        </footer>
+        <sd-macro-inputs></sd-macro-inputs>
+        <sd-macro-debugger></sd-macro-debugger>
+    </dialog>
+</template>

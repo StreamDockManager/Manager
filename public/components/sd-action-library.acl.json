@@ -1,0 +1,11 @@
+{
+    "version": 1,
+    "groups": ["action-library"],
+    "dependencies": [],
+    "options": {
+        "shadow": false
+    },
+    "metadata": {
+        "description": "First-party sd-action-library component. Controllers are registered by the trusted application bootstrap."
+    }
+}

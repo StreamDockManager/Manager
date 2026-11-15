@@ -1,0 +1,181 @@
+<div
+    x-data="macroSharing"
+    @open-macro-export.window="openExport"
+    @open-macro-import.window="openImport"
+>
+    <dialog
+        x-ref="exportDialog"
+        class="feature-dialog profile-export-dialog macro-sharing-dialog"
+        aria-labelledby="macro-export-title"
+        aria-describedby="macro-export-warning"
+        @cancel.prevent="cancelExport"
+    >
+        <header class="picker-header">
+            <div>
+                <h2 id="macro-export-title">Export macros</h2>
+                <p>Share selected macros and the saved macros they call.</p>
+            </div>
+            <button
+                type="button"
+                class="icon-button"
+                aria-label="Cancel macro export"
+                @click="cancelExport"
+                :disabled="exporting"
+            >
+                ×
+            </button>
+        </header>
+        <div class="feature-body feature-fields">
+            <div class="button-row">
+                <strong>Macros to share</strong>
+                <button
+                    type="button"
+                    class="text-button"
+                    @click="selectAll"
+                    :disabled="exporting"
+                    x-text="allSelected ? 'Clear selection' : 'Select all'"
+                ></button>
+            </div>
+            <template x-for="macro in macros" :key="macro.id">
+                <label class="preference-toggle">
+                    <input
+                        type="checkbox"
+                        :value="macro.id"
+                        x-model="selected"
+                        :disabled="exporting"
+                    />
+                    <span x-text="macro.name"></span>
+                </label>
+            </template>
+            <p class="field-help">
+                Referenced saved macros are included automatically. Profiles, device assignments,
+                and global plugin settings stay on this computer.
+            </p>
+            <div class="warning-card" id="macro-export-warning">
+                <strong>Include plugin settings and action files?</strong>
+                <p>
+                    Plugin settings may contain API keys, tokens, passwords, private URLs, file
+                    paths, or personal information. Anyone receiving the archive can read included
+                    settings, including those in nested actions and referenced macros.
+                </p>
+                <p>
+                    Review without settings to omit plugin configuration. Commands, arguments, text,
+                    URLs, and paths in other action fields remain included and may also contain
+                    secrets. Review every macro before sharing.
+                </p>
+            </div>
+            <p class="danger-text" role="alert" x-show="error" x-text="error"></p>
+        </div>
+        <footer class="button-row feature-footer">
+            <button type="button" class="button" @click="cancelExport" :disabled="exporting">
+                Cancel
+            </button>
+            <button
+                type="button"
+                class="button primary"
+                x-ref="exportDecline"
+                autofocus
+                @click="exportWithoutSettings"
+            >
+                Review without settings
+            </button>
+            <button
+                type="button"
+                class="button"
+                @click="exportWithSettings"
+                :disabled="!canIncludeExport"
+                x-text="remaining ? 'Include settings (' + remaining + 's)' : 'Include settings and review'"
+            ></button>
+        </footer>
+    </dialog>
+    <dialog
+        x-ref="importDialog"
+        class="feature-dialog profile-export-dialog macro-sharing-dialog"
+        aria-labelledby="macro-import-title"
+        aria-describedby="macro-import-warning"
+        @cancel.prevent="cancelImport"
+    >
+        <header class="picker-header">
+            <div>
+                <h2 id="macro-import-title">Review macro import</h2>
+                <p>
+                    Add copies to your library. Existing macros and bindings keep their current
+                    actions.
+                </p>
+            </div>
+            <button
+                type="button"
+                class="icon-button"
+                aria-label="Cancel macro import"
+                @click="cancelImport"
+                :disabled="importing"
+            >
+                ×
+            </button>
+        </header>
+        <div class="feature-body feature-fields">
+            <section class="feature-fields" x-show="imported">
+                <h3>Macros to import</h3>
+                <template x-for="item in importItems" :key="item.imported_name">
+                    <p>
+                        <strong x-text="item.imported_name"></strong>
+                        <span class="field-help" x-show="item.name !== item.imported_name">
+                            · renamed to avoid a duplicate name
+                        </span>
+                    </p>
+                </template>
+                <p class="field-help">
+                    Importing does not run any actions. Changes can be undone from the Macros tab.
+                    Profile archives can also supply their saved macros; their profiles and media
+                    are not imported here.
+                </p>
+                <template x-for="warning in importWarnings" :key="warning">
+                    <p class="warning-card" x-text="warning"></p>
+                </template>
+                <div class="warning-card" id="macro-import-warning">
+                    <strong>Review private information before importing</strong>
+                    <p>
+                        Macros can contain API keys, tokens, passwords, private URLs, commands, or
+                        personal file paths. Review actions before using them or sharing them again.
+                    </p>
+                    <p x-show="importedSettings">
+                        This archive includes plugin action settings and may include associated
+                        files. Import without settings to discard that configuration, or explicitly
+                        include it after the countdown. Other action fields remain included.
+                    </p>
+                </div>
+            </section>
+            <p class="danger-text" role="alert" x-show="error" x-text="error"></p>
+        </div>
+        <footer class="button-row feature-footer">
+            <button type="button" class="button" @click="cancelImport" :disabled="importing">
+                Cancel
+            </button>
+            <button
+                type="button"
+                class="button"
+                x-show="imported"
+                @click="recheckImport"
+                :disabled="importing"
+            >
+                Recheck import
+            </button>
+            <button
+                type="button"
+                class="button primary"
+                x-ref="importDecline"
+                @click="importWithoutSettings"
+                :disabled="!imported || importing"
+                x-text="importedSettings ? 'Import without settings' : 'Import macros'"
+            ></button>
+            <button
+                type="button"
+                class="button"
+                x-show="importedSettings"
+                @click="importWithSettings"
+                :disabled="!canIncludeImport"
+                x-text="remaining ? 'Include settings (' + remaining + 's)' : 'Include settings and import'"
+            ></button>
+        </footer>
+    </dialog>
+</div>

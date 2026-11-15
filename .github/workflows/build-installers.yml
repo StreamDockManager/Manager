@@ -1,0 +1,219 @@
+name: native installers
+on:
+    workflow_call:
+        inputs:
+            tag: { required: false, type: string, default: '' }
+            commit: { required: true, type: string }
+            mode: { required: false, type: string, default: 'build-only' }
+            targets: { required: false, type: string, default: 'all' }
+permissions:
+    contents: read
+jobs:
+    installers:
+        if: (github.event_name == 'workflow_dispatch' || (github.event_name == 'push' && !github.event.created)) && inputs.commit == github.sha && ((github.ref == 'refs/heads/package-build' && inputs.mode == 'build-only') || (github.ref == 'refs/heads/main' && github.event_name == 'workflow_dispatch' && github.workflow_ref == format('{0}/.github/workflows/prepare-release.yml@refs/heads/main', github.repository) && ((github.repository == 'StreamDockManager/Manager' && inputs.mode == 'publish' && inputs.tag != '') || (github.repository != 'StreamDockManager/Manager' && inputs.mode == 'build-only' && inputs.tag == '')) && inputs.targets == 'all'))
+        strategy:
+            fail-fast: false
+            matrix:
+                include: >-
+                    ${{ fromJSON(
+                      inputs.targets == 'linux-windows' && '[{"runner":"ubuntu-24.04","runner_variable":"LINUX_RUNNER_LABELS","os":"linux","arch":"amd64","bundles":"deb,rpm"},{"runner":"windows-2022","runner_variable":"WINDOWS_RUNNER_LABELS","os":"windows","arch":"amd64","bundles":"nsis"}]' ||
+                      inputs.targets == 'linux' && '[{"runner":"ubuntu-24.04","runner_variable":"LINUX_RUNNER_LABELS","os":"linux","arch":"amd64","bundles":"deb,rpm"}]' ||
+                      inputs.targets == 'windows' && '[{"runner":"windows-2022","runner_variable":"WINDOWS_RUNNER_LABELS","os":"windows","arch":"amd64","bundles":"nsis"}]' ||
+                      inputs.targets == 'macos-arm64' && '[{"runner":"macos-15","runner_variable":"MACOS_ARM64_RUNNER_LABELS","os":"macos","arch":"arm64","bundles":"app,dmg"}]' ||
+                      inputs.targets == 'macos-amd64' && '[{"runner":"macos-15-intel","runner_variable":"MACOS_X64_RUNNER_LABELS","os":"macos","arch":"amd64","bundles":"app,dmg"}]' ||
+                      github.ref == 'refs/heads/package-build' && inputs.mode == 'build-only' && vars.DEFER_MACOS_X64 == 'true' && '[{"runner":"ubuntu-24.04","runner_variable":"LINUX_RUNNER_LABELS","os":"linux","arch":"amd64","bundles":"deb,rpm"},{"runner":"windows-2022","runner_variable":"WINDOWS_RUNNER_LABELS","os":"windows","arch":"amd64","bundles":"nsis"},{"runner":"macos-15","runner_variable":"MACOS_ARM64_RUNNER_LABELS","os":"macos","arch":"arm64","bundles":"app,dmg"}]' ||
+                      '[{"runner":"ubuntu-24.04","runner_variable":"LINUX_RUNNER_LABELS","os":"linux","arch":"amd64","bundles":"deb,rpm"},{"runner":"windows-2022","runner_variable":"WINDOWS_RUNNER_LABELS","os":"windows","arch":"amd64","bundles":"nsis"},{"runner":"macos-15","runner_variable":"MACOS_ARM64_RUNNER_LABELS","os":"macos","arch":"arm64","bundles":"app,dmg"},{"runner":"macos-15-intel","runner_variable":"MACOS_X64_RUNNER_LABELS","os":"macos","arch":"amd64","bundles":"app,dmg"}]'
+                    ) }}
+        runs-on: ${{ vars[matrix.runner_variable] != '' && (github.event_name == 'push' || github.event_name == 'workflow_dispatch' || (github.event_name == 'pull_request' && github.event.pull_request.head.repo.full_name == github.repository) || (github.event_name == 'workflow_run' && github.event.workflow_run.event == 'push' && github.event.workflow_run.head_repository.full_name == github.repository)) && fromJSON(vars[matrix.runner_variable]) || matrix.runner }}
+        # Empty scalar disables the job container on Windows/macOS
+        container: ${{ matrix.os == 'linux' && 'ubuntu@sha256:78d4744ead1f5b19b04d0df558ab182a5300903900755e515b2ca4d10eb2044d' || '' }}
+        timeout-minutes: 180
+        env:
+            STREAM_DOCK_MANAGER_LINUX_BASELINE_IMAGE: ubuntu@sha256:78d4744ead1f5b19b04d0df558ab182a5300903900755e515b2ca4d10eb2044d
+            CARGO_TARGET_DIR: ${{ github.workspace }}/target
+            CARGO_BUILD_JOBS: '4'
+            CARGO_PROFILE_DEV_DEBUG: '0'
+            CARGO_PROFILE_TEST_DEBUG: '0'
+            CARGO_INCREMENTAL: '0'
+            RELEASE_TAG: ${{ inputs.tag }}
+            BUILD_ONLY: ${{ inputs.mode != 'publish' && 'true' || 'false' }}
+            STREAM_DOCK_MANAGER_RELEASE_REPOSITORY: ${{ github.repository }}
+        steps:
+            - name: Bootstrap pinned Ubuntu build userspace
+              if: runner.os == 'Linux'
+              shell: bash
+              run: |
+                  echo "STREAM_DOCK_MANAGER_WORKSPACE_OWNER=$(stat -c '%u:%g' "$GITHUB_WORKSPACE")" >> "$GITHUB_ENV"
+                  # GitHub mounts /github/home, but this pinned container runs as root.
+                  # Match the account home for rustup rather than bypassing its safety check.
+                  container_home="$(getent passwd "$(id -u)" | cut -d: -f6)"
+                  test -n "$container_home"
+                  test -d "$container_home"
+                  echo "HOME=$container_home" >> "$GITHUB_ENV"
+                  # The minimal image excludes manpages. Keep them for newly installed
+                  # packages so update-alternatives can create its documented slave links.
+                  printf '%s\n' 'path-include=/usr/share/man/*' > /etc/dpkg/dpkg.cfg.d/zz-manager-manpages
+                  apt-get update
+                  DEBIAN_FRONTEND=noninteractive apt-get install -y --no-install-recommends bash git ca-certificates curl sudo python3 python3-venv python-is-python3 xz-utils build-essential pkg-config
+                  cat /etc/os-release
+                  getconf GNU_LIBC_VERSION
+                  uname -a
+                  echo "CARGO_HOME=$GITHUB_WORKSPACE/target/.cargo" >> "$GITHUB_ENV"
+                  echo "RUSTUP_HOME=$GITHUB_WORKSPACE/target/.rustup" >> "$GITHUB_ENV"
+                  echo "CARGO_TARGET_DIR=$GITHUB_WORKSPACE/target" >> "$GITHUB_ENV"
+                  echo "NPM_CONFIG_PREFIX=$GITHUB_WORKSPACE/target/.npm-prefix" >> "$GITHUB_ENV"
+                  echo "$GITHUB_WORKSPACE/target/.npm-prefix/bin" >> "$GITHUB_PATH"
+            - uses: actions/checkout@v7.0.1
+              with:
+                  ref: ${{ inputs.commit }}
+                  persist-credentials: false
+            - name: Require clean baseline build outputs
+              if: runner.os == 'Linux'
+              shell: bash
+              run: |
+                  if [ -e "$GITHUB_WORKSPACE/target" ]; then
+                    echo 'Refusing to reuse native outputs from another userspace; checkout must clean this owned target directory.' >&2
+                    exit 1
+                  fi
+                  mkdir "$GITHUB_WORKSPACE/target"
+                  # Checkout's temporary HOME does not carry this trust into run steps
+                  git config --file "$GITHUB_WORKSPACE/target/.gitconfig" --add safe.directory "$GITHUB_WORKSPACE"
+                  echo "GIT_CONFIG_GLOBAL=$GITHUB_WORKSPACE/target/.gitconfig" >> "$GITHUB_ENV"
+            - name: Use Git for Windows Bash
+              if: runner.os == 'Windows'
+              shell: powershell
+              run: |
+                  $gitDirectory = Split-Path (Get-Command git.exe -ErrorAction Stop).Source -Parent
+                  $gitBash = Join-Path $gitDirectory '..\bin\bash.exe'
+                  if (!(Test-Path -LiteralPath $gitBash)) { throw 'Git for Windows Bash is required; the WSL bash launcher cannot run native Windows setup actions.' }
+                  $bashDirectory = Split-Path (Resolve-Path -LiteralPath $gitBash).Path -Parent
+                  $bashDirectory | Out-File -FilePath $env:GITHUB_PATH -Encoding utf8 -Append
+            - name: Configure npm cache
+              shell: bash
+              run: |
+                  npm_cache="$RUNNER_TEMP/npm-cache"
+                  if [ "$RUNNER_OS" = Linux ]; then npm_cache="$GITHUB_WORKSPACE/target/.npm-cache"; fi
+                  echo "NPM_CONFIG_CACHE=$npm_cache" >> "$GITHUB_ENV"
+            - uses: actions/setup-python@v7.1.0
+              if: runner.os != 'Linux' && (runner.os != 'macOS' || runner.environment != 'self-hosted')
+              with:
+                  python-version: '3.12'
+            - name: Prepare isolated self-hosted Python
+              if: runner.environment == 'self-hosted'
+              shell: bash
+              run: |
+                  python_command=python
+                  if [ "$RUNNER_OS" = macOS ]; then python_command=python3; fi
+                  "$python_command" -c 'import sys; print(sys.version); sys.exit(0 if sys.version_info >= (3, 12) else "Install Python 3.12 or newer on this runner.")'
+                  venv_root="$RUNNER_TEMP/native-installers-python"
+                  if [ "$RUNNER_OS" = Linux ]; then venv_root="$GITHUB_WORKSPACE/target/.python"; fi
+                  "$python_command" -m venv --clear --without-pip "$venv_root"
+                  if [ "$RUNNER_OS" = Windows ]; then
+                    echo "$venv_root/Scripts" >> "$GITHUB_PATH"
+                  else
+                    echo "$venv_root/bin" >> "$GITHUB_PATH"
+                  fi
+            - name: Configure optional plugin release repository
+              if: vars.PLUGINS_RELEASE_REPOSITORY != ''
+              env:
+                  PLUGINS_RELEASE_REPOSITORY: ${{ vars.PLUGINS_RELEASE_REPOSITORY }}
+              shell: bash
+              run: echo "STREAM_DOCK_MANAGER_PLUGINS_RELEASE_REPOSITORY=$PLUGINS_RELEASE_REPOSITORY" >> "$GITHUB_ENV"
+            - uses: dtolnay/rust-toolchain@stable
+            - uses: actions/setup-node@v7.1.0
+              with:
+                  node-version: 26
+                  cache: npm
+            - run: npm install --global npm@12.2.2
+            - name: Activate isolated Ubuntu npm
+              if: runner.os == 'Linux'
+              shell: bash
+              run: echo "$NPM_CONFIG_PREFIX/bin" >> "$GITHUB_PATH"
+            - name: Verify native installer architecture
+              env:
+                  NATIVE_OS: ${{ matrix.os }}
+                  NATIVE_ARCH: ${{ matrix.arch }}
+                  BUILD_MODE: ${{ inputs.mode }}
+                  BUILD_TARGETS: ${{ inputs.targets }}
+              shell: bash
+              run: python scripts/native_build.py --os "$NATIVE_OS" --arch "$NATIVE_ARCH" --mode "$BUILD_MODE" --targets "$BUILD_TARGETS"
+            - name: Verify Windows native toolchain
+              if: runner.os == 'Windows'
+              shell: powershell
+              run: |
+                  python --version
+                  rustc -Vv
+                  cargo -V
+                  node --version
+                  npm --version
+                  git --version
+                  $vswhere = Join-Path ${env:ProgramFiles(x86)} 'Microsoft Visual Studio\Installer\vswhere.exe'
+                  if (!(Test-Path -LiteralPath $vswhere)) { throw 'Install Visual Studio C++ Build Tools and the Windows SDK on this runner.' }
+                  $installation = & $vswhere -latest -products '*' -requires Microsoft.VisualStudio.Component.VC.Tools.x86.x64 -property installationPath
+                  if (!$installation) { throw 'The MSVC x64/x86 C++ toolchain is required for Rust native tests.' }
+                  Write-Output "MSVC installation: $installation"
+                  $sdkLibraries = Join-Path ${env:ProgramFiles(x86)} 'Windows Kits\10\Lib\*\um\x64\kernel32.lib'
+                  if (!(Get-ChildItem -Path $sdkLibraries -ErrorAction SilentlyContinue)) { throw 'A Windows SDK with x64 libraries is required.' }
+            - name: Verify macOS native toolchain
+              if: runner.os == 'macOS'
+              run: |
+                  sw_vers
+                  uname -m
+                  rustc -Vv
+                  xcode-select -p
+                  xcrun --find clang
+                  xcrun --sdk macosx --show-sdk-path
+            - if: runner.os == 'Linux'
+              run: sudo apt-get update && sudo env DEBIAN_FRONTEND=noninteractive apt-get install -y build-essential pkg-config libssl-dev libudev-dev libxdo-dev libdbus-1-dev libwebkit2gtk-4.1-dev libappindicator3-dev librsvg2-dev patchelf ffmpeg
+            - id: source
+              env:
+                  BUILD_ONLY: 'true'
+              run: python scripts/release.py plan
+            - run: python -m compileall -q scripts
+            - run: npm ci
+            - run: npm run build:native
+            - name: Prepare verified patched Rust dependencies
+              run: python scripts/prepare_patched_deps.py
+            - run: cargo check --workspace --all-targets --locked
+            - name: Build desktop packages with the platform integrity policy
+              shell: bash
+              run: node scripts/tauri.mjs build --config src-tauri/tauri.release.conf.json --bundles "${{ matrix.bundles }}"
+            - name: Verify Linux executable baseline
+              if: runner.os == 'Linux'
+              shell: bash
+              env:
+                  BUILD_MODE: ${{ inputs.mode }}
+                  BUILD_TARGETS: ${{ inputs.targets }}
+              run: python scripts/native_build.py --os linux --arch amd64 --mode "$BUILD_MODE" --targets "$BUILD_TARGETS" --binary target/release/stream-dock-manager --report target/release/bundle/build-environment-linux-amd64.json
+            - name: Verify macOS desktop bundle inventory
+              if: runner.os == 'macOS'
+              env:
+                  RELEASE_COMMIT: ${{ steps.source.outputs.commit }}
+                  NATIVE_ARCH: ${{ matrix.arch }}
+              shell: bash
+              run: python scripts/verify_desktop_bundle.py --dir target/release/bundle --arch "$NATIVE_ARCH" --report "target/release/bundle/desktop-inventory-macos-$NATIVE_ARCH.json"
+            - name: Include instructions in the macOS disk image
+              if: runner.os == 'macOS'
+              run: python scripts/finalize_desktop_dmg.py --dir target/release/bundle
+            - name: Catalogue native installers
+              env:
+                  RELEASE_COMMIT: ${{ steps.source.outputs.commit }}
+              run: python scripts/release.py manager-catalog --dir target/release/bundle --os ${{ matrix.os }} --arch ${{ matrix.arch }}
+            - uses: actions/upload-artifact@v7.0.2
+              with:
+                  name: ${{ inputs.mode == 'publish' && 'manager' || 'manager-development' }}-${{ matrix.os }}-${{ matrix.arch }}
+                  path: |
+                      target/release/bundle/**/*.dmg
+                      target/release/bundle/**/*.exe
+                      target/release/bundle/**/*.deb
+                      target/release/bundle/**/*.rpm
+                      target/release/bundle/catalog-*.json
+                      target/release/bundle/desktop-inventory-*.json
+                      target/release/bundle/build-environment-*.json
+                  if-no-files-found: error
+            - name: Restore owned workspace permissions
+              if: always() && runner.os == 'Linux' && env.STREAM_DOCK_MANAGER_WORKSPACE_OWNER != ''
+              shell: bash
+              run: |
+                  if [[ ! "$STREAM_DOCK_MANAGER_WORKSPACE_OWNER" =~ ^[0-9]+:[0-9]+$ ]]; then exit 1; fi
+                  chown -hR "$STREAM_DOCK_MANAGER_WORKSPACE_OWNER" "$GITHUB_WORKSPACE"

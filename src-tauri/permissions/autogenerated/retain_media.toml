@@ -1,0 +1,11 @@
+# Automatically generated - DO NOT EDIT!
+
+[[permission]]
+identifier = "allow-retain-media"
+description = "Enables the retain_media command without any pre-configured scope."
+commands.allow = ["retain_media"]
+
+[[permission]]
+identifier = "deny-retain-media"
+description = "Denies the retain_media command without any pre-configured scope."
+commands.deny = ["retain_media"]

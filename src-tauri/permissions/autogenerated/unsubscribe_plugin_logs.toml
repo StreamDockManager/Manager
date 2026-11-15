@@ -1,0 +1,11 @@
+# Automatically generated - DO NOT EDIT!
+
+[[permission]]
+identifier = "allow-unsubscribe-plugin-logs"
+description = "Enables the unsubscribe_plugin_logs command without any pre-configured scope."
+commands.allow = ["unsubscribe_plugin_logs"]
+
+[[permission]]
+identifier = "deny-unsubscribe-plugin-logs"
+description = "Denies the unsubscribe_plugin_logs command without any pre-configured scope."
+commands.deny = ["unsubscribe_plugin_logs"]

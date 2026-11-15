@@ -1,0 +1,11 @@
+# Automatically generated - DO NOT EDIT!
+
+[[permission]]
+identifier = "allow-finish-media-drop"
+description = "Enables the finish_media_drop command without any pre-configured scope."
+commands.allow = ["finish_media_drop"]
+
+[[permission]]
+identifier = "deny-finish-media-drop"
+description = "Denies the finish_media_drop command without any pre-configured scope."
+commands.deny = ["finish_media_drop"]

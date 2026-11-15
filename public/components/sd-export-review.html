@@ -1,0 +1,229 @@
+<div x-data="exportReview" @open-export-review.window="open">
+    <dialog
+        x-ref="dialog"
+        class="feature-dialog wide-dialog"
+        aria-labelledby="export-review-title"
+        @cancel.prevent="close"
+    >
+        <header class="picker-header">
+            <div>
+                <h2
+                    id="export-review-title"
+                    x-text="savedReceipt ? 'Archive saved' : 'Review export candidate'"
+                ></h2>
+                <p x-show="!savedReceipt">Inspect the frozen archive before saving it.</p>
+                <p x-show="savedReceipt">
+                    Drag a copy of the reviewed ZIP into another application.
+                </p>
+            </div>
+            <button
+                type="button"
+                class="icon-button"
+                aria-label="Cancel export review"
+                @click="close"
+                :disabled="writing"
+            >
+                ×
+            </button>
+        </header>
+        <div class="feature-body feature-fields">
+            <p role="status" x-show="busy && !report">
+                Preparing an immutable candidate and its media…
+            </p>
+            <p role="alert" class="danger-text" x-show="error" x-text="error"></p>
+            <template x-if="report">
+                <div class="feature-fields">
+                    <p x-text="report.names.join(', ')"></p>
+                    <p
+                        class="field-help"
+                        x-text="'Source workspace revision ' + report.source_revision + ' · Candidate revision ' + report.revision"
+                    ></p>
+                    <p class="warning-card" x-show="report.include_plugin_settings">
+                        Plugin action settings and associated files are included. Anyone receiving
+                        this archive can read their contents.
+                    </p>
+                    <template x-for="warning in report.warnings" :key="warning">
+                        <p class="field-help" x-text="warning"></p>
+                    </template>
+                    <div class="button-row">
+                        <button
+                            type="button"
+                            class="button"
+                            @click="previous"
+                            :disabled="page <= 1 || busy || writing"
+                        >
+                            Previous fields
+                        </button>
+                        <span
+                            role="status"
+                            x-text="'Page ' + fieldPage.page + ' of ' + fieldPage.pages + ' · ' + report.fields.length + ' fields'"
+                        ></span>
+                        <button
+                            type="button"
+                            class="button"
+                            @click="next"
+                            :disabled="page >= fieldPage.pages || busy || writing"
+                        >
+                            Next fields
+                        </button>
+                    </div>
+                    <ul class="macro-library" aria-label="Export literal fields">
+                        <template x-for="item in fieldPage.items" :key="item.key">
+                            <li class="macro-library-row export-field-row">
+                                <div class="macro-library-info">
+                                    <strong x-text="item.label"></strong>
+                                    <small class="source-path" x-text="item.location"></small>
+                                    <pre
+                                        class="export-literal"
+                                        tabindex="0"
+                                        :data-key="item.key"
+                                        :aria-label="'Literal ' + item.label + ' in ' + item.location"
+                                        x-text="displayLiteral(item)"
+                                    ></pre>
+                                </div>
+                                <button
+                                    type="button"
+                                    class="button"
+                                    :data-key="item.key"
+                                    :aria-label="'Change ' + item.label + ' in ' + item.location"
+                                    @click="editField"
+                                    :disabled="busy || writing"
+                                >
+                                    Change field
+                                </button>
+                            </li>
+                        </template>
+                    </ul>
+                    <p class="field-help" x-show="report.fields.length === 0">
+                        This candidate has no editable literal fields. Review the complete document
+                        below.
+                    </p>
+                    <details>
+                        <summary>Complete candidate document</summary>
+                        <pre
+                            class="export-literal"
+                            tabindex="0"
+                            aria-label="Complete export candidate"
+                            x-text="report.candidate_json"
+                        ></pre>
+                    </details>
+                    <details>
+                        <summary>Archive identity</summary>
+                        <p
+                            class="source-path"
+                            x-text="'Archive SHA-256: ' + report.archive_sha256"
+                        ></p>
+                        <p
+                            class="source-path"
+                            x-text="'Document SHA-256: ' + report.document_sha256"
+                        ></p>
+                    </details>
+                    <label class="preference-toggle">
+                        <input
+                            x-ref="ack"
+                            type="checkbox"
+                            x-model="reviewed"
+                            :disabled="busy || writing"
+                        />
+                        <span>I reviewed this candidate and its literal fields.</span>
+                    </label>
+                </div>
+            </template>
+        </div>
+        <footer class="feature-footer button-row">
+            <button type="button" class="button" x-show="savedReceipt" @mousedown="dragSaved">
+                Drag ZIP
+            </button>
+            <button
+                type="button"
+                class="button"
+                x-ref="done"
+                @click="close"
+                :disabled="writing"
+                x-text="savedReceipt ? 'Done' : 'Cancel review'"
+            >
+                Cancel review
+            </button>
+            <button
+                type="button"
+                class="button primary"
+                x-show="!savedReceipt"
+                @click="write"
+                :disabled="!canWrite"
+                x-text="writing ? 'Saving archive…' : 'Save reviewed archive'"
+            ></button>
+        </footer>
+    </dialog>
+    <dialog
+        x-ref="edit"
+        class="feature-dialog"
+        aria-labelledby="export-field-title"
+        @cancel.prevent="cancelEdit"
+    >
+        <header class="picker-header">
+            <h2 id="export-field-title">Change export field</h2>
+            <button
+                type="button"
+                class="icon-button"
+                aria-label="Cancel field change"
+                @click="cancelEdit"
+                :disabled="busy"
+            >
+                ×
+            </button>
+        </header>
+        <div class="feature-body feature-fields">
+            <p x-text="field ? field.label : ''"></p>
+            <p class="source-path field-help" x-text="field ? field.location : ''"></p>
+            <label>
+                Change
+                <select x-model="operation" :disabled="busy" aria-label="Export field change">
+                    <option value="replace">Replace literal</option>
+                    <template x-if="field && field.can_parameter">
+                        <option value="parameter">Convert to required profile parameter</option>
+                    </template>
+                    <template x-if="field && field.can_input">
+                        <option value="input">Convert to required macro input</option>
+                    </template>
+                    <template x-if="field && field.can_require">
+                        <option value="required">Require value and remove default</option>
+                    </template>
+                </select>
+            </label>
+            <label x-show="operation === 'replace'">
+                Replacement value
+                <textarea
+                    x-ref="replacement"
+                    x-model="replacement"
+                    rows="4"
+                    aria-label="Export replacement value"
+                    :disabled="busy"
+                ></textarea>
+            </label>
+            <p
+                class="field-help"
+                x-show="operation === 'replace' && field && field.value_type !== 'string'"
+            >
+                Enter a valid JSON value. The candidate must retain valid field types.
+            </p>
+            <label x-show="needsName">
+                Required value name
+                <input x-model="name" aria-label="Required export value name" :disabled="busy" />
+            </label>
+            <p class="field-help" x-show="operation !== 'replace'">
+                The literal is removed from this candidate. Required values have no portable
+                default. Macro callers are updated within this candidate; string profile parameters
+                use the credential store after import.
+            </p>
+            <p role="alert" class="danger-text" x-show="editError" x-text="editError"></p>
+        </div>
+        <footer class="feature-footer button-row">
+            <button type="button" class="button" @click="cancelEdit" :disabled="busy">
+                Cancel change
+            </button>
+            <button type="button" class="button primary" @click="applyField" :disabled="busy">
+                Apply to candidate
+            </button>
+        </footer>
+    </dialog>
+</div>

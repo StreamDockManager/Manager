@@ -1,0 +1,11 @@
+{
+    "version": 1,
+    "groups": ["settings"],
+    "options": {
+        "shadow": false
+    },
+    "metadata": {
+        "description": "First-party sd-settings component. Controllers are registered by the trusted application bootstrap."
+    },
+    "dependencies": ["sd-device-settings", "sd-updates"]
+}

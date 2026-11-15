@@ -1,0 +1,282 @@
+schema_version = 1
+model_id = "n4"
+name = "N4"
+protocol = "vendor-crt-1"
+status = "experimental"
+
+[capabilities]
+firmware_query = true
+boot_logo = { size = [800, 480] }
+sleep = true
+brightness = true
+lighting = false
+lighting_channels = []
+background = false
+reliable_button_release = true
+reliable_encoder_release = true
+image_formats = ["png", "jpeg"]
+media_formats = ["png", "jpeg", "gif", "mp4"]
+max_fps = 24
+frame_output = { frame_scheduling = true, grouped_key_updates = true }
+
+[layout]
+width = 800
+height = 580
+rotation = 0
+
+[[variants]]
+id = "usb-6602-1001"
+name = "N4 (6602:1001)"
+
+[variants.identity]
+vendor_id = 26114
+product_id = 4097
+usage_page_min = 1026
+usage = 1
+
+[[variants]]
+id = "usb-6603-1007"
+name = "N4 (6603:1007)"
+
+[variants.identity]
+vendor_id = 26115
+product_id = 4103
+usage_page_min = 1026
+usage = 1
+
+[[controls]]
+id = "key-1"
+label = "Key 1"
+kind = "button"
+x = 40
+y = 50
+width = 112
+height = 112
+semantics = ["press", "release"]
+image_slot = 6
+image_width = 112
+image_height = 112
+
+[[controls]]
+id = "key-2"
+label = "Key 2"
+kind = "button"
+x = 184
+y = 50
+width = 112
+height = 112
+semantics = ["press", "release"]
+image_slot = 7
+image_width = 112
+image_height = 112
+
+[[controls]]
+id = "key-3"
+label = "Key 3"
+kind = "button"
+x = 328
+y = 50
+width = 112
+height = 112
+semantics = ["press", "release"]
+image_slot = 8
+image_width = 112
+image_height = 112
+
+[[controls]]
+id = "key-4"
+label = "Key 4"
+kind = "button"
+x = 472
+y = 50
+width = 112
+height = 112
+semantics = ["press", "release"]
+image_slot = 9
+image_width = 112
+image_height = 112
+
+[[controls]]
+id = "key-5"
+label = "Key 5"
+kind = "button"
+x = 616
+y = 50
+width = 112
+height = 112
+semantics = ["press", "release"]
+image_slot = 10
+image_width = 112
+image_height = 112
+
+[[controls]]
+id = "key-6"
+label = "Key 6"
+kind = "button"
+x = 40
+y = 194
+width = 112
+height = 112
+semantics = ["press", "release"]
+image_slot = 11
+image_width = 112
+image_height = 112
+
+[[controls]]
+id = "key-7"
+label = "Key 7"
+kind = "button"
+x = 184
+y = 194
+width = 112
+height = 112
+semantics = ["press", "release"]
+image_slot = 12
+image_width = 112
+image_height = 112
+
+[[controls]]
+id = "key-8"
+label = "Key 8"
+kind = "button"
+x = 328
+y = 194
+width = 112
+height = 112
+semantics = ["press", "release"]
+image_slot = 13
+image_width = 112
+image_height = 112
+
+[[controls]]
+id = "key-9"
+label = "Key 9"
+kind = "button"
+x = 472
+y = 194
+width = 112
+height = 112
+semantics = ["press", "release"]
+image_slot = 14
+image_width = 112
+image_height = 112
+
+[[controls]]
+id = "key-10"
+label = "Key 10"
+kind = "button"
+x = 616
+y = 194
+width = 112
+height = 112
+semantics = ["press", "release"]
+image_slot = 15
+image_width = 112
+image_height = 112
+
+[[controls]]
+id = "dial-1"
+label = "Dial 1"
+kind = "encoder"
+x = 92
+y = 468
+width = 76
+height = 76
+semantics = ["press", "release", "pulse", "rotate"]
+
+[[controls]]
+id = "dial-2"
+label = "Dial 2"
+kind = "encoder"
+x = 272
+y = 468
+width = 76
+height = 76
+semantics = ["press", "release", "pulse", "rotate"]
+
+[[controls]]
+id = "dial-3"
+label = "Dial 3"
+kind = "encoder"
+x = 452
+y = 468
+width = 76
+height = 76
+semantics = ["press", "release", "pulse", "rotate"]
+
+[[controls]]
+id = "dial-4"
+label = "Dial 4"
+kind = "encoder"
+x = 632
+y = 468
+width = 76
+height = 76
+semantics = ["press", "release", "pulse", "rotate"]
+
+[[controls]]
+id = "aux-key-1"
+minimum_manager = "0.1.0"
+label = "Aux Key 1"
+kind = "button"
+x = 40
+y = 340
+width = 176
+height = 112
+semantics = ["press", "release"]
+image_slot = 1
+image_width = 176
+image_height = 112
+
+[[controls]]
+id = "aux-key-2"
+minimum_manager = "0.1.0"
+label = "Aux Key 2"
+kind = "button"
+x = 220
+y = 340
+width = 176
+height = 112
+semantics = ["press", "release"]
+image_slot = 2
+image_width = 176
+image_height = 112
+
+[[controls]]
+id = "aux-key-3"
+minimum_manager = "0.1.0"
+label = "Aux Key 3"
+kind = "button"
+x = 400
+y = 340
+width = 176
+height = 112
+semantics = ["press", "release"]
+image_slot = 3
+image_width = 176
+image_height = 112
+
+[[controls]]
+id = "aux-key-4"
+minimum_manager = "0.1.0"
+label = "Aux Key 4"
+kind = "button"
+x = 580
+y = 340
+width = 176
+height = 112
+semantics = ["press", "release"]
+image_slot = 4
+image_width = 176
+image_height = 112
+
+[[controls]]
+id = "touch-strip"
+label = "Swipe strip"
+kind = "touch"
+x = 40
+y = 340
+width = 716
+height = 112
+preview_hidden = true
+semantics = ["swipe"]

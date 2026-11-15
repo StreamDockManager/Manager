@@ -1,0 +1,11 @@
+# Automatically generated - DO NOT EDIT!
+
+[[permission]]
+identifier = "allow-theme-wallpaper-frame"
+description = "Enables the theme_wallpaper_frame command without any pre-configured scope."
+commands.allow = ["theme_wallpaper_frame"]
+
+[[permission]]
+identifier = "deny-theme-wallpaper-frame"
+description = "Denies the theme_wallpaper_frame command without any pre-configured scope."
+commands.deny = ["theme_wallpaper_frame"]

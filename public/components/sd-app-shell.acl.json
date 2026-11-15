@@ -1,0 +1,27 @@
+{
+    "version": 1,
+    "groups": ["shell"],
+    "dependencies": [
+        "sd-benchmark-progress",
+        "sd-feature-dialogs",
+        "sd-application-data",
+        "sd-background-editor",
+        "sd-library-organization",
+        "sd-profile-conversion",
+        "sd-profile-versions",
+        "sd-media-library",
+        "sd-export-review",
+        "sd-macro-sharing",
+        "sd-plugin-management",
+        "sd-video-editor",
+        "sd-plugin-logs",
+        "sd-toasts",
+        "sd-keyboard-macro-editor"
+    ],
+    "options": {
+        "shadow": false
+    },
+    "metadata": {
+        "description": "First-party sd-app-shell component. Controllers are registered by the trusted application bootstrap."
+    }
+}

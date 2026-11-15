@@ -1,0 +1,11 @@
+# Automatically generated - DO NOT EDIT!
+
+[[permission]]
+identifier = "allow-prepare-boot-logo"
+description = "Enables the prepare_boot_logo command without any pre-configured scope."
+commands.allow = ["prepare_boot_logo"]
+
+[[permission]]
+identifier = "deny-prepare-boot-logo"
+description = "Denies the prepare_boot_logo command without any pre-configured scope."
+commands.deny = ["prepare_boot_logo"]

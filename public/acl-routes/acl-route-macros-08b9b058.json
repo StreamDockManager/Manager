@@ -1,0 +1,108 @@
+{
+  "version": 1,
+  "basePath": "..",
+  "components": {
+    "sd-action-fields": {
+      "source": "components/sd-action-fields.html",
+      "dependencies": [],
+      "options": {
+        "shadow": false,
+        "templateRevision": "sha256-57rYJ3oFcoNiVc3766bL2Pgq6gX7cUnhDSQURna0Ibg"
+      }
+    },
+    "sd-macro-debugger": {
+      "source": "components/sd-macro-debugger.html",
+      "dependencies": [],
+      "options": {
+        "shadow": false,
+        "templateRevision": "sha256--kp93uiRHDI70VRj2sY6wjw-6d9JsRJLeIqj8F5gNEc"
+      },
+      "metadata": {
+        "description": "Owned macro debug session controls and bounded execution output."
+      }
+    },
+    "sd-macro-inputs": {
+      "source": "components/sd-macro-inputs.html",
+      "dependencies": [],
+      "options": {
+        "shadow": false,
+        "templateRevision": "sha256-p6-I4h40ABP41Mw5MsDg9Bn2qtMEDMQqNsiY-yovnAQ"
+      },
+      "metadata": {
+        "description": "Lexical input definitions shared by the action and macro editors."
+      }
+    },
+    "sd-action-workspace": {
+      "source": "components/sd-action-workspace.html",
+      "dependencies": [
+        "sd-action-fields",
+        "sd-macro-debugger",
+        "sd-macro-inputs"
+      ],
+      "options": {
+        "shadow": false,
+        "templateRevision": "sha256-LgHr-xeMp5pet7MHKSYg97Qc9MSlyw7NQmxXxfSvYz4"
+      },
+      "metadata": {
+        "description": "Shared action and macro workspace; the parent adapter owns content, events, and lifetime."
+      }
+    },
+    "sd-action-editor": {
+      "source": "components/sd-action-editor.html",
+      "dependencies": [
+        "sd-action-workspace"
+      ],
+      "options": {
+        "shadow": false,
+        "attributes": {
+          "content": {
+            "type": "String",
+            "default": "{\"kind\":\"none\"}",
+            "reflect": true
+          }
+        },
+        "templateRevision": "sha256--afvzZY3Ne-b_XmagiBpOM9_SbsUjNFXoY759ij1GZQ"
+      },
+      "metadata": {
+        "description": "Ordered macro actions with stable draft IDs and explicit teardown of the prop observer."
+      }
+    },
+    "sd-macro-delete-dialog": {
+      "source": "components/sd-macro-delete-dialog.html",
+      "dependencies": [],
+      "options": {
+        "shadow": false,
+        "templateRevision": "sha256-nmAgxIcLSTsyYNj1qy5-qSX60YWVJxT_KLJzJ_RAHbw"
+      },
+      "metadata": {
+        "description": "Saved macro deletion confirmation, including affected callers."
+      }
+    },
+    "sd-macros": {
+      "source": "components/sd-macros.html",
+      "dependencies": [
+        "sd-macro-delete-dialog",
+        "sd-action-editor"
+      ],
+      "options": {
+        "shadow": false,
+        "templateRevision": "sha256-pDcCZQ0H3ElaliSzguju-9t1RvgXxfcODbUYbnWkZXo"
+      },
+      "metadata": {
+        "description": "Saved macro library and management page."
+      }
+    }
+  },
+  "groups": {
+    "editor": [
+      "sd-action-editor",
+      "sd-action-fields",
+      "sd-action-workspace",
+      "sd-macro-debugger",
+      "sd-macro-inputs"
+    ],
+    "macros": [
+      "sd-macros"
+    ]
+  }
+}

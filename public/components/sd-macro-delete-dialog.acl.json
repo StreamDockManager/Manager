@@ -1,0 +1,7 @@
+{
+    "version": 1,
+    "groups": [],
+    "dependencies": [],
+    "options": { "shadow": false },
+    "metadata": { "description": "Saved macro deletion confirmation, including affected callers." }
+}

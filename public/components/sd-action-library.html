@@ -1,0 +1,155 @@
+<section class="secondary-screen action-library-screen" x-data="actions">
+    <header class="page-heading">
+        <div>
+            <h1>Action library</h1>
+            <p x-text="selectionSummary"></p>
+        </div>
+        <div class="heading-actions">
+            <button
+                type="button"
+                class="button"
+                x-show="selection.choosing"
+                @click="cancelSelection"
+            >
+                Cancel and return
+            </button>
+            <a class="button" href="#/editor" x-show="!selection.choosing">Open Device editor</a>
+        </div>
+    </header>
+    <section class="action-library card" aria-label="All actions">
+        <div class="library-heading action-library-toolbar">
+            <h2>All actions</h2>
+            <label class="search-field">
+                <span aria-hidden="true">⌕</span>
+                <input
+                    type="search"
+                    aria-label="Search actions"
+                    placeholder="Find an action…"
+                    x-model="filters.search"
+                />
+            </label>
+            <label class="action-category">
+                <span>Source</span>
+                <select aria-label="Action source" x-model="filters.source">
+                    <option value="all">All sources</option>
+                    <option value="plugins">All plugins</option>
+                    <template x-for="source in sources" :key="source.id">
+                        <option :value="source.id" x-text="source.name"></option>
+                    </template>
+                </select>
+            </label>
+            <label class="action-category">
+                <span>Category</span>
+                <select aria-label="Action category" x-model="filters.category">
+                    <option value="all">All categories</option>
+                    <template x-for="name in categories" :key="name">
+                        <option :value="name" x-text="name"></option>
+                    </template>
+                </select>
+            </label>
+            <label class="preference-toggle library-favorite-filter">
+                <input
+                    type="checkbox"
+                    aria-label="Favorite actions only"
+                    x-model="filters.favoritesOnly"
+                    :disabled="!organization.loaded"
+                />
+                <span>Favorites only</span>
+            </label>
+        </div>
+        <p
+            class="field-help danger-text"
+            role="alert"
+            x-show="organization.error"
+            x-text="organization.error"
+        ></p>
+        <div class="action-items">
+            <template x-for="item in actionPage.items" :key="item.key">
+                <div class="library-action-row">
+                    <button
+                        class="action-item"
+                        :aria-label="selection.choosing ? 'Use ' + item.name : null"
+                        :aria-pressed="selection.choosing ? selection.request.current === item.id : null"
+                        :data-kind="item.id"
+                        :data-key="item.key"
+                        :data-unavailable="unavailable(item)"
+                        :disabled="loadingKey !== '' || (selection.request && !selection.choosing)"
+                        @click="pick"
+                    >
+                        <img
+                            class="action-icon"
+                            :src="item.icon"
+                            :class="{'plugin-library-icon': !item.themedIcon}"
+                            alt=""
+                        />
+                        <span>
+                            <strong x-text="item.name"></strong>
+                            <small
+                                class="action-source"
+                                x-show="item.pluginId"
+                                x-text="item.source"
+                            ></small>
+                            <small x-text="item.description"></small>
+                            <small
+                                class="field-help"
+                                x-show="unavailable(item)"
+                                x-text="unavailable(item)"
+                            ></small>
+                            <small x-show="itemTags(item)" x-text="itemTags(item)"></small>
+                        </span>
+                    </button>
+                    <button
+                        type="button"
+                        class="icon-button library-favorite-button"
+                        x-show="item.organizable !== false"
+                        :class="{'is-favorite': itemFavorite(item)}"
+                        :data-kind="item.id"
+                        :data-key="item.key"
+                        @click="organize"
+                        :aria-label="'Organize ' + item.name"
+                        :data-tooltip="itemTags(item) || 'Favorite and tags'"
+                        :disabled="organization.busy"
+                        x-text="itemFavorite(item) ? '★' : '☆'"
+                    ></button>
+                </div>
+            </template>
+            <p class="no-results" x-show="filtered.length === 0">No matching actions.</p>
+        </div>
+        <nav
+            class="pagination action-pagination"
+            aria-label="Action library pages"
+            x-show="filtered.length > 0"
+        >
+            <label class="page-size">
+                Per page
+                <select aria-label="Actions per page" x-model="filters.pageSize">
+                    <option value="12">12</option>
+                    <option value="24">24</option>
+                    <option value="48">48</option>
+                </select>
+            </label>
+            <span
+                aria-live="polite"
+                x-text="actionPage.start + '–' + actionPage.end + ' of ' + actionPage.total + ' · Page ' + actionPage.page + ' of ' + actionPage.pages"
+            ></span>
+            <div class="button-row">
+                <button
+                    class="button"
+                    :disabled="actionPage.page === 1"
+                    data-direction="-1"
+                    @click="changeActionPage"
+                >
+                    Previous actions
+                </button>
+                <button
+                    class="button"
+                    :disabled="actionPage.page === actionPage.pages"
+                    data-direction="1"
+                    @click="changeActionPage"
+                >
+                    Next actions
+                </button>
+            </div>
+        </nav>
+    </section>
+</section>

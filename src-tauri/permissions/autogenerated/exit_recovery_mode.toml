@@ -1,0 +1,11 @@
+# Automatically generated - DO NOT EDIT!
+
+[[permission]]
+identifier = "allow-exit-recovery-mode"
+description = "Enables the exit_recovery_mode command without any pre-configured scope."
+commands.allow = ["exit_recovery_mode"]
+
+[[permission]]
+identifier = "deny-exit-recovery-mode"
+description = "Denies the exit_recovery_mode command without any pre-configured scope."
+commands.deny = ["exit_recovery_mode"]

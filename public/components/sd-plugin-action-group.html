@@ -1,0 +1,72 @@
+<section class="plugin-control-group" :aria-label="group.label">
+    <div class="plugin-group-heading">
+        <h3 x-text="group.label"></h3>
+        <span x-text="group.hint"></span>
+    </div>
+    <p class="field-help" x-show="!canUseType(group.id)">
+        <span x-text="actionGroupHint"></span>
+    </p>
+    <div class="plugin-actions-grid">
+        <template x-for="choice in group.window.items" :key="choice.key">
+            <div class="library-action-row">
+                <button
+                    class="plugin-action"
+                    :data-plugin="choice.pluginId"
+                    :data-action="choice.actionId"
+                    :data-name="choice.name"
+                    :data-kind="choice.controlType"
+                    :aria-label="'Use ' + choice.name"
+                    :disabled="app.busy || !plugin.enabled || !canUseType(group.id)"
+                    @click="useAction"
+                >
+                    <img
+                        class="plugin-action-icon"
+                        x-show="choice.icon"
+                        :src="choice.icon"
+                        alt=""
+                    />
+                    <span x-text="choice.name"></span>
+                    <span aria-hidden="true">＋</span>
+                </button>
+                <button
+                    type="button"
+                    class="icon-button"
+                    :data-plugin="choice.pluginId"
+                    :data-action="choice.actionId"
+                    @click="organizeChoice"
+                    :aria-label="'Organize ' + choice.name"
+                    :data-tooltip="choiceTags(choice) || 'Favorite and tags'"
+                    :disabled="organization.busy"
+                    x-text="choiceFavorite(choice) ? '★' : '☆'"
+                ></button>
+            </div>
+        </template>
+    </div>
+    <nav
+        class="pagination"
+        :aria-label="plugin.name + ' ' + group.label + ' action pages'"
+        x-show="group.window.pages > 1"
+    >
+        <button
+            class="button"
+            :data-key="group.key"
+            :data-page="group.window.page"
+            data-direction="-1"
+            :disabled="group.window.page === 1"
+            @click="changeActionPage"
+        >
+            Previous actions
+        </button>
+        <span x-text="'Page ' + group.window.page + ' of ' + group.window.pages"></span>
+        <button
+            class="button"
+            :data-key="group.key"
+            :data-page="group.window.page"
+            data-direction="1"
+            :disabled="group.window.page === group.window.pages"
+            @click="changeActionPage"
+        >
+            Next actions
+        </button>
+    </nav>
+</section>

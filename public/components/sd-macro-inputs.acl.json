@@ -1,0 +1,10 @@
+{
+    "version": 1,
+    "groups": ["editor"],
+    "options": {
+        "shadow": false
+    },
+    "metadata": {
+        "description": "Lexical input definitions shared by the action and macro editors."
+    }
+}

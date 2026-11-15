@@ -1,0 +1,11 @@
+# Automatically generated - DO NOT EDIT!
+
+[[permission]]
+identifier = "allow-start-macro-debug"
+description = "Enables the start_macro_debug command without any pre-configured scope."
+commands.allow = ["start_macro_debug"]
+
+[[permission]]
+identifier = "deny-start-macro-debug"
+description = "Denies the start_macro_debug command without any pre-configured scope."
+commands.deny = ["start_macro_debug"]

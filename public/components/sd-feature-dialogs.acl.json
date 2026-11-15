@@ -1,0 +1,20 @@
+{
+    "version": 1,
+    "groups": ["shell"],
+    "options": {
+        "shadow": false
+    },
+    "metadata": {
+        "description": "Setup, plugin compatibility and staged import dialogs."
+    },
+    "dependencies": [
+        "sd-setup-dialog",
+        "sd-plugin-folder-import",
+        "sd-plugin-preflight",
+        "sd-plugin-profile-suggestions",
+        "sd-profile-archive-import",
+        "sd-plugin-catalog-dialog",
+        "sd-profile-sharing-dialog",
+        "sd-runtime-dialog"
+    ]
+}

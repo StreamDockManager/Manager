@@ -1,0 +1,8 @@
+{
+    "version": 1,
+    "groups": ["shell"],
+    "options": { "shadow": false },
+    "metadata": {
+        "description": "Reviewed single-profile history comparison and atomic restoration."
+    }
+}

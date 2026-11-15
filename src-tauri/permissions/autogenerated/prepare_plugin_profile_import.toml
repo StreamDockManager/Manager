@@ -1,0 +1,11 @@
+# Automatically generated - DO NOT EDIT!
+
+[[permission]]
+identifier = "allow-prepare-plugin-profile-import"
+description = "Enables the prepare_plugin_profile_import command without any pre-configured scope."
+commands.allow = ["prepare_plugin_profile_import"]
+
+[[permission]]
+identifier = "deny-prepare-plugin-profile-import"
+description = "Denies the prepare_plugin_profile_import command without any pre-configured scope."
+commands.deny = ["prepare_plugin_profile_import"]

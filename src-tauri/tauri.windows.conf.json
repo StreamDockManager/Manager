@@ -1,0 +1,15 @@
+{
+    "bundle": {
+        "resources": {
+            "../packaging/install-instructions/windows/INSTALL-INSTRUCTIONS.md": "INSTALL-INSTRUCTIONS.md",
+            "../packaging/windows/TAURI-LICENSE-MIT": "notices/TAURI-LICENSE-MIT"
+        },
+        "windows": {
+            "nsis": {
+                "installMode": "currentUser",
+                "template": "../packaging/windows/installer.nsi",
+                "installerHooks": "../packaging/windows/uninstall.nsh"
+            }
+        }
+    }
+}

@@ -1,0 +1,635 @@
+<section class="secondary-screen" x-data="diagnostics">
+    <div class="page-heading">
+        <div>
+            <h1>Diagnostics</h1>
+        </div>
+        <div class="button-row">
+            <button class="button" @click="refresh">↻ Refresh</button>
+            <button
+                type="button"
+                class="button"
+                @click="$store.managerLogs.open()"
+                :disabled="$store.managerLogs.opening"
+                x-text="$store.managerLogs.opening ? 'Opening logs…' : 'Open logs folder'"
+            ></button>
+            <button class="button" @click="exportReport" :disabled="exportBusy">
+                Export diagnostic report
+            </button>
+        </div>
+    </div>
+    <div class="feature-notice">
+        <p>
+            Stream Dock Manager is a work in progress. Performance optimizations are ongoing to
+            improve responsiveness and reduce resource usage.
+        </p>
+    </div>
+    <nav class="section-index button-row" aria-label="Diagnostics sections">
+        <a class="button" href="#diagnostics-resources" @click.prevent="jumpToSection">Resources</a>
+        <a class="button" href="#diagnostics-benchmarks" @click.prevent="jumpToSection">
+            Benchmarks
+        </a>
+        <a class="button" href="#diagnostics-dependencies" @click.prevent="jumpToSection">
+            Dependencies
+        </a>
+        <a class="button" href="#diagnostics-events" @click.prevent="jumpToSection">Events</a>
+    </nav>
+    <section
+        id="diagnostics-resources"
+        tabindex="-1"
+        class="card settings-card manager-resources"
+        aria-label="Resource usage"
+    >
+        <div class="runtime-toolbar">
+            <div class="runtime-metadata">
+                <h2>Resource usage</h2>
+                <p
+                    class="field-help"
+                    x-text="resourceUsageEnabled ? 'Live measurements · one-second updates · last five minutes' : 'Monitoring is off. Turn it on to resume live measurements.'"
+                ></p>
+            </div>
+            <div class="button-row">
+                <label class="preference-toggle">
+                    <input
+                        type="checkbox"
+                        :checked="resourceUsageEnabled"
+                        @change="changeResourceUsage"
+                    />
+                    <span>Live monitoring</span>
+                </label>
+                <div
+                    class="button-row"
+                    role="group"
+                    aria-label="Resource usage scope"
+                    x-show="resourceUsageEnabled"
+                >
+                    <button
+                        type="button"
+                        class="button"
+                        :class="{primary: resourceScope === 'manager'}"
+                        :aria-pressed="resourceScope === 'manager'"
+                        @click="showManagerResources"
+                    >
+                        Manager
+                    </button>
+                    <button
+                        type="button"
+                        class="button"
+                        :class="{primary: resourceScope === 'combined'}"
+                        :aria-pressed="resourceScope === 'combined'"
+                        @click="showCombinedResources"
+                    >
+                        Manager + plugins
+                    </button>
+                </div>
+            </div>
+        </div>
+        <template x-if="resourceUsageEnabled">
+            <div>
+                <div class="performance-grid resource-graphs">
+                    <template x-for="graph in resourceGraphs" :key="graph.id">
+                        <article class="card resource-graph" :aria-label="graph.name + ' usage'">
+                            <header>
+                                <h3 x-text="graph.name"></h3>
+                                <strong class="resource-value" x-text="graph.value"></strong>
+                            </header>
+                            <p class="field-help resource-note" x-text="graph.note"></p>
+                            <small class="resource-scale" x-text="graph.scale"></small>
+                            <svg
+                                viewBox="0 0 600 150"
+                                role="img"
+                                :aria-label="resourceScopeLabel + ': ' + graph.description"
+                            >
+                                <path
+                                    class="resource-grid"
+                                    d="M6 6H594 M6 72H594 M6 138H594"
+                                ></path>
+                                <path class="resource-line" :d="graph.path"></path>
+                                <circle
+                                    class="resource-point"
+                                    :cx="graph.lastX"
+                                    :cy="graph.lastY"
+                                    r="3"
+                                    x-show="graph.hasPoint"
+                                ></circle>
+                            </svg>
+                            <div class="resource-time">
+                                <small>5 min ago</small>
+                                <small>Now</small>
+                            </div>
+                        </article>
+                    </template>
+                </div>
+                <p class="field-help">
+                    <span x-text="resourceNote"></span>
+                    CPU is a share of total logical CPU capacity. RAM is resident memory. GPU
+                    counters depend on OS and driver support; unavailable readings leave gaps.
+                </p>
+                <p
+                    class="field-help"
+                    role="status"
+                    aria-label="Process coverage"
+                    x-show="resourceProcessNote"
+                    x-text="resourceProcessNote"
+                ></p>
+            </div>
+        </template>
+    </section>
+    <section
+        id="diagnostics-benchmarks"
+        tabindex="-1"
+        class="card settings-card settings-wide benchmark-tool"
+        x-data="benchmark"
+        aria-label="Benchmark tool"
+    >
+        <div class="runtime-metadata">
+            <h2>Benchmarks</h2>
+            <p class="field-help">
+                Compare Manager rendering, plugin fixtures and device output with a repeatable,
+                finite workload. No installed plugin actions are executed.
+            </p>
+        </div>
+        <p class="field-help" role="status" x-show="!available">
+            Benchmarks require the native desktop application. Browser preview does not produce
+            performance results.
+        </p>
+        <section class="settings-section" aria-label="Benchmark presets">
+            <h3>Test preset</h3>
+            <div class="button-row benchmark-presets">
+                <button
+                    type="button"
+                    class="button"
+                    @click="smoke"
+                    :disabled="locked"
+                    :aria-pressed="preset === 'smoke'"
+                >
+                    Short smoke
+                </button>
+                <button
+                    type="button"
+                    class="button"
+                    @click="qualification"
+                    :disabled="locked || isPlugins"
+                    :aria-pressed="preset === 'qualification'"
+                >
+                    Qualification matrix
+                </button>
+                <button
+                    type="button"
+                    class="button"
+                    @click="soak"
+                    :disabled="locked || isPlugins"
+                    :aria-pressed="preset === 'soak'"
+                >
+                    30-minute supervised soak
+                </button>
+            </div>
+        </section>
+        <div class="benchmark-setup-grid">
+            <section class="settings-section" aria-label="Benchmark workload">
+                <h3>Workload</h3>
+                <fieldset class="settings-form-grid" :disabled="locked || !available">
+                    <label class="settings-field">
+                        <span>Benchmark target</span>
+                        <select x-model="config.target" @change="targetChanged">
+                            <option value="manager">Manager rendering only</option>
+                            <option value="simulator">
+                                Simulator: real encoder, fake transport
+                            </option>
+                            <option value="hardware">
+                                Physical device: host transport completion
+                            </option>
+                            <option value="plugins">Safe plugin engine / SDK fixture</option>
+                        </select>
+                    </label>
+                    <label class="settings-field" x-show="!isPlugins">
+                        <span>Benchmark device</span>
+                        <select x-model="config.device_id">
+                            <option value="">Select connected device</option>
+                            <template x-for="device in devices" :key="device.id">
+                                <option :value="device.id" x-text="device.name"></option>
+                            </template>
+                        </select>
+                    </label>
+                    <label class="settings-field" x-show="!isPlugins">
+                        <span>Deterministic image pattern</span>
+                        <select x-model="config.pattern">
+                            <option value="numbered">Numbered gradient</option>
+                            <option value="high_detail">
+                                High-detail fixed-seed noise + number
+                            </option>
+                        </select>
+                    </label>
+                    <label class="settings-field">
+                        <span>Workload</span>
+                        <select x-model="config.workload">
+                            <option value="one_key">One key</option>
+                            <option value="two_keys">Two keys</option>
+                            <option value="all_keys" x-text="allKeysLabel"></option>
+                            <option
+                                value="all_screens"
+                                :disabled="isPlugins || !sectionCount"
+                                x-text="allScreensLabel"
+                            ></option>
+                            <option value="background" :disabled="isPlugins || !hasBackground">
+                                Background only
+                            </option>
+                            <option value="key_background" :disabled="isPlugins || !hasBackground">
+                                One key + background
+                            </option>
+                            <option value="all_background" :disabled="isPlugins || !hasBackground">
+                                All LCD keys + background
+                            </option>
+                            <option value="mixed" x-text="mixedLabel"></option>
+                        </select>
+                    </label>
+                </fieldset>
+            </section>
+            <section class="settings-section" aria-label="Benchmark timing">
+                <h3>Run settings</h3>
+                <fieldset class="settings-form-grid" :disabled="locked || !available">
+                    <label class="settings-field" x-show="!isPlugins">
+                        <span>Output comparison</span>
+                        <select x-model="config.mode">
+                            <option value="individual_updates">Individual updates</option>
+                            <option value="frame_scheduling">Frame scheduling</option>
+                            <option value="grouped_key_updates">Grouped key updates</option>
+                            <option value="compare">Compare all three modes</option>
+                        </select>
+                    </label>
+                    <label class="settings-field">
+                        <span>Requested rate (FPS)</span>
+                        <input
+                            aria-label="Requested FPS (not measured display FPS)"
+                            type="number"
+                            min="1"
+                            max="24"
+                            x-model="config.target_fps"
+                        />
+                    </label>
+                    <label class="settings-field">
+                        <span>Measurement seconds</span>
+                        <input type="number" min="1" max="300" x-model="config.duration_seconds" />
+                    </label>
+                    <label class="settings-field" x-show="!isPlugins">
+                        <span>Warm-up seconds</span>
+                        <input type="number" min="0" max="10" x-model="config.warmup_seconds" />
+                    </label>
+                    <label class="settings-field" x-show="!isPlugins">
+                        <span>Repetitions</span>
+                        <input type="number" min="1" max="3" x-model="config.repetitions" />
+                    </label>
+                </fieldset>
+                <p class="field-help">
+                    Requested rates are host-side targets. Displayed FPS and input-to-visible
+                    latency require external measurement.
+                </p>
+            </section>
+        </div>
+        <section
+            class="settings-section feature-notice"
+            x-show="isHardware"
+            aria-label="Physical device consent"
+        >
+            <h3>Before running on hardware</h3>
+            <p class="field-help">
+                Save edits first. Hardware runs temporarily replace device images and pause normal
+                output, then request restoration of the current scene. Actions on the tested device
+                are suppressed while input polling stays active.
+            </p>
+            <fieldset class="settings-section" :disabled="locked || !available">
+                <label class="preference-toggle" x-show="isHardware">
+                    <input type="checkbox" x-model="config.acknowledge_hardware" />
+                    <span>I understand this replaces physical device images temporarily.</span>
+                </label>
+            </fieldset>
+        </section>
+        <p class="field-help" x-show="isPlugins">
+            Uses a configured, hash-verified test fixture. Seconds × requested FPS selects 1–1200
+            synthetic frames; it runs as fast as the SDK delivers them, not a timed FPS test. No
+            background or hardware is exercised.
+        </p>
+        <div class="button-row settings-actions">
+            <button
+                type="button"
+                class="button primary"
+                @click="start"
+                :disabled="!canStart"
+                x-text="busy ? 'Starting…' : 'Start benchmark'"
+            ></button>
+            <button
+                type="button"
+                class="button"
+                @click="showProgress"
+                x-show="view.running"
+                aria-haspopup="dialog"
+            >
+                View progress
+            </button>
+        </div>
+        <p class="danger-text" role="alert" x-show="error" x-text="error"></p>
+        <section
+            class="settings-section benchmark-results"
+            aria-label="Benchmark results"
+            x-show="hasResults"
+        >
+            <header class="runtime-toolbar">
+                <div class="runtime-metadata">
+                    <h3>Latest results</h3>
+                    <p class="field-help" x-show="view.report" x-text="reportSummary"></p>
+                </div>
+                <div class="button-row" role="group" aria-label="Export benchmark report">
+                    <button
+                        type="button"
+                        class="button"
+                        @click="exportJson"
+                        :disabled="!canExport"
+                        aria-label="Export benchmark JSON"
+                    >
+                        JSON
+                    </button>
+                    <button
+                        type="button"
+                        class="button"
+                        @click="exportMarkdown"
+                        :disabled="!canExport"
+                        aria-label="Export benchmark Markdown"
+                    >
+                        Markdown
+                    </button>
+                    <button
+                        type="button"
+                        class="button"
+                        @click="exportCsv"
+                        :disabled="!canExport"
+                        aria-label="Export benchmark CSV"
+                    >
+                        CSV
+                    </button>
+                </div>
+            </header>
+            <p class="field-help" role="status" x-show="loadingResult">Loading benchmark report…</p>
+            <p class="danger-text" role="alert" x-show="resultError" x-text="resultError"></p>
+            <button type="button" class="button" x-show="canRetryResult" @click="retryResult">
+                Retry result retrieval
+            </button>
+            <details class="disclosure" x-show="view.report">
+                <summary>Report limitations and errors</summary>
+                <ul class="disclosure-body">
+                    <template x-for="item in limitations" :key="item">
+                        <li x-text="item"></li>
+                    </template>
+                </ul>
+            </details>
+            <p class="field-help">
+                Displayed FPS and input-to-visible latency are not measured by host writes. Use
+                external numbered-frame capture for hardware qualification. Render-only results have
+                no transport completion.
+            </p>
+            <div
+                class="runtime-table-scroll"
+                x-show="runs.length"
+                role="region"
+                aria-label="Benchmark mode comparison"
+                tabindex="0"
+            >
+                <p class="field-help">
+                    These cells share one device, build, pattern and requested rate. Compare
+                    matching repetitions; queued mode differences are intentional. Exported reports
+                    must have compatible host, firmware, asset and measurement settings before
+                    comparison.
+                </p>
+                <table class="runtime-table">
+                    <thead>
+                        <tr>
+                            <th scope="col">Mode</th>
+                            <th scope="col">Repetition</th>
+                            <th scope="col">Completed surfaces</th>
+                            <th scope="col">Report bytes</th>
+                            <th scope="col">Queue p95 ms</th>
+                            <th scope="col">Status</th>
+                        </tr>
+                    </thead>
+                    <tbody>
+                        <template x-for="cell in runs" :key="cell.mode + '-' + cell.repetition">
+                            <tr>
+                                <td x-text="cell.mode"></td>
+                                <td x-text="cell.repetition"></td>
+                                <td x-text="cell.output.total_completed"></td>
+                                <td x-text="cell.output.total_report_bytes"></td>
+                                <td x-text="format(cell.queue_ms.p95)"></td>
+                                <td x-text="cell.status"></td>
+                            </tr>
+                        </template>
+                    </tbody>
+                </table>
+            </div>
+            <template x-for="run in runs" :key="run.mode + '-' + run.repetition">
+                <details class="disclosure">
+                    <summary
+                        x-text="run.mode + ' · run ' + run.repetition + ' · ' + run.status"
+                    ></summary>
+                    <div class="disclosure-body">
+                        <p
+                            x-text="'Render p95: ' + format(run.render_ms.p95) + ' ms · queue p95: ' + format(run.queue_ms.p95) + ' ms · transfer p95: ' + format(run.transfer_ms.p95) + ' ms'"
+                        ></p>
+                        <p
+                            x-text="'Sent report bytes: ' + run.output.total_report_bytes + ' · peak pending bytes: ' + run.output.peak_pending_bytes"
+                        ></p>
+                        <p x-text="'Restoration: ' + run.restoration"></p>
+                        <p class="danger-text" x-show="run.error" x-text="run.error"></p>
+                        <div
+                            class="runtime-table-scroll"
+                            role="region"
+                            aria-label="Per-surface benchmark results"
+                            tabindex="0"
+                        >
+                            <table class="runtime-table">
+                                <thead>
+                                    <tr>
+                                        <th scope="col">Surface</th>
+                                        <th scope="col">Generated</th>
+                                        <th scope="col">Enqueued</th>
+                                        <th scope="col">Host completed</th>
+                                        <th scope="col">Dropped</th>
+                                        <th scope="col">Host FPS</th>
+                                    </tr>
+                                </thead>
+                                <tbody>
+                                    <template
+                                        x-for="surface in run.surfaces"
+                                        :key="surface.surface_id"
+                                    >
+                                        <tr>
+                                            <td x-text="surface.surface_id"></td>
+                                            <td x-text="surface.generated"></td>
+                                            <td x-text="surface.enqueued"></td>
+                                            <td x-text="surface.transport_completed"></td>
+                                            <td x-text="surface.dropped"></td>
+                                            <td x-text="format(surface.host_completed_fps)"></td>
+                                        </tr>
+                                    </template>
+                                </tbody>
+                            </table>
+                        </div>
+                    </div>
+                </details>
+            </template>
+            <details class="disclosure" x-show="pluginResult">
+                <summary>Plugin fixture details</summary>
+                <div class="disclosure-body">
+                    <pre class="benchmark-plugin-result" x-text="pluginResult"></pre>
+                </div>
+            </details>
+        </section>
+    </section>
+    <section
+        id="diagnostics-dependencies"
+        tabindex="-1"
+        class="card settings-card"
+        x-data="dependencies"
+        aria-label="Dependency explorer"
+    >
+        <h2>Dependency explorer and layout lint</h2>
+        <label>
+            Search references
+            <input type="search" x-model="query" />
+        </label>
+        <label>
+            Entity ID
+            <input x-model="entity" placeholder="profile:default, plugin:…, media:…" />
+        </label>
+        <label>
+            Direction
+            <select x-model="direction">
+                <option value="incoming">Incoming</option>
+                <option value="outgoing">Outgoing</option>
+            </select>
+        </label>
+        <p>Findings are advice and do not prevent actions.</p>
+        <template x-for="finding in findings">
+            <p>
+                <span x-text="finding.message"></span>
+                <button
+                    class="button"
+                    :data-profile="finding.profile"
+                    :data-page="finding.page"
+                    :data-control="finding.control"
+                    @click="navigate"
+                >
+                    Open location
+                </button>
+            </p>
+        </template>
+        <details>
+            <summary x-text="references.length + ' references'"></summary>
+            <template x-for="reference in references">
+                <p>
+                    <span
+                        x-text="reference.source + ' → ' + reference.target + ' (' + reference.path + ')'"
+                    ></span>
+                    <button
+                        class="button"
+                        :data-profile="reference.profile"
+                        :data-page="reference.page"
+                        :data-control="reference.control"
+                        @click="navigate"
+                    >
+                        Open location
+                    </button>
+                </p>
+            </template>
+        </details>
+    </section>
+    <section class="card settings-card">
+        <h2
+            x-text="resourceUsageEnabled ? 'Performance — last five minutes' : 'Performance — paused'"
+        ></h2>
+        <p class="field-help" x-show="!resourceUsageEnabled">
+            Live performance updates are paused while resource usage is off.
+        </p>
+        <p
+            x-text="'Render cache: ' + report.cache.bytes + ' bytes · ' + report.cache.hits + ' hits / ' + report.cache.misses + ' misses'"
+        ></p>
+        <p x-show="!report.metrics.length">No native measurements available.</p>
+        <div class="performance-grid">
+            <template x-for="metric in report.metrics" :key="metric.name">
+                <article class="card">
+                    <strong x-text="metric.name"></strong>
+                    <p
+                        x-text="'Latest ' + format(metric.latest) + ' · p50 ' + format(metric.p50) + ' · p95 ' + format(metric.p95)"
+                    ></p>
+                    <small x-text="metric.count + ' samples · sum ' + format(metric.sum)"></small>
+                </article>
+            </template>
+        </div>
+    </section>
+    <div class="card diagnostic-table">
+        <template x-for="row in rows" :key="row.category">
+            <div class="diagnostic-row">
+                <strong x-text="row.category"></strong>
+                <pre x-text="row.value"></pre>
+                <span
+                    class="chip"
+                    x-show="row.status !== 'experimental'"
+                    x-text="row.status === 'experimental' ? '' : row.status"
+                ></span>
+            </div>
+        </template>
+    </div>
+    <div id="diagnostics-events" tabindex="-1" class="card events-card">
+        <h2>Recent runtime events</h2>
+        <p x-show="events.length === 0">No events yet. Try sending an input from the simulator.</p>
+        <p class="field-help">Local time · repeated display updates are grouped.</p>
+        <template x-for="event in events" :key="event.logId">
+            <div class="event-row">
+                <time
+                    :datetime="event.time.iso"
+                    :aria-label="event.time.title"
+                    x-text="event.time.label"
+                ></time>
+                <span x-text="'#' + event.sequence + ' · Revision ' + event.revision"></span>
+                <strong x-text="event.kind"></strong>
+                <span class="event-description" x-text="event.description"></span>
+            </div>
+        </template>
+    </div>
+    <dialog
+        x-ref="exportDialog"
+        class="feature-dialog wide-dialog"
+        aria-labelledby="diagnostic-export-title"
+        @cancel.prevent="cancelExport"
+    >
+        <header class="picker-header">
+            <h2 id="diagnostic-export-title">Review diagnostic report</h2>
+        </header>
+        <div class="feature-body">
+            <p>
+                Review the exact JSON before saving or sharing. It includes build, OS, session,
+                backend, runtime versions, plugin identifiers and performance summaries. Raw logs,
+                profile contents, settings, hostnames, device serials and user file paths are
+                excluded.
+            </p>
+            <p class="field-help">
+                Unavailable versions remain unknown. The preview expires after ten minutes. Nothing
+                is uploaded.
+            </p>
+            <label for="diagnostic-export-preview">Report contents</label>
+            <textarea
+                id="diagnostic-export-preview"
+                class="monospace"
+                rows="16"
+                readonly
+                :value="exportPreview"
+                spellcheck="false"
+            ></textarea>
+        </div>
+        <footer class="feature-footer button-row">
+            <button type="button" class="button" @click="cancelExport" :disabled="exportBusy">
+                Cancel
+            </button>
+            <button type="button" class="button primary" @click="saveExport" :disabled="exportBusy">
+                Save report
+            </button>
+        </footer>
+    </dialog>
+</section>

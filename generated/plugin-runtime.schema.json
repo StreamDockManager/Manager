@@ -1,0 +1,544 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "title": "Array_of_PluginRuntimeSnapshot",
+  "type": "array",
+  "items": {
+    "$ref": "#/$defs/PluginRuntimeSnapshot"
+  },
+  "$defs": {
+    "HealthCounts": {
+      "type": "object",
+      "properties": {
+        "automatic_restarts": {
+          "type": "integer",
+          "format": "uint64",
+          "minimum": 0
+        },
+        "crashes": {
+          "type": "integer",
+          "format": "uint64",
+          "minimum": 0
+        },
+        "failed_starts": {
+          "type": "integer",
+          "format": "uint64",
+          "minimum": 0
+        },
+        "issues": {
+          "type": "integer",
+          "format": "uint64",
+          "minimum": 0
+        }
+      },
+      "required": [
+        "crashes",
+        "failed_starts",
+        "automatic_restarts",
+        "issues"
+      ]
+    },
+    "HealthEvent": {
+      "type": "object",
+      "properties": {
+        "category": {
+          "type": "string"
+        },
+        "id": {
+          "type": "string"
+        },
+        "message": {
+          "type": "string"
+        },
+        "occurrences": {
+          "type": "integer",
+          "format": "uint64",
+          "minimum": 0
+        },
+        "run_id": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "severity": {
+          "type": "string"
+        },
+        "timestamp_ms": {
+          "type": "integer",
+          "format": "uint64",
+          "minimum": 0
+        },
+        "version": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "id",
+        "timestamp_ms",
+        "version",
+        "category",
+        "severity",
+        "message",
+        "occurrences"
+      ]
+    },
+    "MeasurementCoverage": {
+      "type": "string",
+      "enum": [
+        "unavailable",
+        "partial"
+      ]
+    },
+    "MeasurementSource": {
+      "type": "string",
+      "enum": [
+        "unavailable",
+        "process_tree_rss",
+        "shared_webview",
+        "sdk_payload"
+      ]
+    },
+    "MeasurementState": {
+      "type": "string",
+      "enum": [
+        "warming_up",
+        "available",
+        "stale",
+        "unavailable",
+        "not_running"
+      ]
+    },
+    "PluginDemand": {
+      "type": "object",
+      "properties": {
+        "device_id": {
+          "type": "string"
+        },
+        "profile_id": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "device_id",
+        "profile_id"
+      ]
+    },
+    "PluginHealth": {
+      "type": "object",
+      "properties": {
+        "blocked_reason": {
+          "type": [
+            "string",
+            "null"
+          ],
+          "default": null
+        },
+        "events": {
+          "type": "array",
+          "default": [],
+          "items": {
+            "$ref": "#/$defs/HealthEvent"
+          }
+        },
+        "last_exit": {
+          "type": [
+            "string",
+            "null"
+          ],
+          "default": null
+        },
+        "last_exit_code": {
+          "type": [
+            "integer",
+            "null"
+          ],
+          "format": "int32",
+          "default": null
+        },
+        "last_exit_signal": {
+          "type": [
+            "integer",
+            "null"
+          ],
+          "format": "int32",
+          "default": null
+        },
+        "last_issue_ms": {
+          "type": [
+            "integer",
+            "null"
+          ],
+          "format": "uint64",
+          "default": null,
+          "minimum": 0
+        },
+        "last_registration_ms": {
+          "type": [
+            "integer",
+            "null"
+          ],
+          "format": "uint64",
+          "default": null,
+          "minimum": 0
+        },
+        "last_run_peak_resident_bytes": {
+          "type": [
+            "integer",
+            "null"
+          ],
+          "format": "uint64",
+          "default": null,
+          "minimum": 0
+        },
+        "last_unexpected_exit_ms": {
+          "type": [
+            "integer",
+            "null"
+          ],
+          "format": "uint64",
+          "default": null,
+          "minimum": 0
+        },
+        "missing_assets": {
+          "type": "array",
+          "default": [],
+          "items": {
+            "type": "string"
+          }
+        },
+        "recent_failures": {
+          "type": "array",
+          "default": [],
+          "items": {
+            "type": "string"
+          }
+        },
+        "restart_attempts": {
+          "type": "integer",
+          "format": "uint8",
+          "default": 0,
+          "maximum": 255,
+          "minimum": 0
+        },
+        "session": {
+          "$ref": "#/$defs/HealthCounts",
+          "default": {
+            "automatic_restarts": 0,
+            "crashes": 0,
+            "failed_starts": 0,
+            "issues": 0
+          }
+        },
+        "totals": {
+          "$ref": "#/$defs/HealthCounts",
+          "default": {
+            "automatic_restarts": 0,
+            "crashes": 0,
+            "failed_starts": 0,
+            "issues": 0
+          }
+        },
+        "unsupported_apis": {
+          "type": "array",
+          "default": [],
+          "items": {
+            "type": "string"
+          }
+        }
+      }
+    },
+    "PluginNetwork": {
+      "type": "object",
+      "properties": {
+        "coverage": {
+          "$ref": "#/$defs/MeasurementCoverage"
+        },
+        "download_bytes_per_second": {
+          "type": [
+            "number",
+            "null"
+          ],
+          "format": "double"
+        },
+        "received_bytes": {
+          "type": [
+            "integer",
+            "null"
+          ],
+          "format": "uint64",
+          "minimum": 0
+        },
+        "sampled_at_ms": {
+          "type": [
+            "integer",
+            "null"
+          ],
+          "format": "uint64",
+          "minimum": 0
+        },
+        "sent_bytes": {
+          "type": [
+            "integer",
+            "null"
+          ],
+          "format": "uint64",
+          "minimum": 0
+        },
+        "source": {
+          "$ref": "#/$defs/MeasurementSource"
+        },
+        "state": {
+          "$ref": "#/$defs/MeasurementState"
+        },
+        "upload_bytes_per_second": {
+          "type": [
+            "number",
+            "null"
+          ],
+          "format": "double"
+        }
+      },
+      "required": [
+        "state",
+        "source",
+        "coverage"
+      ]
+    },
+    "PluginResources": {
+      "type": "object",
+      "properties": {
+        "cpu_percent": {
+          "type": [
+            "number",
+            "null"
+          ],
+          "format": "double"
+        },
+        "history": {
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/ResourceSample"
+          }
+        },
+        "peak_cpu_percent": {
+          "type": [
+            "number",
+            "null"
+          ],
+          "format": "double",
+          "default": null
+        },
+        "peak_resident_bytes": {
+          "type": "integer",
+          "format": "uint64",
+          "minimum": 0
+        },
+        "process_count": {
+          "type": [
+            "integer",
+            "null"
+          ],
+          "format": "uint",
+          "minimum": 0
+        },
+        "resident_bytes": {
+          "type": [
+            "integer",
+            "null"
+          ],
+          "format": "uint64",
+          "minimum": 0
+        },
+        "root_pid": {
+          "type": [
+            "integer",
+            "null"
+          ],
+          "format": "uint32",
+          "minimum": 0
+        },
+        "sampled_at_ms": {
+          "type": [
+            "integer",
+            "null"
+          ],
+          "format": "uint64",
+          "minimum": 0
+        },
+        "source": {
+          "$ref": "#/$defs/MeasurementSource"
+        },
+        "state": {
+          "$ref": "#/$defs/MeasurementState"
+        }
+      },
+      "required": [
+        "state",
+        "source",
+        "peak_resident_bytes",
+        "history"
+      ]
+    },
+    "PluginRuntime": {
+      "type": "object",
+      "properties": {
+        "demand": {
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/PluginDemand"
+          }
+        },
+        "last_wake_at_ms": {
+          "type": [
+            "integer",
+            "null"
+          ],
+          "format": "uint64",
+          "default": null,
+          "minimum": 0
+        },
+        "last_wake_reason": {
+          "description": "Last admitted start in this Manager session; retains only categorical reasons",
+          "anyOf": [
+            {
+              "$ref": "#/$defs/RuntimeReason"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null
+        },
+        "network": {
+          "$ref": "#/$defs/PluginNetwork"
+        },
+        "reason": {
+          "$ref": "#/$defs/RuntimeReason"
+        },
+        "resources": {
+          "$ref": "#/$defs/PluginResources"
+        },
+        "run_id": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "started_at_ms": {
+          "type": [
+            "integer",
+            "null"
+          ],
+          "format": "uint64",
+          "minimum": 0
+        },
+        "state": {
+          "$ref": "#/$defs/RuntimeState"
+        },
+        "uptime_ms": {
+          "type": [
+            "integer",
+            "null"
+          ],
+          "format": "uint64",
+          "minimum": 0
+        }
+      },
+      "required": [
+        "state",
+        "reason",
+        "demand",
+        "resources",
+        "network"
+      ]
+    },
+    "PluginRuntimeSnapshot": {
+      "type": "object",
+      "properties": {
+        "enabled": {
+          "type": "boolean"
+        },
+        "health": {
+          "$ref": "#/$defs/PluginHealth"
+        },
+        "id": {
+          "type": "string"
+        },
+        "runtime": {
+          "$ref": "#/$defs/PluginRuntime"
+        },
+        "status": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "id",
+        "status",
+        "enabled",
+        "runtime",
+        "health"
+      ]
+    },
+    "ResourceSample": {
+      "type": "object",
+      "properties": {
+        "cpu_percent": {
+          "type": [
+            "number",
+            "null"
+          ],
+          "format": "double"
+        },
+        "resident_bytes": {
+          "type": [
+            "integer",
+            "null"
+          ],
+          "format": "uint64",
+          "minimum": 0
+        },
+        "timestamp_ms": {
+          "type": "integer",
+          "format": "uint64",
+          "minimum": 0
+        }
+      },
+      "required": [
+        "timestamp_ms"
+      ]
+    },
+    "RuntimeReason": {
+      "type": "string",
+      "enum": [
+        "disabled",
+        "no_active_device",
+        "no_active_profile_demand",
+        "no_visible_actions",
+        "required_by_active_profile",
+        "manual_action",
+        "configuration",
+        "registration",
+        "missing_runtime",
+        "compatibility",
+        "unexpected_exit",
+        "registration_timeout",
+        "repeated_failures",
+        "user_restart",
+        "shutdown"
+      ]
+    },
+    "RuntimeState": {
+      "type": "string",
+      "enum": [
+        "disabled",
+        "idle",
+        "queued",
+        "starting",
+        "running",
+        "stopping",
+        "retrying",
+        "blocked"
+      ]
+    }
+  }
+}

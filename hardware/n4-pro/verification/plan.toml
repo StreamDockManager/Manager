@@ -1,0 +1,25 @@
+revision = "2"
+model_id = "n4-pro"
+features = [
+  "startup-logo-fit-crop-orientation",
+  "startup-logo-restart-persistence",
+  "startup-logo-disconnect-recovery",
+  "identity-firmware",
+  "all-button-edges",
+  "all-encoder-pulses",
+  "all-encoder-rotations",
+  "touch-zones-coordinates-swipes",
+  "png-jpeg-orientation",
+  "gif-mp4-playback-timing",
+  "animation-scene-sleep-disconnect-cancellation",
+  "background-rectangles",
+  "brightness-sleep-lighting",
+  "twenty-reconnects",
+  "restart-sleep-wake",
+  "portal-denial-revocation-restoration",
+  "audio-device-changes",
+  "multiple-device-isolation",
+  "eight-hour-soak",
+  "bounded-output-20fps",
+  "dispatch-under-50ms",
+]

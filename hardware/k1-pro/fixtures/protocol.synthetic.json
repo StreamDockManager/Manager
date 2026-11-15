@@ -1,0 +1,146 @@
+{
+    "method": "simulated",
+    "provenance": "Synthetic Python SDK 82efe4d97e6bdbb9b10cbf1a80fd53d8393b278e semantics, with explicit HIDAPI report ID 4. Not a capture or physical qualification.",
+    "model_id": "k1-pro",
+    "report_id": 4,
+    "report_size": 1025,
+    "usb_ids": ["6603:1015", "5548:1025", "6603:1019"],
+    "inputs": [
+        {
+            "event": "button",
+            "code": 5,
+            "control_id": "key-1",
+            "states": [0, 1, 2]
+        },
+        {
+            "event": "button",
+            "code": 3,
+            "control_id": "key-2",
+            "states": [0, 1, 2]
+        },
+        {
+            "event": "button",
+            "code": 1,
+            "control_id": "key-3",
+            "states": [0, 1, 2]
+        },
+        {
+            "event": "button",
+            "code": 6,
+            "control_id": "key-4",
+            "states": [0, 1, 2]
+        },
+        {
+            "event": "button",
+            "code": 4,
+            "control_id": "key-5",
+            "states": [0, 1, 2]
+        },
+        {
+            "event": "button",
+            "code": 2,
+            "control_id": "key-6",
+            "states": [0, 1, 2]
+        },
+        {
+            "event": "pulse",
+            "code": 37,
+            "control_id": "dial-1",
+            "states": [1]
+        },
+        {
+            "event": "rotate",
+            "code": 80,
+            "control_id": "dial-1",
+            "delta": -1,
+            "states": [0, 1, 2]
+        },
+        {
+            "event": "rotate",
+            "code": 81,
+            "control_id": "dial-1",
+            "delta": 1,
+            "states": [0, 1, 2]
+        },
+        {
+            "event": "pulse",
+            "code": 48,
+            "control_id": "dial-2",
+            "states": [1]
+        },
+        {
+            "event": "rotate",
+            "code": 96,
+            "control_id": "dial-2",
+            "delta": -1,
+            "states": [0, 1, 2]
+        },
+        {
+            "event": "rotate",
+            "code": 97,
+            "control_id": "dial-2",
+            "delta": 1,
+            "states": [0, 1, 2]
+        },
+        {
+            "event": "pulse",
+            "code": 49,
+            "control_id": "dial-3",
+            "states": [1]
+        },
+        {
+            "event": "rotate",
+            "code": 144,
+            "control_id": "dial-3",
+            "delta": -1,
+            "states": [0, 1, 2]
+        },
+        {
+            "event": "rotate",
+            "code": 145,
+            "control_id": "dial-3",
+            "delta": 1,
+            "states": [0, 1, 2]
+        }
+    ],
+    "surfaces": [
+        {
+            "control_id": "key-1",
+            "slot": 5,
+            "wire_size": [64, 64],
+            "encoding": "jpeg"
+        },
+        {
+            "control_id": "key-2",
+            "slot": 3,
+            "wire_size": [64, 64],
+            "encoding": "jpeg"
+        },
+        {
+            "control_id": "key-3",
+            "slot": 1,
+            "wire_size": [64, 64],
+            "encoding": "jpeg"
+        },
+        {
+            "control_id": "key-4",
+            "slot": 6,
+            "wire_size": [64, 64],
+            "encoding": "jpeg"
+        },
+        {
+            "control_id": "key-5",
+            "slot": 4,
+            "wire_size": [64, 64],
+            "encoding": "jpeg"
+        },
+        {
+            "control_id": "key-6",
+            "slot": 2,
+            "wire_size": [64, 64],
+            "encoding": "jpeg"
+        }
+    ],
+    "mode": null,
+    "python_normalized_states": true
+}

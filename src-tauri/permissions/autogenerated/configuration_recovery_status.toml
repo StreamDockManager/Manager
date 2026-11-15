@@ -1,0 +1,11 @@
+# Automatically generated - DO NOT EDIT!
+
+[[permission]]
+identifier = "allow-configuration-recovery-status"
+description = "Enables the configuration_recovery_status command without any pre-configured scope."
+commands.allow = ["configuration_recovery_status"]
+
+[[permission]]
+identifier = "deny-configuration-recovery-status"
+description = "Denies the configuration_recovery_status command without any pre-configured scope."
+commands.deny = ["configuration_recovery_status"]

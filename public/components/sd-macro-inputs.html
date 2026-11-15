@@ -1,0 +1,158 @@
+<template x-if="namedMode">
+    <dialog
+        class="feature-dialog macro-settings-dialog"
+        x-ref="macroSettingsDialog"
+        :aria-labelledby="'macro-settings-title-' + editorId"
+        @cancel.prevent.stop="closeMacroSettings"
+    >
+        <header class="picker-header">
+            <div>
+                <h2 :id="'macro-settings-title-' + editorId">Macro settings</h2>
+                <p>Choose a profile context and define inputs for callers.</p>
+            </div>
+            <button
+                type="button"
+                class="icon-button"
+                aria-label="Close macro settings"
+                @click="closeMacroSettings"
+            >
+                ×
+            </button>
+        </header>
+        <div class="feature-body">
+            <label>
+                Profile context
+                <select x-model="settingsProfileId">
+                    <option value="">Automatic</option>
+                    <template
+                        x-for="option in targetOptions(app.snapshot.profiles, settingsProfileId)"
+                        :key="option.value"
+                    >
+                        <option
+                            :value="option.value"
+                            :selected="option.value === settingsProfileId"
+                            x-text="option.label"
+                        ></option>
+                    </template>
+                </select>
+            </label>
+            <p class="field-help">
+                Used for page and parameter choices and simulation in this editor.
+            </p>
+            <h3>Inputs</h3>
+            <div class="parameter-editors">
+                <p class="field-help">
+                    Inputs belong to this call. Use an input reference beside a supported action
+                    field, or forward it explicitly to another macro.
+                </p>
+                <template x-for="(input,index) in settingsInputs" :key="index">
+                    <fieldset class="parameter-editor">
+                        <legend x-text="'Input ' + (index + 1)"></legend>
+                        <div class="settings-form-grid parameter-fields">
+                            <label>
+                                Name
+                                <input
+                                    aria-label="Macro input name"
+                                    x-model="input.name"
+                                    maxlength="80"
+                                />
+                            </label>
+                            <label>
+                                Label
+                                <input
+                                    aria-label="Macro input label"
+                                    x-model="input.label"
+                                    maxlength="256"
+                                />
+                            </label>
+                            <label>
+                                Type
+                                <select
+                                    aria-label="Macro input type"
+                                    x-model="input.type"
+                                    :data-index="index"
+                                    @change="macroInputType"
+                                >
+                                    <option value="string">Text</option>
+                                    <option value="number">Number</option>
+                                    <option value="boolean">Boolean</option>
+                                </select>
+                            </label>
+                            <label class="preference-toggle">
+                                <input type="checkbox" x-model="input.required" />
+                                <span>Required input</span>
+                            </label>
+                            <label class="preference-toggle">
+                                <input
+                                    type="checkbox"
+                                    :checked="input.default !== null"
+                                    :data-index="index"
+                                    data-toggle="true"
+                                    @change="macroInputDefault"
+                                />
+                                <span>Use input default</span>
+                            </label>
+                            <template x-if="input.default !== null && input.type !== 'boolean'">
+                                <label>
+                                    Input default
+                                    <input
+                                        aria-label="Input default"
+                                        :type="input.type === 'number' ? 'number' : 'text'"
+                                        :value="input.default"
+                                        :data-index="index"
+                                        @change="macroInputDefault"
+                                    />
+                                </label>
+                            </template>
+                            <template x-if="input.default !== null && input.type === 'boolean'">
+                                <label class="preference-toggle">
+                                    <input
+                                        aria-label="Boolean input default"
+                                        type="checkbox"
+                                        :checked="input.default"
+                                        :data-index="index"
+                                        @change="macroInputDefault"
+                                    />
+                                    <span>Default is true</span>
+                                </label>
+                            </template>
+                        </div>
+                        <button
+                            class="text-button danger-text"
+                            type="button"
+                            :data-index="index"
+                            @click="removeMacroInput"
+                            :aria-label="'Remove input ' + input.name"
+                        >
+                            Remove input
+                        </button>
+                    </fieldset>
+                </template>
+                <div class="button-row">
+                    <button
+                        class="button"
+                        type="button"
+                        @click="addMacroInput"
+                        :disabled="settingsInputs.length >= 64"
+                    >
+                        Add macro input
+                    </button>
+                </div>
+            </div>
+            <p
+                class="danger-text field-help"
+                role="alert"
+                x-show="settingsError"
+                x-text="settingsError"
+            ></p>
+        </div>
+        <footer class="feature-footer">
+            <div class="button-row">
+                <button type="button" class="button" @click="closeMacroSettings">Cancel</button>
+                <button type="button" class="button primary" @click="applyMacroSettings">
+                    Apply settings
+                </button>
+            </div>
+        </footer>
+    </dialog>
+</template>

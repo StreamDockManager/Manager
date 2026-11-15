@@ -1,0 +1,11 @@
+[Desktop Entry]
+Type=Application
+Name=Stream Dock Manager
+Comment=Configure and manage Stream Dock devices
+Exec=stream-dock-manager %u
+Icon=app.streamdockmanager.manager
+Terminal=false
+Categories=Utility;Settings;
+StartupNotify=true
+StartupWMClass=Stream Dock Manager
+MimeType=x-scheme-handler/stream-dock-manager;

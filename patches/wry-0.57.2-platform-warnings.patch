@@ -1,0 +1,43 @@
+--- a/src/webkitgtk/mod.rs
++++ b/src/webkitgtk/mod.rs
+@@ -367,0 +368,2 @@
++            // The replacement requires WebKitGTK 2.40; retain the supported 2.38 API
++            #[allow(deprecated)]
+@@ -600,3 +602 @@
+-          #[cfg(feature = "v2_42")]
+-          let is_display = media_request.is_for_display_device();
+-          #[cfg(not(feature = "v2_42"))]
++          // Keep the WebKitGTK 2.38-compatible display-capture fallback
+@@ -805,0 +806,2 @@
++      // The replacement requires WebKitGTK 2.40; retain the supported 2.38 API
++      #[allow(deprecated)]
+--- a/src/webkitgtk/synthetic_mouse_events.rs
++++ b/src/webkitgtk/synthetic_mouse_events.rs
+@@ -21,0 +22,2 @@
++        // The replacement requires WebKitGTK 2.40; retain the supported 2.38 API
++        #[allow(deprecated)]
+@@ -31,0 +34,2 @@
++        // The replacement requires WebKitGTK 2.40; retain the supported 2.38 API
++        #[allow(deprecated)]
+@@ -55,0 +60,2 @@
++        // The replacement requires WebKitGTK 2.40; retain the supported 2.38 API
++        #[allow(deprecated)]
+@@ -65,0 +72,2 @@
++        // The replacement requires WebKitGTK 2.40; retain the supported 2.38 API
++        #[allow(deprecated)]
+--- a/src/wkwebview/mod.rs
++++ b/src/wkwebview/mod.rs
+@@ -32,0 +33,2 @@
++#[cfg(any(debug_assertions, feature = "devtools", feature = "mac-proxy"))]
++use objc2::runtime::NSObject;
+@@ -38 +40 @@
+-  runtime::{AnyObject, NSObject, ProtocolObject},
++  runtime::{AnyObject, ProtocolObject},
+--- a/src/wkwebview/download.rs
++++ b/src/wkwebview/download.rs
+@@ -106 +106 @@
+-  error: &NSError,
++  _error: &NSError,
+@@ -112 +112 @@
+-      let description = error.localizedDescription().to_string();
++      let description = _error.localizedDescription().to_string();

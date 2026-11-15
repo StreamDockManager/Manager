@@ -1,0 +1,255 @@
+{
+    "schema_version": 1,
+    "sdk": "@elgato/streamdeck@3.0.4",
+    "schema": "@elgato/schemas@0.6.0",
+    "scope": "All explicit 7.0/7.1 requiresVersion sites and version-labelled API declarations in the pinned SDK dist, plus changes from manifest 6.9 to 7.0 to 7.1. Not a claim about undocumented vendor behavior.",
+    "production_version": "7.1.0",
+    "candidate_version": "7.1.0",
+    "full_compatibility_claim": false,
+    "gates": [
+        {
+            "feature": "Default settings behavior",
+            "minimum": "7.1",
+            "upstream": [
+                "dist/plugin/settings.js:validateSettingsBehavior",
+                "dist/plugin/settings.js:onDidReceiveSettings",
+                "dist/plugin/settings.js:onDidReceiveGlobalSettings",
+                "dist/plugin/actions/action-base.js:getSettings,setSettings,#fetch",
+                "dist/plugin/actions/service.js:ActionService",
+                "dist/plugin/actions/cache.js:SettingsCache"
+            ],
+            "contract": "Both registration version and manifest minimum are checked. Default cache clones settings, seeds on appearance, replaces on received settings and deletes on disappearance/setSettings. Getter IDs suppress callbacks; PI edits notify; runtime writes do not notify themselves.",
+            "implementation": [
+                "crates/plugin-host/src/lib.rs:getSettings,setSettings,getGlobalSettings,setGlobalSettings,synchronize",
+                "crates/plugin-host/src/saved_settings.rs:publish_settings,commit_saved_settings",
+                "crates/plugin-host/src/saved_settings_reads.rs:read-after-write fences",
+                "crates/runtime/src/plugin_settings_persistence.rs:persist_saved_plugin_settings"
+            ],
+            "candidate_tests": [
+                "official_sdk_default_mode_candidate_semantics",
+                "official_sdk_default_mode_candidate_saved_read_after_write",
+                "official_sdk_default_mode_candidate_startup_callbacks",
+                "official_sdk_candidate_rejected_writes_preserve_values",
+                "official_sdk_real_runtime_settings_resources_survive_restart_and_rejection"
+            ],
+            "remaining": "Accepted/rejected owner ordering and real Runtime SQLite settings/global clean-restart persistence passed in the local isolated candidate. Actual inspector browser and reference-host parity remain independent."
+        },
+        {
+            "feature": "Get action resources",
+            "minimum": "7.1",
+            "upstream": [
+                "dist/plugin/actions/action-base.js:getResources,#fetch",
+                "dist/api/command.d.ts:GetResources",
+                "dist/api/events/action.d.ts:DidReceiveResources"
+            ],
+            "contract": "Version and manifest gate. ID-bearing didReceiveResources resolves getter without onDidReceiveResources callback; resources are a map of local file paths associated with the action.",
+            "implementation": [
+                "crates/plugin-host/src/lib.rs:getResources",
+                "crates/plugin-host/src/vendor_resources.rs:resources_event",
+                "crates/runtime/src/vendor_resources.rs:paths"
+            ],
+            "candidate_tests": [
+                "official_sdk_default_mode_candidate_semantics",
+                "official_sdk_default_mode_candidate_resource_read_after_write",
+                "official_sdk_candidate_rejected_writes_preserve_values",
+                "official_sdk_real_runtime_settings_resources_survive_restart_and_rejection"
+            ],
+            "remaining": "The local candidate proves genuine SDK getters against real Runtime managed files after source deletion and clean restart. Complete V3 import/export, reference-host behavior, crash recovery and other native platform flush guarantees remain separate."
+        },
+        {
+            "feature": "Set action resources and PI resource notifications",
+            "minimum": "7.1",
+            "upstream": [
+                "dist/plugin/actions/action-base.js:setResources",
+                "dist/plugin/actions/service.js:onDidReceiveResources",
+                "dist/api/command.d.ts:SetResources",
+                "dist/api/events/action.d.ts:DidReceiveResources"
+            ],
+            "contract": "Version and manifest gate. Files associated with an action are included in export. Runtime setter must not masquerade as a PI change; PI changes notify action listeners.",
+            "implementation": [
+                "crates/plugin-host/src/vendor_resources.rs:queue_resources,publish_resources",
+                "crates/runtime/src/vendor_resources.rs:stage",
+                "crates/runtime/src/plugin_settings_persistence.rs:persist_saved_plugin_settings"
+            ],
+            "candidate_tests": [
+                "official_sdk_default_mode_candidate_semantics",
+                "official_sdk_default_mode_candidate_resource_read_after_write",
+                "official_sdk_real_runtime_settings_resources_survive_restart_and_rejection"
+            ],
+            "remaining": "The local candidate proves genuine SDK-to-Runtime staging, immediate saved read, rejected missing-file staging preserving prior state, and clean-restart persistence. Browser arbitrary-file selection is unavailable. Reference-host, crash and native platform qualification remain separate."
+        },
+        {
+            "feature": "Resources on single-action and multi-action event payloads",
+            "minimum": "7.1",
+            "upstream": [
+                "dist/api/events/action.d.ts:SingleActionPayload.resources",
+                "dist/api/events/action.d.ts:MultiActionPayload.resources"
+            ],
+            "contract": "Action event payloads include resources, including an empty map when no resource is associated. Existing action metadata must survive settings updates.",
+            "implementation": [
+                "crates/plugin-host/src/lib.rs:dispatch,synchronize",
+                "crates/plugin-host/src/saved_settings.rs:settings_event",
+                "crates/plugin-host/src/vendor_resources.rs:publish_resources"
+            ],
+            "candidate_tests": [
+                "official_sdk_candidate_single_and_multi_action_resource_payloads",
+                "official_sdk_candidate_changed_settings_resource_payload"
+            ],
+            "remaining": "Candidate covers empty appearance maps, distinct single/multi input maps and changed-settings resource/action metadata. Complete vendor export and reference-host payload parity remain separate."
+        },
+        {
+            "feature": "Changed device event",
+            "minimum": "7.0",
+            "upstream": [
+                "dist/plugin/devices/service.js:onDeviceDidChange",
+                "dist/plugin/devices/device.js:Device",
+                "dist/api/events/device.d.ts:DeviceDidChange"
+            ],
+            "contract": "Version and manifest gate. Device name/size changes update the SDK device store before listener delivery; no fabricated reconnect.",
+            "implementation": ["crates/plugin-host/src/lib.rs:synchronize"],
+            "candidate_tests": ["official_sdk_default_mode_candidate_semantics"],
+            "existing_tests": [
+                "vendor_contract_tests::device_changes_emit_change_without_fabricating_reconnect"
+            ],
+            "remaining": "Synthetic-device evidence does not qualify physical devices or reference-host race/order behavior."
+        },
+        {
+            "feature": "Key logic availability declaration",
+            "minimum": "7.0",
+            "upstream": [
+                "../vendor/elgato/manifest-schema/v6.9.ts:Actions",
+                "../vendor/elgato/manifest-schema/latest.ts:SupportedInKeyLogicActions"
+            ],
+            "contract": "Manifest adds SupportedInKeyLogicActions boolean, default true. This controls availability inside vendor key logic actions.",
+            "implementation": [
+                "crates/plugin-host/src/lib.rs:PluginAction,read_plugin",
+                "crates/plugin-host/src/manifest_schema.rs:unsupported",
+                "crates/runtime/src/builtins/key_logic.rs",
+                "crates/runtime/src/lib.rs:validate_workspace",
+                "src/key-logic.ts"
+            ],
+            "remaining": "Manager Gesture supports configurable tap/double/hold through existing nested multi-action pulse transport, requiring both key-logic and multi-action eligibility flags. Picker/save and normal/manual/tracked dispatch enforce those flags. Exact vendor timing, nested payload/state/context and release behavior remain unqualified. Explicit declarations require manifest minimum 7.0, admitted by the production 7.1 subset; older omitted=true defaults can also use the bounded Manager behavior. This SDK candidate does not itself qualify key logic.",
+            "existing_tests": [
+                "vendor_contract_tests::vendor_manifest_action_flags_are_projected_with_upstream_true_defaults",
+                "builtins::key_logic_tests",
+                "key-logic.test.ts",
+                "action-library.test.ts"
+            ]
+        },
+        {
+            "feature": "Node version declarations",
+            "minimum": "7.1",
+            "upstream": [
+                "../vendor/elgato/manifest-schema/v7.0.ts:Nodejs.Version",
+                "../vendor/elgato/manifest-schema/v7.1.ts",
+                "../vendor/elgato/manifest-schema/latest.ts:Nodejs.Version"
+            ],
+            "contract": "7.0 restricts Node to20; pinned7.1 schema admits20,24,26. Shape admission is separate from supported published LTS selection.",
+            "implementation": [
+                "crates/plugin-host/src/manifest_schema.rs:validate",
+                "crates/plugin-runtimes/src/service.rs"
+            ],
+            "candidate_tests": ["current_sdk_candidate::Fixture::new"],
+            "existing_tests": [
+                "manifest_schema::tests::official_version_branches_gate_node_controllers_and_fields"
+            ],
+            "remaining": "Candidate selects existing Node24 with no override. It does not qualify Node20, Node26, all OS targets or an installed vendor application."
+        }
+    ],
+    "independent_release_blockers": [
+        "Full vendor profile V3 import/install/switch/export",
+        "Actual inspector browser and popup behavior",
+        "Reference-host captures and comparison",
+        "Physical hardware and optical qualification",
+        "Native target matrix and platform-specific durability",
+        "Untouched upstream Counter execution"
+    ],
+    "candidate_observation": {
+        "source_sha256": "d15b30a2ff564a78bbec9e5a9a282821d86a463fa8b918278f8d68587ff81eab",
+        "artifact_directory": "artifacts/current-sdk-candidate/snapshot-x8tichds",
+        "status": "passed-isolated-transport-and-real-runtime-candidate",
+        "passed": 10,
+        "failed": 0,
+        "stages": [
+            {
+                "stage": "host-transport",
+                "passed": 7,
+                "failed": 0
+            },
+            {
+                "stage": "real-runtime-durability",
+                "passed": 3,
+                "failed": 0
+            }
+        ],
+        "boundary": "Post-format source snapshot. Unmodified SDK 3.0.4 defaults, schema-valid 7.1/Node 24 without override. Seven host tests, the real Runtime settings/global/resource staging/rejection/restart test and two genuine SDK bundled-profile cases passed. Profile requests traverse the authenticated socket, typed host effect, real bounded queue and production transactions; test-only dequeue hold preserves actual admission for stale navigation/reconnection assertions. Independent synthetic driver, unchanged authentic archive/manifest, no upstream sample execution or fake commit. Production contract and registry remained 6.9 during that historical run; promotion to the explicit 7.1 subset was separately reviewed afterward. Evidence prose is recorded after the tested snapshot.",
+        "remaining_failure": null,
+        "remaining_qualification": [
+            "Trusted browser interaction/permissions and reference-host parity; structural native WK evidence is separately recorded",
+            "Full profile V3, multipage/general vendor formats, reference host and physical hardware",
+            "Crash/power-loss recovery and native target matrix; this candidate ran on local macOS only"
+        ],
+        "full_compatibility_claim": false
+    },
+    "runtime_profile_qualification": {
+        "driver": "tests/fixtures/plugins/elgato-sdk-executable/src/bundled-profiles.js",
+        "synthetic_manifest": "tests/fixtures/plugins/elgato-sdk-executable/src/bundled-profiles.manifest.json",
+        "sdk_calls": [
+            "profiles.switchToProfile(device, \"sd\")",
+            "profiles.switchToProfile(device, \"sd\", 0)",
+            "profiles.switchToProfile(device, \"sd\", 1)",
+            "profiles.switchToProfile(device, undefined)",
+            "profiles.switchToProfile(device, undefined, 0)"
+        ],
+        "candidate_tests": [
+            "bundled_profiles::official_sdk_bundled_profiles_review_decline_accept_restart_and_return",
+            "bundled_profiles::official_sdk_bundled_profiles_reject_stale_queued_navigation_and_reconnection"
+        ],
+        "assertions": [
+            "AutoInstall false produces no startup review; genuine SDK request emits review with unchanged archive digest and 15 bindings",
+            "Review/decline do not change workspace; acceptance persists fresh profile, owner mapping and selection across full Runtime/SDK restart",
+            "Installed switching uses the mapping without reimport; page 1 is explicitly rejected while omitted/zero page is accepted",
+            "Omitted profile restores the tracked prior profile/page; any ordinary navigation invalidates that return chain",
+            "Real socket requests captured in a held production queue are rejected after navigation or reconnection without workspace writes"
+        ],
+        "scope": "Observed owned single-page V2 archive on synthetic m3. Independent driver only; untouched upstream program is not executed. No full V3, vendor parity, native Windows or hardware claim.",
+        "artifact_directory": "artifacts/current-sdk-candidate/production-8vbm656f",
+        "full_compatibility_claim": false,
+        "production_mode": true
+    },
+    "production_compatibility_label": "streamdeck-7.1-subset",
+    "production_observation": {
+        "status": "passed-direct-production-transport-and-real-runtime",
+        "artifact_directory": "artifacts/current-sdk-candidate/production-8vbm656f",
+        "source_sha256": "22607b429d015260935d90dd19a230f846b8f3d9c004eed74cf13b6bce0832c8",
+        "passed": 10,
+        "failed": 0,
+        "stages": [
+            {
+                "stage": "host-transport",
+                "passed": 7,
+                "failed": 0
+            },
+            {
+                "stage": "real-runtime-durability",
+                "passed": 3,
+                "failed": 0
+            }
+        ],
+        "execution": "Cargo ran directly in the production checkout, not the archived copy. No declaration or registration injection. Source inputs and authentic fixture bytes were unchanged during the run.",
+        "production_contract_sha256": {
+            "crates/plugin-host/connection-contract.v1.json": "88a89d0bd24db61de73efd379fb0dac5413be984029565b2ffe4756def53919f",
+            "crates/plugin-host/connection-implementations.v1.json": "2d476fe1b38b57c82b3d15daff4e8efb672bbabf0ef871d2c388d8f91a6170cd"
+        },
+        "baseline_manifest_check": {
+            "test": "official_elgato_sdk_executes_legacy_and_rejects_older_manifest_in_default_mode",
+            "passed": 1,
+            "failed": 0,
+            "artifact": "baseline-corrected-output.txt",
+            "scope": "Separate older 6.9/Node20 fixture: default mode correctly rejects its manifest minimum independently of host 7.1; explicit legacy mode passes. Node24 selection without acknowledgment remains rejected, and the explicit override is asserted. An earlier changed assertion incorrectly expected this old manifest to connect in default mode; baseline-output.txt retains that fixture-only failure."
+        },
+        "post_run_changes": "Only the separate node_protocol older-manifest assertion/name and evidence prose changed after the direct 10-test run. The production code, declarations, current-mode tests and genuine Runtime fixtures remained identical.",
+        "process_cleanup": "All five logged profile Node PIDs confirmed exited; exact PID/cwd evidence in process-cleanup.json. No broad process claim.",
+        "full_compatibility_claim": false
+    }
+}

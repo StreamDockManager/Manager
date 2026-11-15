@@ -1,0 +1,30 @@
+{
+    "identifier": "plugin-log-reader",
+    "description": "Trusted first-party log window. Capture controls and appearance only; no workspace, execution, plugin view, or device permissions.",
+    "windows": ["log-reader-*"],
+    "permissions": [
+        "allow-report-frontend-error",
+        "core:default",
+        "core:window:allow-close",
+        "core:window:allow-set-theme",
+        "core:window:allow-set-background-color",
+        "core:webview:allow-set-webview-background-color",
+        "core:window:allow-set-title",
+        "dialog:allow-save",
+        "allow-appearance-preferences",
+        "allow-client-preferences",
+        "allow-plugin-log-plugins",
+        "allow-plugin-log-preferences",
+        "allow-save-plugin-log-preferences",
+        "allow-plugin-log-captures",
+        "allow-start-plugin-log-capture",
+        "allow-stop-plugin-log-capture",
+        "allow-resume-plugin-log-capture",
+        "allow-clear-plugin-log-capture",
+        "allow-subscribe-plugin-logs",
+        "allow-unsubscribe-plugin-logs",
+        "allow-read-plugin-logs",
+        "allow-plugin-log-network-detail",
+        "allow-export-plugin-log-capture"
+    ]
+}

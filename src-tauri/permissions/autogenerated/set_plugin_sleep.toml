@@ -1,0 +1,11 @@
+# Automatically generated - DO NOT EDIT!
+
+[[permission]]
+identifier = "allow-set-plugin-sleep"
+description = "Enables the set_plugin_sleep command without any pre-configured scope."
+commands.allow = ["set_plugin_sleep"]
+
+[[permission]]
+identifier = "deny-set-plugin-sleep"
+description = "Denies the set_plugin_sleep command without any pre-configured scope."
+commands.deny = ["set_plugin_sleep"]

@@ -1,0 +1,91 @@
+<!doctype html>
+<html>
+    <head>
+        <meta charset="utf-8" />
+        <title>Disposable interactive probe</title>
+        <style>
+            body {
+                font: 18px system-ui;
+                margin: 28px;
+            }
+            button,
+            input {
+                font: 18px system-ui;
+                margin: 12px 0;
+                padding: 10px;
+            }
+            #status {
+                padding: 15px;
+                background: #eee;
+            }
+        </style>
+    </head>
+    <body>
+        <h1>Disposable inspector probe</h1>
+        <p id="status">Waiting for fixture initialization</p>
+        <button id="popup">Open dummy child</button>
+        <br />
+        <input id="file" type="file" aria-label="Choose generated fixture" />
+        <br />
+        <button id="cancelled">Verify picker cancellation</button>
+        <script>
+            window.phase = 'ready';
+            window.changes = 0;
+            window.trustedPopup = false;
+            window.trustedFile = false;
+            window.socketClosed = false;
+            // Display the current native inspector probe phase
+            window.setStatus = (text) => (document.getElementById('status').textContent = text);
+            // Record trusted activation before probing native popup handling
+            popup.addEventListener('click', (event) => {
+                window.trustedPopup = event.isTrusted;
+                window.child = window.open('child.html', 'interactive-child');
+                window.phase = window.child ? 'popup-allowed' : 'popup-cancelled';
+                setStatus(window.phase);
+            });
+            // Record whether the picker was opened by a trusted user interaction
+            file.addEventListener('click', (event) => {
+                window.trustedFile = event.isTrusted;
+            });
+            // Read only the selected fixture and report its projected resource path
+            file.addEventListener('change', async () => {
+                window.changes++;
+                window.projected = decodeURIComponent(file.value.replace(/^C:\\fakepath\\/, ''));
+                window.selectedBytes = await file.files[0].text();
+                window.phase = 'file-selected';
+                setStatus('Generated file selected');
+                window.sendResource(window.projected);
+            });
+            // Verify that cancelling the picker did not synthesize a file selection
+            cancelled.addEventListener('click', () => {
+                window.phase =
+                    file.files.length === 0 && window.changes === 0
+                        ? 'picker-cancelled'
+                        : 'unexpected-selection';
+                setStatus(window.phase);
+            });
+            // Connect the probe to its loopback host using the supplied action context
+            window.connectSocket = (port, uuid, event, _info, details) => {
+                const action = JSON.parse(details);
+                window.socket = new WebSocket('ws://127.0.0.1:' + port);
+                // Register the probe only after its host socket opens
+                socket.onopen = () => {
+                    socket.send(JSON.stringify({ event, uuid }));
+                    window.socketReady = true;
+                };
+                // Record transport closure for the owning fixture harness
+                socket.onclose = () => (window.socketClosed = true);
+                // Report the selected fixture path through the host resource contract
+                window.sendResource = (path) =>
+                    socket.send(
+                        JSON.stringify({
+                            event: 'setResources',
+                            context: action.context,
+                            action: action.action,
+                            payload: { file: path },
+                        }),
+                    );
+            };
+        </script>
+    </body>
+</html>

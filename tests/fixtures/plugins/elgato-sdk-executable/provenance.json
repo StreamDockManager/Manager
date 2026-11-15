@@ -1,0 +1,18 @@
+{
+    "sdk": "@elgato/streamdeck",
+    "version": "3.0.4",
+    "registry_tarball": "https://registry.npmjs.org/@elgato/streamdeck/-/streamdeck-3.0.4.tgz",
+    "registry_integrity": "sha512-AAaRxzR1bWwR6v2OVaqiAe3pjsbm3llddPSiioYgYQsHDorV+Cq/ZxQv5gIvjbnuh06CmItPpN7JuEEdrnQ1PQ==",
+    "reviewed_source_revision": "9d9636e9ea956ff4be0246e7ab8e3679866b324f",
+    "npm_git_head": null,
+    "source_equivalence_verified": false,
+    "license": "MIT",
+    "bundler": "rolldown@1.3.2",
+    "fixture_source": "project-owned",
+    "default_current_mode_qualified": false,
+    "manifest_schema": "@elgato/schemas@0.6.0",
+    "declared_node_version": "20",
+    "tested_node_version": "24.20.0",
+    "runtime_override_acknowledged": true,
+    "qualification_scope": "Disposable protocol probe under explicit Node20-to-Node24 override; default runtime mismatch refusal tested; no ordinary untouched package or reference-host qualification"
+}

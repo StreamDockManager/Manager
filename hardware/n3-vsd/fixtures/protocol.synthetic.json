@@ -1,0 +1,103 @@
+{
+    "method": "simulated",
+    "provenance": "Source-derived N3 reports from 4ndv/opendeck-akp03 10d183451807cc172fdf394bdd34f41a33fb52d3 (mappings.rs, inputs.rs) and 4ndv/mirajazz v0.16.2 f0a7fa3f9b5eaaa9b699c667312336d9c56f6723 (device.rs, state.rs). Never captured HID.",
+    "model_id": "n3-vsd",
+    "inputs": [
+        {
+            "code": 1,
+            "control_id": "key-1",
+            "kind": "button"
+        },
+        {
+            "code": 2,
+            "control_id": "key-2",
+            "kind": "button"
+        },
+        {
+            "code": 3,
+            "control_id": "key-3",
+            "kind": "button"
+        },
+        {
+            "code": 4,
+            "control_id": "key-4",
+            "kind": "button"
+        },
+        {
+            "code": 5,
+            "control_id": "key-5",
+            "kind": "button"
+        },
+        {
+            "code": 6,
+            "control_id": "key-6",
+            "kind": "button"
+        },
+        {
+            "code": 37,
+            "control_id": "key-7",
+            "kind": "button"
+        },
+        {
+            "code": 48,
+            "control_id": "key-8",
+            "kind": "button"
+        },
+        {
+            "code": 49,
+            "control_id": "key-9",
+            "kind": "button"
+        },
+        {
+            "code": 51,
+            "control_id": "dial-1",
+            "kind": "button"
+        },
+        {
+            "code": 52,
+            "control_id": "dial-2",
+            "kind": "button"
+        },
+        {
+            "code": 53,
+            "control_id": "dial-3",
+            "kind": "button"
+        },
+        {
+            "code": 144,
+            "control_id": "dial-1",
+            "kind": "rotate",
+            "delta": -1
+        },
+        {
+            "code": 145,
+            "control_id": "dial-1",
+            "kind": "rotate",
+            "delta": 1
+        },
+        {
+            "code": 96,
+            "control_id": "dial-2",
+            "kind": "rotate",
+            "delta": -1
+        },
+        {
+            "code": 97,
+            "control_id": "dial-2",
+            "kind": "rotate",
+            "delta": 1
+        },
+        {
+            "code": 80,
+            "control_id": "dial-3",
+            "kind": "rotate",
+            "delta": -1
+        },
+        {
+            "code": 81,
+            "control_id": "dial-3",
+            "kind": "rotate",
+            "delta": 1
+        }
+    ]
+}

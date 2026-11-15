@@ -1,0 +1,81 @@
+{
+    "schema_version": 1,
+    "model_id": "k1-pro",
+    "method": "simulated",
+    "provenance": "Synthetic source-derived command payloads with explicit HIDAPI report ID. COLOR uses the official web app custom-color payload; keyboard brightness is the official web app raw 0\u2013100 percentage; speed uses official web LSPD 0\u20135; other commands follow Python. Not captured physical HID.",
+    "physical_qualification": false,
+    "source_revision": "82efe4d97e6bdbb9b10cbf1a80fd53d8393b278e",
+    "cases": [
+        {
+            "settings": {
+                "brightness": 0
+            },
+            "report_prefix": [4, 67, 82, 84, 0, 0, 76, 76, 85, 77, 0, 0],
+            "report_length": 1025
+        },
+        {
+            "settings": {
+                "brightness": 6
+            },
+            "report_prefix": [4, 67, 82, 84, 0, 0, 76, 76, 85, 77, 0, 6],
+            "report_length": 1025
+        },
+        {
+            "settings": {
+                "brightness": 100
+            },
+            "report_prefix": [4, 67, 82, 84, 0, 0, 76, 76, 85, 77, 0, 100],
+            "report_length": 1025,
+            "source": "https://app.mirabox.net/assets/index-DmfhZ_Gy.js (sendLuminance)"
+        },
+        {
+            "settings": {
+                "color": [0, 127, 255]
+            },
+            "report_prefix": [
+                4, 67, 82, 84, 0, 0, 67, 79, 76, 79, 82, 1, 0, 127, 255, 0, 210, 255, 255
+            ],
+            "report_length": 1025,
+            "source": "https://app.mirabox.net/assets/index-DmfhZ_Gy.js (sendColor)"
+        },
+        {
+            "settings": {
+                "os_mode": "windows"
+            },
+            "report_prefix": [4, 67, 82, 84, 0, 0, 67, 80, 79, 83, 0, 87],
+            "report_length": 1025
+        },
+        {
+            "settings": {
+                "os_mode": "macos"
+            },
+            "report_prefix": [4, 67, 82, 84, 0, 0, 67, 80, 79, 83, 0, 77],
+            "report_length": 1025
+        },
+        {
+            "settings": {
+                "effect": 9
+            },
+            "report_prefix": [4, 67, 82, 84, 0, 0, 76, 77, 79, 68, 0, 9],
+            "report_length": 1025
+        },
+        {
+            "settings": {
+                "speed": 5
+            },
+            "report_prefix": [4, 67, 82, 84, 0, 0, 76, 83, 80, 68, 0, 5],
+            "report_length": 1025
+        },
+        {
+            "settings": {
+                "color": [0, 127, 255],
+                "custom_color": false
+            },
+            "report_prefix": [
+                4, 67, 82, 84, 0, 0, 67, 79, 76, 79, 82, 0, 0, 127, 255, 0, 210, 255, 255
+            ],
+            "report_length": 1025,
+            "source": "https://app.mirabox.net/assets/index-DmfhZ_Gy.js (sendColor flag 0)"
+        }
+    ]
+}

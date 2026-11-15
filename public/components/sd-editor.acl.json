@@ -1,0 +1,16 @@
+{
+    "version": 1,
+    "groups": ["editor"],
+    "dependencies": [
+        "sd-device-preview",
+        "sd-device-settings",
+        "sd-inspector",
+        "sd-automatic-profiles"
+    ],
+    "options": {
+        "shadow": false
+    },
+    "metadata": {
+        "description": "First-party sd-editor component. Controllers are registered by the trusted application bootstrap."
+    }
+}

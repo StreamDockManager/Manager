@@ -1,0 +1,8 @@
+{
+    "version": 1,
+    "groups": ["editor", "settings"],
+    "options": { "shadow": false },
+    "metadata": {
+        "description": "Tabbed device settings for display, lighting, behavior and firmware."
+    }
+}

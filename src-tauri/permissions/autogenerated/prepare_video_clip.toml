@@ -1,0 +1,11 @@
+# Automatically generated - DO NOT EDIT!
+
+[[permission]]
+identifier = "allow-prepare-video-clip"
+description = "Enables the prepare_video_clip command without any pre-configured scope."
+commands.allow = ["prepare_video_clip"]
+
+[[permission]]
+identifier = "deny-prepare-video-clip"
+description = "Denies the prepare_video_clip command without any pre-configured scope."
+commands.deny = ["prepare_video_clip"]

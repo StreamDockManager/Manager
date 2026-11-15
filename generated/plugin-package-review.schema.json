@@ -1,0 +1,488 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "title": "PluginPackageReview",
+  "type": "object",
+  "properties": {
+    "can_import": {
+      "type": "boolean"
+    },
+    "can_run": {
+      "type": "boolean"
+    },
+    "channel": {
+      "type": "string"
+    },
+    "channel_change": {
+      "type": "boolean"
+    },
+    "compatibility": {
+      "$ref": "#/$defs/PluginPreflight"
+    },
+    "compatible": {
+      "type": "boolean"
+    },
+    "id": {
+      "type": "string"
+    },
+    "installed_version": {
+      "type": [
+        "string",
+        "null"
+      ]
+    },
+    "manifest": {
+      "$ref": "#/$defs/NormalizedManifest"
+    },
+    "package": {
+      "$ref": "#/$defs/PackageCandidate"
+    },
+    "reason": {
+      "type": [
+        "string",
+        "null"
+      ]
+    },
+    "source": {
+      "$ref": "#/$defs/PackageSource"
+    },
+    "suggested_profiles": {
+      "anyOf": [
+        {
+          "$ref": "#/$defs/PluginProfileCatalog"
+        },
+        {
+          "type": "null"
+        }
+      ],
+      "default": null
+    },
+    "trusted": {
+      "type": "boolean"
+    },
+    "version_change": {
+      "type": [
+        "string",
+        "null"
+      ]
+    }
+  },
+  "required": [
+    "id",
+    "trusted",
+    "package",
+    "channel",
+    "channel_change",
+    "compatible",
+    "manifest",
+    "source",
+    "compatibility",
+    "can_import",
+    "can_run"
+  ],
+  "$defs": {
+    "CompatibilityCheck": {
+      "type": "object",
+      "properties": {
+        "code": {
+          "type": "string"
+        },
+        "level": {
+          "type": "string"
+        },
+        "message": {
+          "type": "string"
+        },
+        "remedy": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "code",
+        "level",
+        "message",
+        "remedy"
+      ]
+    },
+    "NormalizedManifest": {
+      "type": "object",
+      "properties": {
+        "action_count": {
+          "type": "integer",
+          "format": "uint",
+          "minimum": 0
+        },
+        "control_types": {
+          "type": "array",
+          "items": {
+            "type": "string"
+          }
+        },
+        "dialect": {
+          "type": "string"
+        },
+        "entry_point": {
+          "type": "string"
+        },
+        "id": {
+          "type": "string"
+        },
+        "name": {
+          "type": "string"
+        },
+        "platforms": {
+          "type": "array",
+          "items": {
+            "type": "string"
+          }
+        },
+        "publisher": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "runtime_kind": {
+          "type": "string"
+        },
+        "version": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "id",
+        "name",
+        "version",
+        "dialect",
+        "entry_point",
+        "runtime_kind",
+        "platforms",
+        "action_count",
+        "control_types"
+      ]
+    },
+    "PackageCandidate": {
+      "type": "object",
+      "properties": {
+        "architectures": {
+          "type": "array",
+          "items": {
+            "type": "string"
+          }
+        },
+        "files": {
+          "type": "object",
+          "additionalProperties": {
+            "type": "string"
+          }
+        },
+        "id": {
+          "type": "string"
+        },
+        "minimum_manager": {
+          "type": "string"
+        },
+        "os": {
+          "type": "string"
+        },
+        "path": {
+          "type": "string"
+        },
+        "required_capabilities": {
+          "type": "array",
+          "items": {
+            "type": "string"
+          }
+        },
+        "sha256": {
+          "type": "string"
+        },
+        "size": {
+          "type": "integer",
+          "format": "uint64",
+          "minimum": 0
+        },
+        "version": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "files",
+        "os",
+        "id",
+        "version",
+        "path",
+        "sha256",
+        "size",
+        "architectures",
+        "minimum_manager",
+        "required_capabilities"
+      ]
+    },
+    "PackageSource": {
+      "type": "object",
+      "properties": {
+        "filename": {
+          "type": "string"
+        },
+        "format": {
+          "type": "string"
+        },
+        "sha256": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "format",
+        "filename",
+        "sha256"
+      ]
+    },
+    "PluginPreflight": {
+      "type": "object",
+      "properties": {
+        "can_enable": {
+          "type": "boolean"
+        },
+        "can_install": {
+          "type": "boolean"
+        },
+        "checks": {
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/CompatibilityCheck"
+          }
+        },
+        "id": {
+          "type": "string"
+        },
+        "installed": {
+          "type": "boolean"
+        },
+        "kind": {
+          "type": "string"
+        },
+        "name": {
+          "type": "string"
+        },
+        "runtime": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/RuntimeResolution"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null
+        },
+        "source": {
+          "type": "string"
+        },
+        "version": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "id",
+        "name",
+        "version",
+        "source",
+        "kind",
+        "installed",
+        "checks",
+        "can_install",
+        "can_enable"
+      ]
+    },
+    "PluginProfileCatalog": {
+      "type": "object",
+      "properties": {
+        "can_configure": {
+          "type": "boolean"
+        },
+        "fingerprint": {
+          "type": "string"
+        },
+        "name": {
+          "type": "string"
+        },
+        "plugin_id": {
+          "type": "string"
+        },
+        "suggestions": {
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/PluginProfileSuggestion"
+          }
+        },
+        "warnings": {
+          "type": "array",
+          "items": {
+            "type": "string"
+          }
+        }
+      },
+      "required": [
+        "plugin_id",
+        "name",
+        "fingerprint",
+        "can_configure",
+        "suggestions",
+        "warnings"
+      ]
+    },
+    "PluginProfileSuggestion": {
+      "type": "object",
+      "properties": {
+        "binding_count": {
+          "type": "integer",
+          "format": "uint",
+          "minimum": 0
+        },
+        "error": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "key": {
+          "type": "string"
+        },
+        "model_id": {
+          "type": "string"
+        },
+        "name": {
+          "type": "string"
+        },
+        "page_count": {
+          "type": "integer",
+          "format": "uint",
+          "minimum": 0
+        },
+        "unavailable_actions": {
+          "type": "array",
+          "items": {
+            "type": "string"
+          }
+        }
+      },
+      "required": [
+        "key",
+        "name",
+        "model_id",
+        "page_count",
+        "binding_count",
+        "unavailable_actions"
+      ]
+    },
+    "RuntimeInstallation": {
+      "type": "object",
+      "properties": {
+        "channel": {
+          "type": "string"
+        },
+        "executable": {
+          "type": "string"
+        },
+        "id": {
+          "type": "string"
+        },
+        "kind": {
+          "$ref": "#/$defs/RuntimeKind"
+        },
+        "line": {
+          "type": "string"
+        },
+        "provenance": {
+          "type": "string"
+        },
+        "source": {
+          "type": "string"
+        },
+        "verification": {
+          "type": "string"
+        },
+        "version": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "id",
+        "kind",
+        "channel",
+        "line",
+        "version",
+        "executable",
+        "source",
+        "verification",
+        "provenance"
+      ]
+    },
+    "RuntimeKind": {
+      "type": "string",
+      "enum": [
+        "nodejs"
+      ]
+    },
+    "RuntimeRequirement": {
+      "type": "object",
+      "properties": {
+        "channel": {
+          "type": "string"
+        },
+        "kind": {
+          "$ref": "#/$defs/RuntimeKind"
+        },
+        "version": {
+          "type": [
+            "string",
+            "null"
+          ]
+        }
+      },
+      "required": [
+        "kind",
+        "channel"
+      ]
+    },
+    "RuntimeResolution": {
+      "type": "object",
+      "properties": {
+        "message": {
+          "type": "string"
+        },
+        "overridden": {
+          "type": "boolean"
+        },
+        "recommended_line": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "requirement": {
+          "$ref": "#/$defs/RuntimeRequirement"
+        },
+        "selected": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/RuntimeInstallation"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "state": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "requirement",
+        "state",
+        "message",
+        "overridden"
+      ]
+    }
+  }
+}

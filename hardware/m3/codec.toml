@@ -1,0 +1,222 @@
+schema_version = 1
+mode_before_wake = false
+reinitialize_on_wake = true
+require_input_ok = true
+button_states = [0, 1]
+rotate_states = [0]
+swipe_states = [0]
+report_size = 1025
+report_id = 0
+
+[[inputs]]
+event = "button"
+code = 11
+control_id = "key-1"
+
+[[inputs]]
+event = "button"
+code = 12
+control_id = "key-2"
+
+[[inputs]]
+event = "button"
+code = 13
+control_id = "key-3"
+
+[[inputs]]
+event = "button"
+code = 14
+control_id = "key-4"
+
+[[inputs]]
+event = "button"
+code = 15
+control_id = "key-5"
+
+[[inputs]]
+event = "button"
+code = 6
+control_id = "key-6"
+
+[[inputs]]
+event = "button"
+code = 7
+control_id = "key-7"
+
+[[inputs]]
+event = "button"
+code = 8
+control_id = "key-8"
+
+[[inputs]]
+event = "button"
+code = 9
+control_id = "key-9"
+
+[[inputs]]
+event = "button"
+code = 10
+control_id = "key-10"
+
+[[inputs]]
+event = "button"
+code = 1
+control_id = "key-11"
+
+[[inputs]]
+event = "button"
+code = 2
+control_id = "key-12"
+
+[[inputs]]
+event = "button"
+code = 3
+control_id = "key-13"
+
+[[inputs]]
+event = "button"
+code = 4
+control_id = "key-14"
+
+[[inputs]]
+event = "button"
+code = 5
+control_id = "key-15"
+
+[[inputs]]
+event = "pulse"
+code = 53
+control_id = "dial-1"
+
+[[inputs]]
+event = "rotate"
+code = 80
+control_id = "dial-1"
+delta = -1
+
+[[inputs]]
+event = "rotate"
+code = 81
+control_id = "dial-1"
+delta = 1
+
+[[inputs]]
+event = "pulse"
+code = 51
+control_id = "dial-2"
+
+[[inputs]]
+event = "rotate"
+code = 144
+control_id = "dial-2"
+delta = -1
+
+[[inputs]]
+event = "rotate"
+code = 145
+control_id = "dial-2"
+delta = 1
+
+[[inputs]]
+event = "pulse"
+code = 55
+control_id = "dial-3"
+
+[[inputs]]
+event = "rotate"
+code = 160
+control_id = "dial-3"
+delta = -1
+
+[[inputs]]
+event = "rotate"
+code = 161
+control_id = "dial-3"
+delta = 1
+
+[[surfaces]]
+control_id = "key-1"
+encoding = "source_format"
+rotation = 270
+
+[[surfaces]]
+control_id = "key-2"
+encoding = "source_format"
+rotation = 270
+
+[[surfaces]]
+control_id = "key-3"
+encoding = "source_format"
+rotation = 270
+
+[[surfaces]]
+control_id = "key-4"
+encoding = "source_format"
+rotation = 270
+
+[[surfaces]]
+control_id = "key-5"
+encoding = "source_format"
+rotation = 270
+
+[[surfaces]]
+control_id = "key-6"
+encoding = "source_format"
+rotation = 270
+
+[[surfaces]]
+control_id = "key-7"
+encoding = "source_format"
+rotation = 270
+
+[[surfaces]]
+control_id = "key-8"
+encoding = "source_format"
+rotation = 270
+
+[[surfaces]]
+control_id = "key-9"
+encoding = "source_format"
+rotation = 270
+
+[[surfaces]]
+control_id = "key-10"
+encoding = "source_format"
+rotation = 270
+
+[[surfaces]]
+control_id = "key-11"
+encoding = "source_format"
+rotation = 270
+
+[[surfaces]]
+control_id = "key-12"
+encoding = "source_format"
+rotation = 270
+
+[[surfaces]]
+control_id = "key-13"
+encoding = "source_format"
+rotation = 270
+
+[[surfaces]]
+control_id = "key-14"
+encoding = "source_format"
+rotation = 270
+
+[[surfaces]]
+control_id = "key-15"
+encoding = "source_format"
+rotation = 270
+
+[background]
+control_id = "background"
+encoding = "jpeg"
+rotation = 270
+flip_x = false
+
+[boot]
+control_id = "boot"
+encoding = "jpeg"
+rotation = 270
+flip_x = false

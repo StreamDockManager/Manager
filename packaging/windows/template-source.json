@@ -1,0 +1,12 @@
+{
+    "tauriCliVersion": "2.12.4",
+    "source": "@tauri-apps/cli 2.12.4 embedded crates/tauri-bundler/src/bundle/windows/nsis/installer.nsi",
+    "upstreamSha256": "d00089d3b1a2c4a30d7b6e098079100cb8f25e980f84d4515aca4597b95e967d",
+    "license": "MIT",
+    "changes": [
+        "Preserve data for every installer-launched NSIS removal.",
+        "Hide and reset cleanup choice outside a direct interactive uninstall.",
+        "Retain configuration if the installed main executable cannot be removed.",
+        "Replace unchecked bundle-ID recursion with the scoped cleanup helper."
+    ]
+}

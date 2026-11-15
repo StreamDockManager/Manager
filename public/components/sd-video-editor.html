@@ -1,0 +1,685 @@
+<div
+    x-data="videoEditor"
+    @open-video-editor.window="open"
+    @pointermove.window="moveCrop"
+    @pointerup.window="endCrop"
+    @pointercancel.window="endCrop"
+>
+    <dialog
+        x-ref="dialog"
+        class="feature-dialog video-editor-dialog"
+        aria-labelledby="video-editor-title"
+        @cancel.prevent="close"
+    >
+        <header class="picker-header">
+            <div>
+                <h2 id="video-editor-title" x-text="isGif ? 'GIF editor' : 'Video editor'"></h2>
+                <p x-text="targetLabel"></p>
+            </div>
+            <button
+                class="icon-button"
+                type="button"
+                :aria-label="isGif ? 'Close GIF editor' : 'Close video editor'"
+                @click="close"
+                :disabled="cleanupWorking"
+            >
+                ×
+            </button>
+        </header>
+        <section
+            class="video-editor-feedback"
+            :aria-label="isGif ? 'GIF editing status' : 'Video editing status'"
+            x-show="progress || error || notice || validation"
+        >
+            <div
+                class="video-editor-progress"
+                x-show="progress"
+                role="status"
+                aria-live="polite"
+                aria-atomic="true"
+            >
+                <div class="video-editor-progress-label">
+                    <strong x-text="progress ? progress.phase : ''"></strong>
+                    <button
+                        type="button"
+                        class="text-button"
+                        @click="cancelWork"
+                        x-show="!cleanupWorking"
+                    >
+                        Cancel operation
+                    </button>
+                </div>
+                <progress
+                    :value="progress && progress.total ? progress.completed : null"
+                    :max="progress && progress.total ? progress.total : 1"
+                    :class="{'indeterminate': progress && !progress.total}"
+                    aria-label="Video operation progress"
+                ></progress>
+                <small
+                    x-show="progress && progress.total"
+                    x-text="progress ? progress.completed + ' / ' + progress.total : ''"
+                ></small>
+            </div>
+            <p class="danger-text" role="alert" x-show="error" x-text="error"></p>
+            <button
+                type="button"
+                class="text-button"
+                x-show="recording && sourceAvailable && !busy && (error || !decoderReady)"
+                @click="retryDecoder"
+            >
+                Retry decoder
+            </button>
+            <p class="danger-text" role="alert" x-show="validation" x-text="validation"></p>
+            <p role="status" x-show="notice" x-text="notice"></p>
+            <details x-show="details">
+                <summary>Decoder details</summary>
+                <pre x-text="details"></pre>
+            </details>
+        </section>
+        <div class="feature-body video-editor-body">
+            <div class="video-editor-source-row">
+                <div class="video-editor-source-info">
+                    <strong x-text="recording ? recording.name : 'Select a recording'"></strong>
+                    <small x-text="sourceLabel"></small>
+                    <small x-show="preparedLabel" x-text="preparedLabel"></small>
+                </div>
+                <button
+                    x-ref="choose"
+                    type="button"
+                    class="button"
+                    @click="choose"
+                    :disabled="busy"
+                    x-text="recording ? 'Replace recording' : 'Choose recording'"
+                ></button>
+            </div>
+            <div class="video-editor-empty" x-show="!recording">
+                <h3>Make a clip for your device</h3>
+                <p>
+                    Choose an MP4 recording or GIF, find a section, and preview it at the
+                    destination’s dimensions.
+                </p>
+                <p class="field-help">
+                    Recordings can be up to 8 GiB, four hours and 4K. Only your selected section is
+                    prepared for playback.
+                </p>
+            </div>
+            <details class="video-recording-storage">
+                <summary>Recording storage</summary>
+                <p class="field-help">
+                    Original recordings stay in managed storage for editing. Profile exports include
+                    prepared clips, without full recordings.
+                </p>
+                <button type="button" class="button" @click="reviewRecordings" :disabled="busy">
+                    Review unused recordings
+                </button>
+                <section
+                    x-show="cleanup && cleanup.recordings.length"
+                    aria-label="Unused recording cleanup review"
+                >
+                    <p
+                        x-text="cleanup ? 'Permanently delete ' + cleanup.recordings.length + ' unused recording(s), ' + (cleanup.bytes / 1024 / 1024).toFixed(1) + ' MiB?' : ''"
+                    ></p>
+                    <ul>
+                        <template
+                            x-for="source in cleanup ? cleanup.recordings : []"
+                            :key="source.id"
+                        >
+                            <li x-text="source.name"></li>
+                        </template>
+                    </ul>
+                    <div class="button-row">
+                        <button
+                            type="button"
+                            class="button"
+                            @click="discardCleanup"
+                            :disabled="busy"
+                        >
+                            Cancel cleanup
+                        </button>
+                        <button
+                            type="button"
+                            class="button danger"
+                            @click="cleanupRecordings"
+                            :disabled="busy"
+                        >
+                            Delete reviewed recordings
+                        </button>
+                    </div>
+                </section>
+            </details>
+            <div class="video-editor-workspace" x-show="recording">
+                <section class="video-editor-stage" aria-label="Video preview and timeline">
+                    <div class="video-editor-stage-toolbar">
+                        <div class="button-row" role="group" aria-label="Preview view">
+                            <button
+                                type="button"
+                                class="button"
+                                data-view="source"
+                                @click="changeView"
+                                :aria-pressed="view === 'source'"
+                            >
+                                Source
+                            </button>
+                            <button
+                                type="button"
+                                class="button"
+                                data-view="device"
+                                @click="changeView"
+                                :aria-pressed="view === 'device'"
+                            >
+                                Device preview
+                            </button>
+                        </div>
+                        <small
+                            x-text="view === 'device' ? targetLabel : 'Original framing'"
+                        ></small>
+                    </div>
+                    <div class="video-editor-preview-area">
+                        <div
+                            x-ref="sourceFrame"
+                            class="video-editor-preview-frame"
+                            :style="previewStyle"
+                        >
+                            <img
+                                :src="image"
+                                x-show="image"
+                                alt="Video frame at the editor playhead"
+                            />
+                            <template x-if="view === 'source' && image">
+                                <div
+                                    class="video-editor-crop"
+                                    :style="cropStyle"
+                                    @pointerdown="startCrop"
+                                    aria-label="Crop region"
+                                >
+                                    <span aria-hidden="true">Drag to position crop</span>
+                                    <button
+                                        type="button"
+                                        class="video-editor-crop-handle"
+                                        data-resize="true"
+                                        aria-label="Drag to resize crop; numeric controls available below"
+                                        data-tooltip="Resize crop"
+                                    >
+                                        ↘
+                                    </button>
+                                </div>
+                            </template>
+                            <span class="field-help" x-show="!image">Preview appears here</span>
+                        </div>
+                    </div>
+                    <div class="video-editor-transport">
+                        <div class="button-row">
+                            <button
+                                type="button"
+                                class="button"
+                                data-direction="-1"
+                                @click="step"
+                                :disabled="busy"
+                                aria-label="Previous video frame"
+                            >
+                                ← Frame
+                            </button>
+                            <button
+                                type="button"
+                                class="button"
+                                @click="togglePlay"
+                                :aria-pressed="playing"
+                                :disabled="busy || validation !== ''"
+                                x-text="playing ? 'Pause' : 'Play selection'"
+                            ></button>
+                            <button
+                                type="button"
+                                class="button"
+                                data-direction="1"
+                                @click="step"
+                                :disabled="busy"
+                                aria-label="Next video frame"
+                            >
+                                Frame →
+                            </button>
+                        </div>
+                        <output
+                            class="video-editor-time"
+                            x-text="currentTime"
+                            aria-label="Playhead time"
+                        ></output>
+                    </div>
+                    <label class="video-editor-overview">
+                        Recording overview
+                        <input
+                            type="range"
+                            :min="availableStart"
+                            :max="availableEnd"
+                            step="1"
+                            :value="position"
+                            @input="scrub"
+                            :disabled="busy"
+                            aria-label="Recording overview playhead"
+                        />
+                    </label>
+                    <div class="video-editor-timeline" aria-label="Clip timeline">
+                        <div class="video-editor-filmstrip" aria-hidden="true">
+                            <template x-for="thumbnail in thumbnails" :key="thumbnail.position">
+                                <img :src="thumbnail.url" alt="" />
+                            </template>
+                        </div>
+                        <div
+                            class="video-editor-selection"
+                            :style="selectionStyle"
+                            aria-hidden="true"
+                        ></div>
+                        <label class="video-editor-trim-in">
+                            <span>In</span>
+                            <input
+                                type="range"
+                                :min="windowStart"
+                                :max="windowEnd"
+                                step="1"
+                                :value="clipStart"
+                                @input="rangeIn"
+                                :disabled="busy"
+                                aria-label="Clip in handle"
+                            />
+                        </label>
+                        <label class="video-editor-trim-out">
+                            <span>Out</span>
+                            <input
+                                type="range"
+                                :min="windowStart"
+                                :max="windowEnd"
+                                step="1"
+                                :value="clipEnd"
+                                @input="rangeOut"
+                                :disabled="busy"
+                                aria-label="Clip out handle"
+                            />
+                        </label>
+                    </div>
+                    <label class="video-editor-playhead-label">
+                        Timeline playhead
+                        <input
+                            type="range"
+                            :min="windowStart"
+                            :max="windowEnd"
+                            step="1"
+                            :value="position"
+                            @input="scrub"
+                            :disabled="busy"
+                            aria-label="Timeline playhead"
+                        />
+                    </label>
+                    <div class="video-editor-timeline-tools">
+                        <div class="button-row">
+                            <button
+                                type="button"
+                                class="button"
+                                data-factor="0.5"
+                                @click="zoom"
+                                :disabled="busy"
+                                aria-label="Zoom into timeline"
+                            >
+                                ＋
+                            </button>
+                            <button
+                                type="button"
+                                class="button"
+                                data-factor="2"
+                                @click="zoom"
+                                :disabled="busy"
+                                aria-label="Zoom out of timeline"
+                            >
+                                −
+                            </button>
+                            <button
+                                type="button"
+                                class="button"
+                                @click="fitSelection"
+                                :disabled="busy"
+                            >
+                                Fit selection
+                            </button>
+                            <button
+                                type="button"
+                                class="button"
+                                @click="fitRecording"
+                                :disabled="busy"
+                            >
+                                Full recording
+                            </button>
+                            <button
+                                type="button"
+                                class="button"
+                                data-direction="-1"
+                                @click="pan"
+                                :disabled="busy"
+                                aria-label="Pan timeline earlier"
+                            >
+                                ←
+                            </button>
+                            <button
+                                type="button"
+                                class="button"
+                                data-direction="1"
+                                @click="pan"
+                                :disabled="busy"
+                                aria-label="Pan timeline later"
+                            >
+                                →
+                            </button>
+                        </div>
+                        <small x-text="durationLabel"></small>
+                    </div>
+                    <div class="settings-form-grid video-editor-time-fields">
+                        <div class="field-group">
+                            <label>
+                                In point
+                                <input
+                                    type="text"
+                                    :value="inTime"
+                                    data-field="in"
+                                    @change="changeTime"
+                                    :disabled="busy"
+                                    aria-label="Clip in time"
+                                />
+                            </label>
+                            <button
+                                type="button"
+                                class="text-button"
+                                @click="setIn"
+                                :disabled="busy"
+                            >
+                                Set in at playhead
+                            </button>
+                        </div>
+                        <div class="field-group">
+                            <label>
+                                Out point
+                                <input
+                                    type="text"
+                                    :value="outTime"
+                                    data-field="out"
+                                    @change="changeTime"
+                                    :disabled="busy"
+                                    aria-label="Clip out time"
+                                />
+                            </label>
+                            <button
+                                type="button"
+                                class="text-button"
+                                @click="setOut"
+                                :disabled="busy"
+                            >
+                                Set out at playhead
+                            </button>
+                        </div>
+                    </div>
+                </section>
+                <fieldset class="video-editor-settings" :disabled="busy">
+                    <legend>Clip settings</legend>
+                    <section class="settings-section">
+                        <h3>Clip</h3>
+                        <label>
+                            Saved clips
+                            <select
+                                :value="selectedClip"
+                                @change="selectClip"
+                                aria-label="Saved video clips"
+                            >
+                                <option value="">New or edited clip</option>
+                                <template x-for="clip in clips" :key="clip.asset">
+                                    <option
+                                        :value="clip.asset"
+                                        x-text="clip.info.name + ' · revision ' + clip.info.revision"
+                                    ></option>
+                                </template>
+                            </select>
+                        </label>
+                        <label>
+                            Clip name
+                            <input
+                                type="text"
+                                maxlength="120"
+                                x-model="name"
+                                @input="changed"
+                                aria-label="Clip name"
+                            />
+                        </label>
+                        <div class="button-row">
+                            <button type="button" class="button" @click="newClip">New clip</button>
+                            <button type="button" class="button" @click="duplicateClip">
+                                Duplicate
+                            </button>
+                        </div>
+                    </section>
+                    <section class="settings-section">
+                        <h3>Playback</h3>
+                        <label>
+                            Maximum FPS
+                            <select
+                                :value="maximum"
+                                data-field="maximum"
+                                @change="changeOption"
+                                aria-label="Maximum video FPS"
+                            >
+                                <template x-for="rate in rates" :key="rate.value">
+                                    <option :value="rate.value" x-text="rate.label"></option>
+                                </template>
+                            </select>
+                        </label>
+                        <label>
+                            Preferred minimum FPS
+                            <input
+                                type="number"
+                                min="0.001"
+                                :max="options.max_fps || sourceFps"
+                                step="any"
+                                :value="minimum"
+                                data-field="minimum"
+                                @change="changeOption"
+                                aria-label="Preferred minimum video FPS"
+                            />
+                        </label>
+                        <p class="field-help">
+                            Congestion can reduce delivery below this preference to keep playback
+                            current.
+                        </p>
+                        <label>
+                            Playback speed
+                            <select
+                                :value="options.speed"
+                                data-field="speed"
+                                @change="changeOption"
+                                aria-label="Video playback speed"
+                            >
+                                <option value="0.25">0.25×</option>
+                                <option value="0.5">0.5×</option>
+                                <option value="1">1×</option>
+                                <option value="1.5">1.5×</option>
+                                <option value="2">2×</option>
+                                <option value="4">4×</option>
+                            </select>
+                        </label>
+                    </section>
+                    <section class="settings-section">
+                        <h3>Framing</h3>
+                        <label>
+                            Scale to destination
+                            <select
+                                :value="options.fit"
+                                data-field="fit"
+                                @change="changeOption"
+                                aria-label="Video framing"
+                            >
+                                <option value="fit">Fit (show the whole image)</option>
+                                <option value="fill">Fill (crop edges)</option>
+                            </select>
+                        </label>
+                        <label x-show="options.fit === 'fit'">
+                            Letterbox background
+                            <select
+                                :value="options.letterbox || 'transparent'"
+                                data-field="letterbox"
+                                @change="changeOption"
+                                aria-label="Video letterbox background"
+                            >
+                                <option value="black">Black (efficient JPEG)</option>
+                                <option value="transparent">Transparent (PNG)</option>
+                            </select>
+                        </label>
+                        <p
+                            class="field-help"
+                            x-text="'Output keeps ' + targetLabel + '. Aspect ratio is preserved.'"
+                        ></p>
+                        <div class="settings-form-grid">
+                            <label>
+                                Minimum detail (px)
+                                <input
+                                    type="number"
+                                    min="64"
+                                    max="1024"
+                                    :value="minEdge"
+                                    data-field="min-edge"
+                                    @change="changeOption"
+                                    aria-label="Minimum video detail"
+                                />
+                            </label>
+                            <label>
+                                Maximum detail (px)
+                                <input
+                                    type="number"
+                                    min="64"
+                                    max="1024"
+                                    :value="maxEdge"
+                                    data-field="max-edge"
+                                    @change="changeOption"
+                                    aria-label="Maximum video detail"
+                                />
+                            </label>
+                        </div>
+                        <button type="button" class="text-button" @click="matchTarget">
+                            Match target dimensions
+                        </button>
+                        <details>
+                            <summary>Crop coordinates</summary>
+                            <div class="media-crop-grid">
+                                <label>
+                                    X %
+                                    <input
+                                        type="number"
+                                        min="0"
+                                        max="99"
+                                        :value="options.crop[0] * 100"
+                                        data-field="crop-0"
+                                        @change="changeOption"
+                                    />
+                                </label>
+                                <label>
+                                    Y %
+                                    <input
+                                        type="number"
+                                        min="0"
+                                        max="99"
+                                        :value="options.crop[1] * 100"
+                                        data-field="crop-1"
+                                        @change="changeOption"
+                                    />
+                                </label>
+                                <label>
+                                    Width %
+                                    <input
+                                        type="number"
+                                        min="1"
+                                        max="100"
+                                        :value="options.crop[2] * 100"
+                                        data-field="crop-2"
+                                        @change="changeOption"
+                                    />
+                                </label>
+                                <label>
+                                    Height %
+                                    <input
+                                        type="number"
+                                        min="1"
+                                        max="100"
+                                        :value="options.crop[3] * 100"
+                                        data-field="crop-3"
+                                        @change="changeOption"
+                                    />
+                                </label>
+                            </div>
+                            <button type="button" class="text-button" @click="resetCrop">
+                                Reset crop
+                            </button>
+                        </details>
+                    </section>
+                    <section class="settings-section">
+                        <h3>Output quality</h3>
+                        <label class="range-label">
+                            JPEG quality
+                            <output x-text="quality"></output>
+                            <input
+                                type="range"
+                                min="1"
+                                max="100"
+                                :value="quality"
+                                data-field="quality"
+                                @input="changeOption"
+                                aria-label="Video JPEG quality"
+                            />
+                        </label>
+                        <p class="field-help">
+                            Lower quality reduces transfer size. Transparency and composed UI may
+                            require PNG.
+                        </p>
+                        <details>
+                            <summary>Encoding options</summary>
+                            <label>
+                                Image encoding
+                                <select
+                                    :value="options.encoding || 'auto'"
+                                    data-field="encoding"
+                                    @change="changeOption"
+                                    aria-label="Video image encoding"
+                                >
+                                    <option value="auto">Automatic</option>
+                                    <option value="jpeg">JPEG</option>
+                                    <option value="png">PNG</option>
+                                </select>
+                            </label>
+                        </details>
+                    </section>
+                </fieldset>
+            </div>
+        </div>
+        <footer class="feature-footer video-editor-footer">
+            <p class="field-help">
+                Saving creates a new clip revision. Existing assignments stay unchanged.
+            </p>
+            <p class="field-help" role="status" x-show="copyComparison" x-text="copyComparison"></p>
+            <div class="button-row">
+                <button
+                    type="button"
+                    class="button"
+                    @click="close"
+                    :disabled="cleanupWorking"
+                    x-text="preparedAsset ? 'Done' : 'Cancel'"
+                ></button>
+                <button
+                    type="button"
+                    class="button"
+                    @click="saveClip"
+                    :disabled="!canSave"
+                    x-text="saving ? 'Preparing…' : 'Save clip'"
+                ></button>
+                <button
+                    type="button"
+                    class="button primary"
+                    @click="applyClip"
+                    :disabled="!canApply"
+                >
+                    Apply clip
+                </button>
+            </div>
+        </footer>
+    </dialog>
+</div>

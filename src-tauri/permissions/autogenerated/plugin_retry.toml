@@ -1,0 +1,11 @@
+# Automatically generated - DO NOT EDIT!
+
+[[permission]]
+identifier = "allow-plugin-retry"
+description = "Enables the plugin_retry command without any pre-configured scope."
+commands.allow = ["plugin_retry"]
+
+[[permission]]
+identifier = "deny-plugin-retry"
+description = "Denies the plugin_retry command without any pre-configured scope."
+commands.deny = ["plugin_retry"]

@@ -1,0 +1,11 @@
+# Automatically generated - DO NOT EDIT!
+
+[[permission]]
+identifier = "allow-commit-boot-logo"
+description = "Enables the commit_boot_logo command without any pre-configured scope."
+commands.allow = ["commit_boot_logo"]
+
+[[permission]]
+identifier = "deny-commit-boot-logo"
+description = "Denies the commit_boot_logo command without any pre-configured scope."
+commands.deny = ["commit_boot_logo"]

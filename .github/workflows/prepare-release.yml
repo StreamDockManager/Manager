@@ -1,0 +1,93 @@
+name: Prepare Release
+on:
+    workflow_dispatch:
+permissions:
+    contents: read
+    actions: read
+concurrency:
+    group: manager-prepare-release
+    cancel-in-progress: false
+jobs:
+    plan:
+        if: github.event_name == 'workflow_dispatch' && github.ref == 'refs/heads/main'
+        runs-on: ubuntu-24.04
+        outputs:
+            tag: ${{ steps.plan.outputs.tag }}
+            commit: ${{ steps.plan.outputs.commit }}
+            mode: ${{ github.repository == 'StreamDockManager/Manager' && 'publish' || 'build-only' }}
+        steps:
+            - uses: actions/checkout@v7.0.1
+              with:
+                  persist-credentials: false
+            - uses: actions/setup-python@v7.1.0
+              with:
+                  python-version: '3.12'
+            - id: plan
+              env:
+                  BUILD_ONLY: ${{ github.repository != 'StreamDockManager/Manager' && 'true' || 'false' }}
+              run: python scripts/release.py plan
+            - name: Validate pinned compatibility evidence without claiming full qualification
+              run: |
+                  python scripts/vsd_contract_inventory.py --check
+                  python scripts/vendor-compatibility.py
+            - run: python -m unittest discover -s scripts -p 'test_prepared_release.py'
+    installers:
+        if: github.event_name == 'workflow_dispatch' && github.ref == 'refs/heads/main'
+        needs: plan
+        uses: ./.github/workflows/build-installers.yml
+        with:
+            tag: ${{ needs.plan.outputs.tag }}
+            commit: ${{ needs.plan.outputs.commit }}
+            mode: ${{ needs.plan.outputs.mode }}
+            targets: all
+    cli:
+        if: github.event_name == 'workflow_dispatch' && github.ref == 'refs/heads/main'
+        needs: plan
+        uses: ./.github/workflows/build-cli.yml
+        with:
+            tag: ${{ needs.plan.outputs.tag }}
+            commit: ${{ needs.plan.outputs.commit }}
+            mode: ${{ needs.plan.outputs.mode }}
+            targets: all
+    rehearsal:
+        if: always() && github.repository != 'StreamDockManager/Manager' && github.event_name == 'workflow_dispatch' && github.ref == 'refs/heads/main'
+        needs: [plan, installers, cli]
+        runs-on: ubuntu-24.04
+        steps:
+            - name: Require both complete platform build matrices
+              env:
+                  PLAN_RESULT: ${{ needs.plan.result }}
+                  INSTALLERS_RESULT: ${{ needs.installers.result }}
+                  CLI_RESULT: ${{ needs.cli.result }}
+              run: |
+                  test "$PLAN_RESULT" = success
+                  test "$INSTALLERS_RESULT" = success
+                  test "$CLI_RESULT" = success
+                  echo 'Build-only rehearsal succeeded; download manager-development-* and manager-cli-development-* artifacts.' >> "$GITHUB_STEP_SUMMARY"
+    publication:
+        if: github.repository == 'StreamDockManager/Manager' && github.event_name == 'workflow_dispatch' && github.ref == 'refs/heads/main'
+        needs: [plan, installers, cli]
+        runs-on: ubuntu-24.04
+        env:
+            RELEASE_COMMIT: ${{ needs.plan.outputs.commit }}
+            RELEASE_BUILD: ${{ github.run_id }}
+        steps:
+            - uses: actions/checkout@v7.0.1
+              with:
+                  ref: ${{ needs.plan.outputs.commit }}
+                  persist-credentials: false
+            - uses: actions/setup-python@v7.1.0
+              with:
+                  python-version: '3.12'
+            - uses: actions/download-artifact@v8.0.2
+              with:
+                  pattern: manager-*
+                  path: artifacts/native
+            - run: python scripts/release.py assemble --dir artifacts/native
+            - run: python scripts/release.py verify --dir artifacts/native/publish
+            - uses: actions/upload-artifact@v7.0.2
+              with:
+                  name: manager-publication
+                  path: artifacts/native/publish/*
+                  if-no-files-found: error
+                  retention-days: 30

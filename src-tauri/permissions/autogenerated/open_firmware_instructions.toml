@@ -1,0 +1,11 @@
+# Automatically generated - DO NOT EDIT!
+
+[[permission]]
+identifier = "allow-open-firmware-instructions"
+description = "Enables the open_firmware_instructions command without any pre-configured scope."
+commands.allow = ["open_firmware_instructions"]
+
+[[permission]]
+identifier = "deny-open-firmware-instructions"
+description = "Denies the open_firmware_instructions command without any pre-configured scope."
+commands.deny = ["open_firmware_instructions"]

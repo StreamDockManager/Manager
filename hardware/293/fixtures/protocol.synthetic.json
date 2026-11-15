@@ -1,0 +1,193 @@
+{
+    "method": "simulated",
+    "provenance": "Synthetic reports reconstructed from MiraboxSpace/StreamDock-Device-SDK fc124cb5bc8fe0cd6c72d3f2af80588adc7dcffb source; never captured HID or physical qualification.",
+    "model_id": "293",
+    "report_id": 0,
+    "report_size": 513,
+    "usb_ids": ["5500:1001"],
+    "inputs": [
+        {
+            "event": "button",
+            "code": 11,
+            "control_id": "key-1",
+            "states": [0, 1]
+        },
+        {
+            "event": "button",
+            "code": 12,
+            "control_id": "key-2",
+            "states": [0, 1]
+        },
+        {
+            "event": "button",
+            "code": 13,
+            "control_id": "key-3",
+            "states": [0, 1]
+        },
+        {
+            "event": "button",
+            "code": 14,
+            "control_id": "key-4",
+            "states": [0, 1]
+        },
+        {
+            "event": "button",
+            "code": 15,
+            "control_id": "key-5",
+            "states": [0, 1]
+        },
+        {
+            "event": "button",
+            "code": 6,
+            "control_id": "key-6",
+            "states": [0, 1]
+        },
+        {
+            "event": "button",
+            "code": 7,
+            "control_id": "key-7",
+            "states": [0, 1]
+        },
+        {
+            "event": "button",
+            "code": 8,
+            "control_id": "key-8",
+            "states": [0, 1]
+        },
+        {
+            "event": "button",
+            "code": 9,
+            "control_id": "key-9",
+            "states": [0, 1]
+        },
+        {
+            "event": "button",
+            "code": 10,
+            "control_id": "key-10",
+            "states": [0, 1]
+        },
+        {
+            "event": "button",
+            "code": 1,
+            "control_id": "key-11",
+            "states": [0, 1]
+        },
+        {
+            "event": "button",
+            "code": 2,
+            "control_id": "key-12",
+            "states": [0, 1]
+        },
+        {
+            "event": "button",
+            "code": 3,
+            "control_id": "key-13",
+            "states": [0, 1]
+        },
+        {
+            "event": "button",
+            "code": 4,
+            "control_id": "key-14",
+            "states": [0, 1]
+        },
+        {
+            "event": "button",
+            "code": 5,
+            "control_id": "key-15",
+            "states": [0, 1]
+        }
+    ],
+    "surfaces": [
+        {
+            "control_id": "key-1",
+            "slot": 1,
+            "wire_size": [100, 100],
+            "encoding": "jpeg"
+        },
+        {
+            "control_id": "key-2",
+            "slot": 2,
+            "wire_size": [100, 100],
+            "encoding": "jpeg"
+        },
+        {
+            "control_id": "key-3",
+            "slot": 3,
+            "wire_size": [100, 100],
+            "encoding": "jpeg"
+        },
+        {
+            "control_id": "key-4",
+            "slot": 4,
+            "wire_size": [100, 100],
+            "encoding": "jpeg"
+        },
+        {
+            "control_id": "key-5",
+            "slot": 5,
+            "wire_size": [100, 100],
+            "encoding": "jpeg"
+        },
+        {
+            "control_id": "key-6",
+            "slot": 6,
+            "wire_size": [100, 100],
+            "encoding": "jpeg"
+        },
+        {
+            "control_id": "key-7",
+            "slot": 7,
+            "wire_size": [100, 100],
+            "encoding": "jpeg"
+        },
+        {
+            "control_id": "key-8",
+            "slot": 8,
+            "wire_size": [100, 100],
+            "encoding": "jpeg"
+        },
+        {
+            "control_id": "key-9",
+            "slot": 9,
+            "wire_size": [100, 100],
+            "encoding": "jpeg"
+        },
+        {
+            "control_id": "key-10",
+            "slot": 10,
+            "wire_size": [100, 100],
+            "encoding": "jpeg"
+        },
+        {
+            "control_id": "key-11",
+            "slot": 11,
+            "wire_size": [100, 100],
+            "encoding": "jpeg"
+        },
+        {
+            "control_id": "key-12",
+            "slot": 12,
+            "wire_size": [100, 100],
+            "encoding": "jpeg"
+        },
+        {
+            "control_id": "key-13",
+            "slot": 13,
+            "wire_size": [100, 100],
+            "encoding": "jpeg"
+        },
+        {
+            "control_id": "key-14",
+            "slot": 14,
+            "wire_size": [100, 100],
+            "encoding": "jpeg"
+        },
+        {
+            "control_id": "key-15",
+            "slot": 15,
+            "wire_size": [100, 100],
+            "encoding": "jpeg"
+        }
+    ],
+    "mode": null
+}

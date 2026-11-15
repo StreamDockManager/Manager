@@ -1,0 +1,117 @@
+<div
+    x-data="backgroundEditor"
+    @open-background-editor.window="open"
+    @media-deleted.window="mediaDeleted"
+>
+    <dialog
+        data-media-drop-target
+        @media-file-drop="dropMedia"
+        x-ref="dialog"
+        class="feature-dialog background-editor-dialog"
+        aria-labelledby="background-editor-title"
+        aria-describedby="background-editor-description"
+        @cancel.prevent="cancel"
+    >
+        <header class="picker-header">
+            <div>
+                <h2 id="background-editor-title">Device background</h2>
+                <p id="background-editor-description" x-text="subtitle"></p>
+            </div>
+            <button
+                type="button"
+                class="icon-button"
+                aria-label="Close background editor"
+                @click="cancel"
+                :disabled="saving"
+            >
+                ×
+            </button>
+        </header>
+        <div class="feature-body background-editor-body">
+            <div class="button-row" :class="asset ? 'background-media-actions' : ''">
+                <button
+                    type="button"
+                    class="button"
+                    x-ref="choose"
+                    @click="choose"
+                    :disabled="importing || saving"
+                    x-text="importing ? 'Preparing media…' : asset ? 'Replace background media' : 'Choose background media'"
+                ></button>
+                <button
+                    type="button"
+                    class="button"
+                    @click="browseMedia"
+                    :disabled="importing || saving"
+                >
+                    Browse existing media
+                </button>
+                <button
+                    type="button"
+                    class="button"
+                    @click="reset"
+                    :disabled="!asset || importing || saving"
+                >
+                    Reset adjustments
+                </button>
+                <button
+                    type="button"
+                    class="button danger-text"
+                    @click="remove"
+                    :disabled="!asset || importing || saving"
+                >
+                    Use default background
+                </button>
+            </div>
+            <p class="field-help">
+                Choose or drop a PNG, JPEG, SVG, GIF or MP4 file. Crop and scale changes keep the
+                original image. Changes take effect when you save.
+            </p>
+            <fieldset :disabled="saving || importing" x-show="asset">
+                <sd-media-options
+                    :asset="asset"
+                    :content="mediaContent"
+                    @media-change="updateMedia"
+                ></sd-media-options>
+            </fieldset>
+            <div class="background-editor-empty" x-show="!asset">
+                <span aria-hidden="true">▧</span>
+                <h3>Theme background</h3>
+                <p>
+                    The wallpaper follows your selected palette. Choose media to use a custom
+                    background.
+                </p>
+            </div>
+            <p class="field-help">
+                Backgrounds belong to this profile. Animated backgrounds continue when the editor is
+                closed. FFmpeg is an optional fallback for MP4 imports; clips can be up to 16 MiB
+                for direct imports. Use the video editor to select clips from longer recordings.
+            </p>
+            <div class="settings-section">
+                <button
+                    type="button"
+                    class="button"
+                    @click="previewOnDock"
+                    :disabled="!!dockPreviewReason || importing || saving"
+                    :title="dockPreviewReason"
+                >
+                    Preview on dock
+                </button>
+                <p
+                    class="field-help"
+                    x-text="dockPreviewReason || 'Preview the background for five seconds. Saved actions remain live.'"
+                ></p>
+            </div>
+            <p class="danger-text" role="alert" x-show="error" x-text="error"></p>
+        </div>
+        <footer class="button-row feature-footer">
+            <button type="button" class="button" @click="cancel" :disabled="saving">Cancel</button>
+            <button
+                type="button"
+                class="button primary"
+                @click="save"
+                :disabled="!canSave"
+                x-text="saving ? 'Saving…' : 'Save background'"
+            ></button>
+        </footer>
+    </dialog>
+</div>

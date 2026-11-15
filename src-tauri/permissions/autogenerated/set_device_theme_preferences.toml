@@ -1,0 +1,11 @@
+# Automatically generated - DO NOT EDIT!
+
+[[permission]]
+identifier = "allow-set-device-theme-preferences"
+description = "Enables the set_device_theme_preferences command without any pre-configured scope."
+commands.allow = ["set_device_theme_preferences"]
+
+[[permission]]
+identifier = "deny-set-device-theme-preferences"
+description = "Denies the set_device_theme_preferences command without any pre-configured scope."
+commands.deny = ["set_device_theme_preferences"]

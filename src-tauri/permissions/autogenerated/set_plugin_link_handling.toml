@@ -1,0 +1,11 @@
+# Automatically generated - DO NOT EDIT!
+
+[[permission]]
+identifier = "allow-set-plugin-link-handling"
+description = "Enables the set_plugin_link_handling command without any pre-configured scope."
+commands.allow = ["set_plugin_link_handling"]
+
+[[permission]]
+identifier = "deny-set-plugin-link-handling"
+description = "Denies the set_plugin_link_handling command without any pre-configured scope."
+commands.deny = ["set_plugin_link_handling"]

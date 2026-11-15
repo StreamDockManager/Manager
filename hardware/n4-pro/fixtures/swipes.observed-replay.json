@@ -1,0 +1,182 @@
+{
+    "method": "replay",
+    "provenance": "Reconstructed replay from physical decoded-coordinate observations, not raw HID capture. The initial fixed-code hypothesis failed subsequent physical retesting; retained as historical evidence and a trajectory regression.",
+    "provenance_details": {
+        "observed_source_commit": "0b4d237cf93b40f75086645dd6cd44952f7d1b49",
+        "evidence": "artifacts/native-hardware-0b4d237/sessions/first/events.jsonl, input sequences 50\u201377",
+        "evidence_excerpt_sha256": "03482338e5d06427cb4a30e0e2ba4253afa4e9593ca30e23118ce0e13c59ddcf",
+        "scope": "Sanitized decoded coordinates from a physical macOS ARM64 N4 Pro session. The user confirmed left-to-right then right-to-left finger movement. ACK/ARX/OK frames and swipe code/state bytes are reconstructed from the exact observed-source decoder; these are not raw HID captures. Firmware was not queried; other variants remain unqualified."
+    },
+    "gestures": [
+        {
+            "physical_direction": "right",
+            "inferred_swipe_code": 56,
+            "observed_sequence_range": [50, 64],
+            "coordinates": [
+                {
+                    "kind": "touch",
+                    "phase": "start",
+                    "x": 68,
+                    "y": 0
+                },
+                {
+                    "kind": "touch",
+                    "phase": "move",
+                    "x": 68,
+                    "y": 75
+                },
+                {
+                    "kind": "touch",
+                    "phase": "move",
+                    "x": 68,
+                    "y": 75
+                },
+                {
+                    "kind": "touch",
+                    "phase": "move",
+                    "x": 68,
+                    "y": 75
+                },
+                {
+                    "kind": "touch",
+                    "phase": "move",
+                    "x": 70,
+                    "y": 75
+                },
+                {
+                    "kind": "touch",
+                    "phase": "move",
+                    "x": 87,
+                    "y": 76
+                },
+                {
+                    "kind": "touch",
+                    "phase": "move",
+                    "x": 118,
+                    "y": 77
+                },
+                {
+                    "kind": "touch",
+                    "phase": "move",
+                    "x": 214,
+                    "y": 78
+                },
+                {
+                    "kind": "touch",
+                    "phase": "move",
+                    "x": 252,
+                    "y": 79
+                },
+                {
+                    "kind": "touch",
+                    "phase": "move",
+                    "x": 295,
+                    "y": 82
+                },
+                {
+                    "kind": "touch",
+                    "phase": "move",
+                    "x": 336,
+                    "y": 83
+                },
+                {
+                    "kind": "touch",
+                    "phase": "move",
+                    "x": 396,
+                    "y": 83
+                },
+                {
+                    "kind": "touch",
+                    "phase": "move",
+                    "x": 452,
+                    "y": 83
+                },
+                {
+                    "kind": "touch",
+                    "phase": "move",
+                    "x": 620,
+                    "y": 86
+                }
+            ]
+        },
+        {
+            "physical_direction": "left",
+            "inferred_swipe_code": 57,
+            "observed_sequence_range": [65, 77],
+            "coordinates": [
+                {
+                    "kind": "touch",
+                    "phase": "start",
+                    "x": 728,
+                    "y": 0
+                },
+                {
+                    "kind": "touch",
+                    "phase": "move",
+                    "x": 714,
+                    "y": 69
+                },
+                {
+                    "kind": "touch",
+                    "phase": "move",
+                    "x": 707,
+                    "y": 70
+                },
+                {
+                    "kind": "touch",
+                    "phase": "move",
+                    "x": 677,
+                    "y": 70
+                },
+                {
+                    "kind": "touch",
+                    "phase": "move",
+                    "x": 640,
+                    "y": 70
+                },
+                {
+                    "kind": "touch",
+                    "phase": "move",
+                    "x": 596,
+                    "y": 70
+                },
+                {
+                    "kind": "touch",
+                    "phase": "move",
+                    "x": 550,
+                    "y": 70
+                },
+                {
+                    "kind": "touch",
+                    "phase": "move",
+                    "x": 424,
+                    "y": 63
+                },
+                {
+                    "kind": "touch",
+                    "phase": "move",
+                    "x": 369,
+                    "y": 60
+                },
+                {
+                    "kind": "touch",
+                    "phase": "move",
+                    "x": 314,
+                    "y": 60
+                },
+                {
+                    "kind": "touch",
+                    "phase": "move",
+                    "x": 255,
+                    "y": 60
+                },
+                {
+                    "kind": "touch",
+                    "phase": "move",
+                    "x": 176,
+                    "y": 59
+                }
+            ]
+        }
+    ]
+}

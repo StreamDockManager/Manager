@@ -1,0 +1,28 @@
+revision = "6"
+model_id = "k1-pro"
+features = [
+  "keyboard-brightness-percent-0-through-100",
+  "keyboard-global-rgb-boundaries",
+  "keyboard-custom-color-toggle-and-rainbow-rollback",
+  "keyboard-ripple-14-background-hue-saturation",
+  "keyboard-mode-reenumeration",
+  "keyboard-explicit-apply-no-reconnect-replay",
+  "keyboard-web-effects-0-through-15-web-speed-lspd-0-through-5-static-order",
+  "python-image-map-5-3-1-6-4-2-and-1023-byte-payloads-plus-pad",
+  "boot-wire-canvas-format-size-and-persistence",
+  "variant-and-unknown-firmware-fail-closed",
+  "identity-firmware-usage-interface",
+  "all-button-edges",
+  "all-encoder-pulses-rotations",
+  "all-directional-switch-edges",
+  "source-derived-swipe-direction",
+  "png-jpeg-wire-geometry-orientation",
+  "raw-background-byte-order",
+  "background-limits",
+  "brightness-sleep-lighting",
+  "twenty-reconnects",
+  "restart-sleep-wake-input-consumption",
+  "multiple-device-isolation",
+  "animation-cancellation-and-output-bounds",
+  "eight-hour-soak",
+]

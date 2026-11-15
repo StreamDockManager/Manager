@@ -1,0 +1,11 @@
+# Automatically generated - DO NOT EDIT!
+
+[[permission]]
+identifier = "allow-pending-vendor-profile-reviews"
+description = "Enables the pending_vendor_profile_reviews command without any pre-configured scope."
+commands.allow = ["pending_vendor_profile_reviews"]
+
+[[permission]]
+identifier = "deny-pending-vendor-profile-reviews"
+description = "Denies the pending_vendor_profile_reviews command without any pre-configured scope."
+commands.deny = ["pending_vendor_profile_reviews"]

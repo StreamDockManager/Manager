@@ -1,0 +1,11 @@
+# Automatically generated - DO NOT EDIT!
+
+[[permission]]
+identifier = "allow-plugin-log-plugins"
+description = "Enables the plugin_log_plugins command without any pre-configured scope."
+commands.allow = ["plugin_log_plugins"]
+
+[[permission]]
+identifier = "deny-plugin-log-plugins"
+description = "Denies the plugin_log_plugins command without any pre-configured scope."
+commands.deny = ["plugin_log_plugins"]

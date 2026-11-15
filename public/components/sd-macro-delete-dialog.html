@@ -1,0 +1,24 @@
+<dialog
+    x-ref="macroDeleteDialog"
+    class="feature-dialog macro-delete-dialog"
+    :aria-label="deletionTitle"
+    @cancel.prevent="cancelDeletion"
+>
+    <div class="feature-body">
+        <h2 x-text="deletionTitle"></h2>
+        <p x-text="deletionDescription"></p>
+        <p class="danger-text" role="alert" x-show="deletionError" x-text="deletionError"></p>
+    </div>
+    <footer class="feature-footer">
+        <button type="button" class="button" autofocus @click="cancelDeletion" :disabled="deleting">
+            Cancel
+        </button>
+        <button
+            type="button"
+            class="button danger"
+            @click="confirmDeletion"
+            :disabled="deleting || app.busy"
+            x-text="deleting ? 'Deleting…' : 'Delete macro'"
+        ></button>
+    </footer>
+</dialog>

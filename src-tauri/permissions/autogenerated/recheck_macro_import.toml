@@ -1,0 +1,11 @@
+# Automatically generated - DO NOT EDIT!
+
+[[permission]]
+identifier = "allow-recheck-macro-import"
+description = "Enables the recheck_macro_import command without any pre-configured scope."
+commands.allow = ["recheck_macro_import"]
+
+[[permission]]
+identifier = "deny-recheck-macro-import"
+description = "Denies the recheck_macro_import command without any pre-configured scope."
+commands.deny = ["recheck_macro_import"]

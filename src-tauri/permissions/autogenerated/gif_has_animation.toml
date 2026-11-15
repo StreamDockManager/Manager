@@ -1,0 +1,11 @@
+# Automatically generated - DO NOT EDIT!
+
+[[permission]]
+identifier = "allow-gif-has-animation"
+description = "Enables the gif_has_animation command without any pre-configured scope."
+commands.allow = ["gif_has_animation"]
+
+[[permission]]
+identifier = "deny-gif-has-animation"
+description = "Denies the gif_has_animation command without any pre-configured scope."
+commands.deny = ["gif_has_animation"]

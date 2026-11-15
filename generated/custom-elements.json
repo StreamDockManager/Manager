@@ -1,0 +1,566 @@
+{
+  "schemaVersion": "2.1.0",
+  "readme": "",
+  "modules": [
+    {
+      "kind": "javascript-module",
+      "path": "acl-components",
+      "declarations": [
+        {
+          "kind": "class",
+          "customElement": true,
+          "name": "SdActionFieldsElement",
+          "tagName": "sd-action-fields",
+          "members": [],
+          "attributes": [],
+          "events": [],
+          "slots": []
+        },
+        {
+          "kind": "class",
+          "customElement": true,
+          "name": "SdMacroDebuggerElement",
+          "tagName": "sd-macro-debugger",
+          "description": "Owned macro debug session controls and bounded execution output.",
+          "members": [],
+          "attributes": [],
+          "events": [],
+          "slots": []
+        },
+        {
+          "kind": "class",
+          "customElement": true,
+          "name": "SdMacroInputsElement",
+          "tagName": "sd-macro-inputs",
+          "description": "Lexical input definitions shared by the action and macro editors.",
+          "members": [],
+          "attributes": [],
+          "events": [],
+          "slots": []
+        },
+        {
+          "kind": "class",
+          "customElement": true,
+          "name": "SdActionWorkspaceElement",
+          "tagName": "sd-action-workspace",
+          "description": "Shared action and macro workspace; the parent adapter owns content, events, and lifetime.",
+          "members": [],
+          "attributes": [],
+          "events": [],
+          "slots": []
+        },
+        {
+          "kind": "class",
+          "customElement": true,
+          "name": "SdActionEditorElement",
+          "tagName": "sd-action-editor",
+          "description": "Ordered macro actions with stable draft IDs and explicit teardown of the prop observer.",
+          "members": [
+            {
+              "kind": "field",
+              "name": "content",
+              "attribute": "content",
+              "type": {
+                "text": "string"
+              }
+            }
+          ],
+          "attributes": [
+            {
+              "name": "content",
+              "fieldName": "content",
+              "type": {
+                "text": "string"
+              }
+            }
+          ],
+          "events": [],
+          "slots": []
+        },
+        {
+          "kind": "class",
+          "customElement": true,
+          "name": "SdActionLibraryElement",
+          "tagName": "sd-action-library",
+          "description": "First-party sd-action-library component. Controllers are registered by the trusted application bootstrap.",
+          "members": [],
+          "attributes": [],
+          "events": [],
+          "slots": []
+        },
+        {
+          "kind": "class",
+          "customElement": true,
+          "name": "SdApplicationDataElement",
+          "tagName": "sd-application-data",
+          "description": "Application data ownership, retention and recovery management.",
+          "members": [],
+          "attributes": [],
+          "events": [],
+          "slots": []
+        },
+        {
+          "kind": "class",
+          "customElement": true,
+          "name": "SdMediaOptionsElement",
+          "tagName": "sd-media-options",
+          "description": "Non-destructive media transforms shared with Rust playback.",
+          "members": [
+            {
+              "kind": "field",
+              "name": "asset",
+              "attribute": "asset",
+              "type": {
+                "text": "string"
+              }
+            },
+            {
+              "kind": "field",
+              "name": "control",
+              "attribute": "control",
+              "type": {
+                "text": "string"
+              }
+            },
+            {
+              "kind": "field",
+              "name": "content",
+              "attribute": "content",
+              "type": {
+                "text": "string"
+              }
+            }
+          ],
+          "attributes": [
+            {
+              "name": "asset",
+              "fieldName": "asset",
+              "type": {
+                "text": "string"
+              }
+            },
+            {
+              "name": "control",
+              "fieldName": "control",
+              "type": {
+                "text": "string"
+              }
+            },
+            {
+              "name": "content",
+              "fieldName": "content",
+              "type": {
+                "text": "string"
+              }
+            }
+          ],
+          "events": [],
+          "slots": []
+        },
+        {
+          "kind": "class",
+          "customElement": true,
+          "name": "SdBackgroundEditorElement",
+          "tagName": "sd-background-editor",
+          "description": "Shared, isolated device background editing dialog.",
+          "members": [],
+          "attributes": [],
+          "events": [],
+          "slots": []
+        },
+        {
+          "kind": "class",
+          "customElement": true,
+          "name": "SdBenchmarkProgressElement",
+          "tagName": "sd-benchmark-progress",
+          "description": "Shared benchmark progress, cancellation and device restoration dialog.",
+          "members": [],
+          "attributes": [],
+          "events": [],
+          "slots": []
+        },
+        {
+          "kind": "class",
+          "customElement": true,
+          "name": "SdExportReviewElement",
+          "tagName": "sd-export-review",
+          "description": "Immutable profile and macro export review with draft field changes.",
+          "members": [],
+          "attributes": [],
+          "events": [],
+          "slots": []
+        },
+        {
+          "kind": "class",
+          "customElement": true,
+          "name": "SdPluginCatalogDialogElement",
+          "tagName": "sd-plugin-catalog-dialog",
+          "members": [],
+          "attributes": [],
+          "events": [],
+          "slots": []
+        },
+        {
+          "kind": "class",
+          "customElement": true,
+          "name": "SdPluginFolderImportElement",
+          "tagName": "sd-plugin-folder-import",
+          "members": [],
+          "attributes": [],
+          "events": [],
+          "slots": []
+        },
+        {
+          "kind": "class",
+          "customElement": true,
+          "name": "SdPluginPreflightElement",
+          "tagName": "sd-plugin-preflight",
+          "members": [],
+          "attributes": [],
+          "events": [],
+          "slots": []
+        },
+        {
+          "kind": "class",
+          "customElement": true,
+          "name": "SdPluginProfileSuggestionsElement",
+          "tagName": "sd-plugin-profile-suggestions",
+          "members": [],
+          "attributes": [],
+          "events": [],
+          "slots": []
+        },
+        {
+          "kind": "class",
+          "customElement": true,
+          "name": "SdProfileArchiveImportElement",
+          "tagName": "sd-profile-archive-import",
+          "members": [],
+          "attributes": [],
+          "events": [],
+          "slots": []
+        },
+        {
+          "kind": "class",
+          "customElement": true,
+          "name": "SdProfileSharingDialogElement",
+          "tagName": "sd-profile-sharing-dialog",
+          "members": [],
+          "attributes": [],
+          "events": [],
+          "slots": []
+        },
+        {
+          "kind": "class",
+          "customElement": true,
+          "name": "SdRuntimeDialogElement",
+          "tagName": "sd-runtime-dialog",
+          "members": [],
+          "attributes": [],
+          "events": [],
+          "slots": []
+        },
+        {
+          "kind": "class",
+          "customElement": true,
+          "name": "SdSetupDialogElement",
+          "tagName": "sd-setup-dialog",
+          "members": [],
+          "attributes": [],
+          "events": [],
+          "slots": []
+        },
+        {
+          "kind": "class",
+          "customElement": true,
+          "name": "SdFeatureDialogsElement",
+          "tagName": "sd-feature-dialogs",
+          "description": "Setup, plugin compatibility and staged import dialogs.",
+          "members": [],
+          "attributes": [],
+          "events": [],
+          "slots": []
+        },
+        {
+          "kind": "class",
+          "customElement": true,
+          "name": "SdKeyboardMacroEditorElement",
+          "tagName": "sd-keyboard-macro-editor",
+          "description": "Trusted, isolated keyboard recording draft with explicit Apply/Cancel.",
+          "members": [],
+          "attributes": [],
+          "events": [],
+          "slots": []
+        },
+        {
+          "kind": "class",
+          "customElement": true,
+          "name": "SdLibraryOrganizationElement",
+          "tagName": "sd-library-organization",
+          "description": "Installation-local library favorites and tag editor.",
+          "members": [],
+          "attributes": [],
+          "events": [],
+          "slots": []
+        },
+        {
+          "kind": "class",
+          "customElement": true,
+          "name": "SdMacroSharingElement",
+          "tagName": "sd-macro-sharing",
+          "description": "Portable macro sharing with explicit privacy consent and import review.",
+          "members": [],
+          "attributes": [],
+          "events": [],
+          "slots": []
+        },
+        {
+          "kind": "class",
+          "customElement": true,
+          "name": "SdMediaLibraryElement",
+          "tagName": "sd-media-library",
+          "description": "Managed media reuse and reviewed retention-safe cleanup.",
+          "members": [],
+          "attributes": [],
+          "events": [],
+          "slots": []
+        },
+        {
+          "kind": "class",
+          "customElement": true,
+          "name": "SdPluginLogsElement",
+          "tagName": "sd-plugin-logs",
+          "description": "Persistent nonmodal plugin capture reader.",
+          "members": [],
+          "attributes": [],
+          "events": [],
+          "slots": []
+        },
+        {
+          "kind": "class",
+          "customElement": true,
+          "name": "SdPluginManagementElement",
+          "tagName": "sd-plugin-management",
+          "description": "Reviewed plugin rollback and installation-local update preferences.",
+          "members": [],
+          "attributes": [],
+          "events": [],
+          "slots": []
+        },
+        {
+          "kind": "class",
+          "customElement": true,
+          "name": "SdProfileConversionElement",
+          "tagName": "sd-profile-conversion",
+          "description": "Reviewed cross-model profile conversion. Native staging never executes actions.",
+          "members": [],
+          "attributes": [],
+          "events": [],
+          "slots": []
+        },
+        {
+          "kind": "class",
+          "customElement": true,
+          "name": "SdProfileVersionsElement",
+          "tagName": "sd-profile-versions",
+          "description": "Reviewed single-profile history comparison and atomic restoration.",
+          "members": [],
+          "attributes": [],
+          "events": [],
+          "slots": []
+        },
+        {
+          "kind": "class",
+          "customElement": true,
+          "name": "SdToastsElement",
+          "tagName": "sd-toasts",
+          "description": "Shared first-party notification stack.",
+          "members": [],
+          "attributes": [],
+          "events": [],
+          "slots": []
+        },
+        {
+          "kind": "class",
+          "customElement": true,
+          "name": "SdVideoEditorElement",
+          "tagName": "sd-video-editor",
+          "description": "Shared source-timed video clip editor with isolated drafts and contextual job feedback.",
+          "members": [],
+          "attributes": [],
+          "events": [],
+          "slots": []
+        },
+        {
+          "kind": "class",
+          "customElement": true,
+          "name": "SdAppShellElement",
+          "tagName": "sd-app-shell",
+          "description": "First-party sd-app-shell component. Controllers are registered by the trusted application bootstrap.",
+          "members": [],
+          "attributes": [],
+          "events": [],
+          "slots": []
+        },
+        {
+          "kind": "class",
+          "customElement": true,
+          "name": "SdAutomaticProfilesElement",
+          "tagName": "sd-automatic-profiles",
+          "members": [],
+          "attributes": [],
+          "events": [],
+          "slots": []
+        },
+        {
+          "kind": "class",
+          "customElement": true,
+          "name": "SdDevicePreviewElement",
+          "tagName": "sd-device-preview",
+          "description": "First-party sd-device-preview component. Controllers are registered by the trusted application bootstrap.",
+          "members": [],
+          "attributes": [],
+          "events": [],
+          "slots": []
+        },
+        {
+          "kind": "class",
+          "customElement": true,
+          "name": "SdDeviceSettingsElement",
+          "tagName": "sd-device-settings",
+          "description": "Tabbed device settings for display, lighting, behavior and firmware.",
+          "members": [],
+          "attributes": [],
+          "events": [],
+          "slots": []
+        },
+        {
+          "kind": "class",
+          "customElement": true,
+          "name": "SdDiagnosticsElement",
+          "tagName": "sd-diagnostics",
+          "description": "First-party sd-diagnostics component. Controllers are registered by the trusted application bootstrap.",
+          "members": [],
+          "attributes": [],
+          "events": [],
+          "slots": []
+        },
+        {
+          "kind": "class",
+          "customElement": true,
+          "name": "SdMacroEditorElement",
+          "tagName": "sd-macro-editor",
+          "description": "Ordered macro actions with stable draft IDs and explicit teardown of the prop observer.",
+          "members": [
+            {
+              "kind": "field",
+              "name": "content",
+              "attribute": "content",
+              "type": {
+                "text": "string"
+              }
+            }
+          ],
+          "attributes": [
+            {
+              "name": "content",
+              "fieldName": "content",
+              "type": {
+                "text": "string"
+              }
+            }
+          ],
+          "events": [],
+          "slots": []
+        },
+        {
+          "kind": "class",
+          "customElement": true,
+          "name": "SdInspectorElement",
+          "tagName": "sd-inspector",
+          "description": "First-party sd-inspector component. Controllers are registered by the trusted application bootstrap.",
+          "members": [],
+          "attributes": [],
+          "events": [],
+          "slots": []
+        },
+        {
+          "kind": "class",
+          "customElement": true,
+          "name": "SdEditorElement",
+          "tagName": "sd-editor",
+          "description": "First-party sd-editor component. Controllers are registered by the trusted application bootstrap.",
+          "members": [],
+          "attributes": [],
+          "events": [],
+          "slots": []
+        },
+        {
+          "kind": "class",
+          "customElement": true,
+          "name": "SdMacroDeleteDialogElement",
+          "tagName": "sd-macro-delete-dialog",
+          "description": "Saved macro deletion confirmation, including affected callers.",
+          "members": [],
+          "attributes": [],
+          "events": [],
+          "slots": []
+        },
+        {
+          "kind": "class",
+          "customElement": true,
+          "name": "SdMacrosElement",
+          "tagName": "sd-macros",
+          "description": "Saved macro library and management page.",
+          "members": [],
+          "attributes": [],
+          "events": [],
+          "slots": []
+        },
+        {
+          "kind": "class",
+          "customElement": true,
+          "name": "SdPluginActionGroupElement",
+          "tagName": "sd-plugin-action-group",
+          "members": [],
+          "attributes": [],
+          "events": [],
+          "slots": []
+        },
+        {
+          "kind": "class",
+          "customElement": true,
+          "name": "SdUpdatesElement",
+          "tagName": "sd-updates",
+          "description": "First-party update management; plugin inspectors have no access.",
+          "members": [],
+          "attributes": [],
+          "events": [],
+          "slots": []
+        },
+        {
+          "kind": "class",
+          "customElement": true,
+          "name": "SdPluginsElement",
+          "tagName": "sd-plugins",
+          "description": "First-party sd-plugins component. Controllers are registered by the trusted application bootstrap.",
+          "members": [],
+          "attributes": [],
+          "events": [],
+          "slots": []
+        },
+        {
+          "kind": "class",
+          "customElement": true,
+          "name": "SdSettingsElement",
+          "tagName": "sd-settings",
+          "description": "First-party sd-settings component. Controllers are registered by the trusted application bootstrap.",
+          "members": [],
+          "attributes": [],
+          "events": [],
+          "slots": []
+        }
+      ]
+    }
+  ]
+}

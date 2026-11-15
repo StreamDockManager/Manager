@@ -1,0 +1,51 @@
+{
+    "schema_version": 1,
+    "registrations": [
+        {
+            "model_id": "n3-vsd",
+            "usb_id": "5548:1001",
+            "identity": {
+                "vendor_id": 21832,
+                "product_id": 4097,
+                "interface": 0,
+                "usage_page": 65440,
+                "usage": 1
+            },
+            "evidence": "hardware/n3-vsd/README.md"
+        },
+        {
+            "model_id": "n1-vsd",
+            "usb_id": "5548:1002",
+            "identity": {
+                "vendor_id": 21832,
+                "product_id": 4098,
+                "interface": 0,
+                "usage_page": 65440,
+                "usage": 1
+            },
+            "evidence": "hardware/n1-vsd/README.md"
+        },
+        {
+            "model_id": "293-v3",
+            "usb_id": "5548:1003",
+            "identity": {
+                "vendor_id": 21832,
+                "product_id": 4099,
+                "usage_page_min": 1026,
+                "usage": 1
+            },
+            "evidence": "hardware/293-v3/README.md"
+        },
+        {
+            "model_id": "xl",
+            "usb_id": "5548:1034",
+            "identity": {
+                "vendor_id": 21832,
+                "product_id": 4148,
+                "usage_page_min": 1026,
+                "usage": 1
+            },
+            "evidence": "hardware/xl/README.md"
+        }
+    ]
+}

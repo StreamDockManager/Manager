@@ -1,0 +1,11 @@
+# Automatically generated - DO NOT EDIT!
+
+[[permission]]
+identifier = "allow-publish-browser-media"
+description = "Enables the publish_browser_media command without any pre-configured scope."
+commands.allow = ["publish_browser_media"]
+
+[[permission]]
+identifier = "deny-publish-browser-media"
+description = "Denies the publish_browser_media command without any pre-configured scope."
+commands.deny = ["publish_browser_media"]

@@ -1,0 +1,11 @@
+# Automatically generated - DO NOT EDIT!
+
+[[permission]]
+identifier = "allow-configuration-recovery-validate"
+description = "Enables the configuration_recovery_validate command without any pre-configured scope."
+commands.allow = ["configuration_recovery_validate"]
+
+[[permission]]
+identifier = "deny-configuration-recovery-validate"
+description = "Denies the configuration_recovery_validate command without any pre-configured scope."
+commands.deny = ["configuration_recovery_validate"]

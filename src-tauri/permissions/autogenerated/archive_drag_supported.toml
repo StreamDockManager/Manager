@@ -1,0 +1,11 @@
+# Automatically generated - DO NOT EDIT!
+
+[[permission]]
+identifier = "allow-archive-drag-supported"
+description = "Enables the archive_drag_supported command without any pre-configured scope."
+commands.allow = ["archive_drag_supported"]
+
+[[permission]]
+identifier = "deny-archive-drag-supported"
+description = "Denies the archive_drag_supported command without any pre-configured scope."
+commands.deny = ["archive_drag_supported"]

@@ -1,0 +1,123 @@
+{
+    "$schema": "https://json-schema.org/draft/2020-12/schema",
+    "title": "Embedded plugin connection contract v1",
+    "type": "object",
+    "additionalProperties": false,
+    "required": [
+        "schema_version",
+        "manager_contract_version",
+        "surface_contract_version",
+        "capabilities",
+        "vendors"
+    ],
+    "properties": {
+        "schema_version": {
+            "const": 1
+        },
+        "manager_contract_version": {
+            "type": "integer",
+            "minimum": 1,
+            "maximum": 4294967295
+        },
+        "surface_contract_version": {
+            "type": "integer",
+            "minimum": 1,
+            "maximum": 4294967295
+        },
+        "capabilities": {
+            "type": "array",
+            "minItems": 1,
+            "uniqueItems": true,
+            "items": {
+                "type": "string",
+                "pattern": "^[a-z][a-z0-9-]*-v[1-9][0-9]*$"
+            }
+        },
+        "vendors": {
+            "type": "object",
+            "additionalProperties": false,
+            "required": ["streamdeck", "vsd", "openaction"],
+            "properties": {
+                "streamdeck": {
+                    "type": "object",
+                    "additionalProperties": false,
+                    "required": ["application_version", "compatibility_label", "sdk_versions"],
+                    "properties": {
+                        "application_version": {
+                            "type": "string",
+                            "pattern": "^[0-9]+(\\.[0-9]+){0,3}$"
+                        },
+                        "compatibility_label": {
+                            "type": "string",
+                            "minLength": 1,
+                            "pattern": "-subset$"
+                        },
+                        "sdk_versions": {
+                            "type": "array",
+                            "minItems": 1,
+                            "uniqueItems": true,
+                            "items": {
+                                "type": "integer",
+                                "minimum": 1,
+                                "maximum": 4294967295
+                            }
+                        }
+                    }
+                },
+                "vsd": {
+                    "type": "object",
+                    "additionalProperties": false,
+                    "required": ["application_version", "compatibility_label", "sdk_versions"],
+                    "properties": {
+                        "application_version": {
+                            "type": "string",
+                            "pattern": "^[0-9]+(\\.[0-9]+){0,3}$"
+                        },
+                        "compatibility_label": {
+                            "type": "string",
+                            "minLength": 1,
+                            "pattern": "-subset$"
+                        },
+                        "sdk_versions": {
+                            "type": "array",
+                            "minItems": 1,
+                            "uniqueItems": true,
+                            "items": {
+                                "type": "integer",
+                                "minimum": 1,
+                                "maximum": 4294967295
+                            }
+                        }
+                    }
+                },
+                "openaction": {
+                    "type": "object",
+                    "additionalProperties": false,
+                    "required": ["application_version", "compatibility_label", "sdk_versions"],
+                    "properties": {
+                        "application_version": {
+                            "type": "string",
+                            "pattern": "^[0-9]+(\\.[0-9]+){0,3}$"
+                        },
+                        "compatibility_label": {
+                            "type": "string",
+                            "minLength": 1,
+                            "pattern": "-subset$"
+                        },
+                        "sdk_versions": {
+                            "type": "array",
+                            "minItems": 0,
+                            "uniqueItems": true,
+                            "items": {
+                                "type": "integer",
+                                "minimum": 1,
+                                "maximum": 4294967295
+                            },
+                            "maxItems": 0
+                        }
+                    }
+                }
+            }
+        }
+    }
+}

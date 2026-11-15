@@ -1,0 +1,226 @@
+{
+    "method": "simulated",
+    "provenance": "Source-derived reports from tommasobbianchi/opendeck-vsd-n1 635f1cb492c663e63200fcdaba9f436489f7a475 and skyf/lightslinger a3d464243051f77627129c6b20981baf9df98310. Transport framing from mirajazz 0.16.2, revision f0a7fa3f9b5eaaa9b699c667312336d9c56f6723. Independent synthetic reports, never captured HID. See protocol-sources.v1.json and README.md.",
+    "model_id": "n1-vsd",
+    "report_id": 0,
+    "report_size": 1025,
+    "usb_ids": ["5548:1002"],
+    "inputs": [
+        {
+            "event": "button",
+            "code": 1,
+            "control_id": "key-1"
+        },
+        {
+            "event": "button",
+            "code": 2,
+            "control_id": "key-2"
+        },
+        {
+            "event": "button",
+            "code": 3,
+            "control_id": "key-3"
+        },
+        {
+            "event": "button",
+            "code": 4,
+            "control_id": "key-4"
+        },
+        {
+            "event": "button",
+            "code": 5,
+            "control_id": "key-5"
+        },
+        {
+            "event": "button",
+            "code": 6,
+            "control_id": "key-6"
+        },
+        {
+            "event": "button",
+            "code": 7,
+            "control_id": "key-7"
+        },
+        {
+            "event": "button",
+            "code": 8,
+            "control_id": "key-8"
+        },
+        {
+            "event": "button",
+            "code": 9,
+            "control_id": "key-9"
+        },
+        {
+            "event": "button",
+            "code": 10,
+            "control_id": "key-10"
+        },
+        {
+            "event": "button",
+            "code": 11,
+            "control_id": "key-11"
+        },
+        {
+            "event": "button",
+            "code": 12,
+            "control_id": "key-12"
+        },
+        {
+            "event": "button",
+            "code": 13,
+            "control_id": "key-13"
+        },
+        {
+            "event": "button",
+            "code": 14,
+            "control_id": "key-14"
+        },
+        {
+            "event": "button",
+            "code": 15,
+            "control_id": "key-15"
+        },
+        {
+            "event": "button",
+            "code": 30,
+            "control_id": "key-16"
+        },
+        {
+            "event": "button",
+            "code": 31,
+            "control_id": "key-17"
+        },
+        {
+            "event": "button",
+            "code": 35,
+            "control_id": "dial-1"
+        },
+        {
+            "event": "rotate",
+            "code": 50,
+            "control_id": "dial-1",
+            "delta": -1
+        },
+        {
+            "event": "rotate",
+            "code": 51,
+            "control_id": "dial-1",
+            "delta": 1
+        }
+    ],
+    "surfaces": [
+        {
+            "control_id": "key-1",
+            "slot": 1,
+            "wire_size": [96, 96],
+            "encoding": "jpeg"
+        },
+        {
+            "control_id": "key-2",
+            "slot": 2,
+            "wire_size": [96, 96],
+            "encoding": "jpeg"
+        },
+        {
+            "control_id": "key-3",
+            "slot": 3,
+            "wire_size": [96, 96],
+            "encoding": "jpeg"
+        },
+        {
+            "control_id": "key-4",
+            "slot": 4,
+            "wire_size": [96, 96],
+            "encoding": "jpeg"
+        },
+        {
+            "control_id": "key-5",
+            "slot": 5,
+            "wire_size": [96, 96],
+            "encoding": "jpeg"
+        },
+        {
+            "control_id": "key-6",
+            "slot": 6,
+            "wire_size": [96, 96],
+            "encoding": "jpeg"
+        },
+        {
+            "control_id": "key-7",
+            "slot": 7,
+            "wire_size": [96, 96],
+            "encoding": "jpeg"
+        },
+        {
+            "control_id": "key-8",
+            "slot": 8,
+            "wire_size": [96, 96],
+            "encoding": "jpeg"
+        },
+        {
+            "control_id": "key-9",
+            "slot": 9,
+            "wire_size": [96, 96],
+            "encoding": "jpeg"
+        },
+        {
+            "control_id": "key-10",
+            "slot": 10,
+            "wire_size": [96, 96],
+            "encoding": "jpeg"
+        },
+        {
+            "control_id": "key-11",
+            "slot": 11,
+            "wire_size": [96, 96],
+            "encoding": "jpeg"
+        },
+        {
+            "control_id": "key-12",
+            "slot": 12,
+            "wire_size": [96, 96],
+            "encoding": "jpeg"
+        },
+        {
+            "control_id": "key-13",
+            "slot": 13,
+            "wire_size": [96, 96],
+            "encoding": "jpeg"
+        },
+        {
+            "control_id": "key-14",
+            "slot": 14,
+            "wire_size": [96, 96],
+            "encoding": "jpeg"
+        },
+        {
+            "control_id": "key-15",
+            "slot": 15,
+            "wire_size": [96, 96],
+            "encoding": "jpeg"
+        },
+        {
+            "control_id": "display-1",
+            "slot": 16,
+            "wire_size": [64, 64],
+            "encoding": "jpeg"
+        },
+        {
+            "control_id": "display-2",
+            "slot": 17,
+            "wire_size": [64, 64],
+            "encoding": "jpeg"
+        },
+        {
+            "control_id": "display-3",
+            "slot": 18,
+            "wire_size": [64, 64],
+            "encoding": "jpeg"
+        }
+    ],
+    "mode": 2,
+    "mode_before_wake": true,
+    "require_input_ok": false,
+    "wake_brightness": 0
+}

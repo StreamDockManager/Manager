@@ -1,0 +1,288 @@
+<section class="secondary-screen macros-screen" x-data="savedActions">
+    <header class="page-heading">
+        <div>
+            <h1>Macros</h1>
+            <p>Create and manage reusable actions for your device profiles.</p>
+        </div>
+        <div class="heading-actions">
+            <button
+                type="button"
+                class="button"
+                @click="$dispatch('open-macro-import')"
+                :disabled="app.busy"
+            >
+                Import macros
+            </button>
+            <button
+                type="button"
+                class="button"
+                @click="$dispatch('open-macro-export')"
+                :disabled="app.busy || !total"
+            >
+                Export macros
+            </button>
+            <button
+                type="button"
+                class="icon-button"
+                aria-label="Undo"
+                data-tooltip="Undo last change"
+                :disabled="!app.snapshot.history.undo.length || app.busy"
+                @click="undo"
+            >
+                ↶
+            </button>
+            <button
+                type="button"
+                class="icon-button"
+                aria-label="Redo"
+                data-tooltip="Redo last change"
+                :disabled="!app.snapshot.history.redo.length || app.busy"
+                @click="redo"
+            >
+                ↷
+            </button>
+            <button type="button" class="button primary" @click="newMacro" :disabled="app.busy">
+                <span aria-hidden="true">＋</span>
+                Create saved macro
+            </button>
+        </div>
+    </header>
+    <section class="card macro-library" aria-label="Saved macros">
+        <div class="macro-library-toolbar">
+            <label class="search-field macro-search">
+                <span aria-hidden="true">⌕</span>
+                <input
+                    aria-label="Search macros"
+                    type="search"
+                    placeholder="Search your macros…"
+                    x-model="query"
+                />
+            </label>
+            <label class="macro-sort">
+                <span>Sort by</span>
+                <select aria-label="Sort macros" x-model="sort">
+                    <option value="asc">Name A–Z</option>
+                    <option value="desc">Name Z–A</option>
+                </select>
+            </label>
+        </div>
+        <label class="preference-toggle library-favorite-filter">
+            <input type="checkbox" x-model="favoritesOnly" :disabled="!organization.loaded" />
+            <span>Favorite macros only</span>
+        </label>
+        <p
+            class="field-help danger-text"
+            role="alert"
+            x-show="organization.error"
+            x-text="organization.error"
+        ></p>
+        <div class="macro-library-caption">
+            <span
+                x-text="macros.length + ' of ' + total + (total === 1 ? ' macro' : ' macros')"
+                aria-live="polite"
+            ></span>
+            <span>Changes apply everywhere a macro is used.</span>
+        </div>
+        <div class="macro-library-list" role="list" x-show="macros.length">
+            <template x-for="macro in macros" :key="macro.id">
+                <article class="macro-library-row" role="listitem" :data-id="macro.id">
+                    <span class="macro-library-icon" aria-hidden="true">
+                        <img class="action-icon" src="/appearance/icons/zap.svg" alt="" />
+                    </span>
+                    <div class="macro-library-info">
+                        <button
+                            type="button"
+                            class="macro-name"
+                            :data-id="macro.id"
+                            @click="editMacro"
+                            x-text="macro.name"
+                        ></button>
+                        <p>
+                            <span
+                                x-text="stepCount(macro.action) + (stepCount(macro.action) === 1 ? ' step' : ' steps')"
+                            ></span>
+                            <span aria-hidden="true">·</span>
+                            <span x-text="usageLabel(macro.id)"></span>
+                        </p>
+                        <small
+                            class="danger-text"
+                            x-show="macroMissingPlugin(macro)"
+                            x-text="'Incompatible · Requires ' + macroMissingPlugin(macro)"
+                        ></small>
+                        <small x-show="macroTags(macro)" x-text="macroTags(macro)"></small>
+                    </div>
+                    <div class="button-row">
+                        <button
+                            type="button"
+                            class="button"
+                            :aria-label="'Run ' + macro.name"
+                            :aria-haspopup="macro.inputs && macro.inputs.length ? 'dialog' : null"
+                            :data-id="macro.id"
+                            @click="runMacro"
+                            :aria-disabled="startingMacroId !== '' || macroMissingPlugin(macro) !== ''"
+                            x-text="startingMacroId === macro.id ? 'Queuing…' : 'Run'"
+                        ></button>
+                        <button
+                            type="button"
+                            class="icon-button"
+                            :data-id="macro.id"
+                            @click="organizeMacro"
+                            :aria-label="'Organize ' + macro.name"
+                            :data-tooltip="macroTags(macro) || 'Favorite and tags'"
+                            :disabled="organization.busy"
+                            x-text="macroFavorite(macro) ? '★' : '☆'"
+                        ></button>
+                        <button
+                            type="button"
+                            class="icon-button"
+                            :aria-label="'Export ' + macro.name"
+                            data-tooltip="Export macro"
+                            @click="$dispatch('open-macro-export', {id: macro.id})"
+                            :disabled="app.busy"
+                        >
+                            <svg
+                                viewBox="0 0 24 24"
+                                width="18"
+                                height="18"
+                                fill="none"
+                                stroke="currentColor"
+                                stroke-width="1.6"
+                                aria-hidden="true"
+                            >
+                                <path d="M12 3v12m-4-4 4 4 4-4M4 16v5h16v-5" />
+                            </svg>
+                        </button>
+                        <button
+                            type="button"
+                            class="button"
+                            :aria-label="'Edit ' + macro.name"
+                            :data-id="macro.id"
+                            @click="editMacro"
+                        >
+                            Edit
+                        </button>
+                        <button
+                            type="button"
+                            class="icon-button danger-text"
+                            :aria-label="'Delete ' + macro.name"
+                            :data-id="macro.id"
+                            @click="deleteMacro"
+                            :disabled="app.busy"
+                        >
+                            <svg
+                                viewBox="0 0 24 24"
+                                width="18"
+                                height="18"
+                                fill="none"
+                                stroke="currentColor"
+                                stroke-width="1.6"
+                                aria-hidden="true"
+                            >
+                                <path d="M3 6h18M9 6V3h6v3M5 6l1 15h12l1-15M10 10v7m4-7v7" />
+                            </svg>
+                        </button>
+                    </div>
+                </article>
+            </template>
+        </div>
+        <div class="macro-library-empty" x-show="!macros.length">
+            <span class="macro-empty-icon" aria-hidden="true">
+                <img class="action-icon" src="/appearance/icons/zap.svg" alt="" />
+            </span>
+            <h2 x-text="total ? 'No matching macros' : 'No saved macros'"></h2>
+            <p
+                x-text="total ? 'Try a different name or clear your search.' : 'Combine actions into a saved macro, then use it in any profile.'"
+            ></p>
+            <button type="button" class="button" x-show="total" @click="query = ''">
+                Clear search
+            </button>
+            <button type="button" class="button primary" x-show="!total" @click="newMacro">
+                Create your first macro
+            </button>
+        </div>
+    </section>
+    <dialog
+        x-ref="macroRunDialog"
+        class="feature-dialog"
+        aria-labelledby="macro-run-title"
+        @cancel.prevent="closeMacroRun"
+    >
+        <header class="picker-header">
+            <div>
+                <h2
+                    id="macro-run-title"
+                    x-text="runDraft ? 'Run ' + runDraft.name : 'Run macro'"
+                ></h2>
+                <p
+                    x-show="runDraft"
+                    x-text="runDraft && (runDraft.deviceName ? 'Device: ' + runDraft.deviceName : 'Run on this computer')"
+                ></p>
+            </div>
+            <button
+                type="button"
+                class="icon-button"
+                aria-label="Close macro run"
+                :disabled="startingMacroId !== ''"
+                @click="closeMacroRun"
+            >
+                ×
+            </button>
+        </header>
+        <form
+            id="macro-run-inputs"
+            class="feature-body"
+            @input="runError = ''"
+            @submit.prevent="submitMacroRun"
+        >
+            <template x-for="field in runFields" :key="field.name">
+                <fieldset class="field-group" :disabled="startingMacroId !== ''">
+                    <label class="field-group">
+                        <span x-text="field.label"></span>
+                        <template x-if="field.type === 'boolean'">
+                            <select x-model="field.value" :disabled="!field.supplied">
+                                <option value="">Choose…</option>
+                                <option value="true">True</option>
+                                <option value="false">False</option>
+                            </select>
+                        </template>
+                        <template x-if="field.type !== 'boolean'">
+                            <input
+                                :type="field.type === 'number' ? 'number' : 'text'"
+                                step="any"
+                                x-model="field.value"
+                                :disabled="!field.supplied"
+                            />
+                        </template>
+                    </label>
+                    <label class="preference-toggle" x-show="field.canOmit">
+                        <input type="checkbox" x-model="field.supplied" />
+                        <span
+                            x-text="(field.default === null ? 'Provide ' : 'Override default for ') + field.label"
+                        ></span>
+                    </label>
+                </fieldset>
+            </template>
+            <p class="field-help danger-text" role="alert" x-show="runError" x-text="runError"></p>
+        </form>
+        <footer class="feature-footer">
+            <div class="button-row">
+                <button
+                    type="button"
+                    class="button"
+                    :disabled="startingMacroId !== ''"
+                    @click="closeMacroRun"
+                >
+                    Cancel
+                </button>
+                <button
+                    type="submit"
+                    form="macro-run-inputs"
+                    class="button primary"
+                    :disabled="startingMacroId !== ''"
+                    x-text="startingMacroId ? 'Queuing…' : 'Run macro'"
+                ></button>
+            </div>
+        </footer>
+    </dialog>
+    <sd-macro-delete-dialog></sd-macro-delete-dialog>
+</section>

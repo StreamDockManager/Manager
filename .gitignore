@@ -1,0 +1,28 @@
+/target/
+/node_modules/
+/dist/
+/.tools/
+/test-results/
+/playwright-report/
+/artifacts/
+*.log
+.DS_Store
+hardware/*/verification/artifacts/
+src-tauri/gen/
+
+src-tauri/resources/node/
+src-tauri/resources/cli/
+.npm-cache/
+
+__pycache__/
+*.pyc
+
+# Verified patched crates are generated before Cargo resolution.
+/vendor/.cache/
+
+/tests/fixtures/plugins/openaction-sdk-executable/target/
+
+/dist-public-preview/
+
+# Per-invocation bundler metadata is removed when the CLI exits
+/src-tauri/.package-metadata-*/

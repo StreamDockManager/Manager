@@ -1,0 +1,11 @@
+# Automatically generated - DO NOT EDIT!
+
+[[permission]]
+identifier = "allow-compact-application-data"
+description = "Enables the compact_application_data command without any pre-configured scope."
+commands.allow = ["compact_application_data"]
+
+[[permission]]
+identifier = "deny-compact-application-data"
+description = "Denies the compact_application_data command without any pre-configured scope."
+commands.deny = ["compact_application_data"]

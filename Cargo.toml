@@ -1,0 +1,146 @@
+[workspace]
+resolver = "2"
+exclude = ["vendor/.cache/sources/glib-0.18.5"]
+members = [
+  "crates/storage",
+  "crates/desktop-contract",
+  "crates/hardware-core",
+  "crates/hardware-protocols",
+  "crates/hardware-registry",
+  "hardware/n4-pro",
+  "hardware/293",
+  "hardware/293-v3",
+  "hardware/293s",
+  "hardware/293s-v3",
+  "hardware/m18",
+  "hardware/m3",
+  "hardware/n3",
+  "hardware/n3-vsd",
+  "hardware/n1",
+  "hardware/n1-vsd",
+  "hardware/n4",
+  "hardware/k1-pro",
+  "hardware/mini",
+  "hardware/xl",
+  "hardware/h1-pro",
+  "crates/downloads",
+  "crates/runtime",
+  "crates/plugin-host",
+  "crates/plugin-runtimes",
+  "crates/stream-dock-manager-cli",
+  "xtask",
+  "src-tauri",
+]
+default-members = [
+  "crates/storage",
+  "crates/desktop-contract",
+  "crates/hardware-core",
+  "crates/hardware-protocols",
+  "crates/hardware-registry",
+  "hardware/n4-pro",
+  "hardware/293",
+  "hardware/293-v3",
+  "hardware/293s",
+  "hardware/293s-v3",
+  "hardware/m18",
+  "hardware/m3",
+  "hardware/n3",
+  "hardware/n3-vsd",
+  "hardware/n1",
+  "hardware/n1-vsd",
+  "hardware/n4",
+  "hardware/k1-pro",
+  "hardware/mini",
+  "hardware/xl",
+  "hardware/h1-pro",
+  "crates/downloads",
+  "crates/runtime",
+  "crates/plugin-host",
+  "crates/plugin-runtimes",
+  "crates/stream-dock-manager-cli",
+  "xtask",
+]
+
+[workspace.package]
+version = "0.1.0"
+edition = "2021"
+license = "GPL-3.0-or-later"
+rust-version = "1.95"
+
+[workspace.dependencies]
+stream-dock-manager-storage = { path = "crates/storage" }
+rusqlite = { version = "0.42.0", default-features = false, features = [
+  "bundled",
+  "backup",
+  "limits",
+  "fallible_uint",
+] }
+stream-dock-manager-desktop-contract = { path = "crates/desktop-contract" }
+hex = "0.4.3"
+zip = { version = "=9.5.1", default-features = false, features = [
+  "deflate",
+  "lzma",
+] }
+ts-rs = { version = "12.0.1", features = [
+  "serde-json-impl",
+  "no-serde-warnings",
+] }
+schemars = "1.2.3"
+serde = { version = "1.0.229", features = ["derive"] }
+serde_json = "1.0.154"
+thiserror = "2.0.21"
+toml = "1.2.1"
+image = { version = "0.25.10", default-features = false, features = [
+  "png",
+  "jpeg",
+  "gif",
+] }
+uuid = { version = "1.29.2", features = ["v4", "serde"] }
+clap = { version = "4.6.7", features = ["derive"] }
+hardware-core = { package = "stream-dock-manager-hardware-core", path = "crates/hardware-core" }
+hardware-protocols = { package = "stream-dock-manager-hardware-protocols", path = "crates/hardware-protocols" }
+hardware-registry = { package = "stream-dock-manager-hardware-registry", path = "crates/hardware-registry" }
+stream-dock-manager-runtime = { path = "crates/runtime" }
+stream-dock-manager-plugin-runtimes = { path = "crates/plugin-runtimes" }
+stream-dock-manager-plugin-host = { path = "crates/plugin-host" }
+stream-dock-manager-downloads = { path = "crates/downloads" }
+
+[profile.release]
+lto = "thin"
+strip = true
+
+# Optimized local crates can retain inconsistent anonymous LLVM symbols in
+# incremental macOS builds. Match CI and rebuild changed crates without reusing
+# incremental object files; Cargo still caches unchanged crates normally
+[profile.dev]
+incremental = false
+
+# Keep real-time image work optimized when the desktop application is run with
+# `tauri dev`. The application/controller code keeps its normal debug profile
+[profile.dev.package.stream-dock-manager-hardware-core]
+opt-level = 3
+
+[profile.dev.package.image]
+opt-level = 3
+
+[profile.dev.package.png]
+opt-level = 3
+
+# Balanced final-device PNG compression must also stay fast in desktop dev builds
+[profile.dev.package.flate2]
+opt-level = 3
+
+[profile.dev.package.zlib-rs]
+opt-level = 3
+
+[profile.dev.package.zune-jpeg]
+opt-level = 3
+
+[profile.dev.package.zune-core]
+opt-level = 3
+
+# GTK3 requires glib 0.18. Apply the upstream VariantStrIter security fix without
+# changing that dependency family's ABI. See vendor/README.md for provenance
+[patch.crates-io]
+glib = { path = "vendor/.cache/sources/glib-0.18.5" }
+wry = { path = "vendor/.cache/sources/wry-0.57.2" }

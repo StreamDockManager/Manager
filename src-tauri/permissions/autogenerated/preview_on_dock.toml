@@ -1,0 +1,11 @@
+# Automatically generated - DO NOT EDIT!
+
+[[permission]]
+identifier = "allow-preview-on-dock"
+description = "Enables the preview_on_dock command without any pre-configured scope."
+commands.allow = ["preview_on_dock"]
+
+[[permission]]
+identifier = "deny-preview-on-dock"
+description = "Denies the preview_on_dock command without any pre-configured scope."
+commands.deny = ["preview_on_dock"]

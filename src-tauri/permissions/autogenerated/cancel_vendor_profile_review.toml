@@ -1,0 +1,11 @@
+# Automatically generated - DO NOT EDIT!
+
+[[permission]]
+identifier = "allow-cancel-vendor-profile-review"
+description = "Enables the cancel_vendor_profile_review command without any pre-configured scope."
+commands.allow = ["cancel_vendor_profile_review"]
+
+[[permission]]
+identifier = "deny-cancel-vendor-profile-review"
+description = "Denies the cancel_vendor_profile_review command without any pre-configured scope."
+commands.deny = ["cancel_vendor_profile_review"]

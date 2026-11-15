@@ -1,0 +1,11 @@
+# Automatically generated - DO NOT EDIT!
+
+[[permission]]
+identifier = "allow-cancel-macros"
+description = "Enables the cancel_macros command without any pre-configured scope."
+commands.allow = ["cancel_macros"]
+
+[[permission]]
+identifier = "deny-cancel-macros"
+description = "Denies the cancel_macros command without any pre-configured scope."
+commands.deny = ["cancel_macros"]

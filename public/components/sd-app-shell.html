@@ -1,0 +1,477 @@
+<div
+    class="app-shell"
+    x-data="shell"
+    :class="{ 'sidebar-collapsed': sidebarCollapsed }"
+    @profile-change="selectProfileId($event.detail.id)"
+    @configure-library-action.window="configureLibraryAction"
+>
+    <a class="skip-link button" href="#main-content" @click.prevent="jumpToSection">
+        Skip to main content
+    </a>
+    <aside class="sidebar">
+        <div id="sidebar-content" class="sidebar-content">
+            <button
+                type="button"
+                class="brand"
+                @click="openAbout"
+                aria-label="About Stream Dock Manager"
+                aria-haspopup="dialog"
+            >
+                <span class="brand-mark" aria-hidden="true">
+                    <i></i>
+                    <i></i>
+                    <i></i>
+                    <i></i>
+                </span>
+                <span class="brand-wordmark">
+                    Stream Dock
+                    <span class="brand-caption">Manager</span>
+                </span>
+            </button>
+            <nav aria-label="Main navigation">
+                <a
+                    href="#/editor"
+                    aria-label="Device editor"
+                    :data-tooltip="sidebarCollapsed ? 'Device editor' : null"
+                    :class="{active: app.route === 'editor'}"
+                    :aria-current="app.route === 'editor' ? 'page' : null"
+                >
+                    <img class="nav-icon" src="/appearance/icons/monitor.svg" alt="" />
+                    <span class="nav-label">Device editor</span>
+                </a>
+                <a
+                    href="#/action-library"
+                    aria-label="Action library"
+                    :data-tooltip="sidebarCollapsed ? 'Action library' : null"
+                    :class="{active: app.route === 'action-library'}"
+                    :aria-current="app.route === 'action-library' ? 'page' : null"
+                >
+                    <img class="nav-icon" src="/appearance/icons/keyboard.svg" alt="" />
+                    <span class="nav-label">Action library</span>
+                </a>
+                <a
+                    href="#/macros"
+                    aria-label="Macros"
+                    :data-tooltip="sidebarCollapsed ? 'Macros' : null"
+                    :class="{active: app.route === 'macros'}"
+                    :aria-current="app.route === 'macros' ? 'page' : null"
+                >
+                    <img class="nav-icon" src="/appearance/icons/zap.svg" alt="" />
+                    <span class="nav-label">Macros</span>
+                    <span class="nav-count" x-text="app.snapshot.saved_macros.length"></span>
+                </a>
+                <a
+                    href="#/plugins"
+                    aria-label="Plugins"
+                    :data-tooltip="sidebarCollapsed ? 'Plugins' : null"
+                    :class="{active: app.route === 'plugins'}"
+                    :aria-current="app.route === 'plugins' ? 'page' : null"
+                >
+                    <img class="nav-icon" src="/appearance/icons/folder.svg" alt="" />
+                    <span class="nav-label">Plugins</span>
+                    <span class="nav-count" x-text="app.snapshot.plugins.length"></span>
+                </a>
+                <a
+                    href="#/settings"
+                    aria-label="Settings"
+                    :data-tooltip="sidebarCollapsed ? 'Settings' : null"
+                    :class="{active: app.route === 'settings'}"
+                    :aria-current="app.route === 'settings' ? 'page' : null"
+                >
+                    <img class="nav-icon" src="/appearance/icons/settings.svg" alt="" />
+                    <span class="nav-label">Settings</span>
+                </a>
+                <a
+                    href="#/diagnostics"
+                    aria-label="Diagnostics"
+                    :data-tooltip="sidebarCollapsed ? 'Diagnostics' : null"
+                    :class="{active: app.route === 'diagnostics'}"
+                    :aria-current="app.route === 'diagnostics' ? 'page' : null"
+                >
+                    <img class="nav-icon" src="/appearance/icons/terminal.svg" alt="" />
+                    <span class="nav-label">Diagnostics</span>
+                </a>
+            </nav>
+            <section class="sidebar-device" aria-label="Device and simulator">
+                <strong x-text="deviceName"></strong>
+                <small class="sidebar-device-status">
+                    <span
+                        class="connection-dot"
+                        x-show="app.device && app.device.connected"
+                        aria-hidden="true"
+                    ></span>
+                    <span x-text="status"></span>
+                </small>
+                <button
+                    type="button"
+                    class="button"
+                    @click="simulator"
+                    :aria-label="app.simulated ? 'Disconnect simulator' : 'Try the simulator'"
+                    x-text="app.simulated ? 'Disconnect' : 'Try the simulator'"
+                ></button>
+            </section>
+            <button
+                type="button"
+                class="button sidebar-benchmark"
+                x-show="benchmarkActive"
+                x-cloak
+                aria-label="View benchmark progress"
+                aria-haspopup="dialog"
+                :data-tooltip="sidebarCollapsed ? 'View benchmark progress' : null"
+                @click="openBenchmarkProgress"
+            >
+                <span class="benchmark-active-dot" aria-hidden="true"></span>
+                <img
+                    class="nav-icon sidebar-activity-icon"
+                    src="/appearance/icons/clock.svg"
+                    alt=""
+                />
+                <span class="benchmark-sidebar-label">Benchmark running</span>
+            </button>
+            <button
+                type="button"
+                class="button sidebar-benchmark"
+                data-log-trigger
+                x-show="$store.pluginLogs.captures.length"
+                x-cloak
+                :aria-expanded="$store.pluginLogs.visible"
+                :aria-label="$store.pluginLogs.indicator"
+                :data-tooltip="$store.pluginLogs.indicator"
+                @click="$store.pluginLogs.overview($event)"
+            >
+                <span
+                    class="benchmark-active-dot"
+                    aria-hidden="true"
+                    x-show="$store.pluginLogs.activeCount"
+                ></span>
+                <img
+                    class="nav-icon sidebar-activity-icon"
+                    src="/appearance/icons/terminal.svg"
+                    alt=""
+                />
+                <span class="benchmark-sidebar-label" x-text="$store.pluginLogs.indicator"></span>
+                <span
+                    class="plugin-log-count"
+                    aria-hidden="true"
+                    x-text="$store.pluginLogs.compactIndicator"
+                ></span>
+            </button>
+            <div class="sidebar-bottom">
+                <label class="sidebar-appearance">
+                    Appearance
+                    <select
+                        aria-label="Sidebar color theme"
+                        :value="$store.theme.preference"
+                        @change="$store.theme.change($event)"
+                    >
+                        <option value="system">System</option>
+                        <option value="light">Light</option>
+                        <option value="dark">Dark</option>
+                    </select>
+                </label>
+            </div>
+        </div>
+        <div class="sidebar-footer">
+            <button
+                type="button"
+                class="version"
+                :aria-label="'Copy version v' + managerVersion"
+                :data-tooltip="'Copy v' + managerVersion"
+                data-tooltip-dismiss-on-click
+                @click="copyVersion"
+            >
+                <span class="version-label" x-text="'v' + managerVersion"></span>
+            </button>
+            <button
+                type="button"
+                class="icon-button"
+                aria-controls="sidebar-content"
+                :aria-expanded="!sidebarCollapsed"
+                :aria-label="sidebarCollapsed ? 'Expand sidebar' : 'Collapse sidebar'"
+                data-tooltip="Toggle sidebar"
+                data-tooltip-dismiss-on-click
+                @click="toggleSidebar"
+            >
+                <svg
+                    width="20"
+                    height="20"
+                    viewBox="0 0 24 24"
+                    fill="none"
+                    stroke="currentColor"
+                    stroke-width="2"
+                    stroke-linecap="round"
+                    stroke-linejoin="round"
+                    aria-hidden="true"
+                >
+                    <rect x="3" y="4" width="18" height="16" rx="2" />
+                    <path d="M9 4v16" />
+                    <path :d="sidebarCollapsed ? 'm13 9 3 3-3 3' : 'm16 9-3 3 3 3'" />
+                </svg>
+            </button>
+        </div>
+    </aside>
+    <dialog x-ref="about" class="feature-dialog about-dialog" aria-labelledby="about-title">
+        <header class="picker-header">
+            <div>
+                <h2 id="about-title">About Stream Dock Manager</h2>
+                <p>
+                    Build
+                    <span x-text="'v' + managerVersion"></span>
+                </p>
+            </div>
+            <button type="button" class="button" @click="closeAbout" autofocus>Close</button>
+        </header>
+        <div class="feature-body">
+            <p>
+                Configure your devices, build custom controls, and extend your workspace with
+                plugins.
+            </p>
+            <dl class="about-details">
+                <dt>License</dt>
+                <dd>GNU GPL-3.0-or-later</dd>
+                <dt>Project</dt>
+                <dd>Independent, open-source software</dd>
+            </dl>
+            <nav class="about-links" aria-label="Project links">
+                <a
+                    href="https://streamdockmanager.app"
+                    data-kind="website"
+                    @click="openProjectLink"
+                    target="_blank"
+                    rel="noopener noreferrer"
+                >
+                    Official website
+                </a>
+                <a
+                    href="https://github.com/StreamDockManager/Manager"
+                    data-kind="source"
+                    @click="openProjectLink"
+                    target="_blank"
+                    rel="noopener noreferrer"
+                >
+                    Source code on GitHub
+                </a>
+                <a
+                    href="https://github.com/StreamDockManager/Manager/issues"
+                    data-kind="issues"
+                    @click="openProjectLink"
+                    target="_blank"
+                    rel="noopener noreferrer"
+                >
+                    Report an issue
+                </a>
+                <a
+                    href="https://github.com/StreamDockManager/Manager/blob/main/LICENSE"
+                    data-kind="license"
+                    @click="openProjectLink"
+                    target="_blank"
+                    rel="noopener noreferrer"
+                >
+                    Read the license
+                </a>
+            </nav>
+            <p class="field-help" x-show="publicPreview">
+                External links are disabled in this website demo.
+            </p>
+            <p class="field-help">
+                Not affiliated with, endorsed by, or sponsored by VSDInside, MiraBox, OpenDeck, or
+                Elgato Stream Deck.
+            </p>
+            <p class="error" role="alert" x-show="aboutError" x-text="aboutError"></p>
+        </div>
+    </dialog>
+    <div class="main-column">
+        <sd-plugin-logs></sd-plugin-logs>
+        <sd-benchmark-progress></sd-benchmark-progress>
+        <sd-toasts></sd-toasts>
+        <sd-feature-dialogs></sd-feature-dialogs>
+        <sd-application-data></sd-application-data>
+        <sd-background-editor></sd-background-editor>
+        <sd-video-editor></sd-video-editor>
+        <sd-keyboard-macro-editor></sd-keyboard-macro-editor>
+        <div id="action-dialogs-outlet"></div>
+        <section aria-label="Media preparation" x-show="$store.mediaJobs.jobs.length" class="card">
+            <template x-for="job in $store.mediaJobs.jobs" :key="job.id">
+                <p role="status">
+                    <span x-text="job.state + ' · ' + job.frames + ' frames prepared'"></span>
+                    <button
+                        class="button"
+                        :data-id="job.id"
+                        @click="$store.mediaJobs.cancel($event)"
+                    >
+                        Cancel preparation
+                    </button>
+                </p>
+            </template>
+        </section>
+        <main id="main-content" tabindex="-1">
+            <div class="startup-recovery" x-data="startupRecovery">
+                <div class="feature-notice recovery-notice" role="status" x-show="status.active">
+                    <div class="recovery-notice-copy">
+                        <strong>Recovery mode</strong>
+                        <p>
+                            Plugin execution is paused. Review Manager logs to investigate what
+                            happened.
+                        </p>
+                        <p class="field-help">
+                            Exit recovery mode to restart with your saved plugin preferences.
+                        </p>
+                    </div>
+                    <div class="button-row">
+                        <button
+                            type="button"
+                            class="button primary"
+                            @click="$store.managerLogs.open()"
+                            :disabled="$store.managerLogs.opening || busy"
+                            title="Open the Manager log folder"
+                        >
+                            <span
+                                x-text="$store.managerLogs.opening ? 'Opening logs…' : 'Open logs'"
+                            ></span>
+                        </button>
+                        <button class="button" @click="exit" :disabled="busy">
+                            Exit recovery mode
+                        </button>
+                    </div>
+                </div>
+                <dialog
+                    class="feature-dialog"
+                    x-ref="prompt"
+                    aria-labelledby="recovery-heading"
+                    @cancel.prevent="recovery"
+                >
+                    <header class="picker-header">
+                        <h2 id="recovery-heading">Plugin startup was interrupted</h2>
+                        <button
+                            class="icon-button"
+                            aria-label="Keep recovery active and close"
+                            @click="recovery"
+                        >
+                            ×
+                        </button>
+                    </header>
+                    <div class="feature-body">
+                        <p>
+                            Manager exited before these plugin startup attempts finished. This does
+                            not establish that a plugin caused the exit. Plugin execution is paused
+                            while you choose how to continue.
+                        </p>
+                        <ul>
+                            <template x-for="plugin in status.interrupted" :key="plugin.id">
+                                <li x-text="plugin.name"></li>
+                            </template>
+                        </ul>
+                    </div>
+                    <footer class="feature-footer">
+                        <button class="button" @click="normal" :disabled="busy">
+                            Start normally
+                        </button>
+                        <button class="button primary" @click="recovery" :disabled="busy">
+                            Open recovery mode
+                        </button>
+                    </footer>
+                </dialog>
+                <p class="danger-text" role="alert" x-show="error" x-text="error"></p>
+            </div>
+
+            <div class="workspace-wallpaper" x-data="themeWallpaper" aria-hidden="true">
+                <img x-show="image" :src="image || null" alt="" />
+            </div>
+            <section
+                class="feature-notice settings-card"
+                x-show="navigationError"
+                x-cloak
+                aria-label="Navigation error"
+            >
+                <p role="alert" x-text="navigationError"></p>
+                <div class="button-row">
+                    <button type="button" class="button" @click="navigate" :disabled="navigating">
+                        Retry opening page
+                    </button>
+                    <button
+                        type="button"
+                        class="button"
+                        x-show="librarySelection.request"
+                        @click="cancelLibrarySelection"
+                    >
+                        Return to editor
+                    </button>
+                </div>
+            </section>
+            <div id="editor-outlet" x-show="app.route === 'editor'"></div>
+            <div id="route-outlet"></div>
+        </main>
+        <footer class="statusbar" x-ref="statusbar" x-init="observeFooter">
+            <span aria-label="Device connection status" aria-live="polite" aria-atomic="true">
+                <i class="connection-dot" aria-hidden="true"></i>
+                <span x-text="deviceStatus"></span>
+            </span>
+            <button
+                type="button"
+                class="text-button statusbar-about"
+                @click="openAbout"
+                aria-haspopup="dialog"
+            >
+                About
+            </button>
+        </footer>
+    </div>
+    <sd-library-organization></sd-library-organization>
+    <sd-profile-versions></sd-profile-versions>
+    <sd-profile-conversion></sd-profile-conversion>
+    <sd-plugin-management></sd-plugin-management>
+    <sd-export-review></sd-export-review>
+    <sd-macro-sharing></sd-macro-sharing>
+    <sd-media-library></sd-media-library>
+    <dialog
+        id="recovery-close-dialog"
+        class="confirmation-dialog"
+        aria-labelledby="recovery-close-title"
+        aria-describedby="recovery-close-description"
+        @cancel.prevent="$store.recovery.cancelClose()"
+    >
+        <h2 id="recovery-close-title">Close Manager in recovery mode?</h2>
+        <p id="recovery-close-description">
+            Send Manager to the taskbar to keep recovery mode active with plugins paused, or exit
+            recovery mode to restart Manager and resume enabled plugins.
+        </p>
+        <div class="button-row">
+            <button type="button" class="button" autofocus @click="$store.recovery.cancelClose()">
+                Cancel
+            </button>
+            <button type="button" class="button" @click="$store.recovery.sendToTaskbar()">
+                Send to taskbar
+            </button>
+            <button type="button" class="button primary" @click="$store.recovery.restartNormally()">
+                Exit recovery mode
+            </button>
+        </div>
+    </dialog>
+    <dialog
+        id="window-close-dialog"
+        class="confirmation-dialog"
+        aria-labelledby="window-close-title"
+        aria-describedby="window-close-description"
+        @cancel.prevent="$store.windowClose.keepEditing()"
+    >
+        <h2 id="window-close-title">Discard unsaved changes and close?</h2>
+        <p id="window-close-description" x-text="$store.windowClose.description"></p>
+        <div class="button-row">
+            <button
+                type="button"
+                class="button"
+                autofocus
+                @click="$store.windowClose.keepEditing()"
+            >
+                Keep editing
+            </button>
+            <button
+                type="button"
+                class="button danger"
+                @click="$store.windowClose.discardAndClose()"
+            >
+                Discard changes and close
+            </button>
+        </div>
+    </dialog>
+</div>

@@ -1,0 +1,48 @@
+{
+    "UUID": "app.streamdockmanager.plugins.fixture.counter",
+    "Name": "Counter protocol fixture",
+    "Version": "1.0.0",
+    "SDKVersion": 1,
+    "CodePath": "counter.mjs",
+    "Actions": [
+        {
+            "UUID": "app.streamdockmanager.plugins.fixture.counter.increment",
+            "Name": "Increment"
+        }
+    ],
+    "StreamDockManager": {
+        "ManifestDialect": "vsd",
+        "Runtime": {
+            "Kind": "nodejs",
+            "Version": ">=22, <27",
+            "Channel": "lts"
+        },
+        "Capabilities": {
+            "version": 1,
+            "id": "app.streamdockmanager.plugins.fixture.counter",
+            "plugin_version": "1.0.0",
+            "theme_protocol": 1,
+            "settings_protocol": 1,
+            "input_protocol": 0,
+            "icon": {
+                "light": "icon.svg",
+                "dark": "icon.svg"
+            },
+            "actions": {
+                "app.streamdockmanager.plugins.fixture.counter.increment": {
+                    "control_types": ["button"],
+                    "icon": {
+                        "light": "icon.svg",
+                        "dark": "icon.svg"
+                    },
+                    "states": [
+                        {
+                            "light": "icon.svg",
+                            "dark": "icon.svg"
+                        }
+                    ]
+                }
+            }
+        }
+    }
+}

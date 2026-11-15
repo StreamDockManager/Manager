@@ -1,0 +1,11 @@
+# Automatically generated - DO NOT EDIT!
+
+[[permission]]
+identifier = "allow-update-profile-conversion"
+description = "Enables the update_profile_conversion command without any pre-configured scope."
+commands.allow = ["update_profile_conversion"]
+
+[[permission]]
+identifier = "deny-update-profile-conversion"
+description = "Denies the update_profile_conversion command without any pre-configured scope."
+commands.deny = ["update_profile_conversion"]

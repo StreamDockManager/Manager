@@ -1,0 +1,11 @@
+# Automatically generated - DO NOT EDIT!
+
+[[permission]]
+identifier = "allow-cancel-macro-import"
+description = "Enables the cancel_macro_import command without any pre-configured scope."
+commands.allow = ["cancel_macro_import"]
+
+[[permission]]
+identifier = "deny-cancel-macro-import"
+description = "Denies the cancel_macro_import command without any pre-configured scope."
+commands.deny = ["cancel_macro_import"]

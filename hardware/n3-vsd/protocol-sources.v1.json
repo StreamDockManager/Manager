@@ -1,0 +1,34 @@
+{
+    "schema_version": 1,
+    "scope": "Additional reviewed implementation sources; not manufacturer registrations or physical qualification",
+    "sources": [
+        {
+            "repository": "4ndv/opendeck-akp03",
+            "revision": "10d183451807cc172fdf394bdd34f41a33fb52d3",
+            "path": "src/mappings.rs",
+            "git_blob": "bfcf366ebb50bb74088858ca25424951a03da0d7",
+            "sha256": "05d5dc76d0d68d456ed58f40fd97d35fd6a6f69ff5a1b8359dc518039cf69a04"
+        },
+        {
+            "repository": "4ndv/opendeck-akp03",
+            "revision": "10d183451807cc172fdf394bdd34f41a33fb52d3",
+            "path": "src/inputs.rs",
+            "git_blob": "ead5c286ec588dc8e145216b757307f8030a7e38",
+            "sha256": "d99f539a5aa9287e323fe8a8bc4ba3e8779fcb1a4016da4cfa5948fdbb5daaba"
+        },
+        {
+            "repository": "4ndv/mirajazz",
+            "revision": "f0a7fa3f9b5eaaa9b699c667312336d9c56f6723",
+            "path": "src/device.rs",
+            "git_blob": "840d8bf83392864afdc1f345235da343642d06c8",
+            "sha256": "9d7ed8ede874f7e02c505e3f4f326ae1f15f39f8be93387fdfcb8999f14649e5"
+        },
+        {
+            "repository": "4ndv/mirajazz",
+            "revision": "f0a7fa3f9b5eaaa9b699c667312336d9c56f6723",
+            "path": "src/state.rs",
+            "git_blob": "31ef4a86b3cf9cdad31700084fbba6cd57f48f22",
+            "sha256": "c5a11a9c5199f8020cc8809aee81a60d45fd92c67eac9f2d9671affb90a5bb1c"
+        }
+    ]
+}

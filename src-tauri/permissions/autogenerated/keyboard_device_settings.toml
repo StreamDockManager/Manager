@@ -1,0 +1,11 @@
+# Automatically generated - DO NOT EDIT!
+
+[[permission]]
+identifier = "allow-keyboard-device-settings"
+description = "Enables the keyboard_device_settings command without any pre-configured scope."
+commands.allow = ["keyboard_device_settings"]
+
+[[permission]]
+identifier = "deny-keyboard-device-settings"
+description = "Denies the keyboard_device_settings command without any pre-configured scope."
+commands.deny = ["keyboard_device_settings"]

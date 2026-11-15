@@ -1,0 +1,39 @@
+{
+    "UUID": "com.manager.fixture.elgato",
+    "Name": "Official SDK conformance probe",
+    "Version": "0.1.0.0",
+    "SDKVersion": 3,
+    "CodePath": "plugin.js",
+    "Software": {
+        "MinimumVersion": "6.9"
+    },
+    "Nodejs": {
+        "Version": "20"
+    },
+    "Actions": [
+        {
+            "UUID": "com.manager.fixture.elgato.probe",
+            "Name": "Probe",
+            "Controllers": ["Keypad"],
+            "Icon": "action-icon",
+            "States": [
+                {
+                    "Image": "key"
+                }
+            ]
+        }
+    ],
+    "Author": "Stream Dock Manager contributors",
+    "Description": "Disposable official SDK protocol probe, not an upstream sample",
+    "Icon": "plugin-icon",
+    "OS": [
+        {
+            "Platform": "mac",
+            "MinimumVersion": "12"
+        },
+        {
+            "Platform": "windows",
+            "MinimumVersion": "10"
+        }
+    ]
+}

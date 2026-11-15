@@ -1,0 +1,11 @@
+# Automatically generated - DO NOT EDIT!
+
+[[permission]]
+identifier = "allow-resume-plugin-log-capture"
+description = "Enables the resume_plugin_log_capture command without any pre-configured scope."
+commands.allow = ["resume_plugin_log_capture"]
+
+[[permission]]
+identifier = "deny-resume-plugin-log-capture"
+description = "Denies the resume_plugin_log_capture command without any pre-configured scope."
+commands.deny = ["resume_plugin_log_capture"]

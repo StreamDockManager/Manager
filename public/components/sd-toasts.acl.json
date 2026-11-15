@@ -1,0 +1,6 @@
+{
+    "version": 1,
+    "groups": ["shell", "plugin-logs"],
+    "options": { "shadow": false },
+    "metadata": { "description": "Shared first-party notification stack." }
+}

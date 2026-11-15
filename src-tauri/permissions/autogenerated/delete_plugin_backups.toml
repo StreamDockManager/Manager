@@ -1,0 +1,11 @@
+# Automatically generated - DO NOT EDIT!
+
+[[permission]]
+identifier = "allow-delete-plugin-backups"
+description = "Enables the delete_plugin_backups command without any pre-configured scope."
+commands.allow = ["delete_plugin_backups"]
+
+[[permission]]
+identifier = "deny-delete-plugin-backups"
+description = "Denies the delete_plugin_backups command without any pre-configured scope."
+commands.deny = ["delete_plugin_backups"]

@@ -1,0 +1,11 @@
+# Automatically generated - DO NOT EDIT!
+
+[[permission]]
+identifier = "allow-profile-versions"
+description = "Enables the profile_versions command without any pre-configured scope."
+commands.allow = ["profile_versions"]
+
+[[permission]]
+identifier = "deny-profile-versions"
+description = "Denies the profile_versions command without any pre-configured scope."
+commands.deny = ["profile_versions"]

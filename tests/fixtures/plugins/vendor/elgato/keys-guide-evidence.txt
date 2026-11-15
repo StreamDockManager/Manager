@@ -1,0 +1,12 @@
+Source: https://docs.elgato.com/streamdeck/sdk/guides/keys/
+Retrieved: 2026-11-09
+Publisher: Elgato, Stream Deck SDK 3.0.0 guide
+Scope: Short attributed excerpts only; not a complete upstream document or executable trace.
+
+Multi-State Keys:
+“When supporting two states, the state is toggled when the user presses the key, with the new state index available via the payload information.”
+
+Animated image formats:
+“The setImage function does not support animated image formats, such as GIF.”
+
+Interpretation for this implementation: a successful single-key press has the new two-state index in its event payload; key release does not initiate a second transition. This is documentary evidence, not reference-host or physical-device qualification. GIF manifest image discovery is separately supported by manifest-schema/latest.ts. Preserving a GIF byte stream is not evidence of native animated playback.

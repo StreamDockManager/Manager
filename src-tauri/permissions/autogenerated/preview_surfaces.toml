@@ -1,0 +1,11 @@
+# Automatically generated - DO NOT EDIT!
+
+[[permission]]
+identifier = "allow-preview-surfaces"
+description = "Enables the preview_surfaces command without any pre-configured scope."
+commands.allow = ["preview_surfaces"]
+
+[[permission]]
+identifier = "deny-preview-surfaces"
+description = "Denies the preview_surfaces command without any pre-configured scope."
+commands.deny = ["preview_surfaces"]

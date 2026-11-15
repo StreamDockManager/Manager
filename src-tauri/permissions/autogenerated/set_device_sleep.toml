@@ -1,0 +1,11 @@
+# Automatically generated - DO NOT EDIT!
+
+[[permission]]
+identifier = "allow-set-device-sleep"
+description = "Enables the set_device_sleep command without any pre-configured scope."
+commands.allow = ["set_device_sleep"]
+
+[[permission]]
+identifier = "deny-set-device-sleep"
+description = "Denies the set_device_sleep command without any pre-configured scope."
+commands.deny = ["set_device_sleep"]

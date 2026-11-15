@@ -1,0 +1,11 @@
+# Automatically generated - DO NOT EDIT!
+
+[[permission]]
+identifier = "allow-append-keyboard-macro-events"
+description = "Enables the append_keyboard_macro_events command without any pre-configured scope."
+commands.allow = ["append_keyboard_macro_events"]
+
+[[permission]]
+identifier = "deny-append-keyboard-macro-events"
+description = "Denies the append_keyboard_macro_events command without any pre-configured scope."
+commands.deny = ["append_keyboard_macro_events"]

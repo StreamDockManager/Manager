@@ -1,0 +1,198 @@
+schema_version = 1
+model_id = "k1-pro"
+name = "K1 Pro"
+protocol = "vendor-crt-1"
+status = "experimental"
+
+[capabilities]
+firmware_query = true
+firmware_report = { kind = "input", report_id = 4, length = 513, windows_supported = true }
+sleep = true
+brightness = true
+lighting = false
+lighting_channels = []
+background = false
+reliable_button_release = true
+reliable_encoder_release = false
+image_formats = ["png", "jpeg"]
+media_formats = ["png", "jpeg", "gif", "mp4"]
+max_fps = 24
+frame_output = { frame_scheduling = true, grouped_key_updates = true }
+
+[capabilities.keyboard]
+factory_reset = true
+settings_query = true
+brightness_max = 100
+global_rgb = true
+os_modes = ["windows", "macos"]
+effect_max = 15
+effect_names = [
+  "Static",
+  "Gradient",
+  "Breathing",
+  "Wave",
+  "Ripple",
+  "Windmill",
+  "Fountain",
+  "Fireworks",
+  "Band",
+  "Pixel",
+  "Flash",
+  "Halo",
+  "Rush",
+  "Grid",
+  "Ripple",
+  "Game"
+]
+background_color_effects = [14]
+speed_max = 5
+sleep_timeout_seconds_options = [60, 300, 900, 1800, 3600, 7200, 4294967295]
+
+[layout]
+width = 400
+height = 416
+rotation = 0
+
+[[variants]]
+id = "usb-6603-1015"
+name = "K1 Pro (6603:1015)"
+
+available = true
+
+[variants.identity]
+vendor_id = 26115
+product_id = 4117
+usage_page_min = 1026
+usage = 1
+
+[[variants]]
+id = "usb-5548-1025"
+name = "K1 Pro (5548:1025)"
+
+available = true
+
+[variants.identity]
+vendor_id = 21832
+product_id = 4133
+usage_page_min = 1026
+usage = 1
+
+[[variants]]
+id = "usb-6603-1019"
+name = "K1 Pro (6603:1019)"
+
+available = true
+
+[variants.identity]
+vendor_id = 26115
+product_id = 4121
+usage_page_min = 1026
+usage = 1
+
+[[controls]]
+id = "key-1"
+label = "Key 1"
+kind = "button"
+x = 32
+y = 160
+width = 88
+height = 88
+semantics = ["press", "release"]
+image_slot = 5
+image_width = 64
+image_height = 64
+
+[[controls]]
+id = "key-2"
+label = "Key 2"
+kind = "button"
+x = 144
+y = 160
+width = 88
+height = 88
+semantics = ["press", "release"]
+image_slot = 3
+image_width = 64
+image_height = 64
+
+[[controls]]
+id = "key-3"
+label = "Key 3"
+kind = "button"
+x = 256
+y = 160
+width = 88
+height = 88
+semantics = ["press", "release"]
+image_slot = 1
+image_width = 64
+image_height = 64
+
+[[controls]]
+id = "key-4"
+label = "Key 4"
+kind = "button"
+x = 32
+y = 272
+width = 88
+height = 88
+semantics = ["press", "release"]
+image_slot = 6
+image_width = 64
+image_height = 64
+
+[[controls]]
+id = "key-5"
+label = "Key 5"
+kind = "button"
+x = 144
+y = 272
+width = 88
+height = 88
+semantics = ["press", "release"]
+image_slot = 4
+image_width = 64
+image_height = 64
+
+[[controls]]
+id = "key-6"
+label = "Key 6"
+kind = "button"
+x = 256
+y = 272
+width = 88
+height = 88
+semantics = ["press", "release"]
+image_slot = 2
+image_width = 64
+image_height = 64
+
+[[controls]]
+id = "dial-1"
+label = "Dial 1"
+kind = "encoder"
+x = 32
+y = 48
+width = 88
+height = 88
+semantics = ["pulse", "rotate"]
+
+[[controls]]
+id = "dial-2"
+label = "Dial 2"
+kind = "encoder"
+x = 144
+y = 48
+width = 88
+height = 88
+semantics = ["pulse", "rotate"]
+
+[[controls]]
+id = "dial-3"
+label = "Dial 3"
+kind = "encoder"
+x = 256
+y = 48
+width = 88
+height = 88
+semantics = ["pulse", "rotate"]

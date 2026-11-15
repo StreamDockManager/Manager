@@ -1,0 +1,11 @@
+# Automatically generated - DO NOT EDIT!
+
+[[permission]]
+identifier = "allow-pending-plugin-profile-setup"
+description = "Enables the pending_plugin_profile_setup command without any pre-configured scope."
+commands.allow = ["pending_plugin_profile_setup"]
+
+[[permission]]
+identifier = "deny-pending-plugin-profile-setup"
+description = "Denies the pending_plugin_profile_setup command without any pre-configured scope."
+commands.deny = ["pending_plugin_profile_setup"]

@@ -1,0 +1,11 @@
+# Automatically generated - DO NOT EDIT!
+
+[[permission]]
+identifier = "allow-save-update-preferences"
+description = "Enables the save_update_preferences command without any pre-configured scope."
+commands.allow = ["save_update_preferences"]
+
+[[permission]]
+identifier = "deny-save-update-preferences"
+description = "Denies the save_update_preferences command without any pre-configured scope."
+commands.deny = ["save_update_preferences"]

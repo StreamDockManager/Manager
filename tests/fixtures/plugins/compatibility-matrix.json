@@ -1,0 +1,119 @@
+{
+    "schema_version": 1,
+    "baseline_sources": "vendor-sources.json",
+    "full_compatibility_claim": false,
+    "rows": [
+        {
+            "id": "vendor-manifest-admission",
+            "required": true,
+            "status": "partial",
+            "area": "manifest",
+            "evidence": "Untouched pinned VSD package accepted; spoofed identity and malformed claims rejected. Published @elgato/schemas0.6.0 Draft7 shape validation at read/discovery and preflight with all version branches, nested required/types/enums/unknown-field tests; immutable Counter validates without modification. Manager descriptor and VSD paths remain separate. Official SDK3.0.4 protocol probe uses source-valid6.9/Node20 declaration; default Node24 selection refusal and acknowledged runtime override are tested separately. Elgato action OS filtering excludes unavailable actions from actionable lists while retaining raw metadata; current flag defaults and bounded application thumbnails have focused regression evidence. Direct checked-in production 7.1-subset qualification passed 10/10 (host transport 7, real Runtime 3) in artifacts/current-sdk-candidate/production-8vbm656f, source SHA256 22607b429d015260935d90dd19a230f846b8f3d9c004eed74cf13b6bce0832c8. Genuine SDK 3.0.4, schema-valid 7.1/Node24, no legacy opt-in, runtime override or registration rewriting. Source inputs, production declaration/registry and authentic profile bytes were unchanged during execution. The separate older 6.9/Node20 manifest still correctly rejects default mode, while legacy succeeds only under the acknowledged Node24 override.",
+            "blocker": "Custom file/image-dimension qualification, unsupported manifest behavior, reference-host parity and untouched Counter 7.1 launch remain outstanding. SDK default 7.1 mode is admitted by the explicitly partial production contract. Passing candidate transport probes use a purpose-built source-valid fixture and do not qualify untouched Counter execution or all vendor-package semantics."
+        },
+        {
+            "id": "extension-negotiation",
+            "required": true,
+            "status": "verified",
+            "area": "protocol",
+            "evidence": "vendor_contract_tests and storage_rpc socket regression: standard commands accepted, unnegotiated Manager extensions denied",
+            "blocker": ""
+        },
+        {
+            "id": "registration",
+            "required": true,
+            "status": "partial",
+            "area": "launch",
+            "evidence": "Versioned embedded connection contract; dialect-specific registration; four native environment tests; UI-language consistency; three browser scale/context tests; bootstrap escaping and protocol fixtures",
+            "blocker": "Mixed-monitor/reference-host lifecycle and platform qualification outstanding; headless native execution requires an explicit presentation context rather than fabricated display metadata"
+        },
+        {
+            "id": "settings-and-inspectors",
+            "required": true,
+            "status": "partial",
+            "area": "settings",
+            "evidence": "Opaque vendor JSON and standard action inspector paths; owned file/session grants retained. Genuine SDK 3.0.4 explicit legacy-behavior baseline action/global settings and key-input roundtrips pass. Final isolated default-mode candidate passed 10/10: host transport 7 plus real Runtime 3, including settings/global/resource clean-restart durability and two bundled-profile cases. artifacts/current-sdk-candidate/snapshot-x8tichds/ records source SHA256 d15b30a2ff564a78bbec9e5a9a282821d86a463fa8b918278f8d68587ff81eab. Candidate uses schema-valid 7.1/Node 24 without runtime override; production now advertises the partial 7.1 subset. Host tests cover independent caches, runtime/PI callback origin, delayed owner-commit getter ordering, startup silence and rejection. Separate real Runtime settings/resource test uses actual SQLite/settings writer and managed staging, rejects missing-file staging while preserving prior state, deletes original source, and fully restarts Runtime/SDK before rereading settings, globals and exact managed bytes. macOS vendor inspectors use raw IPC-free Wry roots with per-token HTTP origins, exact WebSocket Origin binding and nonpersistent WK data stores. Native per-popup consent, bounded dimensions/count/depth, descendant teardown and session revocation are implemented. inspector_browser::{tests,http_tests,transport_tests}, browser::isolated_origin_tests and vendor_inspectors::tests cover manifest/default dimensions, origin rejection, in-flight HTTP revocation, passive WebSocket teardown, navigation, consent lifetime and subtree policy. Frontend plugin-settings tests cover native listener failure, close-before-open, duplicate close/reopen and disposal while preserving managed Apply/Cancel. Opt-in standalone vendor_inspector_probe passed on actual macOS WK: root/descendant IPC and opener checks, named window reuse and postMessage, nonpersistent shared-descendant stores, Path=/ cookie isolation across sessions, navigation denial, default/explicit geometry, count/depth caps, subtree closure, session revocation and clean exit. artifacts/vendor-inspector-probe/result.json records source hashes and explicit test-only injected consent/automatic requests. Direct checked-in production 7.1-subset qualification passed 10/10 (host transport 7, real Runtime 3) in artifacts/current-sdk-candidate/production-8vbm656f, source SHA256 22607b429d015260935d90dd19a230f846b8f3d9c004eed74cf13b6bce0832c8. Genuine SDK 3.0.4, schema-valid 7.1/Node24, no legacy opt-in, runtime override or registration rewriting. Source inputs, production declaration/registry and authentic profile bytes were unchanged during execution.",
+            "blocker": "The host transport stage uses synthetic presentation metadata and a controlled owner commit; the separate genuine SDK-to-Runtime stage establishes local saved settings/global/resource staging and clean-restart persistence. Complete payload-schema parity, crash/power-loss recovery, other native platforms and reference-host behavior remain unqualified by those tests. Production support is the partial 7.1 subset. Native structural WK probe passed with injected popup consent/automatic requests only. Real trusted consent/user activation, clipboard/geolocation and reference-host qualification remains incomplete. Windows/Linux retain the popup-disabled iframe. Popup navigation is package-only; no external, file, data or blob top-level navigation. DefaultWindowSize and requested geometry are bounded, not pixel-identical vendor UI parity."
+        },
+        {
+            "id": "input-lifecycle",
+            "required": true,
+            "status": "partial",
+            "area": "events",
+            "evidence": "vendor_contract tests signed ticks, held state, physical press/release, touch arrays, settings coordinates/state; deviceDidChange and authored title-change hooks Candidate-only current_sdk_candidate::official_sdk_default_mode_candidate_semantics covers deviceDidChange and disappear/reappear cache lifecycle; official_sdk_candidate_single_and_multi_action_resource_payloads and official_sdk_candidate_changed_settings_resource_payload cover 7.1 resource fields, coordinates and multi-action distinctions (7/7 snapshot-asqjefyv result).",
+            "blocker": "Independent schema/order and physical/reference-host qualification outstanding; no authored typography means no fabricated title event"
+        },
+        {
+            "id": "render-state",
+            "required": true,
+            "status": "partial",
+            "area": "render",
+            "evidence": "Hardware/software caches and ordering split with competing-context regression; state-specific title/image override/reset tests; trigger-description UI/runtime tests; Elgato automatic two-state press payload and opt-out/queue-failure tests; manifest title defaults raster regression; extensionless GIF/SVG source and MIME tests; explicit Elgato multi-action desired state is typed, persists across restart, and remains separate from current state in context-isolated input payloads; macro selector save/reopen/cancel regressions at360/1440px; manifest GIF timing/target isolation and captured native actor delivery tests; bounded transient clips share media budget/clock and existing backpressure scheduler; explicit setImage GIF rejected; Elgato declared encoder layout/background/trigger defaults preserve runtime overrides; background layering yields to authored appearance; distinct software-only MultiActionImage and selected-state macro previews with bounded cached thumbnails; official Dials-guide builtin geometry/content pinned, X1/A0/A1 image-region pixel regressions; custom declared package pixmaps render before runtime feedback with cache-policy, traversal and aggregate-budget regression coverage; published layout-schema alignment/gbar/bar_h fields pinned; hardware-core feedback::tests::text_alignment_moves_raster_glyphs_and_clips_to_the_item; hardware-core feedback::tests::builtin_gbar_keeps_its_bar_and_moves_a_bounded_lower_triangle cover functional alignment (also fitted Manager text), clipping, fixed bar body, moving bounded lower triangle and default/override indicator height; Manager independent dial-lane authoring supports linked turns and separate press; selected-lane Encoder.Icon remains app-only with draft/lane/VSD separation tests",
+            "blocker": "Reference-host and optical hardware rendering qualification outstanding; transient GIFs enforce documented implementation limits. Implicit default layout for background-only declarations remains unsupported. Encoder.Icon uses Manager selected-lane canvases; StackColor is accepted as vendor metadata but is not rendered. User encoder-icon overrides and application UI parity remain unqualified. New Elgato presentation and action-OS behavior is not inferred for VSD. Functional text alignment and gbar indicator movement/height have local raster coverage; exact font metrics/weight, triangle shape, border/gradient styling and optical parity remain unqualified."
+        },
+        {
+            "id": "resources",
+            "required": true,
+            "status": "partial",
+            "area": "resources",
+            "evidence": "Seven managed-resource tests; websocket set/getResources with id echo and restart bytes; archive/redacted export; inspector Apply/Cancel and macro staging tests; Unix file/directory sync failure and retry regressions Candidate-only genuine SDK tests official_sdk_default_mode_candidate_resource_read_after_write, official_sdk_candidate_rejected_writes_preserve_values, official_sdk_candidate_single_and_multi_action_resource_payloads and official_sdk_candidate_changed_settings_resource_payload pass in snapshot-asqjefyv; delayed owner commit, origin-specific callbacks, rejected writes and single/multi-action resource payloads are covered. Native macOS WKUIDelegate selected-file bridge uses pinned sdpi-components 4.0.1 full encoded-path input behavior. browser_resource_grants::tests::{native_selection_stages_exact_snapshot_and_revokes_without_losing_pending_bytes,native_selection_enforces_session_quota_and_owner_lifetime,selected_snapshot_cannot_follow_later_source_replacement,grant_resolution_is_exact_scoped_and_expiring,snapshot_rejects_directories_missing_and_oversized_files,snapshot_rejects_symlinks_and_special_files} pass. tests/browser-resource-selection.test.mjs passes 4 tests against the untouched upstream sanitizer; disposable Chromium input/change probe passes. These are native grant-unit/browser-DOM tests, not a native file-panel or reference-host qualification. Direct checked-in production 7.1-subset qualification passed 10/10 (host transport 7, real Runtime 3) in artifacts/current-sdk-candidate/production-8vbm656f, source SHA256 22607b429d015260935d90dd19a230f846b8f3d9c004eed74cf13b6bce0832c8. Genuine SDK 3.0.4, schema-valid 7.1/Node24, no legacy opt-in, runtime override or registration rewriting. Source inputs, production declaration/registry and authentic profile bytes were unchanged during execution.",
+            "blocker": "Actual macOS native file-panel/reference-host qualification remains outstanding; Linux isolated native chooser bridge is implemented but native-panel/reference-host qualification remains outstanding. Its narrow request IPC accepts no paths and native picker bypasses are denied. Windows bridge remains absent pending a safe native interception API; VSD callbacks and FileList semantics remain unsupported. VSD onFilePickerReturn JSON payload shape is undefined by the pinned sample and not implemented. about:blank selections and showPicker() without an observed file-input click fail closed. Other browser paths remain package/already-owned-resource only. Windows directory flush guarantee remains unqualified. Production host advertisement is the partial 7.1 subset; candidate transport and separately tested real-Runtime durability do not establish full compatibility."
+        },
+        {
+            "id": "profiles",
+            "required": true,
+            "status": "partial",
+            "area": "profiles",
+            "evidence": "Six immutable current official SDK Lights-Out V2 archives, manifest and MIT license pinned at SDK commit 9d9636e9ea956ff4be0246e7ab8e3679866b324f. Strict ZIP and UUID-resolved single-page parser, same-owner keypad actions, matched device geometry, per-state title appearance and state events. Separate profile confirmation; immutable bytes/hash, live owner/session/device/selection checks; atomic profile, provenance mapping and optional activation; exact mapped switching and tracked return; replacement-import invalidation. Bounded coalescing and admission capture before asynchronous work, session-held commit, bounded per-declaration failures and installation-aware review-cache recovery. Final macOS aggregate passed: profile parser 7 + Unix reader 7 + lifecycle 20 = 34 runtime tests, plus 3 host tests and 10 manifest tests. Frontend review-related tests 57 and packaged-preview dialog checks 2 passed. Windows pinned-handle local HarddiskVolume reader passed source review, GNU test linking and Clippy, and MSVC all-target source checking; native Windows tests were not executed. Final isolated genuine SDK 3.0.4 candidate passed host 7 + Runtime 3, including two profile cases: review/decline/accept and restart persistence, installed switching, page rejection/return, and real queued requests rejected after navigation/reconnection. artifacts/current-sdk-candidate/snapshot-x8tichds/ records source SHA256 d15b30a2ff564a78bbec9e5a9a282821d86a463fa8b918278f8d68587ff81eab. The independently authored SDK driver uses unchanged authentic sd archive bytes; no upstream sample executable, fabricated effect or fake commit is used. Direct checked-in production 7.1-subset qualification passed 10/10 (host transport 7, real Runtime 3) in artifacts/current-sdk-candidate/production-8vbm656f, source SHA256 22607b429d015260935d90dd19a230f846b8f3d9c004eed74cf13b6bce0832c8. Genuine SDK 3.0.4, schema-valid 7.1/Node24, no legacy opt-in, runtime override or registration rewriting. Source inputs, production declaration/registry and authentic profile bytes were unchanged during execution.",
+            "blocker": "V3, multipage ordering, folders, nonempty auxiliary controllers, builtins/multi-actions/keylogic/dialstacks, custom images/resources, Readonly=true, custom Action.Name and LinkedTitle=false are unsupported. Windows UNC/network/SUBST roots are rejected and native Windows execution remains unqualified. The authentic SDK executable manifest requires 7.1; production now advertises the partial 7.1 subset. The isolated candidate qualifies the observed single-page V2 subset only; reference-host and physical hardware parity remain unqualified."
+        },
+        {
+            "id": "host-system-events",
+            "required": true,
+            "status": "partial",
+            "area": "events",
+            "evidence": "macOS real NSWorkspace lifecycle/wake source; Windows process transitions/power callback source; host owner filters; default-off macOS deep-link native consent/restoration code",
+            "blocker": "No native reference-host execution; Windows1s process sampling can miss short-lived apps; Linux sources absent; deep-link opt-in requires packaged macOS app/prior handler and only routes to running plugins; Windows/Linux handler opt-in unavailable"
+        },
+        {
+            "id": "reference-macos",
+            "required": true,
+            "status": "unverified",
+            "area": "qualification",
+            "evidence": "",
+            "blocker": "No reference host run performed"
+        },
+        {
+            "id": "reference-windows",
+            "required": true,
+            "status": "unverified",
+            "area": "qualification",
+            "evidence": "",
+            "blocker": "No Windows reference host run performed"
+        },
+        {
+            "id": "linux-portability",
+            "required": true,
+            "status": "unverified",
+            "area": "qualification",
+            "evidence": "",
+            "blocker": "Not an upstream Elgato supported platform; portable subset qualification outstanding"
+        },
+        {
+            "id": "physical-controllers",
+            "required": true,
+            "status": "unverified",
+            "area": "qualification",
+            "evidence": "",
+            "blocker": "No physical hardware exercised in this task"
+        },
+        {
+            "id": "current-upstream-review",
+            "required": true,
+            "status": "partial",
+            "area": "maintenance",
+            "evidence": "Pinned source hashes/licenses at vendor-sources.json; VSD documentation/core identifier generation check; published Elgato manifest schema validation. The SDK repository has a checked-in weekly read-only vendor-review workflow and nine mocked watcher tests for official GitHub revisions, @elgato/streamdeck and @elgato/schemas package identities/versions, and Elgato official application release-note metadata. GitHub CI uses only its supplied scoped GITHUB_TOKEN; local checks are anonymous. Review does not execute downloaded code or auto-upgrade support labels. The candidate snapshot additionally audits and hashes SDK 3.0.4 explicit 7.0/7.1 source gates.",
+            "blocker": "The checked-in scheduled workflow has not been deployed or observed running in this task. VSD Craft application releases still require manual official-site review because no authoritative machine-readable version feed was established. Upstream changes still require source/schema review and new conformance evidence; release metadata is not reference-host qualification."
+        }
+    ]
+}

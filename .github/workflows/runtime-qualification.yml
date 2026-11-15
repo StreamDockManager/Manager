@@ -1,0 +1,48 @@
+name: Native runtime qualification
+on:
+    push:
+        branches: [runtime-qualification]
+    workflow_dispatch:
+permissions:
+    contents: read
+concurrency:
+    group: manager-runtimes-${{ github.ref }}
+    cancel-in-progress: true
+jobs:
+    runtimes:
+        if: github.ref == 'refs/heads/runtime-qualification' && (github.event_name == 'workflow_dispatch' || (github.event_name == 'push' && !github.event.created))
+        strategy:
+            fail-fast: false
+            matrix:
+                platform: >-
+                    ${{ fromJSON(
+                      vars.DEFER_MACOS_X64 == 'true' && '[{"os":"ubuntu-24.04","runner_variable":"LINUX_RUNNER_LABELS"},{"os":"windows-2022","runner_variable":"WINDOWS_RUNNER_LABELS"},{"os":"macos-15","runner_variable":"MACOS_ARM64_RUNNER_LABELS"}]' ||
+                      '[{"os":"ubuntu-24.04","runner_variable":"LINUX_RUNNER_LABELS"},{"os":"windows-2022","runner_variable":"WINDOWS_RUNNER_LABELS"},{"os":"macos-15","runner_variable":"MACOS_ARM64_RUNNER_LABELS"},{"os":"macos-15-intel","runner_variable":"MACOS_X64_RUNNER_LABELS"}]'
+                    ) }}
+                runtime:
+                    - { kind: nodejs, line: '22' }
+                    - { kind: nodejs, line: '24' }
+                    - { kind: nodejs, line: '26' }
+        runs-on: ${{ vars[matrix.platform.runner_variable] != '' && fromJSON(vars[matrix.platform.runner_variable]) || matrix.platform.os }}
+        env:
+            STREAM_DOCK_MANAGER_QUALIFY_RUNTIMES: '1'
+            STREAM_DOCK_MANAGER_QUALIFY_KIND: ${{ matrix.runtime.kind }}
+            STREAM_DOCK_MANAGER_QUALIFY_LINE: ${{ matrix.runtime.line }}
+        steps:
+            - uses: actions/checkout@v7.0.1
+            - name: Use Git for Windows Bash
+              if: runner.os == 'Windows'
+              shell: powershell
+              run: |
+                  $gitDirectory = Split-Path (Get-Command git.exe -ErrorAction Stop).Source -Parent
+                  $gitBash = Join-Path $gitDirectory '..\bin\bash.exe'
+                  if (!(Test-Path -LiteralPath $gitBash)) { throw 'Git for Windows Bash is required; the WSL bash launcher cannot run native Windows setup actions.' }
+                  $bashDirectory = Split-Path (Resolve-Path -LiteralPath $gitBash).Path -Parent
+                  $bashDirectory | Out-File -FilePath $env:GITHUB_PATH -Encoding utf8 -Append
+            - uses: actions/setup-python@v7.1.0
+              with:
+                  python-version: '3.12'
+            - uses: dtolnay/rust-toolchain@stable
+            - name: Prepare verified patched Rust dependencies
+              run: python scripts/prepare_patched_deps.py
+            - run: cargo test -p stream-dock-manager-plugin-host --locked --test runtime_protocol -- --ignored --nocapture

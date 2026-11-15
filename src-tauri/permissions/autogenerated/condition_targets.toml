@@ -1,0 +1,11 @@
+# Automatically generated - DO NOT EDIT!
+
+[[permission]]
+identifier = "allow-condition-targets"
+description = "Enables the condition_targets command without any pre-configured scope."
+commands.allow = ["condition_targets"]
+
+[[permission]]
+identifier = "deny-condition-targets"
+description = "Denies the condition_targets command without any pre-configured scope."
+commands.deny = ["condition_targets"]

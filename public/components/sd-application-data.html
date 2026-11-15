@@ -1,0 +1,275 @@
+<div x-data="applicationData" @open-application-data.window="open">
+    <dialog
+        x-ref="dialog"
+        class="feature-dialog wide-dialog"
+        aria-labelledby="application-data-title"
+        @cancel.prevent="close"
+    >
+        <header class="picker-header">
+            <h2 id="application-data-title">Manage stored data</h2>
+            <button
+                type="button"
+                class="icon-button"
+                aria-label="Close stored data"
+                @click="close"
+                :disabled="busy"
+            >
+                ×
+            </button>
+        </header>
+        <div class="feature-body">
+            <p>
+                Plugin settings and private records stay local. Deleting stored data preserves
+                profile bindings and saved macros. Recovery snapshots may still contain older
+                values.
+            </p>
+            <p role="status" x-show="busy">Working…</p>
+            <p role="alert" class="danger-text" x-show="error" x-text="error"></p>
+            <template x-if="data">
+                <div class="settings-section">
+                    <p
+                        role="alert"
+                        class="danger-text"
+                        x-show="data.backup_error"
+                        x-text="data.backup_error"
+                    ></p>
+                    <p>
+                        <span x-text="bytes(data.database_bytes)"></span>
+                        database ·
+                        <span x-text="bytes(data.reclaimable_bytes)"></span>
+                        reusable space ·
+                        <span x-text="data.backups.length"></span>
+                        recovery snapshots
+                    </p>
+                    <div class="runtime-toolbar">
+                        <label>
+                            Show
+                            <select
+                                aria-label="Filter stored plugin data"
+                                x-model="filter"
+                                :disabled="busy"
+                            >
+                                <option value="all">All plugins</option>
+                                <option value="not-installed">Not installed</option>
+                                <option value="has-cache">Has cache</option>
+                            </select>
+                        </label>
+                        <label>
+                            Sort by
+                            <select
+                                aria-label="Sort stored plugin data"
+                                x-model="sort"
+                                :disabled="busy"
+                            >
+                                <option value="name">Name</option>
+                                <option value="size">Largest saved data</option>
+                                <option value="age">Oldest data</option>
+                            </select>
+                        </label>
+                        <button
+                            type="button"
+                            class="button danger"
+                            @click="reviewSelected"
+                            :disabled="busy || selected.length === 0"
+                        >
+                            Delete selected data
+                        </button>
+                    </div>
+                    <div
+                        class="runtime-table-scroll"
+                        role="region"
+                        aria-label="Plugin stored data"
+                        tabindex="0"
+                    >
+                        <table class="runtime-table stored-data-table">
+                            <thead>
+                                <tr>
+                                    <th scope="col">Select</th>
+                                    <th scope="col">Plugin</th>
+                                    <th scope="col">Status</th>
+                                    <th scope="col">Data</th>
+                                    <th scope="col">Updated / removed</th>
+                                    <th scope="col">Workspace use</th>
+                                    <th scope="col">Management</th>
+                                </tr>
+                            </thead>
+                            <tbody>
+                                <template x-for="plugin in rows" :key="plugin.plugin_id">
+                                    <tr>
+                                        <td>
+                                            <input
+                                                type="checkbox"
+                                                :aria-label="'Select data for ' + plugin.name"
+                                                :data-id="plugin.plugin_id"
+                                                :checked="isSelected(plugin.plugin_id)"
+                                                @change="select"
+                                                :disabled="busy"
+                                            />
+                                        </td>
+                                        <th scope="row">
+                                            <span x-text="plugin.name"></span>
+                                            <small
+                                                class="runtime-metadata"
+                                                x-text="plugin.plugin_id"
+                                            ></small>
+                                        </th>
+                                        <td
+                                            x-text="plugin.retained ? (plugin.installed ? 'Installed · retained' : 'Not installed · retained') : (plugin.installed ? (plugin.enabled ? 'Enabled' : 'Disabled') : 'Not installed')"
+                                        ></td>
+                                        <td>
+                                            <span x-text="bytes(plugin.logical_bytes)"></span>
+                                            <small
+                                                class="runtime-metadata"
+                                                x-text="plugin.record_count + ' records'"
+                                            ></small>
+                                        </td>
+                                        <td>
+                                            <span x-text="date(plugin.updated_ms)"></span>
+                                            <small
+                                                class="runtime-metadata"
+                                                x-show="plugin.removed_ms"
+                                                x-text="'Removed: ' + date(plugin.removed_ms)"
+                                            ></small>
+                                        </td>
+                                        <td x-text="usageText(plugin.plugin_id)"></td>
+                                        <td>
+                                            <div class="button-row">
+                                                <button
+                                                    type="button"
+                                                    class="button"
+                                                    :data-id="plugin.plugin_id"
+                                                    :aria-label="'Review usage for ' + plugin.name"
+                                                    @click="usage"
+                                                    :disabled="busy"
+                                                >
+                                                    Review usage
+                                                </button>
+                                                <button
+                                                    type="button"
+                                                    class="button"
+                                                    x-show="plugin.installed &amp;&amp; plugin.retained"
+                                                    :data-id="plugin.plugin_id"
+                                                    :aria-label="'Restore data for ' + plugin.name"
+                                                    @click="restore"
+                                                    :disabled="busy"
+                                                >
+                                                    Restore data
+                                                </button>
+                                                <button
+                                                    type="button"
+                                                    class="button danger"
+                                                    :data-id="plugin.plugin_id"
+                                                    :aria-label="'Delete stored data for ' + plugin.name"
+                                                    @click="review"
+                                                    :disabled="busy"
+                                                >
+                                                    Delete data
+                                                </button>
+                                            </div>
+                                        </td>
+                                    </tr>
+                                </template>
+                            </tbody>
+                        </table>
+                    </div>
+                    <p x-show="data.plugins.length === 0">No stored plugin data.</p>
+                    <p x-show="data.plugins.length > 0 &amp;&amp; filtered.length === 0">
+                        No plugins match this filter.
+                    </p>
+                    <div class="button-row" x-show="pages > 1">
+                        <button
+                            type="button"
+                            class="button"
+                            @click="previous"
+                            :disabled="busy || page <= 1"
+                        >
+                            Previous
+                        </button>
+                        <span role="status" x-text="pageLabel"></span>
+                        <button
+                            type="button"
+                            class="button"
+                            @click="next"
+                            :disabled="busy || page >= pages"
+                        >
+                            Next
+                        </button>
+                    </div>
+                    <small>
+                        Per-plugin sizes count owned records. Shared database overhead and recovery
+                        snapshots are separate.
+                    </small>
+                </div>
+            </template>
+            <template x-if="pending.length > 0">
+                <section class="settings-section" aria-label="Review stored data deletion">
+                    <h3 x-text="reviewTitle"></h3>
+                    <ul>
+                        <template x-for="plugin in pending" :key="plugin.plugin_id">
+                            <li>
+                                <span x-text="plugin.name"></span>
+                                ·
+                                <span x-text="bytes(plugin.logical_bytes)"></span>
+                            </li>
+                        </template>
+                    </ul>
+                    <p>
+                        This permanently removes the listed plugin settings and private records.
+                        Installed plugins will be stopped before their data is cleared. You can
+                        reinstall a removed plugin later with fresh settings.
+                    </p>
+                    <div class="button-row">
+                        <button type="button" class="button" @click="cancelReview" :disabled="busy">
+                            Cancel
+                        </button>
+                        <button type="button" class="button danger" @click="purge" :disabled="busy">
+                            Delete stored data
+                        </button>
+                    </div>
+                </section>
+            </template>
+            <template x-if="usageTarget">
+                <section class="settings-section" aria-label="Stored data usage">
+                    <h3 x-text="usageTarget.name"></h3>
+                    <p x-text="usageText(usageTarget.plugin_id)"></p>
+                    <p>
+                        These counts show direct saved plugin references. History and drafts are
+                        preserved. Private records may also be referenced through opaque settings;
+                        their individual usage is unknown.
+                    </p>
+                    <button type="button" class="button" disabled>Clear cache</button>
+                    <small class="field-help">
+                        Current private namespaces contain durable records, not declared disposable
+                        caches. Shared download and media caches have separate controls.
+                    </small>
+                </section>
+            </template>
+            <details class="settings-section">
+                <summary>Recovery and disk space</summary>
+                <p>
+                    Snapshots cover managed settings and records. Media files, installed packages,
+                    and OS credentials require their own backups. Preview and restore a snapshot in
+                    Configuration recovery, or use the CLI while Manager is closed.
+                </p>
+                <p class="field-help">
+                    Recovery cleanup keeps up to 32 files or 1 GiB across all files and nested
+                    folders, including older backups and quarantine evidence. Oldest files go first;
+                    the newest validated snapshot is always kept. Cleanup waits for active recovery
+                    to finish, and may temporarily exceed these limits for safety.
+                </p>
+                <div class="button-row">
+                    <button type="button" class="button" @click="createBackup" :disabled="busy">
+                        Create recovery snapshot
+                    </button>
+                    <button type="button" class="button" @click="compact" :disabled="busy">
+                        Reclaim unused space
+                    </button>
+                </div>
+            </details>
+        </div>
+        <footer class="feature-footer button-row">
+            <button type="button" class="button" @click="load" :disabled="busy">Refresh</button>
+            <button type="button" class="button" @click="close" :disabled="busy">Close</button>
+        </footer>
+    </dialog>
+</div>

@@ -1,0 +1,11 @@
+# Automatically generated - DO NOT EDIT!
+
+[[permission]]
+identifier = "allow-editor-restore-state"
+description = "Enables the editor_restore_state command without any pre-configured scope."
+commands.allow = ["editor_restore_state"]
+
+[[permission]]
+identifier = "deny-editor-restore-state"
+description = "Denies the editor_restore_state command without any pre-configured scope."
+commands.deny = ["editor_restore_state"]

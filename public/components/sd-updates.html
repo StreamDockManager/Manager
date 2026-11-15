@@ -1,0 +1,133 @@
+<article
+    id="settings-updates"
+    tabindex="-1"
+    class="card settings-card updates-card"
+    aria-label="Updates"
+>
+    <header class="card-heading">
+        <h2>Application updates</h2>
+        <p>
+            Installed Manager
+            <strong x-text="$store.updates.managerVersion"></strong>
+        </p>
+    </header>
+    <section class="settings-section" aria-label="Update preferences">
+        <label class="settings-field">
+            Manager releases (owner/repository)
+            <input x-model="$store.updates.managerRepository" placeholder="owner/repository" />
+        </label>
+        <label class="preference-toggle">
+            <input type="checkbox" x-model="$store.updates.automatic" />
+            Check for application and plugin updates automatically
+        </label>
+        <div class="button-row">
+            <button class="button" @click="$store.updates.save()">Save update preferences</button>
+            <button
+                class="button"
+                @click="$store.updates.check('manager')"
+                :disabled="$store.updates.checking"
+            >
+                Check for updates
+            </button>
+        </div>
+    </section>
+    <section class="settings-section" role="status">
+        <span class="chip" x-text="$store.updates.managerState"></span>
+        <p x-text="'Last checked: ' + $store.updates.managerLastCheck"></p>
+        <p
+            class="error"
+            x-show="$store.updates.managerError || $store.updates.error"
+            x-text="$store.updates.managerError || $store.updates.error"
+        ></p>
+        <p x-show="$store.updates.managerNotes" x-text="$store.updates.managerNotes"></p>
+        <section
+            class="settings-section"
+            aria-label="Unsigned installer notice"
+            x-show="$store.updates.installers.length > 0"
+        >
+            <h3>Unsigned installers</h3>
+            <p id="manager-download-warning">
+                These installers are unsigned; macOS builds are not notarized. Your operating system
+                may warn or block installation.
+            </p>
+            <p class="field-help" id="manager-download-integrity">
+                Checksums detect changed files. They do not verify the publisher or prove a binary
+                matches its source. Installation is manual.
+            </p>
+            <div class="button-row">
+                <template x-for="link in $store.updates.managerLinks" :key="link.label">
+                    <a
+                        :href="link.url"
+                        :data-kind="link.kind"
+                        @click="$store.updates.openManagerLink($event)"
+                        target="_blank"
+                        rel="noopener noreferrer"
+                        x-text="link.label"
+                    ></a>
+                </template>
+            </div>
+        </section>
+        <template x-for="asset in $store.updates.installers" :key="asset.name">
+            <button
+                class="button"
+                :data-name="asset.name"
+                aria-describedby="manager-download-warning manager-download-integrity"
+                @click="$store.updates.download($event)"
+            >
+                Download installer
+                <span x-text="asset.os"></span>
+            </button>
+        </template>
+        <template x-for="job in $store.updates.managerJobs" :key="job.id">
+            <div class="download-row">
+                <div class="field-group">
+                    <span x-show="job.asset_name" x-text="job.asset_name || ''"></span>
+                    <span x-text="job.state"></span>
+                    <span x-show="job.error" x-text="job.error || ''"></span>
+                    <span
+                        role="status"
+                        x-show="job.state === 'running'"
+                        x-text="$store.updates.downloadProgress(job)"
+                    ></span>
+                    <progress
+                        x-show="job.state === 'running'"
+                        :value="job.completed || 0"
+                        :max="job.total || 1"
+                        :aria-label="'Installer download progress ' + (job.asset_name || '')"
+                    ></progress>
+                </div>
+                <button
+                    class="button"
+                    :data-id="job.id"
+                    @click="$store.updates.cancel($event)"
+                    x-show="job.state === 'running'"
+                >
+                    Cancel download
+                </button>
+                <button
+                    type="button"
+                    class="button"
+                    :data-id="job.id"
+                    :aria-label="'Retry download ' + (job.asset_name || job.id)"
+                    aria-describedby="manager-download-warning manager-download-integrity"
+                    @click="$store.updates.retryDownload($event)"
+                    x-show="$store.updates.canRetry(job)"
+                >
+                    Retry download
+                </button>
+                <button
+                    class="button"
+                    :data-id="job.id"
+                    @click="$store.updates.show($event)"
+                    x-show="job.state === 'complete'"
+                >
+                    Show in folder
+                </button>
+            </div>
+        </template>
+    </section>
+    <button class="button" @click="$store.updates.openCatalog('updates', $event)">
+        Plugin updates
+        <span x-text="$store.updates.count"></span>
+    </button>
+</article>

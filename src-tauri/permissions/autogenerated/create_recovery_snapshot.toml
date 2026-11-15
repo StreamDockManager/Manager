@@ -1,0 +1,11 @@
+# Automatically generated - DO NOT EDIT!
+
+[[permission]]
+identifier = "allow-create-recovery-snapshot"
+description = "Enables the create_recovery_snapshot command without any pre-configured scope."
+commands.allow = ["create_recovery_snapshot"]
+
+[[permission]]
+identifier = "deny-create-recovery-snapshot"
+description = "Denies the create_recovery_snapshot command without any pre-configured scope."
+commands.deny = ["create_recovery_snapshot"]

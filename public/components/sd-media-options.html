@@ -1,0 +1,151 @@
+<div x-data="mediaOptions" class="media-options" x-show="asset">
+    <div :class="layoutClass">
+        <div class="video-media-summary" x-show="kind === 'clip'">
+            <strong x-text="sourceFormat === 'gif' ? 'GIF clip' : 'Video clip'"></strong>
+            <small
+                x-text="(duration / 1000).toFixed(2) + ' s · ' + sourceFps.toFixed(2) + ' source FPS'"
+            ></small>
+            <button
+                type="button"
+                class="button"
+                @click="editVideo"
+                x-text="sourceFormat === 'gif' ? 'Edit GIF' : 'Edit video'"
+            ></button>
+            <p class="field-help">
+                Scrub, choose a section, and adjust framing and playback in the shared clip editor.
+            </p>
+        </div>
+        <div class="photo-source" x-show="sourceImage || sourceError">
+            <div class="photo-source-panel" x-show="sourceImage">
+                <strong>Crop image</strong>
+                <p class="field-help">Drag the box to move it. Drag a corner to resize.</p>
+                <div class="photo-source-frame" x-ref="photoFrame" :style="sourceStyle">
+                    <img :src="sourceImage" alt="Original image for cropping" draggable="false" />
+                    <div
+                        class="photo-crop-box"
+                        :style="cropStyle"
+                        aria-hidden="true"
+                        @pointerdown="startCrop"
+                        @pointermove="moveCrop"
+                        @pointerup="endCrop"
+                        @pointercancel="endCrop"
+                        @lostpointercapture="endCrop"
+                    >
+                        <span class="photo-crop-handle" data-crop-edge="nw"></span>
+                        <span class="photo-crop-handle" data-crop-edge="ne"></span>
+                        <span class="photo-crop-handle" data-crop-edge="sw"></span>
+                        <span class="photo-crop-handle" data-crop-edge="se"></span>
+                    </div>
+                </div>
+            </div>
+            <div class="photo-source-panel" x-show="sourceError">
+                <p class="danger-text" role="alert" x-text="sourceError"></p>
+                <button type="button" class="button" @click="previewSource">
+                    Retry source image
+                </button>
+            </div>
+        </div>
+        <div class="media-preview-panel">
+            <figure class="media-device-preview" x-show="image">
+                <figcaption>Device preview</figcaption>
+                <img class="media-edit-preview" :src="image" alt="Edited media preview" />
+            </figure>
+            <p class="field-help" x-show="!image && !desktopPreview && !error">
+                Image preview is available in the desktop application.
+            </p>
+            <p class="field-help" role="status" x-show="!image && desktopPreview && !error">
+                Loading media preview…
+            </p>
+            <p
+                class="field-help"
+                x-show="kind === 'clip'"
+                x-text="'Requested animation cadence: ' + requested + ' updates/s. Actual delivery depends on device throughput. Source duration: ' + duration + ' ms.'"
+            ></p>
+            <p class="danger-text" role="alert" x-show="error" x-text="error"></p>
+            <button type="button" class="button" x-show="error" @click="preview">
+                Retry device preview
+            </button>
+        </div>
+        <div class="media-option-fields" x-show="kind === 'photo'">
+            <label>
+                Image encoding
+                <select
+                    aria-label="Image encoding"
+                    :value="options.encoding || 'auto'"
+                    data-field="encoding"
+                    @change="change"
+                >
+                    <option value="auto">Automatic (sharp UI, efficient photos)</option>
+                    <option value="png">PNG</option>
+                    <option value="jpeg">JPEG (device support required)</option>
+                </select>
+            </label>
+            <label>
+                Scale
+                <select
+                    aria-label="Media fit"
+                    :value="options.fit"
+                    data-field="fit"
+                    @change="change"
+                >
+                    <option value="fill">Fill (crop edges)</option>
+                    <option value="fit">Fit (letterbox)</option>
+                </select>
+            </label>
+            <div class="media-crop-grid">
+                <label>
+                    X %
+                    <input
+                        aria-label="Crop X"
+                        type="number"
+                        step="any"
+                        min="0"
+                        max="99"
+                        :value="cropX"
+                        data-field="0"
+                        @input="change"
+                    />
+                </label>
+                <label>
+                    Y %
+                    <input
+                        aria-label="Crop Y"
+                        type="number"
+                        step="any"
+                        min="0"
+                        max="99"
+                        :value="cropY"
+                        data-field="1"
+                        @input="change"
+                    />
+                </label>
+                <label>
+                    Width %
+                    <input
+                        aria-label="Crop width"
+                        type="number"
+                        step="any"
+                        min="1"
+                        max="100"
+                        :value="cropWidth"
+                        data-field="2"
+                        @input="change"
+                    />
+                </label>
+                <label>
+                    Height %
+                    <input
+                        aria-label="Crop height"
+                        type="number"
+                        step="any"
+                        min="1"
+                        max="100"
+                        :value="cropHeight"
+                        data-field="3"
+                        @input="change"
+                    />
+                </label>
+            </div>
+        </div>
+    </div>
+</div>

@@ -1,0 +1,11 @@
+# Automatically generated - DO NOT EDIT!
+
+[[permission]]
+identifier = "allow-cancel-boot-logo"
+description = "Enables the cancel_boot_logo command without any pre-configured scope."
+commands.allow = ["cancel_boot_logo"]
+
+[[permission]]
+identifier = "deny-cancel-boot-logo"
+description = "Denies the cancel_boot_logo command without any pre-configured scope."
+commands.deny = ["cancel_boot_logo"]

@@ -1,0 +1,11 @@
+# Automatically generated - DO NOT EDIT!
+
+[[permission]]
+identifier = "allow-acknowledge-manager-catalog-link"
+description = "Enables the acknowledge_manager_catalog_link command without any pre-configured scope."
+commands.allow = ["acknowledge_manager_catalog_link"]
+
+[[permission]]
+identifier = "deny-acknowledge-manager-catalog-link"
+description = "Denies the acknowledge_manager_catalog_link command without any pre-configured scope."
+commands.deny = ["acknowledge_manager_catalog_link"]

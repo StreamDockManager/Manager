@@ -1,0 +1,35 @@
+{
+    "schema_version": 1,
+    "manager_contract_version": 1,
+    "surface_contract_version": 1,
+    "capabilities": [
+        "plugin-protocol-v1",
+        "manager-controls-v1",
+        "telemetry-v1",
+        "surface-metadata-v1",
+        "plugin-theme-v1",
+        "plugin-settings-v1",
+        "plugin-storage-v1",
+        "desktop-input-v1",
+        "action-results-v1",
+        "network-payload-v1",
+        "plugin-logs-v1"
+    ],
+    "vendors": {
+        "streamdeck": {
+            "application_version": "7.1.0",
+            "compatibility_label": "streamdeck-7.1-subset",
+            "sdk_versions": [2, 3]
+        },
+        "vsd": {
+            "application_version": "3.10.205.0918",
+            "compatibility_label": "3.10.205.0918-subset",
+            "sdk_versions": [1]
+        },
+        "openaction": {
+            "application_version": "0.1.0",
+            "compatibility_label": "openaction-subset",
+            "sdk_versions": []
+        }
+    }
+}

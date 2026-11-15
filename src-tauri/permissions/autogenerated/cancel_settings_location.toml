@@ -1,0 +1,11 @@
+# Automatically generated - DO NOT EDIT!
+
+[[permission]]
+identifier = "allow-cancel-settings-location"
+description = "Enables the cancel_settings_location command without any pre-configured scope."
+commands.allow = ["cancel_settings_location"]
+
+[[permission]]
+identifier = "deny-cancel-settings-location"
+description = "Denies the cancel_settings_location command without any pre-configured scope."
+commands.deny = ["cancel_settings_location"]

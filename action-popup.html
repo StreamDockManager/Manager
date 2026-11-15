@@ -1,0 +1,27 @@
+<!doctype html>
+<html lang="en">
+    <head>
+        <meta charset="UTF-8" />
+        <meta name="viewport" content="width=device-width,initial-scale=1" />
+        <title>Stream Dock Manager action</title>
+    </head>
+    <body class="action-popup">
+        <main>
+            <h1 id="title">Stream Dock Manager action</h1>
+            <p id="description"></p>
+            <form id="form">
+                <label id="input-label">
+                    Value
+                    <input id="value" autofocus autocomplete="off" />
+                </label>
+                <div id="choices"></div>
+                <div class="button-row">
+                    <button class="button primary" id="submit" type="submit">Continue</button>
+                    <button class="button" id="cancel" type="button">Cancel</button>
+                </div>
+            </form>
+            <p role="alert" id="error"></p>
+        </main>
+        <script type="module" src="/src/action-popup.ts"></script>
+    </body>
+</html>

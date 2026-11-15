@@ -1,0 +1,11 @@
+# Automatically generated - DO NOT EDIT!
+
+[[permission]]
+identifier = "allow-reset-plugin-styles"
+description = "Enables the reset_plugin_styles command without any pre-configured scope."
+commands.allow = ["reset_plugin_styles"]
+
+[[permission]]
+identifier = "deny-reset-plugin-styles"
+description = "Denies the reset_plugin_styles command without any pre-configured scope."
+commands.deny = ["reset_plugin_styles"]

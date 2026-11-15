@@ -1,0 +1,77 @@
+<div x-data="profileVersions" @profile-versions.window="open">
+    <dialog
+        x-ref="dialog"
+        class="feature-dialog wide-dialog"
+        aria-labelledby="profile-versions-title"
+        @cancel.prevent="close"
+    >
+        <header class="picker-header">
+            <h2 id="profile-versions-title">Profile versions</h2>
+            <button
+                class="icon-button"
+                aria-label="Close profile versions"
+                @click="close"
+                :disabled="restoring"
+            >
+                ×
+            </button>
+        </header>
+        <div class="feature-body">
+            <p x-text="name"></p>
+            <p class="field-help">
+                Compare saved profile settings with retained history. Unsaved inspector edits are
+                not included. Restoring replaces this profile’s saved settings, not other profiles,
+                installed plugins, media files or shared macros. You can undo the restore from
+                History.
+            </p>
+            <p class="field-help" x-text="warning"></p>
+            <p role="status" x-show="busy">Loading…</p>
+            <p role="alert" x-show="error" x-text="error"></p>
+            <p role="alert" x-show="stale">
+                Workspace changed. Close and reopen versions before restoring.
+            </p>
+            <label>
+                Previous version
+                <select x-model="selected" @change="choose" :disabled="busy || stale">
+                    <option value="">Choose a retained version</option>
+                    <template x-for="version in versions" :key="version.id">
+                        <option :value="version.id" x-text="versionLabel(version)"></option>
+                    </template>
+                </select>
+            </label>
+            <p x-show="!busy && !versions.length">No retained previous versions were found.</p>
+            <div x-show="candidate">
+                <p class="field-help">
+                    − removes current lines; + restores selected lines. Large changes may be
+                    grouped. Preview is limited to 2,000 lines / 500,000 characters; restore uses
+                    the complete validated profile.
+                </p>
+                <label>
+                    Changes
+                    <textarea
+                        aria-label="Profile version changes"
+                        class="monospace"
+                        rows="16"
+                        readonly
+                        :value="diffText"
+                        spellcheck="false"
+                    ></textarea>
+                </label>
+                <label class="preference-toggle">
+                    <input type="checkbox" x-model="reviewed" :disabled="busy || stale" />
+                    I reviewed this replacement and want to restore these saved profile settings.
+                </label>
+            </div>
+        </div>
+        <footer class="feature-footer button-row">
+            <button class="button" @click="close" :disabled="restoring">Cancel</button>
+            <button
+                class="button primary"
+                @click="restore"
+                :disabled="busy || stale || !candidate || !reviewed"
+            >
+                Restore selected version
+            </button>
+        </footer>
+    </dialog>
+</div>

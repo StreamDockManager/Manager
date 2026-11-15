@@ -1,0 +1,11 @@
+# Automatically generated - DO NOT EDIT!
+
+[[permission]]
+identifier = "allow-prepare-video-clip-from-asset"
+description = "Enables the prepare_video_clip_from_asset command without any pre-configured scope."
+commands.allow = ["prepare_video_clip_from_asset"]
+
+[[permission]]
+identifier = "deny-prepare-video-clip-from-asset"
+description = "Denies the prepare_video_clip_from_asset command without any pre-configured scope."
+commands.deny = ["prepare_video_clip_from_asset"]

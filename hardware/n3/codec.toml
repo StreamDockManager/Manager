@@ -1,0 +1,141 @@
+schema_version = 1
+mode_before_wake = false
+reinitialize_on_wake = true
+require_input_ok = true
+button_states = [0, 1]
+rotate_states = [0]
+swipe_states = [0]
+report_size = 1025
+report_id = 0
+
+[[inputs]]
+event = "button"
+code = 1
+control_id = "key-1"
+
+[[inputs]]
+event = "button"
+code = 2
+control_id = "key-2"
+
+[[inputs]]
+event = "button"
+code = 3
+control_id = "key-3"
+
+[[inputs]]
+event = "button"
+code = 4
+control_id = "key-4"
+
+[[inputs]]
+event = "button"
+code = 5
+control_id = "key-5"
+
+[[inputs]]
+event = "button"
+code = 6
+control_id = "key-6"
+
+[[inputs]]
+event = "button"
+code = 37
+control_id = "key-7"
+
+[[inputs]]
+event = "button"
+code = 48
+control_id = "key-8"
+
+[[inputs]]
+event = "button"
+code = 49
+control_id = "key-9"
+
+[[inputs]]
+event = "button"
+code = 51
+control_id = "dial-1"
+
+[[inputs]]
+event = "rotate"
+code = 144
+control_id = "dial-1"
+delta = -1
+
+[[inputs]]
+event = "rotate"
+code = 145
+control_id = "dial-1"
+delta = 1
+
+[[inputs]]
+event = "button"
+code = 52
+control_id = "dial-2"
+
+[[inputs]]
+event = "rotate"
+code = 96
+control_id = "dial-2"
+delta = -1
+
+[[inputs]]
+event = "rotate"
+code = 97
+control_id = "dial-2"
+delta = 1
+
+[[inputs]]
+event = "button"
+code = 53
+control_id = "dial-3"
+
+[[inputs]]
+event = "rotate"
+code = 80
+control_id = "dial-3"
+delta = -1
+
+[[inputs]]
+event = "rotate"
+code = 81
+control_id = "dial-3"
+delta = 1
+
+[[surfaces]]
+control_id = "key-1"
+encoding = "jpeg"
+rotation = 90
+
+[[surfaces]]
+control_id = "key-2"
+encoding = "jpeg"
+rotation = 90
+
+[[surfaces]]
+control_id = "key-3"
+encoding = "jpeg"
+rotation = 90
+
+[[surfaces]]
+control_id = "key-4"
+encoding = "jpeg"
+rotation = 90
+
+[[surfaces]]
+control_id = "key-5"
+encoding = "jpeg"
+rotation = 90
+
+[[surfaces]]
+control_id = "key-6"
+encoding = "jpeg"
+rotation = 90
+
+[boot]
+control_id = "boot"
+encoding = "jpeg"
+rotation = 90
+flip_x = false

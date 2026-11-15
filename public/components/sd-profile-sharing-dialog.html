@@ -1,0 +1,83 @@
+<div x-data="profileSharing" @open-profile-export.window="open">
+    <dialog
+        x-ref="dialog"
+        class="feature-dialog profile-export-dialog"
+        aria-labelledby="profile-export-title"
+        aria-describedby="profile-export-warning"
+        @cancel.prevent="cancel"
+    >
+        <header class="picker-header">
+            <div>
+                <h2 id="profile-export-title">Export profiles</h2>
+                <p>Share selected profiles, media, and the saved macros they use.</p>
+            </div>
+            <button
+                type="button"
+                class="icon-button"
+                aria-label="Cancel export"
+                @click="cancel"
+                :disabled="exporting"
+            >
+                ×
+            </button>
+        </header>
+        <div class="feature-body feature-fields">
+            <div class="button-row">
+                <strong>Profiles to share</strong>
+                <button
+                    type="button"
+                    class="text-button"
+                    @click="selectAll"
+                    :disabled="exporting"
+                    x-text="allSelected ? 'Clear selection' : 'Select all'"
+                ></button>
+            </div>
+            <template x-for="profile in profiles" :key="profile.id">
+                <label class="preference-toggle">
+                    <input
+                        type="checkbox"
+                        :value="profile.id"
+                        x-model="selected"
+                        :disabled="exporting"
+                    />
+                    <span x-text="profile.name + ' · ' + profile.model_id"></span>
+                </label>
+            </template>
+            <div class="warning-card" id="profile-export-warning">
+                <strong>Include plugin settings and action files?</strong>
+                <p>
+                    Settings may contain API keys, passwords, tokens, private URLs, file paths, or
+                    other personal information. Anyone receiving the archive can read them,
+                    including settings in nested actions and saved macros.
+                </p>
+                <p>
+                    Review without settings to keep plugin configuration private. Global plugin
+                    settings and local parameter overrides always stay on this computer. Review
+                    profile parameter defaults before sharing.
+                </p>
+            </div>
+            <p class="danger-text" role="alert" x-show="error" x-text="error"></p>
+        </div>
+        <footer class="button-row feature-footer">
+            <button type="button" class="button" @click="cancel" :disabled="exporting">
+                Cancel
+            </button>
+            <button
+                type="button"
+                class="button primary"
+                x-ref="decline"
+                autofocus
+                @click="withoutSettings"
+            >
+                Review without settings
+            </button>
+            <button
+                type="button"
+                class="button"
+                @click="withSettings"
+                :disabled="!canInclude"
+                x-text="remaining ? 'Include settings (' + remaining + 's)' : 'Include settings and review'"
+            ></button>
+        </footer>
+    </dialog>
+</div>

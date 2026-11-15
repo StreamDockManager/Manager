@@ -1,0 +1,11 @@
+# Automatically generated - DO NOT EDIT!
+
+[[permission]]
+identifier = "allow-configuration-recovery-open-data"
+description = "Enables the configuration_recovery_open_data command without any pre-configured scope."
+commands.allow = ["configuration_recovery_open_data"]
+
+[[permission]]
+identifier = "deny-configuration-recovery-open-data"
+description = "Denies the configuration_recovery_open_data command without any pre-configured scope."
+commands.deny = ["configuration_recovery_open_data"]

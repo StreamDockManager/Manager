@@ -1,0 +1,11 @@
+# Automatically generated - DO NOT EDIT!
+
+[[permission]]
+identifier = "allow-forget-import-recipe"
+description = "Enables the forget_import_recipe command without any pre-configured scope."
+commands.allow = ["forget_import_recipe"]
+
+[[permission]]
+identifier = "deny-forget-import-recipe"
+description = "Denies the forget_import_recipe command without any pre-configured scope."
+commands.deny = ["forget_import_recipe"]

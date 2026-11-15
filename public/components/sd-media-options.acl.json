@@ -1,0 +1,26 @@
+{
+    "version": 1,
+    "groups": ["editor", "settings"],
+    "dependencies": [],
+    "options": {
+        "shadow": false,
+        "attributes": {
+            "asset": {
+                "type": "String",
+                "default": ""
+            },
+            "control": {
+                "type": "String",
+                "default": ""
+            },
+            "content": {
+                "type": "String",
+                "default": "{}",
+                "reflect": true
+            }
+        }
+    },
+    "metadata": {
+        "description": "Non-destructive media transforms shared with Rust playback."
+    }
+}

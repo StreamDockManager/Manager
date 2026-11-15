@@ -1,0 +1,9 @@
+{
+    "version": 1,
+    "groups": ["shell"],
+    "dependencies": [],
+    "options": { "shadow": false },
+    "metadata": {
+        "description": "Immutable profile and macro export review with draft field changes."
+    }
+}

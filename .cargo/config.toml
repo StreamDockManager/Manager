@@ -1,0 +1,6 @@
+# Keep Rust and native C/Objective-C dependencies on the same supported macOS
+# floor, including plain cargo builds outside the Tauri CLI. Keep in sync with
+# bundle.macOS.minimumSystemVersion in src-tauri/tauri.conf.json. Explicit
+# environment overrides remain available for downstream build environments
+[env]
+MACOSX_DEPLOYMENT_TARGET = { value = "14.0", force = false }

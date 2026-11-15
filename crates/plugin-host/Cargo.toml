@@ -1,0 +1,50 @@
+[package]
+name = "stream-dock-manager-plugin-host"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+
+[dependencies]
+log = "0.4.35"
+roxmltree = "0.21.2"
+hex.workspace = true
+stream-dock-manager-plugin-runtimes.workspace = true
+stream-dock-manager-storage.workspace = true
+serde.workspace = true
+serde_json.workspace = true
+uuid.workspace = true
+zip.workspace = true
+tungstenite = "0.30.0"
+mio = { version = "1.2.4", features = ["os-poll", "net"] }
+hardware-core.workspace = true
+
+ts-rs.workspace = true
+schemars.workspace = true
+tempfile = "3.27.0"
+base64 = "0.23.1"
+percent-encoding = "2.3.2"
+semver = "1.0.28"
+sha2 = "0.11.1"
+
+jsonschema = { version = "0.61.2", default-features = false }
+
+[dev-dependencies]
+stream-dock-manager-downloads.workspace = true
+image.workspace = true
+
+[target."cfg(unix)".dependencies]
+libc = "0.2.191"
+
+[target."cfg(windows)".dependencies]
+windows = { version = "0.62.2", features = [
+  "Win32_Foundation",
+  "Win32_Security",
+  "Win32_System_JobObjects",
+  "Win32_System_Threading",
+  "Win32_System_Diagnostics_ToolHelp",
+] }
+
+[build-dependencies]
+serde.workspace = true
+serde_json.workspace = true
+jsonschema = { version = "0.61.2", default-features = false }

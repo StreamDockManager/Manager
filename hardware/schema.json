@@ -1,0 +1,719 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "title": "ModelManifest",
+  "type": "object",
+  "properties": {
+    "capabilities": {
+      "$ref": "#/$defs/DeviceCapabilities"
+    },
+    "controls": {
+      "type": "array",
+      "items": {
+        "$ref": "#/$defs/Control"
+      }
+    },
+    "layout": {
+      "$ref": "#/$defs/Layout"
+    },
+    "model_id": {
+      "type": "string"
+    },
+    "name": {
+      "type": "string"
+    },
+    "profile_family": {
+      "description": "Canonical suggested-profile family; native identities and codecs stay model-owned",
+      "type": [
+        "string",
+        "null"
+      ]
+    },
+    "protocol": {
+      "type": "string"
+    },
+    "schema_version": {
+      "type": "integer",
+      "format": "uint32",
+      "minimum": 0
+    },
+    "status": {
+      "type": "string"
+    },
+    "variants": {
+      "type": "array",
+      "items": {
+        "$ref": "#/$defs/Variant"
+      }
+    }
+  },
+  "additionalProperties": false,
+  "required": [
+    "schema_version",
+    "model_id",
+    "name",
+    "protocol",
+    "status",
+    "variants",
+    "capabilities",
+    "layout",
+    "controls"
+  ],
+  "$defs": {
+    "BootLogoCapabilities": {
+      "type": "object",
+      "properties": {
+        "size": {
+          "type": "array",
+          "items": {
+            "type": "integer",
+            "format": "uint16",
+            "maximum": 65535,
+            "minimum": 0
+          },
+          "maxItems": 2,
+          "minItems": 2
+        }
+      },
+      "additionalProperties": false,
+      "required": [
+        "size"
+      ]
+    },
+    "Control": {
+      "type": "object",
+      "properties": {
+        "directional_switch": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/DirectionalSwitch"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "feedback_surface": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "height": {
+          "type": "integer",
+          "format": "uint16",
+          "maximum": 65535,
+          "minimum": 0
+        },
+        "id": {
+          "type": "string"
+        },
+        "image_height": {
+          "type": [
+            "integer",
+            "null"
+          ],
+          "format": "uint16",
+          "maximum": 65535,
+          "minimum": 0
+        },
+        "image_slot": {
+          "type": [
+            "integer",
+            "null"
+          ],
+          "format": "uint8",
+          "maximum": 255,
+          "minimum": 0
+        },
+        "image_width": {
+          "type": [
+            "integer",
+            "null"
+          ],
+          "format": "uint16",
+          "maximum": 65535,
+          "minimum": 0
+        },
+        "kind": {
+          "type": "string"
+        },
+        "label": {
+          "type": "string"
+        },
+        "minimum_manager": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "preview_hidden": {
+          "type": "boolean",
+          "default": false
+        },
+        "semantics": {
+          "type": "array",
+          "items": {
+            "type": "string"
+          }
+        },
+        "width": {
+          "type": "integer",
+          "format": "uint16",
+          "maximum": 65535,
+          "minimum": 0
+        },
+        "x": {
+          "type": "integer",
+          "format": "uint16",
+          "maximum": 65535,
+          "minimum": 0
+        },
+        "y": {
+          "type": "integer",
+          "format": "uint16",
+          "maximum": 65535,
+          "minimum": 0
+        }
+      },
+      "additionalProperties": false,
+      "required": [
+        "id",
+        "label",
+        "kind",
+        "x",
+        "y",
+        "width",
+        "height",
+        "semantics"
+      ]
+    },
+    "DeviceCapabilities": {
+      "type": "object",
+      "properties": {
+        "background": {
+          "type": "boolean"
+        },
+        "background_minimum_manager": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "background_size": {
+          "type": [
+            "array",
+            "null"
+          ],
+          "items": {
+            "type": "integer",
+            "format": "uint16",
+            "maximum": 65535,
+            "minimum": 0
+          },
+          "maxItems": 2,
+          "minItems": 2
+        },
+        "boot_logo": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/BootLogoCapabilities"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "brightness": {
+          "type": "boolean"
+        },
+        "firmware_query": {
+          "type": "boolean",
+          "default": false
+        },
+        "firmware_report": {
+          "description": "Model-specific HID read contract. Omitted means SDK input report 0, 513 bytes",
+          "anyOf": [
+            {
+              "$ref": "#/$defs/FirmwareReport"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "frame_output": {
+          "description": "Implemented experimental paths, not hardware qualification or FPS ratings",
+          "anyOf": [
+            {
+              "$ref": "#/$defs/FrameOutputCapabilities"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "image_formats": {
+          "type": "array",
+          "items": {
+            "type": "string"
+          }
+        },
+        "image_output_unavailable_reason": {
+          "description": "A source-derived contract could not safely choose the image encoding",
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "keyboard": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/KeyboardCapabilities"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "lighting": {
+          "type": "boolean"
+        },
+        "lighting_channels": {
+          "type": "array",
+          "items": {
+            "type": "string"
+          }
+        },
+        "lighting_minimum_manager": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "max_fps": {
+          "type": "integer",
+          "format": "uint8",
+          "maximum": 255,
+          "minimum": 0
+        },
+        "media_formats": {
+          "description": "Accepted source assets; animated sources are decoded into image_formats by the runtime",
+          "type": "array",
+          "items": {
+            "type": "string"
+          }
+        },
+        "reliable_button_release": {
+          "type": "boolean"
+        },
+        "reliable_encoder_release": {
+          "type": "boolean"
+        },
+        "sleep": {
+          "type": "boolean",
+          "default": false
+        },
+        "touch_panel": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/TouchPanelCapabilities"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "vibration": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/VibrationCapabilities"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        }
+      },
+      "additionalProperties": false,
+      "required": [
+        "brightness",
+        "lighting",
+        "lighting_channels",
+        "background",
+        "reliable_button_release",
+        "reliable_encoder_release",
+        "image_formats",
+        "media_formats",
+        "max_fps"
+      ]
+    },
+    "DeviceConfigurationField": {
+      "type": "object",
+      "properties": {
+        "help": {
+          "type": "string"
+        },
+        "id": {
+          "type": "string"
+        },
+        "label": {
+          "type": "string"
+        }
+      },
+      "additionalProperties": false,
+      "required": [
+        "id",
+        "label",
+        "help"
+      ]
+    },
+    "DirectionalSwitch": {
+      "description": "A switch has independent left/center/right button edges. Each position owns\na distinct control ID, so simultaneous directions and their releases retain\nnormal per-control scheduling and held-input ownership.",
+      "type": "object",
+      "properties": {
+        "group": {
+          "type": "string"
+        },
+        "position": {
+          "type": "string"
+        }
+      },
+      "additionalProperties": false,
+      "required": [
+        "group",
+        "position"
+      ]
+    },
+    "FirmwareReport": {
+      "description": "Read-only version transport; it never sends firmware images or update commands",
+      "type": "object",
+      "properties": {
+        "kind": {
+          "$ref": "#/$defs/FirmwareReportKind"
+        },
+        "length": {
+          "type": "integer",
+          "format": "uint16",
+          "maximum": 65535,
+          "minimum": 0
+        },
+        "report_id": {
+          "type": "integer",
+          "format": "uint8",
+          "maximum": 255,
+          "minimum": 0
+        },
+        "windows_supported": {
+          "description": "Some independently sourced protocols are explicitly unimplemented on Windows",
+          "type": "boolean"
+        }
+      },
+      "additionalProperties": false,
+      "required": [
+        "kind",
+        "report_id",
+        "length",
+        "windows_supported"
+      ]
+    },
+    "FirmwareReportKind": {
+      "type": "string",
+      "enum": [
+        "input",
+        "feature"
+      ]
+    },
+    "FrameOutputCapabilities": {
+      "type": "object",
+      "properties": {
+        "frame_scheduling": {
+          "type": "boolean"
+        },
+        "grouped_key_updates": {
+          "type": "boolean"
+        }
+      },
+      "additionalProperties": false,
+      "required": [
+        "frame_scheduling",
+        "grouped_key_updates"
+      ]
+    },
+    "HidSelector": {
+      "description": "Discovery predicate, distinct from the actual identity reported by HIDAPI\nOmitted interface means any interface; usage pages require an exact value or\nan inclusive lower bound. Device/vendor/usage are always exact.",
+      "type": "object",
+      "properties": {
+        "interface": {
+          "type": [
+            "integer",
+            "null"
+          ],
+          "format": "int32"
+        },
+        "product_id": {
+          "type": "integer",
+          "format": "uint16",
+          "maximum": 65535,
+          "minimum": 0
+        },
+        "usage": {
+          "type": "integer",
+          "format": "uint16",
+          "maximum": 65535,
+          "minimum": 0
+        },
+        "usage_page": {
+          "type": [
+            "integer",
+            "null"
+          ],
+          "format": "uint16",
+          "maximum": 65535,
+          "minimum": 0
+        },
+        "usage_page_min": {
+          "type": [
+            "integer",
+            "null"
+          ],
+          "format": "uint16",
+          "maximum": 65535,
+          "minimum": 0
+        },
+        "vendor_id": {
+          "type": "integer",
+          "format": "uint16",
+          "maximum": 65535,
+          "minimum": 0
+        }
+      },
+      "additionalProperties": false,
+      "required": [
+        "vendor_id",
+        "product_id",
+        "usage"
+      ]
+    },
+    "KeyboardCapabilities": {
+      "type": "object",
+      "properties": {
+        "background_color_effects": {
+          "type": "array",
+          "default": [],
+          "items": {
+            "type": "integer",
+            "format": "uint8",
+            "maximum": 255,
+            "minimum": 0
+          }
+        },
+        "brightness_max": {
+          "type": "integer",
+          "format": "uint8",
+          "maximum": 255,
+          "minimum": 0
+        },
+        "effect_max": {
+          "type": [
+            "integer",
+            "null"
+          ],
+          "format": "uint8",
+          "maximum": 255,
+          "minimum": 0
+        },
+        "effect_names": {
+          "description": "Ordered wire indexes, not the vendor UI's decorative IDs",
+          "type": "array",
+          "default": [],
+          "items": {
+            "type": "string"
+          }
+        },
+        "effects_unavailable_reason": {
+          "type": "string",
+          "default": ""
+        },
+        "factory_reset": {
+          "type": "boolean",
+          "default": false
+        },
+        "global_rgb": {
+          "type": "boolean"
+        },
+        "os_modes": {
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/KeyboardOsMode"
+          }
+        },
+        "settings_query": {
+          "type": "boolean",
+          "default": false
+        },
+        "sleep_timeout_seconds_options": {
+          "description": "Supported firmware idle timers in seconds, including u32::MAX for Never",
+          "type": "array",
+          "default": [],
+          "items": {
+            "type": "integer",
+            "format": "uint32",
+            "minimum": 0
+          }
+        },
+        "speed_max": {
+          "type": [
+            "integer",
+            "null"
+          ],
+          "format": "uint8",
+          "maximum": 255,
+          "minimum": 0
+        },
+        "speed_unavailable_reason": {
+          "type": "string",
+          "default": ""
+        }
+      },
+      "additionalProperties": false,
+      "required": [
+        "brightness_max",
+        "global_rgb",
+        "os_modes"
+      ]
+    },
+    "KeyboardOsMode": {
+      "type": "string",
+      "enum": [
+        "auto",
+        "windows",
+        "macos"
+      ]
+    },
+    "Layout": {
+      "type": "object",
+      "properties": {
+        "height": {
+          "type": "integer",
+          "format": "uint16",
+          "maximum": 65535,
+          "minimum": 0
+        },
+        "rotation": {
+          "type": "integer",
+          "format": "uint16",
+          "maximum": 65535,
+          "minimum": 0
+        },
+        "width": {
+          "type": "integer",
+          "format": "uint16",
+          "maximum": 65535,
+          "minimum": 0
+        }
+      },
+      "additionalProperties": false,
+      "required": [
+        "width",
+        "height",
+        "rotation"
+      ]
+    },
+    "TouchPanelCapabilities": {
+      "description": "Host routing capabilities, independent of physical firmware qualification",
+      "type": "object",
+      "properties": {
+        "button_controls": {
+          "type": "array",
+          "items": {
+            "type": "string"
+          }
+        },
+        "gesture_control": {
+          "type": "string"
+        },
+        "swipe_directions": {
+          "type": "array",
+          "items": {
+            "type": "string"
+          }
+        }
+      },
+      "additionalProperties": false,
+      "required": [
+        "gesture_control",
+        "button_controls",
+        "swipe_directions"
+      ]
+    },
+    "Variant": {
+      "type": "object",
+      "properties": {
+        "available": {
+          "type": "boolean",
+          "default": true
+        },
+        "id": {
+          "type": "string"
+        },
+        "identity": {
+          "$ref": "#/$defs/HidSelector"
+        },
+        "name": {
+          "type": "string"
+        },
+        "unavailable_reason": {
+          "type": [
+            "string",
+            "null"
+          ]
+        }
+      },
+      "additionalProperties": false,
+      "required": [
+        "id",
+        "name",
+        "identity"
+      ]
+    },
+    "VibrationCapabilities": {
+      "type": "object",
+      "properties": {
+        "configuration_fields": {
+          "description": "Other fields that the same hardware command must write explicitly",
+          "type": "array",
+          "default": [],
+          "items": {
+            "$ref": "#/$defs/DeviceConfigurationField"
+          }
+        },
+        "firmware_requirements": {
+          "type": "object",
+          "additionalProperties": {
+            "type": "string"
+          }
+        },
+        "strength": {
+          "type": "boolean"
+        },
+        "toggle": {
+          "type": "boolean"
+        },
+        "unavailable_reason": {
+          "type": "string"
+        },
+        "writable": {
+          "type": "boolean"
+        }
+      },
+      "additionalProperties": false,
+      "required": [
+        "toggle",
+        "strength",
+        "writable",
+        "unavailable_reason",
+        "firmware_requirements"
+      ]
+    }
+  }
+}

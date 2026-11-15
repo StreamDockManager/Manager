@@ -1,0 +1,19 @@
+<!doctype html>
+<html lang="en">
+    <head>
+        <meta charset="UTF-8" />
+        <meta name="viewport" content="width=device-width,initial-scale=1" />
+        <meta name="color-scheme" content="light dark" />
+        <meta name="theme-color" content="#080808" />
+        <link rel="icon" type="image/png" sizes="32x32" href="/brand/favicon.png" />
+        <title>Plugin logs · Stream Dock Manager</title>
+    </head>
+    <body class="plugin-log-window">
+        <div id="boot" role="status">Opening plugin logs…</div>
+        <acl-boundary>
+            <sd-plugin-logs></sd-plugin-logs>
+            <sd-toasts></sd-toasts>
+        </acl-boundary>
+        <script type="module" src="/src/plugin-logs-window.ts"></script>
+    </body>
+</html>

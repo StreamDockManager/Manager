@@ -1,0 +1,11 @@
+# Automatically generated - DO NOT EDIT!
+
+[[permission]]
+identifier = "allow-unsubscribe-workspace"
+description = "Enables the unsubscribe_workspace command without any pre-configured scope."
+commands.allow = ["unsubscribe_workspace"]
+
+[[permission]]
+identifier = "deny-unsubscribe-workspace"
+description = "Denies the unsubscribe_workspace command without any pre-configured scope."
+commands.deny = ["unsubscribe_workspace"]

@@ -1,0 +1,11 @@
+# Automatically generated - DO NOT EDIT!
+
+[[permission]]
+identifier = "allow-create-optimized-media-copy"
+description = "Enables the create_optimized_media_copy command without any pre-configured scope."
+commands.allow = ["create_optimized_media_copy"]
+
+[[permission]]
+identifier = "deny-create-optimized-media-copy"
+description = "Denies the create_optimized_media_copy command without any pre-configured scope."
+commands.deny = ["create_optimized_media_copy"]

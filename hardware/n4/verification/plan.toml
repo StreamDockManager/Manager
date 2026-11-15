@@ -1,0 +1,24 @@
+revision = "2"
+model_id = "n4"
+features = [
+  "codec-refresh-static-image-and-input-policy",
+  "boot-wire-canvas-format-size-and-persistence",
+  "variant-and-unknown-firmware-fail-closed",
+  "startup-logo-fit-crop-orientation",
+  "startup-logo-restart-persistence",
+  "startup-logo-disconnect-recovery",
+  "identity-firmware-usage-interface",
+  "all-button-edges",
+  "all-encoder-pulses-rotations",
+  "all-directional-switch-edges",
+  "source-derived-swipe-direction",
+  "png-jpeg-wire-geometry-orientation",
+  "raw-background-byte-order",
+  "background-limits",
+  "brightness-sleep-lighting",
+  "twenty-reconnects",
+  "restart-sleep-wake-input-consumption",
+  "multiple-device-isolation",
+  "animation-cancellation-and-output-bounds",
+  "eight-hour-soak",
+]

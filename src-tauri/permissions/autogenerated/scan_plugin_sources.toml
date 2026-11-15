@@ -1,0 +1,11 @@
+# Automatically generated - DO NOT EDIT!
+
+[[permission]]
+identifier = "allow-scan-plugin-sources"
+description = "Enables the scan_plugin_sources command without any pre-configured scope."
+commands.allow = ["scan_plugin_sources"]
+
+[[permission]]
+identifier = "deny-scan-plugin-sources"
+description = "Denies the scan_plugin_sources command without any pre-configured scope."
+commands.deny = ["scan_plugin_sources"]

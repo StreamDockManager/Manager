@@ -1,0 +1,11 @@
+# Automatically generated - DO NOT EDIT!
+
+[[permission]]
+identifier = "allow-update-profile-import"
+description = "Enables the update_profile_import command without any pre-configured scope."
+commands.allow = ["update_profile_import"]
+
+[[permission]]
+identifier = "deny-update-profile-import"
+description = "Denies the update_profile_import command without any pre-configured scope."
+commands.deny = ["update_profile_import"]

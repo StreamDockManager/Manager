@@ -1,0 +1,11 @@
+# Automatically generated - DO NOT EDIT!
+
+[[permission]]
+identifier = "allow-build-installed-package-export"
+description = "Enables the build_installed_package_export command without any pre-configured scope."
+commands.allow = ["build_installed_package_export"]
+
+[[permission]]
+identifier = "deny-build-installed-package-export"
+description = "Denies the build_installed_package_export command without any pre-configured scope."
+commands.deny = ["build_installed_package_export"]

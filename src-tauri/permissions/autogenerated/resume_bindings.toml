@@ -1,0 +1,11 @@
+# Automatically generated - DO NOT EDIT!
+
+[[permission]]
+identifier = "allow-resume-bindings"
+description = "Enables the resume_bindings command without any pre-configured scope."
+commands.allow = ["resume_bindings"]
+
+[[permission]]
+identifier = "deny-resume-bindings"
+description = "Denies the resume_bindings command without any pre-configured scope."
+commands.deny = ["resume_bindings"]

@@ -1,0 +1,11 @@
+# Automatically generated - DO NOT EDIT!
+
+[[permission]]
+identifier = "allow-benchmark-cancel-progress"
+description = "Enables the benchmark_cancel_progress command without any pre-configured scope."
+commands.allow = ["benchmark_cancel_progress"]
+
+[[permission]]
+identifier = "deny-benchmark-cancel-progress"
+description = "Denies the benchmark_cancel_progress command without any pre-configured scope."
+commands.deny = ["benchmark_cancel_progress"]

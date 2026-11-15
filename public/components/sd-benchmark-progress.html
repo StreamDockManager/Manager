@@ -1,0 +1,113 @@
+<div x-data="benchmarkMonitor" @open-benchmark-progress.window="show">
+    <dialog
+        x-ref="progress"
+        class="feature-dialog benchmark-progress-dialog"
+        aria-label="Benchmark progress"
+        @cancel.prevent="hide"
+    >
+        <header class="picker-header">
+            <div>
+                <h2 x-text="monitor.title"></h2>
+                <p>Manager, plugins and device output</p>
+            </div>
+            <button
+                type="button"
+                class="icon-button"
+                aria-label="Close benchmark progress"
+                @click="hide"
+                autofocus
+            >
+                ×
+            </button>
+        </header>
+        <div class="feature-body benchmark-progress-body">
+            <div
+                class="benchmark-progress-status"
+                role="status"
+                aria-live="polite"
+                aria-atomic="true"
+            >
+                <strong class="benchmark-percentage" x-text="monitor.percentage"></strong>
+                <span x-text="monitor.phase"></span>
+            </div>
+            <progress
+                class="benchmark-progress-meter"
+                max="1"
+                :value="monitor.completion"
+                aria-label="Benchmark progress"
+            ></progress>
+            <p class="field-help" x-show="monitor.liveSummary" x-text="monitor.liveSummary"></p>
+            <p class="field-help" x-show="monitor.liveSummary">
+                Current measured cell only. Drops include coalesced/replaced and invalidated
+                updates. Rates count surface updates, not whole frames or displayed FPS. Latency
+                samples are bounded.
+            </p>
+            <section
+                class="benchmark-restoration"
+                :class="{'feature-notice': monitor.needsAttention}"
+                aria-label="Device output restoration"
+                :role="monitor.needsAttention ? 'alert' : 'status'"
+            >
+                <h3>Device output</h3>
+                <p class="field-help" x-text="monitor.restoration"></p>
+            </section>
+            <p class="danger-text" role="alert" x-show="monitor.error" x-text="monitor.error"></p>
+            <p class="field-help" role="status" x-show="monitor.loadingResult">
+                Loading benchmark report…
+            </p>
+            <button
+                type="button"
+                class="button"
+                x-show="monitor.canRetryResult"
+                @click="retryResult"
+            >
+                Retry result retrieval
+            </button>
+            <p class="field-help">
+                Host completion rates do not measure displayed FPS or input-to-visible latency.
+            </p>
+            <details class="disclosure">
+                <summary>Run details</summary>
+                <dl class="disclosure-body benchmark-run-details">
+                    <div>
+                        <dt>Run ID</dt>
+                        <dd x-text="monitor.progress.run_id"></dd>
+                    </div>
+                    <div>
+                        <dt>Restoration status</dt>
+                        <dd x-text="monitor.progress.restoration_status"></dd>
+                    </div>
+                </dl>
+            </details>
+        </div>
+        <footer class="feature-footer">
+            <p class="field-help" x-show="monitor.running">
+                Closing this dialog keeps the benchmark running.
+            </p>
+            <div class="button-row">
+                <button
+                    type="button"
+                    class="button"
+                    @click="hide"
+                    x-text="monitor.running ? 'Run in background' : 'Close'"
+                ></button>
+                <button
+                    type="button"
+                    class="button danger"
+                    @click="stop"
+                    x-show="monitor.running"
+                    :disabled="!monitor.canStop"
+                    x-text="monitor.progress.cancelling || monitor.stopping ? 'Stopping…' : 'Stop and restore'"
+                ></button>
+                <button
+                    type="button"
+                    class="button primary"
+                    @click="viewResults"
+                    x-show="!monitor.running"
+                >
+                    View results
+                </button>
+            </div>
+        </footer>
+    </dialog>
+</div>

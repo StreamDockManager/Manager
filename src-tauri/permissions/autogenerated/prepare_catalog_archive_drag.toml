@@ -1,0 +1,11 @@
+# Automatically generated - DO NOT EDIT!
+
+[[permission]]
+identifier = "allow-prepare-catalog-archive-drag"
+description = "Enables the prepare_catalog_archive_drag command without any pre-configured scope."
+commands.allow = ["prepare_catalog_archive_drag"]
+
+[[permission]]
+identifier = "deny-prepare-catalog-archive-drag"
+description = "Denies the prepare_catalog_archive_drag command without any pre-configured scope."
+commands.deny = ["prepare_catalog_archive_drag"]

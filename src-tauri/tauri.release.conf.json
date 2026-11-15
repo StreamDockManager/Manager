@@ -1,0 +1,9 @@
+{
+    "bundle": {
+        "resources": {
+            "../LICENSE": "notices/LICENSE",
+            "../THIRD_PARTY_NOTICES.md": "notices/THIRD_PARTY_NOTICES.md"
+        },
+        "useLocalToolsDir": true
+    }
+}

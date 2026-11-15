@@ -1,0 +1,303 @@
+<div x-data="automation">
+    <button class="button" aria-haspopup="dialog" @click="openDialog" :disabled="!app.device">
+        Automatic profiles
+    </button>
+    <dialog
+        x-ref="automationDialog"
+        class="feature-dialog wide-dialog automatic-profiles-dialog"
+        aria-labelledby="automatic-profiles-title"
+        @cancel.prevent="closeDialog"
+    >
+        <header class="picker-header">
+            <div>
+                <h2 id="automatic-profiles-title">Automatic profiles</h2>
+            </div>
+            <button
+                class="icon-button"
+                aria-label="Close automatic profiles"
+                @click="closeDialog"
+                :disabled="saving"
+            >
+                ×
+            </button>
+        </header>
+        <div class="feature-body">
+            <p role="alert" x-show="error" x-text="error"></p>
+            <fieldset class="automatic-draft-fields" :disabled="saving">
+                <div class="automatic-toolbar">
+                    <div>
+                        <strong x-text="deviceName"></strong>
+                        <small
+                            x-text="paused ? 'Paused after manual selection' : enabled ? 'Automatic switching on' : 'Automatic switching off'"
+                        ></small>
+                    </div>
+                    <div class="button-row">
+                        <button
+                            class="button"
+                            @click="toggle"
+                            :disabled="!app.device"
+                            :aria-label="enabled ? 'Disable automatic switching' : 'Enable automatic switching'"
+                            x-text="enabled ? 'Disable' : 'Enable'"
+                        ></button>
+                        <button
+                            class="button"
+                            @click="resume"
+                            x-show="paused"
+                            aria-label="Resume automatic switching"
+                        >
+                            Resume
+                        </button>
+                    </div>
+                </div>
+                <label
+                    class="preference-toggle automatic-return-option"
+                    title="Matching rules take priority. When none match, restore where you were before automatic switching began. Manual profile selection clears that return location."
+                >
+                    <input type="checkbox" x-model="restoreOnExit" />
+                    Return to previous profile/page when no rule matches
+                </label>
+                <section class="automatic-rule-editor">
+                    <h3 x-text="editingRuleId ? 'Edit rule' : 'New rule'"></h3>
+                    <div class="settings-form-grid">
+                        <div class="settings-field">
+                            <label>
+                                Application
+                                <input
+                                    aria-label="Rule application"
+                                    x-model="application"
+                                    placeholder="Choose an application or enter its identifier"
+                                />
+                            </label>
+                            <div class="button-row">
+                                <button
+                                    class="button"
+                                    @click="browseApplication"
+                                    aria-label="Browse application…"
+                                >
+                                    Browse…
+                                </button>
+                                <button
+                                    class="text-button"
+                                    aria-label="Use last focused application"
+                                    @click="capture"
+                                    :disabled="!status.available"
+                                >
+                                    Use last focused
+                                </button>
+                            </div>
+                            <small
+                                role="status"
+                                x-show="captureMessage"
+                                x-text="captureMessage"
+                            ></small>
+                        </div>
+                        <div class="settings-field">
+                            <label>
+                                Window title (optional)
+                                <input
+                                    aria-label="Rule window title"
+                                    x-model="titleValue"
+                                    placeholder="Match a document or window title"
+                                />
+                            </label>
+                            <small class="field-help" x-show="titleMode === 'regex'">
+                                Regular expression, for example ^Project.*Editor$. Look-around and
+                                backreferences are not supported.
+                            </small>
+                            <small
+                                class="field-help"
+                                x-show="titleValue && !status.title_available"
+                            >
+                                Window-title access unavailable. See permissions below.
+                            </small>
+                            <div class="button-row field-row">
+                                <label>
+                                    Match
+                                    <select aria-label="Window title match" x-model="titleMode">
+                                        <option value="contains">Contains</option>
+                                        <option value="exact">Exact</option>
+                                        <option value="regex">Regular expression</option>
+                                    </select>
+                                </label>
+                                <label class="preference-toggle">
+                                    <input type="checkbox" x-model="titleCaseSensitive" />
+                                    Case sensitive
+                                </label>
+                            </div>
+                        </div>
+                        <div class="settings-field settings-wide">
+                            <label class="preference-toggle">
+                                <input type="checkbox" x-model="scheduleEnabled" />
+                                Schedule
+                            </label>
+                            <div x-show="scheduleEnabled" class="settings-form-grid">
+                                <div class="button-row settings-wide">
+                                    <template x-for="day in weekdays" :key="day.value">
+                                        <label class="preference-toggle">
+                                            <input
+                                                type="checkbox"
+                                                :value="day.value"
+                                                x-model="days"
+                                            />
+                                            <span x-text="day.label"></span>
+                                        </label>
+                                    </template>
+                                </div>
+                                <label>
+                                    Start (local time)
+                                    <input
+                                        type="time"
+                                        aria-label="Schedule start"
+                                        x-model="scheduleStart"
+                                    />
+                                </label>
+                                <label>
+                                    End (local time)
+                                    <input
+                                        type="time"
+                                        aria-label="Schedule end"
+                                        x-model="scheduleEnd"
+                                    />
+                                </label>
+                                <small class="settings-wide">
+                                    Overnight ranges belong to their starting day. Equal start/end
+                                    covers the selected whole day.
+                                </small>
+                            </div>
+                        </div>
+                        <label>
+                            Target profile
+                            <select aria-label="Rule profile" x-model="profileId">
+                                <template
+                                    x-for="profile in app.snapshot.profiles"
+                                    :key="profile.id"
+                                >
+                                    <option
+                                        :value="profile.id"
+                                        :selected="profile.id === profileId"
+                                        x-text="profile.name"
+                                    ></option>
+                                </template>
+                            </select>
+                        </label>
+                        <label>
+                            Target page
+                            <select aria-label="Rule page" x-model="pageId">
+                                <option value="">Remembered page</option>
+                                <template x-for="page in targetPages" :key="page.id">
+                                    <option
+                                        :value="page.id"
+                                        :selected="page.id === pageId"
+                                        x-text="page.name"
+                                    ></option>
+                                </template>
+                            </select>
+                        </label>
+                    </div>
+                    <div class="button-row">
+                        <button
+                            class="button"
+                            @click="add"
+                            :disabled="(!application.trim() && !titleValue.trim() && !scheduleEnabled) || !app.device || !profileId"
+                            x-text="editingRuleId ? 'Save rule' : 'Add application rule'"
+                        ></button>
+                        <button class="text-button" @click="cancelEdit" x-show="editingRuleId">
+                            Cancel rule edit
+                        </button>
+                        <button class="button" @click="previewRules">Preview saved rules</button>
+                    </div>
+                </section>
+                <div class="automatic-rules-heading">
+                    <h3>Rules</h3>
+                    <small>First match wins</small>
+                </div>
+                <p x-show="!rules.length" class="field-help">
+                    No rules yet. Add your first rule above.
+                </p>
+                <div
+                    class="automatic-rules-list"
+                    role="region"
+                    aria-label="Automatic profile rules"
+                    tabindex="0"
+                    x-show="rules.length"
+                >
+                    <template x-for="rule in rules" :key="rule.id">
+                        <div class="rule-row">
+                            <div class="automatic-rule-summary">
+                                <strong x-text="rule.application || 'Any application'"></strong>
+                                <small
+                                    x-show="rule.title"
+                                    x-text="rule.title ? 'Title ' + rule.title.mode + ': ' + rule.title.value : ''"
+                                ></small>
+                                <small x-show="rule.schedule">Scheduled in local time</small>
+                                <p
+                                    class="rule-explanation"
+                                    x-show="explanation(rule.id)"
+                                    x-text="explanation(rule.id)"
+                                ></p>
+                                <span x-text="ruleName(rule)"></span>
+                            </div>
+                            <div class="button-row">
+                                <button class="button" :data-id="rule.id" @click="editRule">
+                                    Edit rule
+                                </button>
+                                <button
+                                    class="icon-button"
+                                    aria-label="Move rule up"
+                                    :data-id="rule.id"
+                                    data-direction="-1"
+                                    @click="reorder"
+                                >
+                                    ↑
+                                </button>
+                                <button
+                                    class="icon-button"
+                                    aria-label="Move rule down"
+                                    :data-id="rule.id"
+                                    data-direction="1"
+                                    @click="reorder"
+                                >
+                                    ↓
+                                </button>
+                                <button class="button" :data-id="rule.id" @click="remove">
+                                    Remove rule
+                                </button>
+                            </div>
+                        </div>
+                    </template>
+                </div>
+                <details class="automatic-help">
+                    <summary>Permissions &amp; matching help</summary>
+                    <p class="field-help" x-text="status.reason"></p>
+                    <p class="field-help">
+                        Rules run top to bottom when the focused application or matching rule
+                        changes. You can then change pages freely. Manual profile selection pauses
+                        switching until resumed.
+                    </p>
+                    <p class="field-help" x-show="portDependent">
+                        This device’s assignments depend on its USB port.
+                    </p>
+                    <div x-show="!status.title_available">
+                        <p class="field-help">
+                            Window titles require a supported desktop and macOS Accessibility
+                            access. Titles stay in memory.
+                        </p>
+                        <button class="button" @click="authorizeTitle">
+                            Check title permission
+                        </button>
+                    </div>
+                </details>
+            </fieldset>
+        </div>
+        <footer class="feature-footer">
+            <small class="field-help">Changes take effect only when applied.</small>
+            <button class="button" @click="closeDialog" :disabled="saving">Cancel</button>
+            <button
+                class="button primary"
+                @click="applyDraft"
+                :disabled="saving"
+                x-text="saving ? 'Applying…' : 'Apply'"
+            ></button>
+        </footer>
+    </dialog>
+</div>

@@ -1,0 +1,10 @@
+{
+    "method": "simulated",
+    "provenance": "Synthetic reports constructed from the documented protocol; not physical captures.",
+    "reports": [
+        { "code": 1, "state": 1, "control": "key-1" },
+        { "code": 10, "state": 0, "control": "key-10" },
+        { "code": 55, "state": 1, "control": "dial-1" },
+        { "code": 113, "state": 1, "control": "dial-4" }
+    ]
+}

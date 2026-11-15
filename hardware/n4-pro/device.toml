@@ -1,0 +1,314 @@
+schema_version = 1
+model_id = "n4-pro"
+name = "N4 Pro"
+protocol = "crt-n4"
+status = "experimental"
+
+[capabilities]
+boot_logo = { size = [800, 480] }
+touch_panel = { gesture_control = "touch-strip", button_controls = [
+  "touch-1",
+  "touch-2",
+  "touch-3",
+  "touch-4",
+], swipe_directions = [
+  "left",
+  "right",
+  "up",
+  "down",
+] }
+sleep = true
+brightness = true
+lighting = true
+lighting_channels = ["dial-1", "dial-2", "dial-3", "dial-4"]
+background = true
+background_size = [800, 480]
+reliable_button_release = true
+reliable_encoder_release = false
+image_formats = ["png", "jpeg"]
+media_formats = ["png", "jpeg", "gif", "mp4"]
+max_fps = 24
+firmware_query = true
+vibration = { toggle = true, strength = false, writable = true, unavailable_reason = "", firmware_requirements = { mirabox = "02.006" }, configuration_fields = [
+  { id = "led_follow_key_light", label = "LED follows key lighting", help = "Link the LEDs to the key lighting." },
+  { id = "key_light_on_disconnect", label = "Key lighting when disconnected", help = "Enable key lighting behavior when the device disconnects." },
+  { id = "check_usb_power", label = "Check USB power", help = "Enable the device's USB power check." },
+  { id = "reset_usb_report", label = "USB report reset", help = "Enable the device's USB reporting reset behavior." },
+  { id = "enable_boot_video", label = "Boot video", help = "Enable the device's boot video." },
+] }
+frame_output = { frame_scheduling = true, grouped_key_updates = true }
+
+[layout]
+width = 800
+height = 580
+rotation = 180
+
+[[variants]]
+id = "vsdinside"
+name = "VSDInside N4 Pro"
+
+[variants.identity]
+vendor_id = 21832
+product_id = 4131
+interface = 0
+usage_page = 65440
+usage = 1
+
+[[variants]]
+id = "mirabox"
+name = "MiraBox N4 Pro"
+
+[variants.identity]
+vendor_id = 21832
+product_id = 4104
+interface = 0
+usage_page = 65440
+usage = 1
+
+[[variants]]
+id = "mirabox-e"
+name = "MiraBox N4 Pro E"
+
+[variants.identity]
+vendor_id = 21832
+product_id = 4129
+interface = 0
+usage_page = 65440
+usage = 1
+
+[[controls]]
+id = "key-1"
+label = "Key 1"
+kind = "button"
+x = 40
+y = 50
+width = 112
+height = 112
+image_slot = 11
+image_width = 112
+image_height = 112
+semantics = ["press", "release"]
+
+[[controls]]
+id = "key-2"
+label = "Key 2"
+kind = "button"
+x = 184
+y = 50
+width = 112
+height = 112
+image_slot = 12
+image_width = 112
+image_height = 112
+semantics = ["press", "release"]
+
+[[controls]]
+id = "key-3"
+label = "Key 3"
+kind = "button"
+x = 328
+y = 50
+width = 112
+height = 112
+image_slot = 13
+image_width = 112
+image_height = 112
+semantics = ["press", "release"]
+
+[[controls]]
+id = "key-4"
+label = "Key 4"
+kind = "button"
+x = 472
+y = 50
+width = 112
+height = 112
+image_slot = 14
+image_width = 112
+image_height = 112
+semantics = ["press", "release"]
+
+[[controls]]
+id = "key-5"
+label = "Key 5"
+kind = "button"
+x = 616
+y = 50
+width = 112
+height = 112
+image_slot = 15
+image_width = 112
+image_height = 112
+semantics = ["press", "release"]
+
+[[controls]]
+id = "key-6"
+label = "Key 6"
+kind = "button"
+x = 40
+y = 194
+width = 112
+height = 112
+image_slot = 6
+image_width = 112
+image_height = 112
+semantics = ["press", "release"]
+
+[[controls]]
+id = "key-7"
+label = "Key 7"
+kind = "button"
+x = 184
+y = 194
+width = 112
+height = 112
+image_slot = 7
+image_width = 112
+image_height = 112
+semantics = ["press", "release"]
+
+[[controls]]
+id = "key-8"
+label = "Key 8"
+kind = "button"
+x = 328
+y = 194
+width = 112
+height = 112
+image_slot = 8
+image_width = 112
+image_height = 112
+semantics = ["press", "release"]
+
+[[controls]]
+id = "key-9"
+label = "Key 9"
+kind = "button"
+x = 472
+y = 194
+width = 112
+height = 112
+image_slot = 9
+image_width = 112
+image_height = 112
+semantics = ["press", "release"]
+
+[[controls]]
+id = "key-10"
+label = "Key 10"
+kind = "button"
+x = 616
+y = 194
+width = 112
+height = 112
+image_slot = 10
+image_width = 112
+image_height = 112
+semantics = ["press", "release"]
+
+[[controls]]
+id = "dial-1"
+feedback_surface = "touch-1"
+label = "Dial 1"
+kind = "encoder"
+x = 92
+y = 468
+width = 76
+height = 76
+semantics = ["pulse", "rotate"]
+
+[[controls]]
+id = "dial-2"
+feedback_surface = "touch-2"
+label = "Dial 2"
+kind = "encoder"
+x = 272
+y = 468
+width = 76
+height = 76
+semantics = ["pulse", "rotate"]
+
+[[controls]]
+id = "dial-3"
+feedback_surface = "touch-3"
+label = "Dial 3"
+kind = "encoder"
+x = 452
+y = 468
+width = 76
+height = 76
+semantics = ["pulse", "rotate"]
+
+[[controls]]
+id = "dial-4"
+feedback_surface = "touch-4"
+label = "Dial 4"
+kind = "encoder"
+x = 632
+y = 468
+width = 76
+height = 76
+semantics = ["pulse", "rotate"]
+
+[[controls]]
+id = "touch-1"
+label = "Touch 1"
+kind = "touch"
+x = 40
+y = 340
+width = 176
+height = 112
+image_slot = 1
+image_width = 176
+image_height = 112
+semantics = ["touch"]
+
+[[controls]]
+id = "touch-2"
+label = "Touch 2"
+kind = "touch"
+x = 220
+y = 340
+width = 176
+height = 112
+image_slot = 2
+image_width = 176
+image_height = 112
+semantics = ["touch"]
+
+[[controls]]
+id = "touch-3"
+label = "Touch 3"
+kind = "touch"
+x = 400
+y = 340
+width = 176
+height = 112
+image_slot = 3
+image_width = 176
+image_height = 112
+semantics = ["touch"]
+
+[[controls]]
+id = "touch-4"
+label = "Touch 4"
+kind = "touch"
+x = 580
+y = 340
+width = 176
+height = 112
+image_slot = 4
+image_width = 176
+image_height = 112
+semantics = ["touch"]
+
+[[controls]]
+id = "touch-strip"
+preview_hidden = true
+label = "Touch strip"
+kind = "touch"
+x = 40
+y = 340
+width = 716
+height = 112
+semantics = ["touch", "swipe"]

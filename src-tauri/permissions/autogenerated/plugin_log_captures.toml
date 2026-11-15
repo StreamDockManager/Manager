@@ -1,0 +1,11 @@
+# Automatically generated - DO NOT EDIT!
+
+[[permission]]
+identifier = "allow-plugin-log-captures"
+description = "Enables the plugin_log_captures command without any pre-configured scope."
+commands.allow = ["plugin_log_captures"]
+
+[[permission]]
+identifier = "deny-plugin-log-captures"
+description = "Denies the plugin_log_captures command without any pre-configured scope."
+commands.deny = ["plugin_log_captures"]

@@ -1,0 +1,9 @@
+{
+    "version": 1,
+    "groups": ["editor"],
+    "dependencies": [],
+    "options": { "shadow": false },
+    "metadata": {
+        "description": "Owned macro debug session controls and bounded execution output."
+    }
+}

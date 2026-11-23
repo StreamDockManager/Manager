@@ -267,6 +267,55 @@
                     </template>
                 </div>
                 <details class="automatic-help">
+                    <summary>Test rules</summary>
+                    <div class="settings-form-grid">
+                        <label>
+                            Test device
+                            <select x-model="testDevice">
+                                <template x-for="device in app.snapshot.devices" :key="device.id">
+                                    <option :value="device.id" x-text="device.name"></option>
+                                </template>
+                            </select>
+                        </label>
+                        <label>
+                            Foreground application
+                            <input x-model="testApplication" maxlength="4096" />
+                        </label>
+                        <label>
+                            Window title
+                            <input x-model="testTitle" maxlength="4096" />
+                        </label>
+                        <label>
+                            Local weekday
+                            <select x-model="testDay">
+                                <template x-for="day in weekdays" :key="day.value">
+                                    <option :value="day.value" x-text="day.label"></option>
+                                </template>
+                            </select>
+                        </label>
+                        <label>
+                            Local time
+                            <input type="time" x-model="testTime" />
+                        </label>
+                    </div>
+                    <p class="field-help">
+                        The selected editor device uses your draft rules. Other devices use their
+                        saved rules.
+                    </p>
+                    <button class="button" @click="testRules">Run rule test</button>
+                    <div role="status" x-show="currentTest">
+                        <p x-text="testDestination"></p>
+                        <ol>
+                            <template x-for="evaluation in testRows" :key="evaluation.id">
+                                <li>
+                                    <strong x-text="evaluation.label"></strong>
+                                    <span x-text="evaluation.reasons"></span>
+                                </li>
+                            </template>
+                        </ol>
+                    </div>
+                </details>
+                <details class="automatic-help">
                     <summary>Permissions &amp; matching help</summary>
                     <p class="field-help" x-text="status.reason"></p>
                     <p class="field-help">

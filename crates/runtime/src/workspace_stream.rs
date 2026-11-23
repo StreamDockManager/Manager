@@ -151,7 +151,9 @@ impl Runtime {
                 Edit::SaveProfile { profile } => {
                     profiles.insert(profile.id.clone());
                 }
-                Edit::Bindings { profile_id, .. } => {
+                Edit::Bindings { profile_id, .. }
+                | Edit::LinkControl { profile_id, .. }
+                | Edit::DetachControl { profile_id, .. } => {
                     profiles.insert(profile_id.clone());
                 }
                 Edit::AssignControl { .. } => bulk = true,

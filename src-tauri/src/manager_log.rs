@@ -156,9 +156,68 @@ pub fn stage(stage: Stage) {
         );
     }
 }
-// Record the application startup failure
-pub fn startup_failed(error: &str) {
-    tauri_plugin_log::log::error!(target: diagnostics::TARGET, "{}", serde_json::json!({"event":"manager_startup_failed","reason":diagnostics::classify(error)}));
+#[derive(Clone, Copy, Serialize)]
+#[serde(rename_all = "snake_case")]
+pub enum StartupStage {
+    ConfigurationPath,
+    AutostartIntegration,
+    RecoveryDiscovery,
+    RecoveryWindow,
+    RegistrationEnvironment,
+    RuntimeInitialization,
+    QuitIntegration,
+}
+
+// Classify native opt-in and storage failures without forwarding path or payload text
+fn startup_cause(error: &str) -> &'static str {
+    let text = error
+        .chars()
+        .take(8192)
+        .collect::<String>()
+        .to_ascii_lowercase();
+    if text.starts_with("pass --config only once") {
+        "duplicate_config_argument"
+    } else if text.starts_with("--config requires") || text.starts_with("use --config <path>") {
+        "invalid_config_argument"
+    } else if text.contains("database is locked")
+        || text.contains("another manager")
+        || text.contains("configuration directory is in use")
+        || text.contains("already owned")
+    {
+        "configuration_in_use"
+    } else if text.contains("unsupported configuration database")
+        || text.contains("obsolete sqlite")
+    {
+        "unsupported_database_format"
+    } else if text.contains("keystore") {
+        "plugin_keystore_unavailable"
+    } else if text.contains("database integrity")
+        || text.contains("database disk image is malformed")
+        || text.contains("file is not a database")
+    {
+        "invalid_database"
+    } else if text.contains("unable to open database file")
+        || text.contains("database is unreadable")
+    {
+        "database_unreadable"
+    } else if text.contains("configuration database relocation") {
+        "database_relocation_failed"
+    } else if text.contains("permission denied") || text.contains("access is denied") {
+        "permission_denied"
+    } else {
+        "unclassified"
+    }
+}
+
+// Record the application startup failure; log only the bounded diagnostic projection
+pub fn startup_failed(stage: StartupStage, error: &str) {
+    let record = serde_json::json!({
+        "event":"manager_startup_failed", "stage":stage,
+        "reason":diagnostics::classify(error), "cause":startup_cause(error),
+    });
+    tauri_plugin_log::log::error!(target: diagnostics::TARGET, "{record}");
+    // Before a configuration path is selected there is no Manager file to log into
+    eprintln!("{record}");
     tauri_plugin_log::log::logger().flush();
 }
 // Finish for the current operation
@@ -262,14 +321,14 @@ struct Budget {
 }
 impl Budget {
     // Admit for the current operation
-    fn admit(&mut self, now: Instant) -> bool {
+    fn admit(&mut self, now: Instant, limit: u32) -> bool {
         if now.duration_since(self.start) >= Duration::from_secs(60) {
             self.start = now;
             self.count = 0;
             self.dropped = 0;
         }
         self.count = self.count.saturating_add(1);
-        if self.count > 30 {
+        if self.count > limit {
             self.dropped = self.dropped.saturating_add(1);
             false
         } else {
@@ -277,11 +336,29 @@ impl Budget {
         }
     }
 }
-static FRONTEND_BUDGETS: OnceLock<Mutex<[Budget; 3]>> = OnceLock::new();
+static FRONTEND_BUDGETS: OnceLock<Mutex<[Budget; 4]>> = OnceLock::new();
+static RESOURCE_REPORTS: Mutex<std::collections::VecDeque<FrontendDiagnostic>> =
+    Mutex::new(std::collections::VecDeque::new());
+
+pub fn resource_reports() -> Vec<FrontendDiagnostic> {
+    RESOURCE_REPORTS
+        .lock()
+        .unwrap_or_else(|e| e.into_inner())
+        .iter()
+        .cloned()
+        .collect()
+}
+
 // Record a frontend diagnostic message
 pub fn frontend(window: &str, report: FrontendDiagnostic) -> Result<(), String> {
     report.validate()?;
-    let (index, source) = if window == "main" {
+    let startup = matches!(report.event, diagnostics::FrontendEvent::StartupFailed);
+    if startup && window != "main" {
+        return Err("Startup diagnostics are restricted to the main window".into());
+    }
+    let (index, source) = if startup {
+        (3, "editor")
+    } else if window == "main" {
         (0, "editor")
     } else if window.starts_with("log-reader-") {
         (1, "log_reader")
@@ -298,7 +375,7 @@ pub fn frontend(window: &str, report: FrontendDiagnostic) -> Result<(), String> 
         }))
     });
     let mut budgets = budgets.lock().unwrap_or_else(|error| error.into_inner());
-    if !budgets[index].admit(Instant::now()) {
+    if !budgets[index].admit(Instant::now(), if startup { 6 } else { 30 }) {
         if budgets[index].dropped == 1 {
             event(
                 "frontend_reports_rate_limited",
@@ -308,7 +385,17 @@ pub fn frontend(window: &str, report: FrontendDiagnostic) -> Result<(), String> 
         return Ok(());
     }
     drop(budgets);
+    if matches!(report.event, diagnostics::FrontendEvent::ResourceError) {
+        let mut recent = RESOURCE_REPORTS.lock().unwrap_or_else(|e| e.into_inner());
+        if recent.len() == 32 {
+            recent.pop_front();
+        }
+        recent.push_back(report.clone());
+    }
     tauri_plugin_log::log::error!(target: diagnostics::TARGET, "{}", serde_json::json!({"event":"frontend_error","window":source,"report":report}));
+    if startup {
+        tauri_plugin_log::log::logger().flush();
+    }
     Ok(())
 }
 
@@ -328,6 +415,15 @@ pub fn editor_close_blocked(active: usize, blockers: &[&'static str]) {
         "resources": blockers,
     }));
 }
+/// Selected by native startup from the same config used to initialize the logger
+pub struct StartupLogs(pub PathBuf);
+
+// Resolve only the configured Manager log directory, even before the Runtime exists
+pub fn selected_directory<R: tauri::Runtime>(app: &tauri::AppHandle<R>) -> Option<PathBuf> {
+    use tauri::Manager;
+    app.try_state::<StartupLogs>().map(|logs| logs.0.clone())
+}
+
 // Open folder
 pub fn open_folder(path: &Path) -> Result<(), String> {
     tauri_plugin_log::log::logger().flush();
@@ -355,7 +451,16 @@ mod tests {
                 .unwrap();
             init(app.handle(), &root);
             stage(Stage::RuntimeReady);
-            startup_failed("timeout");
+            startup_failed(
+                StartupStage::RuntimeInitialization,
+                "unable to open database file: /Users/private/api-token-fixture",
+            );
+            let frontend = serde_json::from_value(serde_json::json!({
+                "event":"startup_failed", "reason":"unknown", "frames":[],
+                "startup":{"stage":"shell_mount","loader_code":"ACL_TEMPLATE_HTTP_ERROR"}
+            }))
+            .unwrap();
+            super::frontend("main", frontend).unwrap();
             finish();
             return;
         }
@@ -378,6 +483,12 @@ mod tests {
         let log = std::fs::read_to_string(root.join("logs/manager.log")).unwrap();
         assert!(log.contains("session_started"));
         assert!(log.contains("manager_startup_failed"));
+        assert!(log.contains(r#""stage":"runtime_initialization""#));
+        assert!(log.contains(r#""cause":"database_unreadable""#));
+        assert!(log.contains(r#""stage":"shell_mount""#));
+        assert!(log.contains("ACL_TEMPLATE_HTTP_ERROR"));
+        assert!(!log.contains("/Users/private"));
+        assert!(!log.contains("api-token-fixture"));
         assert!(log.contains("session_finished"));
         let journal: SessionRecord =
             serde_json::from_slice(&std::fs::read(root.join("logs/manager-session.json")).unwrap())
@@ -486,11 +597,11 @@ mod tests {
             dropped: 0,
         };
         for _ in 0..30 {
-            assert!(budget.admit(now));
+            assert!(budget.admit(now, 30));
         }
         for _ in 0..1000 {
-            assert!(!budget.admit(now));
+            assert!(!budget.admit(now, 30));
         }
-        assert!(budget.admit(now + Duration::from_secs(61)));
+        assert!(budget.admit(now + Duration::from_secs(61), 30));
     }
 }

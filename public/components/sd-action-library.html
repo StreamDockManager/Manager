@@ -77,8 +77,9 @@
                         @click="pick"
                     >
                         <img
+                            data-resource-role="plugin-icon"
                             class="action-icon"
-                            :src="item.icon"
+                            :src="item.icon || null"
                             :class="{'plugin-library-icon': !item.themedIcon}"
                             alt=""
                         />

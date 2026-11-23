@@ -12,7 +12,7 @@ struct Setting {
     validate: Validator,
 }
 // Define the exact allowlist of preferences editable through configuration recovery
-fn settings() -> [Setting; 7] {
+fn settings() -> [Setting; 8] {
     use crate::{application_data as app, desktop, profile_database::LocalPreference as Local};
     macro_rules! manager {
         ($record:expr, $object:expr) => {
@@ -51,6 +51,7 @@ fn settings() -> [Setting; 7] {
             LibraryOrganization,
             crate::library_organization::validate_storage_snapshot
         ),
+        manager!(app::FIRMWARE_TEST_CATALOG_RECORD, false),
     ]
 }
 impl Setting {

@@ -15,8 +15,9 @@ TARGETS = ['help', 'deps', 'build', 'build-cli', 'build-frontend', 'package', 'p
 
 
 # Resolve build settings without changing persistent user configuration
-def environment():
-    env = os.environ.copy()
+def public_defaults(env):
+    """Return only validated public build defaults, preserving explicit overrides."""
+    defaults = {}
     path = Path(env.get('WORKSPACE_CONFIG') or ROOT / 'workspace.toml')
     with path.open('rb') as source:
         config = tomllib.load(source)
@@ -40,7 +41,13 @@ def environment():
                     or url.path.endswith('/')):
                 raise ValueError('plugins.catalog_url must be a complete public HTTPS catalog URL')
             _ = url.port
-        env[variable] = value
+        defaults[variable] = value
+    return defaults
+
+
+def environment():
+    env = os.environ.copy()
+    env.update(public_defaults(env))
     jobs = int(env.get('WORKSPACE_JOBS') or min(4, os.cpu_count() or 1))
     if not 1 <= jobs <= 128:
         raise ValueError('WORKSPACE_JOBS must be between 1 and 128')
@@ -81,7 +88,7 @@ def commands(action, system, env):
         'build-frontend': [[npm, 'run', 'build']],
         'check': [[npm, 'run', 'check']],
         'check-syntax': [[sys.executable, 'scripts/check_syntax.py']],
-        'test': [['cargo', 'test', '--locked', '--workspace']],
+        'test': [[sys.executable, 'scripts/with_test_key.py', 'cargo', 'test', '--locked', '--workspace']],
         'format': [[npm, 'run', 'format']],
         'format-check': [[npm, 'run', 'format:check']],
         'dev': [[npm, 'run', 'desktop']],

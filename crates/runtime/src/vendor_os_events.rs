@@ -2,6 +2,58 @@
 //! Only declared identities reach plugins. Never collect command lines or titles
 use crate::Runtime;
 use std::sync::Weak;
+#[cfg(target_os = "macos")]
+mod native_wait;
+
+#[derive(Default)]
+pub(crate) struct Signal {
+    wait: crate::sampler::Signal,
+    #[cfg(target_os = "macos")]
+    revision: std::sync::atomic::AtomicU64,
+    #[cfg(target_os = "macos")]
+    stopped: std::sync::atomic::AtomicBool,
+    #[cfg(target_os = "macos")]
+    native: std::sync::Mutex<Option<std::sync::Arc<dyn Fn() + Send + Sync>>>,
+}
+impl Signal {
+    // Advance the parked wait predicate before waking the native observer
+    pub(crate) fn notify(&self) {
+        self.wait.notify();
+        #[cfg(target_os = "macos")]
+        {
+            self.revision
+                .fetch_add(1, std::sync::atomic::Ordering::AcqRel);
+            if let Some(wake) = &*self.native.lock().unwrap() {
+                wake();
+            }
+        }
+    }
+    // Stop both condition-variable and native run-loop waits
+    pub(crate) fn stop(&self) {
+        #[cfg(target_os = "macos")]
+        self.stopped
+            .store(true, std::sync::atomic::Ordering::Release);
+        self.wait.stop();
+        self.notify();
+    }
+    // Use the same generation wait on platforms without a native run loop
+    fn wait(&self, observed: &mut u64, timeout: Option<std::time::Duration>) -> bool {
+        self.wait.wait(observed, timeout)
+    }
+    #[cfg(target_os = "macos")]
+    fn stopped(&self) -> bool {
+        self.stopped.load(std::sync::atomic::Ordering::Acquire)
+    }
+    #[cfg(target_os = "macos")]
+    fn revision(&self) -> u64 {
+        self.revision.load(std::sync::atomic::Ordering::Acquire)
+    }
+    #[cfg(target_os = "macos")]
+    // Serialize callback removal with notification before releasing native resources
+    fn native(&self, wake: Option<std::sync::Arc<dyn Fn() + Send + Sync>>) {
+        *self.native.lock().unwrap() = wake;
+    }
+}
 
 // Start the vendor-only demand monitor without changing core power or automation observers
 pub(crate) fn start(runtime: Weak<Runtime>) {
@@ -156,6 +208,13 @@ mod macos {
 
     // Maintain separate application and wake subscriptions only while live plugin recipients need them
     pub(super) fn observe(runtime: Weak<Runtime>) -> Result<(), String> {
+        let signal = runtime
+            .upgrade()
+            .ok_or("Runtime stopped")?
+            .vendor_signal
+            .clone();
+        let mut observed = 0;
+        let native_wait = super::native_wait::NativeWait::new(signal.clone()).ok();
         let mut applications = DemandSlot {
             value: None,
             attempted: false,
@@ -165,15 +224,31 @@ mod macos {
             attempted: false,
         };
         loop {
+            if signal.stopped() {
+                return Ok(());
+            }
+            let revision = signal.revision();
             let Some(owner) = runtime.upgrade().filter(|runtime| !runtime.is_stopping()) else {
                 return Ok(());
             };
+            owner.metrics.record("vendor_demand_checks", 1.0);
             let (names, wants_wake) = owner.plugins.lock().unwrap().vendor_os_event_demand();
             drop(owner);
             applications.update(!names.is_empty(), || {
                 Ok(Subscription::new(runtime.clone(), true))
             })?;
             wake.update(wants_wake, || Ok(Subscription::new(runtime.clone(), false)))?;
+            if applications.value.is_none() && wake.value.is_none() {
+                if !signal.wait(&mut observed, None) {
+                    return Ok(());
+                }
+                continue;
+            }
+            if let Some(wait) = &native_wait {
+                // Native delivery and demand changes interrupt this wait without a periodic tick
+                wait.wait(revision, Duration::from_secs(24 * 60 * 60));
+                continue;
+            }
             let start = Instant::now();
             if applications.value.is_some() || wake.value.is_some() {
                 objc2::rc::autoreleasepool(|_| {
@@ -227,6 +302,12 @@ fn observe(runtime: Weak<Runtime>) -> Result<(), String> {
         time::{Duration, Instant},
     };
     use sysinfo::{ProcessesToUpdate, System};
+    let signal = runtime
+        .upgrade()
+        .ok_or("Runtime stopped")?
+        .vendor_signal
+        .clone();
+    let mut observed = 0;
     let mut system: Option<System> = None;
     let mut wake = DemandSlot {
         value: None,
@@ -239,13 +320,19 @@ fn observe(runtime: Weak<Runtime>) -> Result<(), String> {
         let Some(current) = runtime.upgrade().filter(|runtime| !runtime.is_stopping()) else {
             return Ok(());
         };
+        current.metrics.record("vendor_demand_checks", 1.0);
         let (requested, wants_wake) = current.plugins.lock().unwrap().vendor_os_event_demand();
-        if let Err(error) = wake.update(wants_wake, || {
+        let has_applications = !requested.is_empty();
+        if let Err(error) = wake.update(wants_wake || current.vault.is_unlocked(), || {
             let (sender, receiver) = std::sync::mpsc::sync_channel(32);
             #[cfg(target_os = "linux")]
             let subscription = linux_wake::Subscription::new(runtime.clone(), sender)?;
             #[cfg(target_os = "windows")]
-            let subscription = windows_wake::Subscription::new(sender)?;
+            let subscription = windows_wake::Subscription::new(
+                sender,
+                signal.clone(),
+                std::sync::Arc::downgrade(&current.vault),
+            )?;
             Ok((subscription, receiver))
         }) {
             current.emit("plugin-os-events-unavailable", None, None, Some(error));
@@ -273,6 +360,7 @@ fn observe(runtime: Weak<Runtime>) -> Result<(), String> {
                     })?);
                 }
                 let system = system.as_mut().unwrap();
+                current.metrics.record("vendor_application_scans", 1.0);
                 system.refresh_processes_specifics(
                     ProcessesToUpdate::All,
                     true,
@@ -283,7 +371,12 @@ fn observe(runtime: Weak<Runtime>) -> Result<(), String> {
                     changes.previous.clear();
                     next_snapshot = Instant::now() + Duration::from_secs(1);
                     drop(current);
-                    std::thread::sleep(Duration::from_millis(100));
+                    if !signal.wait(
+                        &mut observed,
+                        Some(next_snapshot.saturating_duration_since(Instant::now())),
+                    ) {
+                        return Ok(());
+                    }
                     continue;
                 }
                 for (pid, process) in system.processes() {
@@ -317,8 +410,14 @@ fn observe(runtime: Weak<Runtime>) -> Result<(), String> {
             next_snapshot = Instant::now() + Duration::from_secs(1);
         }
         drop(current);
-        std::thread::sleep(Duration::from_millis(100));
+        if !signal.wait(
+            &mut observed,
+            has_applications.then(|| next_snapshot.saturating_duration_since(Instant::now())),
+        ) {
+            break;
+        }
     }
+    Ok(())
 }
 
 #[cfg(any(target_os = "windows", target_os = "linux"))]
@@ -374,7 +473,11 @@ mod linux_wake {
                                 let mut signals = proxy.receive_signal("PrepareForSleep").await.map_err(|error| error.to_string())?;
                                 while let Some(message) = signals.next().await {
                                     let (sleeping,): (bool,) = message.body().deserialize().map_err(|error| error.to_string())?;
-                                    if !sleeping { let _ = sender.try_send(()); }
+                                    if let Some(owner) = runtime.upgrade() { owner.vault.end_session(); }
+                                    if !sleeping {
+                                        let _ = sender.try_send(());
+                                        if let Some(owner) = runtime.upgrade() { owner.vendor_signal.notify(); }
+                                    }
                                 }
                                 Err("System wake signal stream closed".to_string())
                             } => result,
@@ -409,6 +512,7 @@ mod linux_wake {
 
 #[cfg(target_os = "windows")]
 mod windows_wake {
+    use super::Signal;
     use std::{ffi::c_void, sync::mpsc::SyncSender};
     use windows::Win32::{
         Foundation::HANDLE,
@@ -416,25 +520,45 @@ mod windows_wake {
             PowerRegisterSuspendResumeNotification, PowerUnregisterSuspendResumeNotification,
             DEVICE_NOTIFY_SUBSCRIBE_PARAMETERS, HPOWERNOTIFY,
         },
-        UI::WindowsAndMessaging::{DEVICE_NOTIFY_CALLBACK, PBT_APMRESUMEAUTOMATIC},
+        UI::WindowsAndMessaging::{DEVICE_NOTIFY_CALLBACK, PBT_APMRESUMEAUTOMATIC, PBT_APMSUSPEND},
     };
+    struct WakeContext {
+        vault: std::sync::Weak<crate::vault::Vault>,
+        sender: SyncSender<()>,
+        signal: std::sync::Arc<Signal>,
+    }
     pub(super) struct Subscription {
         handle: HPOWERNOTIFY,
-        sender: *mut SyncSender<()>,
+        sender: *mut WakeContext,
     }
     // Route the native operating-system notification to runtime handling
     unsafe extern "system" fn notify(context: *const c_void, event: u32, _: *const c_void) -> u32 {
-        if event == PBT_APMRESUMEAUTOMATIC && !context.is_null() {
+        if matches!(event, PBT_APMRESUMEAUTOMATIC | PBT_APMSUSPEND) && !context.is_null() {
             // Context is owned until successful unregister waits for pending callbacks
-            let sender = unsafe { &*context.cast::<SyncSender<()>>() };
-            let _ = sender.try_send(());
+            let context = unsafe { &*context.cast::<WakeContext>() };
+            if let Some(vault) = context.vault.upgrade() {
+                vault.end_session();
+            }
+            if event == PBT_APMSUSPEND {
+                return 0;
+            }
+            let _ = context.sender.try_send(());
+            context.signal.notify();
         }
         0
     }
     impl Subscription {
         // Initialize vendor os events state from the supplied inputs
-        pub(super) fn new(sender: SyncSender<()>) -> Result<Self, String> {
-            let sender = Box::into_raw(Box::new(sender));
+        pub(super) fn new(
+            sender: SyncSender<()>,
+            signal: std::sync::Arc<Signal>,
+            vault: std::sync::Weak<crate::vault::Vault>,
+        ) -> Result<Self, String> {
+            let sender = Box::into_raw(Box::new(WakeContext {
+                sender,
+                signal,
+                vault,
+            }));
             let mut parameters = DEVICE_NOTIFY_SUBSCRIBE_PARAMETERS {
                 Callback: Some(notify),
                 Context: sender.cast(),
@@ -479,6 +603,36 @@ mod windows_wake {
 mod tests {
     use super::ProcessChanges;
     use std::collections::{BTreeMap, BTreeSet};
+    #[test]
+    // An idle demand wait has no timer and notifications before waiting cannot be lost
+    fn idle_demand_wait_parks_until_notification_or_shutdown() {
+        use std::{
+            sync::{mpsc, Arc},
+            time::Duration,
+        };
+        let signal = Arc::new(super::Signal::default());
+        let worker_signal = signal.clone();
+        let (send, receive) = mpsc::channel();
+        let worker = std::thread::spawn(move || {
+            let mut observed = 0;
+            let active = worker_signal.wait(&mut observed, None);
+            send.send((active, observed)).unwrap();
+            assert!(!worker_signal.wait(&mut observed, None));
+        });
+        assert!(receive.recv_timeout(Duration::from_millis(650)).is_err());
+        signal.notify();
+        assert_eq!(
+            receive.recv_timeout(Duration::from_secs(1)).unwrap(),
+            (true, 1)
+        );
+        signal.stop();
+        worker.join().unwrap();
+        let signal = super::Signal::default();
+        signal.notify();
+        let mut observed = 0;
+        assert!(signal.wait(&mut observed, None));
+        assert_eq!(observed, 1);
+    }
     #[test]
     // Verify that executable identity preserves case except on Windows
     fn executable_identity_preserves_case_except_on_windows() {

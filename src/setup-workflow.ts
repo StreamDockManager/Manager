@@ -31,8 +31,10 @@ export function registerSetupWorkflow(
             await runFeatureWork(this, work);
         },
         setupVisible: false,
+        setupMounted: false,
         // Show the selected setup workflow content
         show(name: string) {
+            this.setupMounted = true;
             this.setupVisible = true;
             showFeatureDialog(this, name);
         },

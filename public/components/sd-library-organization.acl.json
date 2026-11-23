@@ -1,7 +1,11 @@
 {
     "version": 1,
-    "groups": ["shell"],
+    "groups": ["library-organization"],
     "dependencies": [],
-    "options": { "shadow": false },
-    "metadata": { "description": "Installation-local library favorites and tag editor." }
+    "options": {
+        "shadow": false
+    },
+    "metadata": {
+        "description": "Installation-local library favorites and tag editor."
+    }
 }

@@ -15,452 +15,418 @@
             <button class="button" @click="$dispatch('open-setup')">Run setup wizard</button>
         </div>
     </div>
-    <nav class="section-index button-row" aria-label="Settings sections">
-        <a class="button" href="#settings-appearance" @click.prevent="jumpToSection">
-            Appearance &amp; accessibility
-        </a>
-        <a class="button" href="#settings-runtimes" @click.prevent="jumpToSection">Runtimes</a>
-        <a class="button" href="#settings-parameters" @click.prevent="jumpToSection">
-            Profile parameters
-        </a>
-        <a class="button" href="#settings-background" @click.prevent="jumpToSection">
-            Background operation
-        </a>
-        <a class="button" href="#settings-cache" @click.prevent="jumpToSection">Download cache</a>
-        <a class="button" href="#settings-data" @click.prevent="jumpToSection">Application data</a>
-        <a class="button" href="#settings-profiles" @click.prevent="jumpToSection">
-            Profiles &amp; portability
-        </a>
-        <a class="button" href="#settings-updates" @click.prevent="jumpToSection">
-            Application updates
-        </a>
-        <a class="button" href="#settings-logging" @click.prevent="jumpToSection">Plugin logging</a>
-    </nav>
-    <article
-        id="settings-appearance"
-        tabindex="-1"
-        class="card settings-card appearance-settings"
-        aria-label="Appearance and accessibility"
+    <p
+        class="field-help"
+        role="status"
+        x-show="$store.startupPermissions.developmentWarning"
+        x-text="$store.startupPermissions.developmentWarning"
+    ></p>
+    <div
+        class="navigation-tabs route-tabs"
+        role="tablist"
+        aria-label="Settings sections"
+        @keydown="sectionKey"
     >
-        <h2>Appearance &amp; accessibility</h2>
-        <p>System mode switches between your saved light and dark palettes.</p>
-        <p class="field-help" x-show="$store.theme.hasProfilePalette">
-            The selected profile currently controls Manager’s colors. These are your global
-            defaults; change the override in Profile palettes below.
-        </p>
-        <div class="settings-form-grid appearance-controls">
-            <label>
-                Color theme
-                <select
-                    aria-label="Color theme"
-                    :value="$store.theme.preference"
-                    @change="$store.theme.change($event)"
-                >
-                    <option value="system">System</option>
-                    <option value="light">Light</option>
-                    <option value="dark">Dark</option>
-                </select>
-            </label>
-            <fieldset
-                class="settings-form-grid"
-                :disabled="!$store.theme.styleReady"
-                aria-label="Display preferences"
-            >
-                <div class="field-group">
-                    <label for="appearance-interface-font">Interface font</label>
-                    <div class="appearance-font-picker">
-                        <select
-                            id="appearance-interface-font"
-                            name="font"
-                            :value="$store.theme.style.font"
-                            @change="$store.theme.changeStyle($event)"
-                        >
-                            <template x-for="font in $store.theme.fontOptions" :key="font.id">
-                                <option
-                                    :value="font.id"
-                                    :selected="font.id === $store.theme.style.font"
-                                    x-text="font.label"
-                                ></option>
-                            </template>
-                        </select>
-                        <button
-                            type="button"
-                            class="text-button"
-                            data-preview-fonts
-                            aria-label="Preview fonts"
-                        >
-                            Preview fonts…
-                        </button>
-                        <button
-                            type="button"
-                            class="text-button"
-                            x-show="$store.theme.canDiscoverFonts"
-                            :disabled="$store.theme.fontsLoading"
-                            @click="$store.theme.loadFonts(true)"
-                            :aria-label="$store.theme.fontError ? 'Retry installed fonts' : 'Refresh installed fonts'"
-                            x-text="$store.theme.fontError ? 'Retry' : 'Refresh'"
-                        ></button>
-                    </div>
-                    <small class="field-help" role="status" x-show="$store.theme.fontsLoading">
-                        Loading installed fonts…
-                    </small>
-                    <small
-                        class="field-help danger-text"
-                        role="alert"
-                        x-show="$store.theme.fontError"
-                        x-text="$store.theme.fontError"
-                    ></small>
-                </div>
-                <div class="field-group">
-                    <label>
-                        <span class="scale-label">
-                            UI Scale
-                            <output
-                                aria-hidden="true"
-                                x-text="$store.theme.scaleInput + '%'"
-                            ></output>
-                        </span>
-                        <input
-                            type="range"
-                            name="textScale"
-                            aria-label="UI Scale"
-                            data-tooltip="Scales text, controls, and the device preview."
-                            :aria-valuetext="$store.theme.scaleInput + '%'"
-                            min="90"
-                            max="150"
-                            step="5"
-                            :value="$store.theme.style.textScale"
-                            @input="$store.theme.previewScale($event)"
-                            @change="$store.theme.changeStyle($event)"
-                        />
-                    </label>
-                </div>
-            </fieldset>
-        </div>
-        <div class="field-group" x-show="$store.theme.styleError">
-            <p class="danger-text" role="alert" x-text="$store.theme.styleError"></p>
-            <div class="button-row">
-                <button type="button" class="button" @click="$store.theme.retryStyle()">
-                    Retry theme settings
-                </button>
-            </div>
-        </div>
-        <fieldset
-            class="settings-section theme-customization"
-            :disabled="!$store.theme.styleReady"
-            aria-label="Theme customization"
-            x-data="paletteBrowser"
+        <template x-for="item in sectionTabs" :key="item.id">
+            <button
+                type="button"
+                role="tab"
+                :id="'settings-tab-' + item.id"
+                :aria-controls="'settings-panel-' + item.id"
+                :aria-selected="sectionTab === item.id"
+                :tabindex="sectionTab === item.id ? 0 : -1"
+                :data-section-tab="item.id"
+                @click="selectSection"
+                x-text="item.label"
+            ></button>
+        </template>
+    </div>
+    <section
+        role="tabpanel"
+        id="settings-panel-appearance"
+        aria-labelledby="settings-tab-appearance"
+        tabindex="0"
+        class="route-tab-panel"
+        x-show="sectionTab === 'appearance'"
+    >
+        <article
+            id="settings-appearance"
+            tabindex="-1"
+            class="card settings-card appearance-settings"
+            aria-label="Appearance and accessibility"
         >
-            <div class="palette-settings-row">
-                <ul class="palette-selections" aria-label="Selected palettes">
-                    <template x-for="palette in selectedPalettes" :key="palette.mode">
-                        <li>
-                            <span
-                                class="theme-swatch"
-                                :data-theme-swatch="palette.selected.id"
-                                :data-swatch-mode="palette.mode"
-                                :style="palette.selected.swatch"
-                                aria-hidden="true"
-                            >
-                                <span></span>
-                                <span></span>
-                                <span></span>
-                            </span>
-                            <div class="palette-summary">
-                                <span class="field-help" x-text="palette.label"></span>
-                                <strong x-text="palette.selected.label"></strong>
-                            </div>
-                            <span class="chip theme-palette-active" x-show="palette.active">
-                                Active
-                            </span>
-                        </li>
-                    </template>
-                </ul>
-                <div class="button-row">
-                    <button
-                        type="button"
-                        class="button"
-                        aria-haspopup="dialog"
-                        x-ref="browsePalettes"
-                        @click="openPaletteBrowser"
+            <h2>Appearance &amp; accessibility</h2>
+            <p>System mode switches between your saved light and dark palettes.</p>
+            <p class="field-help" x-show="$store.theme.hasProfilePalette">
+                The selected profile currently controls Manager’s colors. These are your global
+                defaults; change the override in Profile palettes below.
+            </p>
+            <div class="settings-form-grid appearance-controls">
+                <label>
+                    Color theme
+                    <select
+                        aria-label="Color theme"
+                        :value="$store.theme.preference"
+                        @change="$store.theme.change($event)"
                     >
-                        Browse palettes
-                    </button>
-                    <div x-data="paletteEditor">
-                        <button type="button" class="button" @click="open" :disabled="!native">
-                            Manage palettes
-                        </button>
-                        <dialog
-                            class="feature-dialog palette-editor-dialog"
-                            x-ref="dialog"
-                            aria-labelledby="manage-palettes-title"
-                            data-media-drop-target
-                            @media-file-drop="dropMedia"
-                            @cancel.prevent="close"
+                        <option value="system">System</option>
+                        <option value="light">Light</option>
+                        <option value="dark">Dark</option>
+                    </select>
+                </label>
+                <fieldset
+                    class="settings-form-grid"
+                    :disabled="!$store.theme.styleReady"
+                    aria-label="Display preferences"
+                >
+                    <div class="field-group">
+                        <label for="appearance-interface-font-trigger">Interface font</label>
+                        <div class="appearance-font-picker">
+                            <select
+                                id="appearance-interface-font"
+                                hidden
+                                tabindex="-1"
+                                aria-hidden="true"
+                                name="font"
+                                :value="$store.theme.style.font"
+                                @change="$store.theme.changeStyle($event)"
+                                @font-style-apply="$store.theme.applyFontStyle($event)"
+                            >
+                                <template x-for="font in $store.theme.fontOptions" :key="font.id">
+                                    <option
+                                        :value="font.id"
+                                        :selected="font.id === $store.theme.style.font"
+                                        x-text="font.label"
+                                    ></option>
+                                </template>
+                            </select>
+                            <button
+                                type="button"
+                                id="appearance-interface-font-trigger"
+                                data-font-style
+                                :data-font-weight="$store.theme.style.fontWeight"
+                                :data-font-italic="$store.theme.style.fontItalic"
+                                class="button interface-font-trigger"
+                                data-preview-fonts
+                                :title="$store.theme.interfaceFontLabel"
+                                :aria-description="$store.theme.interfaceFontLabel"
+                                aria-label="Preview fonts"
+                                :aria-busy="$store.theme.fontsLoading"
+                            >
+                                <span
+                                    class="interface-font-name"
+                                    x-text="$store.theme.interfaceFontLabel"
+                                ></span>
+                                <span
+                                    class="interface-font-spinner"
+                                    :class="{active: $store.theme.fontsLoading}"
+                                    aria-hidden="true"
+                                ></span>
+                            </button>
+                            <button
+                                type="button"
+                                class="text-button"
+                                x-show="$store.theme.canDiscoverFonts"
+                                :disabled="$store.theme.fontsLoading"
+                                @click="$store.theme.loadFonts(true)"
+                                :aria-label="$store.theme.fontError ? 'Retry installed fonts' : 'Refresh installed fonts'"
+                                x-text="$store.theme.fontError ? 'Retry' : 'Refresh'"
+                            ></button>
+                        </div>
+                        <small
+                            class="font-loading-status"
+                            role="status"
+                            x-show="$store.theme.fontsLoading"
                         >
-                            <header class="picker-header">
-                                <h2 id="manage-palettes-title">Manage palettes</h2>
-                                <button
-                                    type="button"
-                                    class="icon-button"
-                                    aria-label="Close palette editor"
-                                    @click="close"
-                                    :disabled="busy"
+                            Loading installed fonts…
+                        </small>
+                        <small
+                            class="field-help danger-text"
+                            role="alert"
+                            x-show="$store.theme.fontError"
+                            x-text="$store.theme.fontError"
+                        ></small>
+                    </div>
+                    <div class="field-group">
+                        <label>
+                            <span class="scale-label">
+                                UI Scale
+                                <output
+                                    aria-hidden="true"
+                                    x-text="$store.theme.scaleInput + '%'"
+                                ></output>
+                            </span>
+                            <input
+                                type="range"
+                                name="textScale"
+                                aria-label="UI Scale"
+                                data-tooltip="Scales text, controls, and the device preview."
+                                :aria-valuetext="$store.theme.scaleInput + '%'"
+                                min="90"
+                                max="150"
+                                step="5"
+                                :value="$store.theme.style.textScale"
+                                @input="$store.theme.previewScale($event)"
+                                @change="$store.theme.changeStyle($event)"
+                            />
+                        </label>
+                    </div>
+                </fieldset>
+            </div>
+            <div class="field-group" x-show="$store.theme.styleError">
+                <p class="danger-text" role="alert" x-text="$store.theme.styleError"></p>
+                <div class="button-row">
+                    <button type="button" class="button" @click="$store.theme.retryStyle()">
+                        Retry theme settings
+                    </button>
+                </div>
+            </div>
+            <fieldset
+                class="settings-section theme-customization"
+                :disabled="!$store.theme.styleReady"
+                aria-label="Theme customization"
+                x-data="paletteSummary"
+            >
+                <div class="palette-settings-row">
+                    <ul class="palette-selections" aria-label="Selected palettes">
+                        <template x-for="palette in selectedPalettes" :key="palette.mode">
+                            <li>
+                                <span
+                                    class="theme-swatch"
+                                    :data-theme-swatch="palette.selected.id"
+                                    :data-swatch-mode="palette.mode"
+                                    :style="palette.selected.swatch || {}"
+                                    aria-hidden="true"
                                 >
-                                    ×
-                                </button>
-                            </header>
-                            <div class="feature-body">
-                                <div class="palette-editor-layout">
-                                    <div
-                                        class="palette-editor-fields palette-editor-main"
-                                        x-show="!draft"
+                                    <span></span>
+                                    <span></span>
+                                    <span></span>
+                                </span>
+                                <div class="palette-summary">
+                                    <span class="field-help" x-text="palette.label"></span>
+                                    <strong x-text="palette.selected.label"></strong>
+                                </div>
+                                <span class="chip theme-palette-active" x-show="palette.active">
+                                    Active
+                                </span>
+                            </li>
+                        </template>
+                    </ul>
+                    <div class="button-row">
+                        <button
+                            type="button"
+                            class="button"
+                            aria-haspopup="dialog"
+                            @click="openPaletteBrowser"
+                        >
+                            Browse palettes
+                        </button>
+                        <div x-data="paletteEditor">
+                            <button type="button" class="button" @click="open" :disabled="!native">
+                                Manage palettes
+                            </button>
+                            <dialog
+                                class="feature-dialog palette-editor-dialog"
+                                x-ref="dialog"
+                                aria-labelledby="manage-palettes-title"
+                                data-media-drop-target
+                                @media-file-drop="dropMedia"
+                                @cancel.prevent="close"
+                            >
+                                <header class="picker-header">
+                                    <h2 id="manage-palettes-title">Manage palettes</h2>
+                                    <button
+                                        type="button"
+                                        class="icon-button"
+                                        aria-label="Close palette editor"
+                                        @click="close"
+                                        :disabled="busy"
                                     >
-                                        <div class="settings-form-grid">
-                                            <label>
-                                                Appearance
-                                                <select
-                                                    :value="mode"
-                                                    @change="changeMode"
-                                                    :disabled="busy"
-                                                >
-                                                    <option value="light">Light</option>
-                                                    <option value="dark">Dark</option>
-                                                </select>
-                                            </label>
-                                            <label>
-                                                Palette
-                                                <select
-                                                    x-ref="paletteSelect"
-                                                    :value="selection"
-                                                    @change="changeSelection"
-                                                    :disabled="busy"
-                                                >
-                                                    <template
-                                                        x-for="option in options"
-                                                        :key="option.id"
-                                                    >
-                                                        <option
-                                                            :value="option.id"
-                                                            :selected="option.id === selection"
-                                                            x-text="option.label"
-                                                        ></option>
-                                                    </template>
-                                                </select>
-                                            </label>
-                                        </div>
-                                        <div class="button-row">
-                                            <button
-                                                type="button"
-                                                class="button primary"
-                                                @click="addPalette"
-                                                :disabled="busy"
-                                            >
-                                                New palette
-                                            </button>
-                                            <button
-                                                type="button"
-                                                class="button"
-                                                @click="duplicate"
-                                                :disabled="busy"
-                                            >
-                                                Duplicate
-                                            </button>
-                                            <button
-                                                type="button"
-                                                class="button"
-                                                @click="edit()"
-                                                x-show="custom"
-                                                :disabled="busy"
-                                            >
-                                                Edit
-                                            </button>
-                                            <button
-                                                type="button"
-                                                class="button danger-text"
-                                                @click="confirmDelete"
-                                                x-show="custom"
-                                                :disabled="busy"
-                                            >
-                                                Delete palette
-                                            </button>
-                                        </div>
-                                        <p class="field-help" x-show="!custom">
-                                            Duplicate a built-in palette to customize it.
-                                        </p>
-                                    </div>
-                                    <template x-if="draft">
-                                        <fieldset
+                                        ×
+                                    </button>
+                                </header>
+                                <div class="feature-body">
+                                    <div class="palette-editor-layout">
+                                        <div
                                             class="palette-editor-fields palette-editor-main"
-                                            :disabled="busy || importing"
+                                            x-show="!draft"
                                         >
-                                            <label>
-                                                Palette name
-                                                <input
-                                                    type="text"
-                                                    x-ref="name"
-                                                    maxlength="96"
-                                                    x-model="draft.name"
-                                                />
-                                            </label>
-                                            <label class="palette-color-field palette-accent-field">
-                                                <span>
-                                                    <strong>Accent color</strong>
-                                                    <small
-                                                        aria-hidden="true"
-                                                        x-text="draft.colors.accent"
-                                                    ></small>
-                                                </span>
-                                                <input
-                                                    type="color"
-                                                    name="accent"
-                                                    :value="draft.colors.accent"
-                                                    @input="setColor"
-                                                />
-                                            </label>
-                                        </fieldset>
-                                    </template>
-                                    <div class="palette-editor-fields palette-editor-preview">
-                                        <figure class="palette-color-preview" :style="previewStyle">
-                                            <div class="palette-color-preview-surface">
-                                                <figcaption
-                                                    x-text="mode === 'light' ? 'Light palette preview' : 'Dark palette preview'"
-                                                ></figcaption>
-                                                <strong x-text="previewName"></strong>
-                                                <div class="palette-preview-example">
-                                                    <span>Secondary text</span>
-                                                    <span aria-hidden="true"></span>
-                                                </div>
-                                            </div>
-                                        </figure>
-                                        <template x-if="draft">
-                                            <section
-                                                class="palette-suggestions"
-                                                aria-labelledby="palette-suggestions-title"
-                                            >
-                                                <h3 id="palette-suggestions-title">
-                                                    Suggested colors
-                                                </h3>
-                                                <p class="field-help">
-                                                    Choose a set to update the colors around your
-                                                    Accent.
-                                                </p>
-                                                <div class="palette-suggestion-options">
-                                                    <template
-                                                        x-for="suggestion in suggestions"
-                                                        :key="suggestion.label"
+                                            <div class="settings-form-grid">
+                                                <label>
+                                                    Appearance
+                                                    <select
+                                                        :value="mode"
+                                                        @change="changeMode"
+                                                        :disabled="busy"
                                                     >
-                                                        <button
-                                                            type="button"
-                                                            class="button palette-suggestion"
-                                                            :aria-label="'Use ' + suggestion.label.toLowerCase() + ' colors'"
-                                                            @click="applySuggestion(suggestion.colors)"
-                                                            :disabled="busy || importing"
+                                                        <option value="light">Light</option>
+                                                        <option value="dark">Dark</option>
+                                                    </select>
+                                                </label>
+                                                <label>
+                                                    Palette
+                                                    <select
+                                                        x-ref="paletteSelect"
+                                                        :value="selection"
+                                                        @change="changeSelection"
+                                                        :disabled="busy"
+                                                    >
+                                                        <template
+                                                            x-for="option in options"
+                                                            :key="option.id"
                                                         >
-                                                            <span
-                                                                class="palette-suggestion-swatches"
-                                                                aria-hidden="true"
-                                                            >
-                                                                <template
-                                                                    x-for="(color, index) in suggestion.swatches"
-                                                                    :key="index"
-                                                                >
-                                                                    <span
-                                                                        :style="{backgroundColor: color}"
-                                                                    ></span>
-                                                                </template>
-                                                            </span>
-                                                            <span x-text="suggestion.label"></span>
-                                                        </button>
-                                                    </template>
-                                                </div>
-                                            </section>
-                                        </template>
-                                    </div>
-                                    <template x-if="draft">
-                                        <fieldset
-                                            class="palette-color-fields palette-editor-support"
-                                            aria-label="Supporting colors"
-                                            :disabled="busy || importing"
-                                        >
-                                            <template
-                                                x-for="field in primaryFields"
-                                                :key="field.key"
+                                                            <option
+                                                                :value="option.id"
+                                                                :selected="option.id === selection"
+                                                                x-text="option.label"
+                                                            ></option>
+                                                        </template>
+                                                    </select>
+                                                </label>
+                                            </div>
+                                            <div class="button-row">
+                                                <button
+                                                    type="button"
+                                                    class="button primary"
+                                                    @click="addPalette"
+                                                    :disabled="busy"
+                                                >
+                                                    New palette
+                                                </button>
+                                                <button
+                                                    type="button"
+                                                    class="button"
+                                                    @click="duplicate"
+                                                    :disabled="busy"
+                                                >
+                                                    Duplicate
+                                                </button>
+                                                <button
+                                                    type="button"
+                                                    class="button"
+                                                    @click="edit()"
+                                                    x-show="custom"
+                                                    :disabled="busy"
+                                                >
+                                                    Edit
+                                                </button>
+                                                <button
+                                                    type="button"
+                                                    class="button danger-text"
+                                                    @click="confirmDelete"
+                                                    x-show="custom"
+                                                    :disabled="busy"
+                                                >
+                                                    Delete palette
+                                                </button>
+                                            </div>
+                                            <p class="field-help" x-show="!custom">
+                                                Duplicate a built-in palette to customize it.
+                                            </p>
+                                        </div>
+                                        <template x-if="draft">
+                                            <fieldset
+                                                class="palette-editor-fields palette-editor-main"
+                                                :disabled="busy || importing"
                                             >
-                                                <label class="palette-color-field">
+                                                <label>
+                                                    Palette name
+                                                    <input
+                                                        type="text"
+                                                        x-ref="name"
+                                                        maxlength="96"
+                                                        x-model="draft.name"
+                                                    />
+                                                </label>
+                                                <label
+                                                    class="palette-color-field palette-accent-field"
+                                                >
                                                     <span>
-                                                        <span
-                                                            class="palette-color-label"
-                                                            :title="field.label"
-                                                            x-text="field.label"
-                                                        ></span>
+                                                        <strong>Accent color</strong>
                                                         <small
                                                             aria-hidden="true"
-                                                            x-text="field.value"
+                                                            x-text="draft.colors.accent"
                                                         ></small>
                                                     </span>
                                                     <input
                                                         type="color"
-                                                        :name="field.key"
-                                                        :value="field.value"
+                                                        name="accent"
+                                                        :value="draft.colors.accent"
                                                         @input="setColor"
                                                     />
                                                 </label>
-                                            </template>
-                                        </fieldset>
-                                    </template>
-                                </div>
-                                <template x-if="draft">
-                                    <fieldset
-                                        class="palette-editor-fields"
-                                        :disabled="busy || importing"
-                                    >
-                                        <details class="disclosure">
-                                            <summary>Wallpaper</summary>
-                                            <div class="disclosure-body">
-                                                <div class="media-drop-target palette-wallpaper">
-                                                    <img
-                                                        x-show="wallpaperPreview"
-                                                        :src="wallpaperPreview || null"
-                                                        alt="Wallpaper preview"
-                                                        width="64"
-                                                        height="64"
-                                                    />
-                                                    <span
-                                                        x-text="draft.wallpaper ? 'Wallpaper selected' : 'Drop an image or video here'"
-                                                    ></span>
-                                                    <div class="button-row">
-                                                        <button
-                                                            type="button"
-                                                            class="button"
-                                                            @click="chooseFile"
-                                                        >
-                                                            Choose wallpaper
-                                                        </button>
-                                                        <button
-                                                            type="button"
-                                                            class="button"
-                                                            @click="browse"
-                                                        >
-                                                            Browse existing media
-                                                        </button>
-                                                        <button
-                                                            type="button"
-                                                            class="button"
-                                                            @click="clearWallpaper"
-                                                            x-show="draft.wallpaper"
-                                                        >
-                                                            Remove wallpaper
-                                                        </button>
+                                            </fieldset>
+                                        </template>
+                                        <div class="palette-editor-fields palette-editor-preview">
+                                            <figure
+                                                class="palette-color-preview"
+                                                :style="previewStyle"
+                                            >
+                                                <div class="palette-color-preview-surface">
+                                                    <figcaption
+                                                        x-text="mode === 'light' ? 'Light palette preview' : 'Dark palette preview'"
+                                                    ></figcaption>
+                                                    <strong x-text="previewName"></strong>
+                                                    <div class="palette-preview-example">
+                                                        <span>Secondary text</span>
+                                                        <span aria-hidden="true"></span>
                                                     </div>
                                                 </div>
-                                            </div>
-                                        </details>
-                                        <details class="disclosure">
-                                            <summary>Advanced colors</summary>
-                                            <div class="disclosure-body palette-color-fields">
+                                            </figure>
+                                            <template x-if="draft">
+                                                <section
+                                                    class="palette-suggestions"
+                                                    aria-labelledby="palette-suggestions-title"
+                                                >
+                                                    <h3 id="palette-suggestions-title">
+                                                        Suggested colors
+                                                    </h3>
+                                                    <p class="field-help">
+                                                        Choose a set to update the colors around
+                                                        your Accent.
+                                                    </p>
+                                                    <div class="palette-suggestion-options">
+                                                        <template
+                                                            x-for="suggestion in suggestions"
+                                                            :key="suggestion.label"
+                                                        >
+                                                            <button
+                                                                type="button"
+                                                                class="button palette-suggestion"
+                                                                :aria-label="'Use ' + suggestion.label.toLowerCase() + ' colors'"
+                                                                @click="applySuggestion(suggestion.colors)"
+                                                                :disabled="busy || importing"
+                                                            >
+                                                                <span
+                                                                    class="palette-suggestion-swatches"
+                                                                    aria-hidden="true"
+                                                                >
+                                                                    <template
+                                                                        x-for="(color, index) in suggestion.swatches"
+                                                                        :key="index"
+                                                                    >
+                                                                        <span
+                                                                            :style="{backgroundColor: color}"
+                                                                        ></span>
+                                                                    </template>
+                                                                </span>
+                                                                <span
+                                                                    x-text="suggestion.label"
+                                                                ></span>
+                                                            </button>
+                                                        </template>
+                                                    </div>
+                                                </section>
+                                            </template>
+                                        </div>
+                                        <template x-if="draft">
+                                            <fieldset
+                                                class="palette-color-fields palette-editor-support"
+                                                aria-label="Supporting colors"
+                                                :disabled="busy || importing"
+                                            >
                                                 <template
-                                                    x-for="field in advancedFields"
+                                                    x-for="field in primaryFields"
                                                     :key="field.key"
                                                 >
                                                     <label class="palette-color-field">
@@ -483,1200 +449,1546 @@
                                                         />
                                                     </label>
                                                 </template>
-                                            </div>
-                                        </details>
-                                    </fieldset>
-                                </template>
-                                <p role="status" x-show="importing">Importing wallpaper…</p>
-                                <p
-                                    class="danger-text"
-                                    role="alert"
-                                    x-show="error"
-                                    x-text="error"
-                                ></p>
-                            </div>
-                            <footer class="feature-footer palette-editor-footer">
-                                <button
-                                    type="button"
-                                    class="button"
-                                    @click="close"
-                                    x-show="!draft"
-                                    :disabled="busy"
-                                >
-                                    Close
-                                </button>
-                                <button
-                                    type="button"
-                                    class="button"
-                                    @click="backToPalettes"
-                                    x-show="draft"
-                                    :disabled="busy"
-                                >
-                                    Cancel edit
-                                </button>
-                                <button
-                                    type="button"
-                                    class="button primary"
-                                    @click="save"
-                                    x-show="draft"
-                                    :disabled="!draft || !draft.name.trim() || busy || importing"
-                                >
-                                    Save palette
-                                </button>
-                            </footer>
-                        </dialog>
-                        <dialog
-                            class="feature-dialog"
-                            x-ref="confirm"
-                            aria-labelledby="delete-palette-title"
-                            @cancel.prevent="cancelDelete"
-                        >
-                            <header class="picker-header">
-                                <h2 id="delete-palette-title">Delete palette?</h2>
-                            </header>
-                            <div class="feature-body">
-                                An active selection will return to Default.
-                            </div>
-                            <footer class="feature-footer button-row">
-                                <button
-                                    type="button"
-                                    class="button"
-                                    @click="cancelDelete"
-                                    :disabled="busy"
-                                    autofocus
-                                >
-                                    Cancel
-                                </button>
-                                <button
-                                    type="button"
-                                    class="button danger"
-                                    @click="deletePalette"
-                                    :disabled="busy"
-                                >
-                                    Delete palette
-                                </button>
-                            </footer>
-                        </dialog>
-                    </div>
-                    <button type="button" class="text-button" @click="$store.theme.resetStyle()">
-                        Reset theme customization
-                    </button>
-                </div>
-            </div>
-            <dialog
-                class="feature-dialog palette-browser"
-                x-ref="paletteBrowser"
-                aria-labelledby="palette-browser-title"
-                aria-describedby="palette-browser-description"
-                @cancel.prevent="closePaletteBrowser"
-            >
-                <header class="picker-header">
-                    <div>
-                        <h2 id="palette-browser-title">Browse palettes</h2>
-                        <p
-                            id="palette-browser-description"
-                            x-text="$store.theme.followsSystem ? 'Preview in this window. Confirm to save.' : 'Confirm to set the palette and appearance.'"
-                        ></p>
-                    </div>
-                    <button
-                        type="button"
-                        class="icon-button"
-                        aria-label="Close palette browser"
-                        @click="closePaletteBrowser"
-                    >
-                        ×
-                    </button>
-                </header>
-                <div class="picker-toolbar palette-browser-toolbar">
-                    <div
-                        class="catalog-tabs palette-tabs"
-                        role="tablist"
-                        aria-label="Palette appearance"
-                        @keydown="navigatePaletteTabs"
-                    >
-                        <button
-                            type="button"
-                            id="palette-tab-light"
-                            x-ref="lightPaletteTab"
-                            role="tab"
-                            aria-controls="palette-tab-panel"
-                            :aria-selected="paletteTab === 'light'"
-                            :tabindex="paletteTab === 'light' ? 0 : -1"
-                            @click="showPaletteTab('light')"
-                        >
-                            Light
-                        </button>
-                        <button
-                            type="button"
-                            id="palette-tab-dark"
-                            x-ref="darkPaletteTab"
-                            role="tab"
-                            aria-controls="palette-tab-panel"
-                            :aria-selected="paletteTab === 'dark'"
-                            :tabindex="paletteTab === 'dark' ? 0 : -1"
-                            @click="showPaletteTab('dark')"
-                        >
-                            Dark
-                        </button>
-                    </div>
-                    <label class="search-field">
-                        <span aria-hidden="true">⌕</span>
-                        <input
-                            type="search"
-                            aria-label="Search palettes"
-                            placeholder="Search…"
-                            x-model="paletteQuery"
-                            @input="resetPaletteResults"
-                            @keydown.escape.prevent="closePaletteBrowser"
-                            autofocus
-                        />
-                    </label>
-                </div>
-                <div class="palette-browser-body">
-                    <aside
-                        class="palette-preview"
-                        aria-label="Palette preview"
-                        :style="previewPalette.style"
-                    >
-                        <div class="palette-preview-surface">
-                            <div class="palette-preview-name" aria-live="polite">
-                                <small x-text="previewPalette.modeLabel"></small>
-                                <strong
-                                    :title="previewPalette.label"
-                                    x-text="previewPalette.label"
-                                ></strong>
-                            </div>
-                            <span class="palette-preview-accent" aria-hidden="true"></span>
-                        </div>
-                    </aside>
-                    <div
-                        id="palette-tab-panel"
-                        class="palette-results"
-                        x-ref="paletteResults"
-                        role="tabpanel"
-                        :aria-labelledby="'palette-tab-' + paletteTab"
-                        :tabindex="matchingPalettes.length ? -1 : 0"
-                    >
-                        <p class="field-help" role="status" x-show="!matchingPalettes.length">
-                            No palettes match your search.
-                        </p>
-                        <ul>
-                            <template
-                                x-for="scheme in matchingPalettes"
-                                :key="paletteTab + scheme.id"
-                            >
-                                <li>
+                                            </fieldset>
+                                        </template>
+                                    </div>
+                                    <template x-if="draft">
+                                        <fieldset
+                                            class="palette-editor-fields"
+                                            :disabled="busy || importing"
+                                        >
+                                            <details class="disclosure">
+                                                <summary>Wallpaper</summary>
+                                                <div class="disclosure-body">
+                                                    <div
+                                                        class="media-drop-target palette-wallpaper"
+                                                    >
+                                                        <img
+                                                            data-resource-role="media-preview"
+                                                            x-show="wallpaperPreview"
+                                                            :src="wallpaperPreview || null"
+                                                            alt="Wallpaper preview"
+                                                            width="64"
+                                                            height="64"
+                                                        />
+                                                        <span
+                                                            x-text="draft.wallpaper ? 'Wallpaper selected' : 'Drop an image or video here'"
+                                                        ></span>
+                                                        <div class="button-row">
+                                                            <button
+                                                                type="button"
+                                                                class="button"
+                                                                @click="chooseFile"
+                                                            >
+                                                                Choose wallpaper
+                                                            </button>
+                                                            <button
+                                                                type="button"
+                                                                class="button"
+                                                                @click="browse"
+                                                            >
+                                                                Browse existing media
+                                                            </button>
+                                                            <button
+                                                                type="button"
+                                                                class="button"
+                                                                @click="clearWallpaper"
+                                                                x-show="draft.wallpaper"
+                                                            >
+                                                                Remove wallpaper
+                                                            </button>
+                                                        </div>
+                                                    </div>
+                                                </div>
+                                            </details>
+                                            <details class="disclosure">
+                                                <summary>Advanced colors</summary>
+                                                <div class="disclosure-body palette-color-fields">
+                                                    <template
+                                                        x-for="field in advancedFields"
+                                                        :key="field.key"
+                                                    >
+                                                        <label class="palette-color-field">
+                                                            <span>
+                                                                <span
+                                                                    class="palette-color-label"
+                                                                    :title="field.label"
+                                                                    x-text="field.label"
+                                                                ></span>
+                                                                <small
+                                                                    aria-hidden="true"
+                                                                    x-text="field.value"
+                                                                ></small>
+                                                            </span>
+                                                            <input
+                                                                type="color"
+                                                                :name="field.key"
+                                                                :value="field.value"
+                                                                @input="setColor"
+                                                            />
+                                                        </label>
+                                                    </template>
+                                                </div>
+                                            </details>
+                                        </fieldset>
+                                    </template>
+                                    <p role="status" x-show="importing">Importing wallpaper…</p>
+                                    <p
+                                        class="danger-text"
+                                        role="alert"
+                                        x-show="error"
+                                        x-text="error"
+                                    ></p>
+                                </div>
+                                <footer class="feature-footer palette-editor-footer">
                                     <button
                                         type="button"
-                                        class="button palette-option"
-                                        :aria-current="$store.theme.isActivePalette(paletteTab, scheme.id) ? 'true' : null"
-                                        :aria-pressed="pendingPalette && pendingPalette.mode === paletteTab && pendingPalette.id === scheme.id ? 'true' : 'false'"
-                                        @click="previewChoice(paletteTab, scheme.id)"
+                                        class="button"
+                                        @click="close"
+                                        x-show="!draft"
+                                        :disabled="busy"
                                     >
-                                        <span
-                                            class="theme-swatch"
-                                            :data-theme-swatch="scheme.id"
-                                            :data-swatch-mode="paletteTab"
-                                            :style="scheme.swatch"
-                                            aria-hidden="true"
-                                        >
-                                            <span></span>
-                                            <span></span>
-                                            <span></span>
-                                        </span>
-                                        <span x-text="scheme.label"></span>
-                                        <span
-                                            class="chip"
-                                            x-show="scheme.id === savedPaletteId"
-                                            x-text="$store.theme.isActivePalette(paletteTab, scheme.id) ? 'Active' : 'Selected'"
-                                        ></span>
+                                        Close
                                     </button>
-                                </li>
-                            </template>
-                        </ul>
+                                    <button
+                                        type="button"
+                                        class="button"
+                                        @click="backToPalettes"
+                                        x-show="draft"
+                                        :disabled="busy"
+                                    >
+                                        Cancel edit
+                                    </button>
+                                    <button
+                                        type="button"
+                                        class="button primary"
+                                        @click="save"
+                                        x-show="draft"
+                                        :disabled="!draft || !draft.name.trim() || busy || importing"
+                                    >
+                                        Save palette
+                                    </button>
+                                </footer>
+                            </dialog>
+                            <dialog
+                                class="feature-dialog"
+                                x-ref="confirm"
+                                aria-labelledby="delete-palette-title"
+                                @cancel.prevent="cancelDelete"
+                            >
+                                <header class="picker-header">
+                                    <h2 id="delete-palette-title">Delete palette?</h2>
+                                </header>
+                                <div class="feature-body">
+                                    An active selection will return to Default.
+                                </div>
+                                <footer class="feature-footer button-row">
+                                    <button
+                                        type="button"
+                                        class="button"
+                                        @click="cancelDelete"
+                                        :disabled="busy"
+                                        autofocus
+                                    >
+                                        Cancel
+                                    </button>
+                                    <button
+                                        type="button"
+                                        class="button danger"
+                                        @click="deletePalette"
+                                        :disabled="busy"
+                                    >
+                                        Delete palette
+                                    </button>
+                                </footer>
+                            </dialog>
+                        </div>
+                        <button
+                            type="button"
+                            class="text-button"
+                            @click="$store.theme.resetStyle()"
+                        >
+                            Reset theme customization
+                        </button>
                     </div>
                 </div>
-                <footer class="feature-footer palette-browser-footer">
-                    <button type="button" class="button" @click="closePaletteBrowser">
-                        Cancel
-                    </button>
-                    <button
-                        type="button"
-                        class="button primary"
-                        :disabled="!canConfirmPalette"
-                        @click="confirmPalette"
-                    >
-                        Confirm
-                    </button>
-                </footer>
-            </dialog>
-            <div class="field-group">
-                <div class="device-theme-toggles">
+
+                <div class="field-group">
+                    <div class="device-theme-toggles">
+                        <label class="preference-toggle">
+                            <input
+                                type="checkbox"
+                                name="sync"
+                                :checked="$store.theme.deviceTheme.sync"
+                                :disabled="$store.theme.savingDeviceTheme"
+                                @change="$store.theme.changeDeviceTheme($event)"
+                            />
+                            <span>Sync themes to devices</span>
+                        </label>
+                        <label class="preference-toggle">
+                            <input
+                                type="checkbox"
+                                name="transparent_buttons"
+                                :checked="$store.theme.deviceTheme.transparent_buttons"
+                                :disabled="$store.theme.savingDeviceTheme || !$store.theme.deviceTheme.sync"
+                                @change="$store.theme.changeDeviceTheme($event)"
+                            />
+                            <span>Use transparent button backgrounds when syncing</span>
+                        </label>
+                    </div>
+                    <p class="field-help">
+                        Saved backgrounds take precedence. Clear a saved background to use the
+                        current default.
+                    </p>
+                </div>
+            </fieldset>
+            <section class="settings-section accessibility-section" aria-label="Accessibility">
+                <label class="preference-toggle">
+                    <input
+                        type="checkbox"
+                        x-model="$store.accessibility.enabled"
+                        @change="$store.accessibility.save()"
+                        aria-controls="accessibility-options"
+                    />
+                    <span>Enable accessibility options</span>
+                </label>
+                <fieldset
+                    id="accessibility-options"
+                    class="accessibility-options"
+                    aria-label="Accessibility preferences"
+                    x-show="$store.accessibility.enabled"
+                    :disabled="!$store.accessibility.enabled"
+                >
+                    <div class="settings-form-grid">
+                        <label>
+                            High contrast
+                            <select
+                                aria-label="High contrast"
+                                x-model="$store.accessibility.highContrast"
+                                @change="$store.accessibility.save()"
+                            >
+                                <option value="system">System</option>
+                                <option value="on">On</option>
+                                <option value="off">Off</option>
+                            </select>
+                        </label>
+                        <label>
+                            Reduced motion
+                            <select
+                                aria-label="Reduced motion"
+                                x-model="$store.accessibility.reducedMotion"
+                                @change="$store.accessibility.save()"
+                            >
+                                <option value="system">System</option>
+                                <option value="on">On</option>
+                                <option value="off">Off</option>
+                            </select>
+                        </label>
+                    </div>
                     <label class="preference-toggle">
                         <input
                             type="checkbox"
-                            name="sync"
-                            :checked="$store.theme.deviceTheme.sync"
-                            :disabled="$store.theme.savingDeviceTheme"
-                            @change="$store.theme.changeDeviceTheme($event)"
+                            x-model="$store.accessibility.largerText"
+                            @change="$store.accessibility.save()"
                         />
-                        <span>Sync themes to devices</span>
+                        <span>Larger text</span>
                     </label>
                     <label class="preference-toggle">
                         <input
                             type="checkbox"
-                            name="transparent_buttons"
-                            :checked="$store.theme.deviceTheme.transparent_buttons"
-                            :disabled="$store.theme.savingDeviceTheme || !$store.theme.deviceTheme.sync"
-                            @change="$store.theme.changeDeviceTheme($event)"
+                            x-model="$store.accessibility.deviceLabels"
+                            @change="$store.accessibility.save()"
                         />
-                        <span>Use transparent button backgrounds when syncing</span>
+                        <span>Show device labels</span>
+                    </label>
+                </fieldset>
+                <small>
+                    System accessibility preferences apply by default. Custom options stay on this
+                    installation.
+                </small>
+            </section>
+            <section
+                class="settings-section"
+                id="settings-profile-palettes"
+                tabindex="-1"
+                x-data="profilePalettes"
+                aria-labelledby="profile-palettes-heading"
+            >
+                <h3 id="profile-palettes-heading">Profile palettes</h3>
+                <p>
+                    Choose colors for each profile. Light and dark palettes follow your system
+                    appearance. Each device follows its active profile; Manager follows the profile
+                    selected in the editor.
+                </p>
+                <div class="settings-form-grid">
+                    <label>
+                        Profile
+                        <select :value="profileId" @change="choose" :disabled="dirty || busy">
+                            <template x-for="profile in profiles" :key="profile.id">
+                                <option :value="profile.id" x-text="profile.name"></option>
+                            </template>
+                        </select>
+                    </label>
+                    <label>
+                        Apply to
+                        <select x-model="draft.target" :disabled="busy || !profile">
+                            <option value="global">Use global settings</option>
+                            <option value="device">Device only</option>
+                            <option value="manager">Manager only</option>
+                            <option value="both">Device and Manager</option>
+                        </select>
+                    </label>
+                    <label>
+                        Light palette
+                        <select
+                            x-model="draft.light_palette"
+                            :disabled="usesGlobal || busy || !profile"
+                        >
+                            <template x-for="option in lightOptions" :key="option.id">
+                                <option :value="option.id" x-text="option.label"></option>
+                            </template>
+                        </select>
+                    </label>
+                    <label>
+                        Dark palette
+                        <select
+                            x-model="draft.dark_palette"
+                            :disabled="usesGlobal || busy || !profile"
+                        >
+                            <template x-for="option in darkOptions" :key="option.id">
+                                <option :value="option.id" x-text="option.label"></option>
+                            </template>
+                        </select>
                     </label>
                 </div>
                 <p class="field-help">
-                    Saved backgrounds take precedence. Clear a saved background to use the current
-                    default.
+                    Global settings keep your saved choices for later. Custom palettes come from
+                    this installation’s palette library; unavailable palettes use Default. Save or
+                    reset changes before choosing another profile.
                 </p>
-            </div>
-        </fieldset>
-        <section class="settings-section accessibility-section" aria-label="Accessibility">
-            <label class="preference-toggle">
-                <input
-                    type="checkbox"
-                    x-model="$store.accessibility.enabled"
-                    @change="$store.accessibility.save()"
-                    aria-controls="accessibility-options"
-                />
-                <span>Enable accessibility options</span>
-            </label>
-            <fieldset
-                id="accessibility-options"
-                class="accessibility-options"
-                aria-label="Accessibility preferences"
-                x-show="$store.accessibility.enabled"
-                :disabled="!$store.accessibility.enabled"
-            >
-                <div class="settings-form-grid">
-                    <label>
-                        High contrast
-                        <select
-                            aria-label="High contrast"
-                            x-model="$store.accessibility.highContrast"
-                            @change="$store.accessibility.save()"
-                        >
-                            <option value="system">System</option>
-                            <option value="on">On</option>
-                            <option value="off">Off</option>
-                        </select>
-                    </label>
-                    <label>
-                        Reduced motion
-                        <select
-                            aria-label="Reduced motion"
-                            x-model="$store.accessibility.reducedMotion"
-                            @change="$store.accessibility.save()"
-                        >
-                            <option value="system">System</option>
-                            <option value="on">On</option>
-                            <option value="off">Off</option>
-                        </select>
-                    </label>
+                <p class="danger-text" role="alert" x-show="error" x-text="error"></p>
+                <div class="button-row settings-actions">
+                    <button
+                        class="button primary"
+                        @click="save"
+                        :disabled="busy || !dirty || !profile"
+                        x-text="busy ? 'Saving…' : 'Save profile palettes'"
+                    ></button>
+                    <button class="button" @click="load" :disabled="busy || !dirty">
+                        Reset changes
+                    </button>
                 </div>
-                <label class="preference-toggle">
-                    <input
-                        type="checkbox"
-                        x-model="$store.accessibility.largerText"
-                        @change="$store.accessibility.save()"
-                    />
-                    <span>Larger text</span>
-                </label>
-                <label class="preference-toggle">
-                    <input
-                        type="checkbox"
-                        x-model="$store.accessibility.deviceLabels"
-                        @change="$store.accessibility.save()"
-                    />
-                    <span>Show device labels</span>
-                </label>
-            </fieldset>
-            <small>
-                System accessibility preferences apply by default. Custom options stay on this
-                installation.
-            </small>
-        </section>
-        <section
-            class="settings-section"
-            id="settings-profile-palettes"
-            tabindex="-1"
-            x-data="profilePalettes"
-            aria-labelledby="profile-palettes-heading"
-        >
-            <h3 id="profile-palettes-heading">Profile palettes</h3>
-            <p>
-                Choose colors for each profile. Light and dark palettes follow your system
-                appearance. Each device follows its active profile; Manager follows the profile
-                selected in the editor.
-            </p>
-            <div class="settings-form-grid">
-                <label>
-                    Profile
-                    <select :value="profileId" @change="choose" :disabled="dirty || busy">
-                        <template x-for="profile in profiles" :key="profile.id">
-                            <option :value="profile.id" x-text="profile.name"></option>
-                        </template>
-                    </select>
-                </label>
-                <label>
-                    Apply to
-                    <select x-model="draft.target" :disabled="busy || !profile">
-                        <option value="global">Use global settings</option>
-                        <option value="device">Device only</option>
-                        <option value="manager">Manager only</option>
-                        <option value="both">Device and Manager</option>
-                    </select>
-                </label>
-                <label>
-                    Light palette
-                    <select
-                        x-model="draft.light_palette"
-                        :disabled="usesGlobal || busy || !profile"
-                    >
-                        <template x-for="option in lightOptions" :key="option.id">
-                            <option :value="option.id" x-text="option.label"></option>
-                        </template>
-                    </select>
-                </label>
-                <label>
-                    Dark palette
-                    <select x-model="draft.dark_palette" :disabled="usesGlobal || busy || !profile">
-                        <template x-for="option in darkOptions" :key="option.id">
-                            <option :value="option.id" x-text="option.label"></option>
-                        </template>
-                    </select>
-                </label>
-            </div>
-            <p class="field-help">
-                Global settings keep your saved choices for later. Custom palettes come from this
-                installation’s palette library; unavailable palettes use Default. Save or reset
-                changes before choosing another profile.
-            </p>
-            <p class="danger-text" role="alert" x-show="error" x-text="error"></p>
-            <div class="button-row settings-actions">
-                <button
-                    class="button primary"
-                    @click="save"
-                    :disabled="busy || !dirty || !profile"
-                    x-text="busy ? 'Saving…' : 'Save profile palettes'"
-                ></button>
-                <button class="button" @click="load" :disabled="busy || !dirty">
-                    Reset changes
-                </button>
-            </div>
-        </section>
-    </article>
+            </section>
+        </article>
+    </section>
     <section
-        class="card settings-card runtime-settings"
-        id="settings-runtimes"
-        tabindex="-1"
-        x-data="runtimes"
-        aria-labelledby="runtime-heading"
+        role="tabpanel"
+        id="settings-panel-profiles"
+        aria-labelledby="settings-tab-profiles"
+        tabindex="0"
+        class="route-tab-panel"
+        x-show="sectionTab === 'profiles'"
     >
-        <h2 id="runtime-heading">Runtimes</h2>
-        <p>Install a Node.js LTS version privately or choose an existing installation.</p>
-        <div class="runtime-toolbar">
-            <label class="preference-toggle">
-                <input type="checkbox" :checked="automatic" @change="automaticChange" />
-                <span>Check for runtime updates automatically</span>
-            </label>
-            <button class="button" @click="check" :disabled="busy">Check for updates</button>
-        </div>
-        <div class="runtime-metadata">
-            <p x-text="metadata"></p>
-            <p x-show="status && status.stale" role="status">
-                Release metadata is stale. Installed runtimes use cached support dates.
-            </p>
-            <p
-                x-show="status && status.error"
-                x-text="status ? status.error : ''"
-                role="status"
-            ></p>
-        </div>
-        <div
-            class="runtime-table-scroll"
-            tabindex="0"
-            role="region"
-            aria-label="Runtime versions and sources"
-        >
-            <table class="runtime-table" aria-label="Plugin runtimes">
-                <thead>
-                    <tr>
-                        <th scope="col">Runtime</th>
-                        <th scope="col">Latest available</th>
-                        <th scope="col">Default source</th>
-                        <th scope="col">Default version</th>
-                        <th scope="col">Actions</th>
-                    </tr>
-                </thead>
-                <tbody>
-                    <template x-for="card in cards" :key="card.kind">
-                        <tr>
-                            <th scope="row">
-                                <span x-text="card.title"></span>
-                                <small x-text="card.channel"></small>
-                            </th>
-                            <td x-text="card.latest"></td>
-                            <td x-text="card.source"></td>
-                            <td>
-                                <select
-                                    :aria-label="'Default version for ' + card.title"
-                                    :data-kind="card.kind"
-                                    :value="card.selected"
-                                    @change="choose"
-                                >
-                                    <option value="">Choose an LTS version…</option>
-                                    <template x-for="release in card.releases" :key="release.id">
-                                        <option
-                                            :value="release.id"
-                                            x-text="release.version + ' · LTS'"
-                                        ></option>
-                                    </template>
-                                </select>
-                                <small class="danger-text" x-show="card.missing">
-                                    Selected runtime missing
-                                </small>
-                            </td>
-                            <td>
-                                <button
-                                    type="button"
-                                    class="icon-button runtime-manage-button"
-                                    :aria-label="'Manage ' + card.title + ' runtime'"
-                                    :data-tooltip="'Manage ' + card.title + ' runtime'"
-                                    :data-kind="card.kind"
-                                    @click="choose"
-                                >
-                                    <img
-                                        src="/appearance/icons/settings.svg"
-                                        width="20"
-                                        height="20"
-                                        alt=""
+        <div class="settings-grid">
+            <section
+                class="card settings-card settings-wide profile-parameters"
+                id="settings-parameters"
+                tabindex="-1"
+                x-data="profileParameters"
+                aria-label="Profile parameters"
+            >
+                <div class="parameter-heading">
+                    <div>
+                        <h2>Profile parameters</h2>
+                        <p class="field-help">
+                            Reusable values for this profile’s actions, with local overrides for
+                            each setup.
+                        </p>
+                    </div>
+                    <span class="parameter-count" x-text="definitions.length + ' / 64'"></span>
+                </div>
+                <details class="parameter-guide">
+                    <summary>How to use parameters</summary>
+                    <div class="parameter-guide-content">
+                        <p>
+                            Give a value a name, such as
+                            <code>workspace</code>
+                            , then use
+                            <code>${parameter.workspace}</code>
+                            as the entire value of a supported action field. In a declared plugin
+                            setting, use
+                            <code>{"$parameter":"workspace"}</code>
+                            .
+                        </p>
+                        <p>
+                            A portable default travels with the profile. Local overrides stay on
+                            this computer. The selected device’s override wins over the computer’s
+                            override, then the default.
+                        </p>
+                        <p>
+                            Required parameters must have a value. Sensitive text uses the OS
+                            credential store instead of a portable default. Marking a value
+                            sensitive does not erase earlier history.
+                        </p>
+                    </div>
+                </details>
+                <div class="parameter-scope">
+                    <label class="preference-toggle">
+                        <input type="checkbox" x-model="deviceOnly" @change="loadValues" />
+                        <span>Edit overrides for the selected device</span>
+                    </label>
+                    <p
+                        class="field-help"
+                        x-text="deviceOnly ? 'Local values apply only to the selected device.' : 'Local values apply to this computer unless a device overrides them.'"
+                    ></p>
+                </div>
+                <p class="parameter-empty field-help" x-show="!definitions.length">
+                    No parameters yet. Add one to reuse a path, URL, or other value across actions.
+                </p>
+                <div class="parameter-editors" x-show="definitions.length">
+                    <template x-for="(parameter,index) in definitions" :key="index">
+                        <fieldset class="parameter-editor">
+                            <legend x-text="'Parameter ' + (index + 1)"></legend>
+                            <div class="settings-form-grid parameter-fields parameter-identity">
+                                <label>
+                                    Name
+                                    <input
+                                        x-model="parameter.name"
+                                        placeholder="workspace"
+                                        spellcheck="false"
                                     />
-                                </button>
-                            </td>
-                        </tr>
-                    </template>
-                </tbody>
-            </table>
-        </div>
-        <template x-for="card in cards" :key="card.kind">
-            <details class="runtime-installations" x-show="card.installed.length || card.external">
-                <summary>
-                    <span x-text="card.title + ' installation details'"></span>
-                    <span
-                        class="runtime-installation-count"
-                        x-text="card.installed.length + ' installed'"
-                        x-show="card.installed.length"
-                    ></span>
-                </summary>
-                <ul
-                    class="runtime-installation-list"
-                    role="list"
-                    :aria-label="card.title + ' installations'"
-                >
-                    <li class="runtime-installation" x-show="card.external">
-                        <div class="runtime-installation-meta">
-                            <strong>Existing installation</strong>
-                            <span class="chip">Default</span>
-                        </div>
-                        <div class="runtime-installation-path">
-                            <span>Executable</span>
-                            <code x-text="card.external"></code>
-                        </div>
-                    </li>
-                    <template x-for="install in card.installed" :key="install.id">
-                        <li class="runtime-installation">
-                            <div class="runtime-installation-header">
-                                <div class="runtime-installation-meta">
-                                    <strong x-text="install.version"></strong>
-                                    <span x-text="install.channel.toUpperCase()"></span>
-                                    <span x-text="install.source"></span>
-                                    <span x-text="install.support"></span>
-                                    <span class="chip" x-show="install.id === card.selected">
-                                        Default
-                                    </span>
-                                </div>
-                                <template x-if="install.source === 'private'">
-                                    <button
-                                        type="button"
-                                        class="icon-button danger-text"
-                                        :data-id="install.id"
-                                        @click="requestRemoval"
-                                        :disabled="!!removalBlock(install)"
-                                        :aria-label="'Delete private Node.js ' + install.version"
-                                        :data-tooltip="removalBlock(install) || 'Delete private Node.js ' + install.version"
+                                </label>
+                                <label>
+                                    Label
+                                    <input
+                                        x-model="parameter.label"
+                                        placeholder="Workspace folder"
+                                    />
+                                </label>
+                                <label>
+                                    Type
+                                    <select
+                                        aria-label="Type"
+                                        x-model="parameter.type"
+                                        :data-index="index"
+                                        @change="typeChanged"
                                     >
-                                        <svg
-                                            viewBox="0 0 24 24"
-                                            width="18"
-                                            height="18"
-                                            fill="none"
-                                            stroke="currentColor"
-                                            stroke-width="1.6"
-                                            aria-hidden="true"
-                                        >
-                                            <path
-                                                d="M3 6h18M9 6V3h6v3M5 6l1 15h12l1-15M10 10v7m4-7v7"
+                                        <option value="string">Text</option>
+                                        <option value="number">Number</option>
+                                        <option value="boolean">Boolean</option>
+                                    </select>
+                                </label>
+                            </div>
+                            <div class="parameter-options">
+                                <label class="preference-toggle">
+                                    <input type="checkbox" x-model="parameter.required" />
+                                    <span>Required</span>
+                                </label>
+                                <label class="preference-toggle">
+                                    <input
+                                        type="checkbox"
+                                        x-model="parameter.sensitive"
+                                        :disabled="parameter.type !== 'string'"
+                                        :data-index="index"
+                                        @change="sensitiveChanged"
+                                    />
+                                    <span>Sensitive: use OS credential store</span>
+                                </label>
+                            </div>
+                            <div class="parameter-values settings-form-grid">
+                                <template x-if="!parameter.sensitive">
+                                    <div class="field-group">
+                                        <label class="preference-toggle">
+                                            <input
+                                                type="checkbox"
+                                                :checked="parameter.default !== null"
+                                                :data-index="index"
+                                                data-toggle="true"
+                                                @change="defaultChanged"
                                             />
-                                        </svg>
-                                    </button>
+                                            <span>Use portable default</span>
+                                        </label>
+                                        <template
+                                            x-if="parameter.default !== null && parameter.type !== 'boolean'"
+                                        >
+                                            <label>
+                                                Portable default
+                                                <input
+                                                    :aria-label="'Portable default for ' + parameter.label"
+                                                    :type="parameter.type === 'number' ? 'number' : 'text'"
+                                                    :value="parameter.default"
+                                                    :data-index="index"
+                                                    @change="defaultChanged"
+                                                />
+                                            </label>
+                                        </template>
+                                        <template
+                                            x-if="parameter.default !== null && parameter.type === 'boolean'"
+                                        >
+                                            <label class="preference-toggle">
+                                                <input
+                                                    :aria-label="'Portable default for ' + parameter.label"
+                                                    type="checkbox"
+                                                    :checked="parameter.default"
+                                                    :data-index="index"
+                                                    @change="defaultChanged"
+                                                />
+                                                <span>Default is true</span>
+                                            </label>
+                                        </template>
+                                    </div>
+                                </template>
+                                <template x-if="!parameter.sensitive">
+                                    <div class="field-group">
+                                        <label class="preference-toggle">
+                                            <input
+                                                type="checkbox"
+                                                :checked="hasOverride(parameter.name)"
+                                                :data-name="parameter.name"
+                                                @change="useOverride"
+                                            />
+                                            <span>Use local override</span>
+                                        </label>
+                                        <template
+                                            x-if="hasOverride(parameter.name) && parameter.type !== 'boolean'"
+                                        >
+                                            <label>
+                                                Local override
+                                                <input
+                                                    :aria-label="'Local override for ' + parameter.label"
+                                                    :type="parameter.type === 'number' ? 'number' : 'text'"
+                                                    :value="override(parameter.name)"
+                                                    :data-name="parameter.name"
+                                                    @change="value"
+                                                />
+                                            </label>
+                                        </template>
+                                        <template
+                                            x-if="hasOverride(parameter.name) && parameter.type === 'boolean'"
+                                        >
+                                            <label class="preference-toggle">
+                                                <input
+                                                    :aria-label="'Local override for ' + parameter.label"
+                                                    type="checkbox"
+                                                    :checked="values[parameter.name] === true"
+                                                    :data-name="parameter.name"
+                                                    @change="value"
+                                                />
+                                                <span>Override is true</span>
+                                            </label>
+                                        </template>
+                                    </div>
+                                </template>
+                                <template x-if="parameter.sensitive">
+                                    <div class="settings-section settings-wide">
+                                        <p class="field-help">
+                                            Stored securely on this computer, never as a portable
+                                            default.
+                                        </p>
+                                        <p class="field-help">
+                                            Credential:
+                                            <strong
+                                                x-text="credentialStatus(parameter.name)"
+                                            ></strong>
+                                        </p>
+                                        <label>
+                                            New credential
+                                            <input
+                                                :aria-label="'New credential for ' + parameter.label"
+                                                type="password"
+                                                autocomplete="new-password"
+                                                x-model="secrets[parameter.name]"
+                                                :disabled="statuses[parameter.name] === 'unsaved' || credentialBusy !== ''"
+                                            />
+                                        </label>
+                                        <div class="button-row">
+                                            <button
+                                                class="button"
+                                                type="button"
+                                                :data-name="parameter.name"
+                                                data-operation="write"
+                                                @click="credentialAction"
+                                                :disabled="statuses[parameter.name] === 'unsaved' || credentialBusy !== ''"
+                                                :aria-label="'Store credential for ' + parameter.label"
+                                            >
+                                                Store credential
+                                            </button>
+                                            <button
+                                                class="text-button danger-text"
+                                                type="button"
+                                                :data-name="parameter.name"
+                                                data-operation="clear"
+                                                @click="credentialAction"
+                                                :disabled="statuses[parameter.name] === 'unsaved' || credentialBusy !== ''"
+                                                :aria-label="'Clear credential for ' + parameter.label"
+                                            >
+                                                Clear credential
+                                            </button>
+                                        </div>
+                                    </div>
                                 </template>
                             </div>
-                            <div class="runtime-installation-path">
-                                <span>Executable</span>
-                                <code x-text="install.executable"></code>
-                            </div>
-                            <p
-                                class="field-help"
-                                x-show="install.source === 'private' && removalBlock(install)"
-                                x-text="removalBlock(install)"
-                            ></p>
-                        </li>
-                    </template>
-                </ul>
-            </details>
-        </template>
-        <p class="danger-text" role="alert" x-show="error" x-text="error"></p>
-    </section>
-    <div class="settings-grid">
-        <section
-            class="card settings-card settings-wide profile-parameters"
-            id="settings-parameters"
-            tabindex="-1"
-            x-data="profileParameters"
-            aria-label="Profile parameters"
-        >
-            <div class="parameter-heading">
-                <div>
-                    <h2>Profile parameters</h2>
-                    <p class="field-help">
-                        Reusable values for this profile’s actions, with local overrides for each
-                        setup.
-                    </p>
-                </div>
-                <span class="parameter-count" x-text="definitions.length + ' / 64'"></span>
-            </div>
-            <details class="parameter-guide">
-                <summary>How to use parameters</summary>
-                <div class="parameter-guide-content">
-                    <p>
-                        Give a value a name, such as
-                        <code>workspace</code>
-                        , then use
-                        <code>${parameter.workspace}</code>
-                        as the entire value of a supported action field. In a declared plugin
-                        setting, use
-                        <code>{"$parameter":"workspace"}</code>
-                        .
-                    </p>
-                    <p>
-                        A portable default travels with the profile. Local overrides stay on this
-                        computer. The selected device’s override wins over the computer’s override,
-                        then the default.
-                    </p>
-                    <p>
-                        Required parameters must have a value. Sensitive text uses the OS credential
-                        store instead of a portable default. Marking a value sensitive does not
-                        erase earlier history.
-                    </p>
-                </div>
-            </details>
-            <div class="parameter-scope">
-                <label class="preference-toggle">
-                    <input type="checkbox" x-model="deviceOnly" @change="loadValues" />
-                    <span>Edit overrides for the selected device</span>
-                </label>
-                <p
-                    class="field-help"
-                    x-text="deviceOnly ? 'Local values apply only to the selected device.' : 'Local values apply to this computer unless a device overrides them.'"
-                ></p>
-            </div>
-            <p class="parameter-empty field-help" x-show="!definitions.length">
-                No parameters yet. Add one to reuse a path, URL, or other value across actions.
-            </p>
-            <div class="parameter-editors" x-show="definitions.length">
-                <template x-for="(parameter,index) in definitions" :key="index">
-                    <fieldset class="parameter-editor">
-                        <legend x-text="'Parameter ' + (index + 1)"></legend>
-                        <div class="settings-form-grid parameter-fields parameter-identity">
-                            <label>
-                                Name
-                                <input
-                                    x-model="parameter.name"
-                                    placeholder="workspace"
-                                    spellcheck="false"
-                                />
-                            </label>
-                            <label>
-                                Label
-                                <input x-model="parameter.label" placeholder="Workspace folder" />
-                            </label>
-                            <label>
-                                Type
-                                <select
-                                    aria-label="Type"
-                                    x-model="parameter.type"
+                            <div class="button-row parameter-actions">
+                                <p class="field-help" x-text="effectiveSource(parameter)"></p>
+                                <button
+                                    type="button"
+                                    class="text-button danger-text"
                                     :data-index="index"
-                                    @change="typeChanged"
+                                    @click="remove"
                                 >
-                                    <option value="string">Text</option>
-                                    <option value="number">Number</option>
-                                    <option value="boolean">Boolean</option>
-                                </select>
-                            </label>
-                        </div>
-                        <div class="parameter-options">
-                            <label class="preference-toggle">
-                                <input type="checkbox" x-model="parameter.required" />
-                                <span>Required</span>
-                            </label>
-                            <label class="preference-toggle">
-                                <input
-                                    type="checkbox"
-                                    x-model="parameter.sensitive"
-                                    :disabled="parameter.type !== 'string'"
-                                    :data-index="index"
-                                    @change="sensitiveChanged"
-                                />
-                                <span>Sensitive: use OS credential store</span>
-                            </label>
-                        </div>
-                        <div class="parameter-values settings-form-grid">
-                            <template x-if="!parameter.sensitive">
-                                <div class="field-group">
-                                    <label class="preference-toggle">
-                                        <input
-                                            type="checkbox"
-                                            :checked="parameter.default !== null"
-                                            :data-index="index"
-                                            data-toggle="true"
-                                            @change="defaultChanged"
-                                        />
-                                        <span>Use portable default</span>
-                                    </label>
-                                    <template
-                                        x-if="parameter.default !== null && parameter.type !== 'boolean'"
-                                    >
-                                        <label>
-                                            Portable default
-                                            <input
-                                                :aria-label="'Portable default for ' + parameter.label"
-                                                :type="parameter.type === 'number' ? 'number' : 'text'"
-                                                :value="parameter.default"
-                                                :data-index="index"
-                                                @change="defaultChanged"
-                                            />
-                                        </label>
-                                    </template>
-                                    <template
-                                        x-if="parameter.default !== null && parameter.type === 'boolean'"
-                                    >
-                                        <label class="preference-toggle">
-                                            <input
-                                                :aria-label="'Portable default for ' + parameter.label"
-                                                type="checkbox"
-                                                :checked="parameter.default"
-                                                :data-index="index"
-                                                @change="defaultChanged"
-                                            />
-                                            <span>Default is true</span>
-                                        </label>
-                                    </template>
-                                </div>
-                            </template>
-                            <template x-if="!parameter.sensitive">
-                                <div class="field-group">
-                                    <label class="preference-toggle">
-                                        <input
-                                            type="checkbox"
-                                            :checked="hasOverride(parameter.name)"
-                                            :data-name="parameter.name"
-                                            @change="useOverride"
-                                        />
-                                        <span>Use local override</span>
-                                    </label>
-                                    <template
-                                        x-if="hasOverride(parameter.name) && parameter.type !== 'boolean'"
-                                    >
-                                        <label>
-                                            Local override
-                                            <input
-                                                :aria-label="'Local override for ' + parameter.label"
-                                                :type="parameter.type === 'number' ? 'number' : 'text'"
-                                                :value="override(parameter.name)"
-                                                :data-name="parameter.name"
-                                                @change="value"
-                                            />
-                                        </label>
-                                    </template>
-                                    <template
-                                        x-if="hasOverride(parameter.name) && parameter.type === 'boolean'"
-                                    >
-                                        <label class="preference-toggle">
-                                            <input
-                                                :aria-label="'Local override for ' + parameter.label"
-                                                type="checkbox"
-                                                :checked="values[parameter.name] === true"
-                                                :data-name="parameter.name"
-                                                @change="value"
-                                            />
-                                            <span>Override is true</span>
-                                        </label>
-                                    </template>
-                                </div>
-                            </template>
-                            <template x-if="parameter.sensitive">
-                                <div class="settings-section settings-wide">
-                                    <p class="field-help">
-                                        Stored securely on this computer, never as a portable
-                                        default.
-                                    </p>
-                                    <p class="field-help">
-                                        Credential:
-                                        <strong x-text="credentialStatus(parameter.name)"></strong>
-                                    </p>
-                                    <label>
-                                        New credential
-                                        <input
-                                            :aria-label="'New credential for ' + parameter.label"
-                                            type="password"
-                                            autocomplete="new-password"
-                                            x-model="secrets[parameter.name]"
-                                            :disabled="statuses[parameter.name] === 'unsaved' || credentialBusy !== ''"
-                                        />
-                                    </label>
-                                    <div class="button-row">
-                                        <button
-                                            class="button"
-                                            type="button"
-                                            :data-name="parameter.name"
-                                            data-operation="write"
-                                            @click="credentialAction"
-                                            :disabled="statuses[parameter.name] === 'unsaved' || credentialBusy !== ''"
-                                            :aria-label="'Store credential for ' + parameter.label"
-                                        >
-                                            Store credential
-                                        </button>
-                                        <button
-                                            class="text-button danger-text"
-                                            type="button"
-                                            :data-name="parameter.name"
-                                            data-operation="clear"
-                                            @click="credentialAction"
-                                            :disabled="statuses[parameter.name] === 'unsaved' || credentialBusy !== ''"
-                                            :aria-label="'Clear credential for ' + parameter.label"
-                                        >
-                                            Clear credential
-                                        </button>
-                                    </div>
-                                </div>
-                            </template>
-                        </div>
-                        <div class="button-row parameter-actions">
-                            <p class="field-help" x-text="effectiveSource(parameter)"></p>
-                            <button
-                                type="button"
-                                class="text-button danger-text"
-                                :data-index="index"
-                                @click="remove"
-                            >
-                                Remove parameter
-                            </button>
-                        </div>
-                    </fieldset>
-                </template>
-            </div>
-            <p class="danger-text" role="alert" x-show="error" x-text="error"></p>
-            <div class="button-row settings-actions">
-                <button
-                    type="button"
-                    class="button"
-                    @click="add"
-                    :disabled="definitions.length >= 64"
-                >
-                    Add parameter
-                </button>
-                <button type="button" class="button primary" @click="save">Save parameters</button>
-                <button type="button" class="button" @click="load">Reload</button>
-            </div>
-        </section>
-        <article id="settings-background" tabindex="-1" class="card settings-card settings-wide">
-            <h2>Background operation</h2>
-            <p>
-                Closing the desktop editor unloads its interface and keeps devices and actions
-                running. Unsaved changes can be discarded or kept open for editing. Reopen the
-                Device editor from the tray or launcher. On macOS, the Dock icon is hidden while the
-                editor is closed. Use Quit in the tray menu to stop the runtime.
-            </p>
-            <fieldset class="settings-section" :disabled="desktopLoading">
-                <div class="field-group">
-                    <label class="preference-toggle">
-                        <input
-                            type="checkbox"
-                            x-model="autostart"
-                            @change="setAutostart"
-                            :disabled="!autostartSupported || autostartSaving"
-                        />
-                        <span>Start application at login</span>
-                    </label>
-                    <p class="field-help">
-                        Starts Stream Dock Manager after you sign in to this computer.
-                    </p>
-                    <p
-                        class="danger-text"
-                        role="alert"
-                        x-show="startupError"
-                        x-text="startupError"
-                    ></p>
+                                    Remove parameter
+                                </button>
+                            </div>
+                        </fieldset>
+                    </template>
                 </div>
-                <div class="field-group">
-                    <label class="preference-toggle">
-                        <input
-                            type="checkbox"
-                            x-model="launchToTray"
-                            @change="saveDesktop"
-                            :disabled="!savedDesktop || desktopSaving"
-                        />
-                        <span>Launch directly to the system tray</span>
-                    </label>
-                    <p class="field-help">
-                        Keeps the editor hidden on launch. Open it from the taskbar notification
-                        area or menu bar. Applies from the next launch.
-                    </p>
-                </div>
-                <div class="field-group">
-                    <label class="preference-toggle">
-                        <input
-                            type="checkbox"
-                            x-model="managerShortcut"
-                            @change="setManagerShortcut"
-                            :disabled="!savedDesktop || desktopSaving || shortcutSaving"
-                        />
-                        <span>Show Manager shortcut</span>
-                    </label>
-                    <p class="field-help">
-                        Open Manager even when the editor is closed to the tray.
-                    </p>
-                    <p
-                        role="status"
-                        class="field-help"
-                        x-show="shortcutStatus"
-                        x-text="shortcutStatus"
-                    ></p>
-                </div>
-                <div class="field-group">
-                    <label class="preference-toggle">
-                        <input
-                            type="checkbox"
-                            x-model="pluginLinksEnabled"
-                            @change="setPluginLinkHandling"
-                            :disabled="desktopLoading || !pluginLinksSupported || pluginLinksBusy"
-                        />
-                        <span>Handle Stream Deck links</span>
-                    </label>
-                    <p class="field-help">
-                        Open Stream Deck plugin links in Manager. Enabling this may replace the
-                        official Stream Deck app as the default handler. Your computer will ask for
-                        approval.
-                    </p>
-                    <p
-                        class="field-help"
-                        role="status"
-                        x-show="pluginLinksReason"
-                        x-text="pluginLinksReason"
-                    ></p>
-                    <p
-                        class="danger-text"
-                        role="alert"
-                        x-show="pluginLinksError"
-                        x-text="pluginLinksError"
-                    ></p>
-                </div>
-                <div class="field-group">
-                    <label class="preference-toggle">
-                        <input
-                            type="checkbox"
-                            x-model="openactionLinksEnabled"
-                            @change="setOpenactionLinkHandling"
-                            :disabled="desktopLoading || !openactionLinksSupported || openactionLinksBusy"
-                        />
-                        <span>Handle OpenAction links</span>
-                    </label>
-                    <p class="field-help">
-                        Open OpenAction plugin links in Manager. Enabling this may replace the
-                        currently selected application as the default handler. Your computer will
-                        ask for approval.
-                    </p>
-                    <p
-                        class="field-help"
-                        role="status"
-                        x-show="openactionLinksReason"
-                        x-text="openactionLinksReason"
-                    ></p>
-                    <p
-                        class="danger-text"
-                        role="alert"
-                        x-show="openactionLinksError"
-                        x-text="openactionLinksError"
-                    ></p>
-                </div>
-                <div class="field-group">
-                    <label class="preference-toggle">
-                        <input
-                            type="checkbox"
-                            x-model="notifications"
-                            @change="setNotifications"
-                            :disabled="!savedDesktop || desktopSaving"
-                        />
-                        <span>Notify me about device changes</span>
-                    </label>
-                    <p
-                        class="danger-text"
-                        role="alert"
-                        x-show="desktopError"
-                        x-text="desktopError"
-                    ></p>
-                </div>
-            </fieldset>
-            <p class="field-help" x-show="startupPreview">
-                Browser preview: startup changes remain in memory.
-            </p>
-            <div class="button-row settings-actions">
-                <button class="button" @click="cancel">Cancel pending macros</button>
-            </div>
-        </article>
-        <article
-            x-data="cacheSettings"
-            id="settings-cache"
-            tabindex="-1"
-            aria-label="Download cache"
-            class="card settings-card settings-wide"
-        >
-            <h2>Download cache</h2>
-            <p class="field-help">
-                Checked at startup and hourly. Active downloads and protected files are kept.
-            </p>
-            <p x-show="loading" role="status">Loading cache usage…</p>
-            <div class="runtime-table-scroll" role="region" aria-label="Cache usage" tabindex="0">
-                <table class="runtime-table" aria-label="Download cache limits">
-                    <thead>
-                        <tr>
-                            <th scope="col">Folder</th>
-                            <th scope="col">Storage used / limit</th>
-                            <th scope="col">Entries / limit</th>
-                            <th scope="col">Keep up to</th>
-                        </tr>
-                    </thead>
-                    <tbody>
-                        <template x-for="folder in folders" :key="folder.id">
-                            <tr>
-                                <th scope="row" x-text="folder.label"></th>
-                                <td x-text="folder.usage"></td>
-                                <td>
-                                    <span x-text="folder.count"></span>
-                                    <small x-show="folder.protected_entries">
-                                        ·
-                                        <span x-text="folder.protected"></span>
-                                    </small>
-                                </td>
-                                <td x-text="folder.age"></td>
-                            </tr>
-                        </template>
-                    </tbody>
-                </table>
-            </div>
-            <p class="danger-text" role="alert" x-show="warnings" x-text="warnings"></p>
-            <p class="danger-text" role="alert" x-show="error" x-text="error"></p>
-            <p role="status" x-show="notice" x-text="notice"></p>
-            <div class="button-row">
-                <button
-                    type="button"
-                    class="button"
-                    @click="refresh"
-                    :disabled="busy || confirming"
-                >
-                    Refresh cache usage
-                </button>
-                <button
-                    type="button"
-                    class="button danger"
-                    x-ref="deleteCache"
-                    @click="requestClear"
-                    :disabled="busy || confirming || !status"
-                >
-                    Delete cache
-                </button>
-            </div>
-            <dialog
-                x-ref="cacheConfirm"
-                class="feature-dialog"
-                aria-labelledby="cache-confirm-title"
-                @cancel.prevent="cancelClear"
-            >
-                <header class="picker-header">
-                    <h2 id="cache-confirm-title">Delete download cache?</h2>
-                </header>
-                <div class="feature-body">
-                    <p>
-                        This deletes eligible files from the download cache and both update caches.
-                        Downloads may need to be fetched again. Active downloads and protected files
-                        are kept.
-                    </p>
-                    <p>Installed packages, profiles, media, and plugin settings are not deleted.</p>
-                    <p role="status" x-show="clearing">Deleting cache…</p>
-                </div>
-                <footer class="picker-footer button-row">
+                <p class="danger-text" role="alert" x-show="error" x-text="error"></p>
+                <div class="button-row settings-actions">
                     <button
                         type="button"
                         class="button"
-                        autofocus
-                        @click="cancelClear"
-                        :disabled="clearing"
+                        @click="add"
+                        :disabled="definitions.length >= 64"
                     >
-                        Cancel
+                        Add parameter
+                    </button>
+                    <button type="button" class="button primary" @click="save">
+                        Save parameters
+                    </button>
+                    <button type="button" class="button" @click="load">Reload</button>
+                </div>
+            </section>
+            <article id="settings-profiles" tabindex="-1" class="card settings-card settings-wide">
+                <h2>Profiles &amp; portability</h2>
+                <p>
+                    Profiles are validated and saved atomically by Rust. Validated recovery
+                    snapshots retain recent settings and workspace records.
+                </p>
+                <small>
+                    Choose whether to include plugin action settings when exporting. Review
+                    parameter defaults and paths before sharing.
+                </small>
+                <div class="button-row settings-actions">
+                    <button
+                        class="button"
+                        @click="$dispatch('profile-versions')"
+                        :disabled="!app.profile"
+                    >
+                        Profile versions
+                    </button>
+                    <button class="button" @click="exportProfiles">Export profiles ↗</button>
+                    <button class="button" @click="importProfiles">Import profiles</button>
+                    <button
+                        type="button"
+                        class="button"
+                        @click="$dispatch('open-media-library', {})"
+                    >
+                        Manage media
+                    </button>
+                </div>
+            </article>
+        </div>
+    </section>
+    <section
+        role="tabpanel"
+        id="settings-panel-devices"
+        aria-labelledby="settings-tab-devices"
+        tabindex="0"
+        class="route-tab-panel"
+        x-show="sectionTab === 'devices'"
+    >
+        <div class="settings-grid">
+            <article
+                id="settings-background"
+                tabindex="-1"
+                class="card settings-card settings-wide"
+            >
+                <h2>Background operation</h2>
+                <p>
+                    Closing the desktop editor unloads its interface and keeps devices and actions
+                    running. Unsaved changes can be discarded or kept open for editing. Reopen the
+                    Device editor from the tray or launcher. On macOS, the Dock icon is hidden while
+                    the editor is closed. Use Quit in the tray menu to stop the runtime.
+                </p>
+                <fieldset class="settings-section" :disabled="desktopLoading">
+                    <div class="field-group">
+                        <label class="preference-toggle">
+                            <input
+                                type="checkbox"
+                                x-model="autostart"
+                                @change="setAutostart"
+                                :disabled="!autostartSupported || autostartSaving"
+                            />
+                            <span>Start application at login</span>
+                        </label>
+                        <p class="field-help">
+                            Starts Stream Dock Manager after you sign in to this computer.
+                        </p>
+                        <p
+                            class="danger-text"
+                            role="alert"
+                            x-show="startupError"
+                            x-text="startupError"
+                        ></p>
+                    </div>
+                    <div class="field-group">
+                        <label class="preference-toggle">
+                            <input
+                                type="checkbox"
+                                x-model="launchToTray"
+                                @change="saveDesktop"
+                                :disabled="!savedDesktop || desktopSaving"
+                            />
+                            <span>Launch directly to the system tray</span>
+                        </label>
+                        <p class="field-help">
+                            Keeps the editor hidden on launch. Open it from the taskbar notification
+                            area or menu bar. Applies from the next launch.
+                        </p>
+                    </div>
+                    <div class="field-group">
+                        <label class="preference-toggle">
+                            <input
+                                type="checkbox"
+                                x-model="managerShortcut"
+                                @change="setManagerShortcut"
+                                :disabled="!savedDesktop || desktopSaving || shortcutSaving"
+                            />
+                            <span>Show Manager shortcut</span>
+                        </label>
+                        <p class="field-help">
+                            Open Manager even when the editor is closed to the tray.
+                        </p>
+                        <p
+                            role="status"
+                            class="field-help"
+                            x-show="shortcutStatus"
+                            x-text="shortcutStatus"
+                        ></p>
+                    </div>
+                    <div class="field-group">
+                        <label class="preference-toggle">
+                            <input
+                                type="checkbox"
+                                x-model="pluginLinksEnabled"
+                                @change="setPluginLinkHandling"
+                                :disabled="desktopLoading || !pluginLinksSupported || pluginLinksBusy"
+                            />
+                            <span>Handle Stream Deck links</span>
+                        </label>
+                        <p class="field-help">
+                            Open Stream Deck plugin links in Manager. Enabling this may replace the
+                            official Stream Deck app as the default handler. Your computer will ask
+                            for approval.
+                        </p>
+                        <p
+                            class="field-help"
+                            role="status"
+                            x-show="pluginLinksReason"
+                            x-text="pluginLinksReason"
+                        ></p>
+                        <p
+                            class="danger-text"
+                            role="alert"
+                            x-show="pluginLinksError"
+                            x-text="pluginLinksError"
+                        ></p>
+                    </div>
+                    <div class="field-group">
+                        <label class="preference-toggle">
+                            <input
+                                type="checkbox"
+                                x-model="openactionLinksEnabled"
+                                @change="setOpenactionLinkHandling"
+                                :disabled="desktopLoading || !openactionLinksSupported || openactionLinksBusy"
+                            />
+                            <span>Handle OpenAction links</span>
+                        </label>
+                        <p class="field-help">
+                            Open OpenAction plugin links in Manager. Enabling this may replace the
+                            currently selected application as the default handler. Your computer
+                            will ask for approval.
+                        </p>
+                        <p
+                            class="field-help"
+                            role="status"
+                            x-show="openactionLinksReason"
+                            x-text="openactionLinksReason"
+                        ></p>
+                        <p
+                            class="danger-text"
+                            role="alert"
+                            x-show="openactionLinksError"
+                            x-text="openactionLinksError"
+                        ></p>
+                    </div>
+                    <div class="field-group">
+                        <label class="preference-toggle">
+                            <input
+                                type="checkbox"
+                                x-model="notifications"
+                                @change="setNotifications"
+                                :disabled="!savedDesktop || desktopSaving"
+                            />
+                            <span>Notify me about device changes</span>
+                        </label>
+                        <p
+                            class="danger-text"
+                            role="alert"
+                            x-show="desktopError"
+                            x-text="desktopError"
+                        ></p>
+                    </div>
+                </fieldset>
+                <p class="field-help" x-show="startupPreview">
+                    Browser preview: startup changes remain in memory.
+                </p>
+                <div class="button-row settings-actions">
+                    <button class="button" @click="cancel">Cancel pending macros</button>
+                </div>
+            </article>
+            <article
+                class="card settings-card device-settings-card"
+                :class="{'settings-wide': !app.device || !app.device.manifest.capabilities.background}"
+                x-data="deviceOutputSummary"
+                x-show="supportsOutput"
+            >
+                <sd-device-settings></sd-device-settings>
+            </article>
+            <article
+                class="card settings-card background-settings-card"
+                x-show="app.device && app.device.manifest.capabilities.background"
+            >
+                <h2>Device background</h2>
+                <p>
+                    The default wallpaper follows your palette. Use PNG, JPEG, SVG, GIF or MP4 to
+                    set a custom background for the active profile.
+                </p>
+                <div class="button-row">
+                    <button
+                        class="button"
+                        @click="chooseBackground"
+                        :disabled="app.busy || !app.profile"
+                    >
+                        Choose background media
+                    </button>
+                    <button
+                        class="button"
+                        @click="editBackground"
+                        x-show="app.profile && app.profile.background_asset"
+                        :disabled="app.busy"
+                    >
+                        Edit background
+                    </button>
+                    <button
+                        class="button"
+                        @click="removeBackground"
+                        :disabled="app.busy || !app.profile || !app.profile.background_asset"
+                    >
+                        Clear background
+                    </button>
+                </div>
+                <small>
+                    FFmpeg is an optional fallback for MP4 imports. Prepared exports play without
+                    it. Clips: up to 16 MiB and 30 seconds.
+                </small>
+            </article>
+            <article
+                class="card settings-card settings-wide"
+                x-show="$store.updates.status && $store.updates.status.host_os === 'linux'"
+            >
+                <h2>Linux support</h2>
+                <p>
+                    Ubuntu 24.04 and Nobara 44 are release targets. Authorize keyboard input for
+                    this Wayland session. Device configuration and media controls work independently
+                    of this permission.
+                </p>
+                <div class="button-row">
+                    <button class="button" @click="authorizeWayland">
+                        Authorize Wayland keyboard
+                    </button>
+                    <a class="button" href="#/diagnostics?tab=events">Inspect this environment ↗</a>
+                </div>
+                <small>Project maintained. No Nobara endorsement is implied.</small>
+            </article>
+        </div>
+    </section>
+    <section
+        role="tabpanel"
+        id="settings-panel-plugins"
+        aria-labelledby="settings-tab-plugins"
+        tabindex="0"
+        class="route-tab-panel"
+        x-show="sectionTab === 'plugins'"
+    >
+        <div class="settings-grid">
+            <section
+                class="card settings-card runtime-settings"
+                id="settings-runtimes"
+                tabindex="-1"
+                x-data="runtimes"
+                aria-labelledby="runtime-heading"
+            >
+                <h2 id="runtime-heading">Runtimes</h2>
+                <p>Install a Node.js LTS version privately or choose an existing installation.</p>
+                <div class="runtime-toolbar">
+                    <label class="preference-toggle">
+                        <input type="checkbox" :checked="automatic" @change="automaticChange" />
+                        <span>Check for runtime updates automatically</span>
+                    </label>
+                    <button class="button" @click="check" :disabled="busy">
+                        Check for updates
+                    </button>
+                </div>
+                <div class="runtime-metadata">
+                    <p x-text="metadata"></p>
+                    <p x-show="status && status.stale" role="status">
+                        Release metadata is stale. Installed runtimes use cached support dates.
+                    </p>
+                    <p
+                        x-show="status && status.error"
+                        x-text="status ? status.error : ''"
+                        role="status"
+                    ></p>
+                </div>
+                <div
+                    class="runtime-table-scroll"
+                    tabindex="0"
+                    role="region"
+                    aria-label="Runtime versions and sources"
+                    @keydown="scrollVersions"
+                >
+                    <table class="runtime-table" aria-label="Plugin runtimes">
+                        <thead>
+                            <tr>
+                                <th scope="col">Runtime</th>
+                                <th scope="col">Latest available</th>
+                                <th scope="col">Default source</th>
+                                <th scope="col">Default version</th>
+                                <th scope="col">Actions</th>
+                            </tr>
+                        </thead>
+                        <tbody>
+                            <template x-for="card in cards" :key="card.kind">
+                                <tr>
+                                    <th scope="row">
+                                        <span x-text="card.title"></span>
+                                        <small x-text="card.channel"></small>
+                                    </th>
+                                    <td x-text="card.latest"></td>
+                                    <td x-text="card.source"></td>
+                                    <td>
+                                        <select
+                                            :aria-label="'Default version for ' + card.title"
+                                            :data-kind="card.kind"
+                                            :value="card.selected"
+                                            @change="choose"
+                                        >
+                                            <option value="">Choose an LTS version…</option>
+                                            <template
+                                                x-for="release in card.releases"
+                                                :key="release.id"
+                                            >
+                                                <option
+                                                    :value="release.id"
+                                                    x-text="release.version + ' · LTS'"
+                                                ></option>
+                                            </template>
+                                        </select>
+                                        <small class="danger-text" x-show="card.missing">
+                                            Selected runtime missing
+                                        </small>
+                                    </td>
+                                    <td>
+                                        <button
+                                            type="button"
+                                            class="icon-button runtime-manage-button"
+                                            :aria-label="'Manage ' + card.title + ' runtime'"
+                                            :data-tooltip="'Manage ' + card.title + ' runtime'"
+                                            :data-kind="card.kind"
+                                            @click="choose"
+                                        >
+                                            <img
+                                                data-resource-role="interface-icon"
+                                                src="/appearance/icons/settings.svg"
+                                                width="20"
+                                                height="20"
+                                                alt=""
+                                            />
+                                        </button>
+                                    </td>
+                                </tr>
+                            </template>
+                        </tbody>
+                    </table>
+                </div>
+                <template x-for="card in cards" :key="card.kind">
+                    <details
+                        class="runtime-installations"
+                        x-show="card.installed.length || card.external"
+                    >
+                        <summary>
+                            <span x-text="card.title + ' installation details'"></span>
+                            <span
+                                class="runtime-installation-count"
+                                x-text="card.installed.length + ' installed'"
+                                x-show="card.installed.length"
+                            ></span>
+                        </summary>
+                        <ul
+                            class="runtime-installation-list"
+                            role="list"
+                            :aria-label="card.title + ' installations'"
+                        >
+                            <li class="runtime-installation" x-show="card.external">
+                                <div class="runtime-installation-meta">
+                                    <strong>Existing installation</strong>
+                                    <span class="chip">Default</span>
+                                </div>
+                                <div class="runtime-installation-path">
+                                    <span>Executable</span>
+                                    <code x-text="card.external"></code>
+                                </div>
+                            </li>
+                            <template x-for="install in card.installed" :key="install.id">
+                                <li class="runtime-installation">
+                                    <div class="runtime-installation-header">
+                                        <div class="runtime-installation-meta">
+                                            <strong x-text="install.version"></strong>
+                                            <span x-text="install.channel.toUpperCase()"></span>
+                                            <span x-text="install.source"></span>
+                                            <span x-text="install.support"></span>
+                                            <span
+                                                class="chip"
+                                                x-show="install.id === card.selected"
+                                            >
+                                                Default
+                                            </span>
+                                        </div>
+                                        <template x-if="install.source === 'private'">
+                                            <button
+                                                type="button"
+                                                class="icon-button danger-text"
+                                                :data-id="install.id"
+                                                @click="requestRemoval"
+                                                :disabled="!!removalBlock(install)"
+                                                :aria-label="'Delete private Node.js ' + install.version"
+                                                :data-tooltip="removalBlock(install) || 'Delete private Node.js ' + install.version"
+                                            >
+                                                <svg
+                                                    viewBox="0 0 24 24"
+                                                    width="18"
+                                                    height="18"
+                                                    fill="none"
+                                                    stroke="currentColor"
+                                                    stroke-width="1.6"
+                                                    aria-hidden="true"
+                                                >
+                                                    <path
+                                                        d="M3 6h18M9 6V3h6v3M5 6l1 15h12l1-15M10 10v7m4-7v7"
+                                                    />
+                                                </svg>
+                                            </button>
+                                        </template>
+                                    </div>
+                                    <div class="runtime-installation-path">
+                                        <span>Executable</span>
+                                        <code x-text="install.executable"></code>
+                                    </div>
+                                    <p
+                                        class="field-help"
+                                        x-show="install.source === 'private' && removalBlock(install)"
+                                        x-text="removalBlock(install)"
+                                    ></p>
+                                </li>
+                            </template>
+                        </ul>
+                    </details>
+                </template>
+                <p class="danger-text" role="alert" x-show="error" x-text="error"></p>
+            </section>
+            <section
+                class="card settings-card settings-wide"
+                aria-labelledby="plugin-logging-heading"
+                id="settings-logging"
+                tabindex="-1"
+            >
+                <h2 id="plugin-logging-heading">Plugin logging</h2>
+                <label class="preference-toggle">
+                    <input
+                        type="checkbox"
+                        data-preference="global"
+                        :checked="$store.pluginLogs.preferences.enabled"
+                        @change="$store.pluginLogs.changePreference($event)"
+                    />
+                    <span>Enable plugin logging</span>
+                </label>
+                <p class="field-help">
+                    Open Logs on a plugin card to start a capture. Disabling logging stops captures
+                    and retains their files for this Manager session.
+                </p>
+            </section>
+        </div>
+    </section>
+    <section
+        role="tabpanel"
+        id="settings-panel-permissions"
+        aria-labelledby="settings-tab-permissions"
+        tabindex="0"
+        class="route-tab-panel"
+        x-show="sectionTab === 'permissions'"
+    >
+        <article
+            id="settings-plugin-permissions"
+            tabindex="-1"
+            class="card settings-card settings-wide"
+            x-data="pluginPermissions"
+            @vault-session-ended.window="refresh"
+            aria-labelledby="plugin-permissions-title"
+        >
+            <h2 id="plugin-permissions-title">Plugin Permissions</h2>
+            <p>Review what each installed plugin can ask Manager to do.</p>
+            <div class="plugin-permission-filters" @change="resetPage">
+                <label>
+                    Plugin
+                    <select x-model="plugin">
+                        <option value="">All plugins</option>
+                        <template x-for="p in plugins" :key="p.id">
+                            <option :value="p.id" x-text="p.name"></option>
+                        </template>
+                    </select>
+                </label>
+                <label>
+                    Enabled state
+                    <select x-model="enabled">
+                        <option value="">All states</option>
+                        <option value="enabled">Enabled</option>
+                        <option value="disabled">Disabled</option>
+                    </select>
+                </label>
+                <label>
+                    Permission
+                    <select x-model="family">
+                        <option value="">All permissions</option>
+                        <template x-for="name in families" :key="name">
+                            <option :value="name" x-text="name"></option>
+                        </template>
+                    </select>
+                </label>
+                <label>
+                    Outcome
+                    <select x-model="outcome">
+                        <option value="">All outcomes</option>
+                        <option>Granted</option>
+                        <option>Needs approval</option>
+                        <option>Pending review</option>
+                        <option>In use</option>
+                        <option>Denied</option>
+                        <option>Needs setup</option>
+                        <option>Revoked</option>
+                        <option>Vault locked</option>
+                        <option>Unavailable</option>
+                    </select>
+                </label>
+                <button class="button" type="button" @click="refresh" :disabled="working">
+                    Refresh permissions
+                </button>
+            </div>
+            <p role="status" x-show="message" x-text="message"></p>
+            <p x-show="!groupPage.total">No matching plugins or permissions.</p>
+            <nav
+                class="pagination plugin-permission-pagination"
+                aria-label="Plugin permission pages"
+                x-show="groupPage.total"
+            >
+                <span
+                    aria-live="polite"
+                    aria-atomic="true"
+                    x-text="groupPage.start + '–' + groupPage.end + ' of ' + groupPage.total + (groupPage.total === 1 ? ' plugin · Page ' : ' plugins · Page ') + groupPage.page + ' of ' + groupPage.pages"
+                ></span>
+                <div class="button-row" x-show="groupPage.pages > 1">
+                    <button
+                        class="button"
+                        type="button"
+                        aria-label="Previous plugin permission page"
+                        data-direction="-1"
+                        :disabled="groupPage.page === 1"
+                        @click="changePage"
+                    >
+                        Previous
+                    </button>
+                    <button
+                        class="button"
+                        type="button"
+                        aria-label="Next plugin permission page"
+                        data-direction="1"
+                        :disabled="groupPage.page === groupPage.pages"
+                        @click="changePage"
+                    >
+                        Next
+                    </button>
+                </div>
+            </nav>
+            <div class="plugin-permission-list" x-show="groupPage.total">
+                <template x-for="group in groupPage.items" :key="group.id">
+                    <details class="disclosure plugin-permission-group" :open="!!plugin">
+                        <summary>
+                            <strong x-text="group.name"></strong>
+                            <span
+                                class="plugin-permission-meta"
+                                x-text="(group.enabled ? 'Enabled' : 'Disabled') + ' · ' + group.permissions.length + (group.permissions.length === 1 ? ' permission' : ' permissions')"
+                            ></span>
+                        </summary>
+                        <div class="disclosure-body">
+                            <p x-show="!group.permissions.length">
+                                No Manager permissions declared.
+                            </p>
+                            <p
+                                class="source-path"
+                                x-show="group.inventory"
+                                x-text="'Installed package SHA-256: ' + group.inventory"
+                            ></p>
+                            <label class="preference-toggle" x-show="group.changeable">
+                                <input
+                                    type="checkbox"
+                                    x-effect="syncServiceReason($el, group.changeable, group.allowed)"
+                                    :disabled="working"
+                                    :data-plugin-id="group.id"
+                                    data-all="true"
+                                    :aria-label="'Check all shown permissions for ' + group.name"
+                                    @change="changeService"
+                                />
+                                <span>Check all shown permissions</span>
+                            </label>
+                            <template x-for="permission in group.permissions" :key="permission.key">
+                                <section class="macro-library-info installed-permission-scope">
+                                    <h3 x-text="permission.label"></h3>
+                                    <p
+                                        class="source-path"
+                                        x-show="permission.details"
+                                        x-text="permission.details"
+                                    ></p>
+                                    <template
+                                        x-for="purpose in permission.purposes"
+                                        :key="purpose.label"
+                                    >
+                                        <div class="installed-permission-purpose">
+                                            <label class="preference-toggle">
+                                                <input
+                                                    type="checkbox"
+                                                    x-effect="syncServiceReason($el, purpose.changeable, purpose.allowed)"
+                                                    x-show="purpose.changeable"
+                                                    :disabled="working || !purpose.changeable"
+                                                    :data-plugin-id="group.id"
+                                                    :data-key="permission.key"
+                                                    :data-purpose="purpose.label"
+                                                    :aria-label="'Allow ' + permission.label + ': ' + (purpose.label || 'No reason provided')"
+                                                    @change="changeService"
+                                                />
+                                                <span
+                                                    x-text="purpose.label || 'No reason provided'"
+                                                ></span>
+                                            </label>
+                                            <ul class="installed-permission-reasons">
+                                                <template
+                                                    x-for="row in purpose.actions"
+                                                    :key="row.key"
+                                                >
+                                                    <li>
+                                                        <div class="installed-permission-action">
+                                                            <label
+                                                                class="preference-toggle installed-permission-action-label"
+                                                            >
+                                                                <input
+                                                                    type="checkbox"
+                                                                    x-show="row.canChange"
+                                                                    :checked="row.serviceGranted"
+                                                                    :disabled="working || !row.canChange"
+                                                                    :data-plugin-id="group.id"
+                                                                    :data-key="permission.key"
+                                                                    :data-purpose="purpose.label"
+                                                                    :data-grant="row.key"
+                                                                    :aria-label="'Allow ' + permission.label + ' for action ' + row.action"
+                                                                    @change="changeService"
+                                                                />
+                                                                <span
+                                                                    class="source-path"
+                                                                    x-text="row.action"
+                                                                ></span>
+                                                            </label>
+                                                            <span
+                                                                class="field-help installed-permission-action-status"
+                                                                x-text="(row.required ? 'Required' : 'Optional') + ' · ' + row.status"
+                                                            ></span>
+                                                        </div>
+                                                        <p
+                                                            x-show="row.lastRead"
+                                                            x-text="'Last successful read: ' + row.lastRead"
+                                                        ></p>
+                                                        <p
+                                                            x-show="row.lastWrite"
+                                                            x-text="'Last successful write: ' + row.lastWrite"
+                                                        ></p>
+                                                        <div
+                                                            class="button-row"
+                                                            x-show="row.canReview || row.canRevoke"
+                                                        >
+                                                            <button
+                                                                class="button"
+                                                                x-show="row.canReview"
+                                                                :disabled="working"
+                                                                :data-plugin-id="group.id"
+                                                                :data-action="row.action"
+                                                                :data-field="row.field"
+                                                                @click="begin"
+                                                            >
+                                                                Review entry access
+                                                            </button>
+                                                            <button
+                                                                class="button"
+                                                                x-show="row.canRevoke"
+                                                                :disabled="working"
+                                                                :data-plugin-id="group.id"
+                                                                :data-action="row.action"
+                                                                :data-family="row.family"
+                                                                @click="revoke"
+                                                                x-text="row.family === 'vault.write-secret' ? 'Revoke private writes for this action' : 'Revoke direct reads for this action'"
+                                                            ></button>
+                                                        </div>
+                                                    </li>
+                                                </template>
+                                            </ul>
+                                        </div>
+                                    </template>
+                                </section>
+                            </template>
+                        </div>
+                    </details>
+                </template>
+            </div>
+            <dialog
+                class="feature-dialog"
+                aria-labelledby="installed-permission-title"
+                @cancel.prevent="cancel"
+                @close="cancel"
+            >
+                <header class="picker-header">
+                    <h2 id="installed-permission-title" x-text="reviewTitle">
+                        Review Vault access
+                    </h2>
+                </header>
+                <template x-if="review">
+                    <div class="feature-body">
+                        <h3 x-text="reviewPlugin.name"></h3>
+                        <p x-text="reviewPlugin.id + ' · ' + reviewPlugin.version"></p>
+                        <p
+                            class="source-path"
+                            x-text="'Installed package inventory SHA-256: ' + review.inventory_sha256"
+                        ></p>
+                        <p
+                            x-text="review.slot.action + ' · ' + review.slot.field + ' · ' + review.slot.entry_kind"
+                        ></p>
+                        <p x-text="'Purpose stated by the plugin: ' + review.slot.purpose"></p>
+                        <p x-show="review.slot.kind === 'location'">
+                            This action receives the saved latitude and longitude at their stored
+                            precision. Revoking access stops future reads.
+                        </p>
+                        <p x-show="review.slot.kind !== 'location'">
+                            This gives the plugin access to the secret value. The plugin could store
+                            or share it. Revoking access only stops future reads.
+                        </p>
+                        <label class="preference-toggle">
+                            <input type="checkbox" x-model="optIn" :disabled="working" />
+                            <span>Allow direct reads for this package action</span>
+                        </label>
+                        <label>
+                            Choose from Vault
+                            <select x-model="entryId" :disabled="working">
+                                <option value="">Choose an entry</option>
+                                <template x-for="entry in review.entries" :key="entry.id">
+                                    <option :value="entry.id" x-text="entry.label"></option>
+                                </template>
+                            </select>
+                        </label>
+                        <p x-show="!review.entries.length">
+                            Add a compatible entry in Vault to approve access.
+                        </p>
+                    </div>
+                </template>
+                <footer class="feature-footer button-row">
+                    <button class="button" :disabled="working" @click="cancel">Cancel</button>
+                    <button
+                        class="button primary"
+                        :disabled="working || !entryId || !optIn"
+                        @click="allow"
+                    >
+                        Allow access
+                    </button>
+                </footer>
+            </dialog>
+        </article>
+    </section>
+    <section
+        role="tabpanel"
+        id="settings-panel-storage"
+        aria-labelledby="settings-tab-storage"
+        tabindex="0"
+        class="route-tab-panel"
+        x-show="sectionTab === 'storage'"
+    >
+        <div class="settings-grid">
+            <article
+                x-data="cacheSettings"
+                @cache-usage-changed.window="refresh"
+                id="settings-cache"
+                tabindex="-1"
+                aria-label="Cache storage"
+                class="card settings-card settings-wide"
+            >
+                <div class="runtime-toolbar">
+                    <h2>Cache storage</h2>
+                    <span class="cache-total" x-show="status">
+                        <strong x-text="totalUsage"></strong>
+                        used
+                    </span>
+                </div>
+                <p class="field-help">
+                    Manager checks every 15 minutes and clears idle files when a folder exceeds its
+                    target. Active files and retained installers are protected.
+                </p>
+                <p x-show="loading && !status" role="status">Loading cache usage…</p>
+                <div
+                    class="runtime-table-scroll"
+                    role="region"
+                    aria-label="Cache usage"
+                    tabindex="0"
+                    :aria-busy="loading"
+                >
+                    <table class="runtime-table cache-table" aria-label="Cache limits">
+                        <thead>
+                            <tr>
+                                <th scope="col">Folder</th>
+                                <th scope="col">Storage used / target</th>
+                                <th scope="col">Entries</th>
+                                <th scope="col">Protected</th>
+                                <th scope="col">Retention</th>
+                            </tr>
+                        </thead>
+                        <tbody>
+                            <template x-for="folder in folders" :key="folder.id">
+                                <tr>
+                                    <th scope="row" x-text="folder.label"></th>
+                                    <td
+                                        class="cache-capacity"
+                                        :class="{ 'over-target': folder.overTarget }"
+                                    >
+                                        <span x-text="folder.used"></span>
+                                        <span class="cache-target">
+                                            of
+                                            <span x-text="folder.target"></span>
+                                        </span>
+                                        <progress
+                                            aria-hidden="true"
+                                            :max="folder.max_bytes"
+                                            :value="folder.bytes"
+                                        ></progress>
+                                    </td>
+                                    <td x-text="folder.count"></td>
+                                    <td
+                                        :class="{ 'cache-zero': !folder.protected_entries }"
+                                        :title="folder.protected"
+                                        x-text="folder.protected_entries"
+                                    ></td>
+                                    <td x-text="folder.age"></td>
+                                </tr>
+                            </template>
+                        </tbody>
+                    </table>
+                </div>
+                <p class="danger-text" role="alert" x-show="warnings" x-text="warnings"></p>
+                <p class="danger-text" role="alert" x-show="error" x-text="error"></p>
+                <p role="status" x-show="notice" x-text="notice"></p>
+                <div class="button-row">
+                    <button
+                        type="button"
+                        class="button"
+                        @click="refresh"
+                        :disabled="busy || confirming"
+                    >
+                        Refresh cache usage
                     </button>
                     <button
                         type="button"
                         class="button danger"
-                        @click="confirmClear"
-                        :disabled="clearing"
+                        x-ref="deleteCache"
+                        @click="requestClear"
+                        :disabled="busy || confirming || !status"
                     >
                         Delete cache
                     </button>
-                </footer>
-            </dialog>
-        </article>
-        <article id="settings-data" tabindex="-1" class="card settings-card">
-            <h2>Application data</h2>
-            <p>
-                Manage local plugin settings, retained data, and recovery snapshots. Installed
-                packages and media stay in the application data folder.
-            </p>
-            <div class="button-row settings-actions">
-                <button class="button" @click="app.openDataFolder()" :disabled="app.busy">
-                    Open application data folder
-                </button>
-                <button type="button" class="button" @click="$dispatch('open-application-data')">
-                    Manage stored data
-                </button>
-            </div>
-        </article>
-        <article id="settings-profiles" tabindex="-1" class="card settings-card">
-            <h2>Profiles &amp; portability</h2>
-            <p>
-                Profiles are validated and saved atomically by Rust. Validated recovery snapshots
-                retain recent settings and workspace records.
-            </p>
-            <small>
-                Choose whether to include plugin action settings when exporting. Review parameter
-                defaults and paths before sharing.
-            </small>
-            <div class="button-row settings-actions">
-                <button
-                    class="button"
-                    @click="$dispatch('profile-versions')"
-                    :disabled="!app.profile"
+                </div>
+                <dialog
+                    x-ref="cacheConfirm"
+                    class="feature-dialog"
+                    aria-labelledby="cache-confirm-title"
+                    @cancel.prevent="cancelClear"
                 >
-                    Profile versions
-                </button>
-                <button class="button" @click="exportProfiles">Export profiles ↗</button>
-                <button class="button" @click="importProfiles">Import profiles</button>
-                <button type="button" class="button" @click="$dispatch('open-media-library', {})">
-                    Manage media
-                </button>
-            </div>
-        </article>
-        <sd-updates class="settings-wide"></sd-updates>
-        <article
-            class="card settings-card device-settings-card"
-            :class="{'settings-wide': !app.device || !app.device.manifest.capabilities.background}"
-            x-show="app.device &amp;&amp; (app.device.manifest.capabilities.brightness || app.device.manifest.capabilities.lighting || app.device.manifest.capabilities.sleep || app.device.manifest.capabilities.keyboard)"
-        >
-            <sd-device-settings></sd-device-settings>
-        </article>
-        <article
-            class="card settings-card background-settings-card"
-            x-show="app.device && app.device.manifest.capabilities.background"
-        >
-            <h2>Device background</h2>
-            <p>
-                The default wallpaper follows your palette. Use PNG, JPEG, SVG, GIF or MP4 to set a
-                custom background for the active profile.
-            </p>
-            <div class="button-row">
-                <button
-                    class="button"
-                    @click="chooseBackground"
-                    :disabled="app.busy || !app.profile"
-                >
-                    Choose background media
-                </button>
-                <button
-                    class="button"
-                    @click="editBackground"
-                    x-show="app.profile && app.profile.background_asset"
-                    :disabled="app.busy"
-                >
-                    Edit background
-                </button>
-                <button
-                    class="button"
-                    @click="removeBackground"
-                    :disabled="app.busy || !app.profile || !app.profile.background_asset"
-                >
-                    Clear background
-                </button>
-            </div>
-            <small>
-                FFmpeg is an optional fallback for MP4 imports. Prepared exports play without it.
-                Clips: up to 16 MiB and 30 seconds.
-            </small>
-        </article>
-
-        <article
-            class="card settings-card settings-wide"
-            x-show="$store.updates.status && $store.updates.status.host_os === 'linux'"
-        >
-            <h2>Linux support</h2>
-            <p>
-                Ubuntu 24.04 and Nobara 44 are release targets. Authorize keyboard input for this
-                Wayland session. Device configuration and media controls work independently of this
-                permission.
-            </p>
-            <div class="button-row">
-                <button class="button" @click="authorizeWayland">Authorize Wayland keyboard</button>
-                <a class="button" href="#/diagnostics">Inspect this environment ↗</a>
-            </div>
-            <small>Project maintained. No Nobara endorsement is implied.</small>
-        </article>
-        <section
-            class="card settings-card settings-wide"
-            aria-labelledby="plugin-logging-heading"
-            id="settings-logging"
-            tabindex="-1"
-        >
-            <h2 id="plugin-logging-heading">Plugin logging</h2>
-            <label class="preference-toggle">
-                <input
-                    type="checkbox"
-                    data-preference="global"
-                    :checked="$store.pluginLogs.preferences.enabled"
-                    @change="$store.pluginLogs.changePreference($event)"
-                />
-                <span>Enable plugin logging</span>
-            </label>
-            <p class="field-help">
-                Open Logs on a plugin card to start a capture. Disabling logging stops captures and
-                retains their files for this Manager session.
-            </p>
-        </section>
-    </div>
+                    <header class="picker-header">
+                        <h2 id="cache-confirm-title">Delete cached files?</h2>
+                    </header>
+                    <div class="feature-body">
+                        <p>
+                            This deletes idle artwork, downloads, update metadata, and cached
+                            firmware catalogs. Manager may need to fetch them again. Active artwork
+                            and downloads are kept.
+                        </p>
+                        <p>
+                            Manager keeps installed packages, profiles, imported media, and plugin
+                            settings.
+                        </p>
+                        <p role="status" x-show="clearing">Deleting cache…</p>
+                    </div>
+                    <footer class="picker-footer button-row">
+                        <button
+                            type="button"
+                            class="button"
+                            autofocus
+                            @click="cancelClear"
+                            :disabled="clearing"
+                        >
+                            Cancel
+                        </button>
+                        <button
+                            type="button"
+                            class="button danger"
+                            @click="confirmClear"
+                            :disabled="clearing"
+                        >
+                            Delete cache
+                        </button>
+                    </footer>
+                </dialog>
+            </article>
+            <article id="settings-data" tabindex="-1" class="card settings-card settings-wide">
+                <h2>Application data</h2>
+                <p>
+                    Manage local plugin settings, retained data, and recovery snapshots. Installed
+                    packages and media stay in the application data folder.
+                </p>
+                <div class="button-row settings-actions">
+                    <button class="button" @click="app.openDataFolder()" :disabled="app.busy">
+                        Open application data folder
+                    </button>
+                    <button
+                        type="button"
+                        class="button"
+                        @click="$dispatch('open-application-data')"
+                    >
+                        Manage stored data
+                    </button>
+                </div>
+            </article>
+            <sd-updates class="settings-wide"></sd-updates>
+        </div>
+    </section>
 </section>

@@ -48,24 +48,30 @@ pub(super) fn registration_info(
         .apply(&mut info, browser_context)?;
     Ok(info)
 }
+// The VSD Vue starter uses the presence of a truthy fifth callback argument
+// to choose the property inspector, even for a page shared with the runtime.
+pub(super) enum BootstrapRole<'a> {
+    Runtime,
+    Inspector(&'a Value),
+}
+
 // Build the isolated browser plugin bootstrap
-pub(super) fn bootstrap(
-    port: u16,
-    token: &str,
-    event: &str,
-    info: &Value,
-    action: &Value,
-) -> String {
-    let arguments = json!([
+pub(super) fn bootstrap(port: u16, token: &str, info: &Value, role: BootstrapRole<'_>) -> String {
+    let (event, action) = match role {
+        BootstrapRole::Runtime => ("registerPlugin", None),
+        BootstrapRole::Inspector(action) => ("registerPropertyInspector", Some(action)),
+    };
+    let mut arguments = vec![
         port.to_string(),
-        token,
-        event,
+        token.to_owned(),
+        event.to_owned(),
         info.to_string(),
-        action.to_string()
-    ])
-    .to_string()
-    .replace('<', "\\u003c");
-    let cancel = if event == "registerPropertyInspector" {
+    ];
+    if let Some(action) = action {
+        arguments.push(action.to_string());
+    }
+    let arguments = json!(arguments).to_string().replace('<', "\\u003c");
+    let cancel = if let Some(action) = action {
         let context = action["context"].to_string().replace('<', "\\u003c");
         // WebKit does not forward Escape from an iframe to its parent dialog
         // This carries no settings; the parent checks the frame, origin and token
@@ -78,6 +84,176 @@ pub(super) fn bootstrap(
         .trim_end_matches(';');
     format!("<script>{cancel}window.addEventListener('load',()=>{{const connect=window.connectOpenActionSocket||window.connectElgatoStreamDeckSocket||window.connectSocket;if(typeof connect==='function'){{const args={arguments};const info=({environment})(JSON.parse(args[3]),{{devicePixelRatio:window.devicePixelRatio}});args[3]=JSON.stringify(info);connect(...args);}}}},{{once:true}});</script>")
 }
+/// VSD declares per-action defaults in the manifest. Seed only the missing
+/// fields of a legacy browser binding/draft; saved or plugin-owned fields win.
+pub(super) fn vsd_action_settings<'a>(
+    plugin: &Plugin,
+    action: &str,
+    settings: &'a Value,
+) -> std::borrow::Cow<'a, Value> {
+    use std::borrow::Cow;
+    if !legacy_vsd(plugin) {
+        return Cow::Borrowed(settings);
+    }
+    let Some((defaults, existing)) = plugin
+        .metadata
+        .get(action)
+        .and_then(|metadata| metadata["Settings"].as_object())
+        .zip(settings.as_object())
+    else {
+        return Cow::Borrowed(settings);
+    };
+    if defaults.keys().all(|key| existing.contains_key(key)) {
+        return Cow::Borrowed(settings);
+    }
+    let mut merged = existing.clone();
+    for (key, value) in defaults {
+        merged.entry(key).or_insert_with(|| value.clone());
+    }
+    let merged = Value::Object(merged);
+    // Leave the previous behavior for over-limit manifests instead of putting
+    // a larger settings payload in the queue or breaking an existing draft.
+    if merged.to_string().len() > 256 * 1024 {
+        return Cow::Borrowed(settings);
+    }
+    Cow::Owned(merged)
+}
+
+fn legacy_vsd(plugin: &Plugin) -> bool {
+    plugin.info.dialect == "vsd"
+        && plugin.info.kind == "browser"
+        && plugin.info.capabilities.is_none()
+}
+
+/// Legacy browser actions can use title parameters to draw their own canvas,
+/// even when Manager has no user-authored title override. Publish this once
+/// after willAppear, separately from the authored/imported title dedup cache.
+pub(super) fn vsd_initial_title(plugin: &Plugin, appearance: &Value) -> Option<Value> {
+    if !legacy_vsd(plugin) {
+        return None;
+    }
+    let action = appearance["action"].as_str()?;
+    let state = usize::try_from(appearance["payload"]["state"].as_u64()?).ok()?;
+    let state_data = plugin.metadata.get(action)?["States"].get(state)?;
+    let mut title = json!({
+        "fontFamily": "system-ui",
+        "fontStyle": "Regular",
+        "fontSize": 12,
+        "fontUnderline": false,
+        "showTitle": true,
+        "titleAlignment": "bottom",
+        "titleColor": "#FFFFFF"
+    });
+    if let Value::Object(values) = visual::manifest_title_parameters(state_data) {
+        title.as_object_mut().unwrap().extend(values);
+    }
+    let text = state_data["Title"].as_str().unwrap_or_default();
+    if text.len() > 4096 || title.to_string().len() > 8192 {
+        return None;
+    }
+    Some(json!({
+        "event": "titleParametersDidChange",
+        "action": action,
+        "context": appearance["context"],
+        "device": appearance["device"],
+        "payload": {
+            "settings": appearance["payload"]["settings"],
+            "coordinates": appearance["payload"]["coordinates"],
+            "state": state,
+            "title": text,
+            "titleParameters": title
+        }
+    }))
+}
+
+pub(super) fn is_html(path: &Path) -> bool {
+    path.extension()
+        .and_then(|extension| extension.to_str())
+        .is_some_and(|extension| {
+            extension.eq_ignore_ascii_case("html") || extension.eq_ignore_ascii_case("htm")
+        })
+}
+
+fn asset_mime(path: &Path) -> Option<&'static str> {
+    if is_html(path) {
+        return Some("text/html; charset=utf-8");
+    }
+    let extension = path.extension()?.to_str()?;
+    Some(match extension {
+        "js" | "mjs" => "text/javascript; charset=utf-8",
+        "css" => "text/css; charset=utf-8",
+        "json" => "application/json",
+        "png" => "image/png",
+        "jpg" | "jpeg" => "image/jpeg",
+        "svg" => "image/svg+xml",
+        "gif" => "image/gif",
+        "webp" => "image/webp",
+        "woff" => "font/woff",
+        "woff2" => "font/woff2",
+        ext if ext.eq_ignore_ascii_case("ttf") => "font/ttf",
+        ext if ext.eq_ignore_ascii_case("mp3") => "audio/mpeg",
+        ext if ext.eq_ignore_ascii_case("wav") => "audio/wav",
+        ext if ext.eq_ignore_ascii_case("ogg") || ext.eq_ignore_ascii_case("oga") => "audio/ogg",
+        ext if ext.eq_ignore_ascii_case("m4a") => "audio/mp4",
+        _ => return None,
+    })
+}
+
+// Media elements in WebKit can require a valid 206 for their initial bytes=0-1
+// request. Support only one bounded byte range on already-approved audio files.
+#[derive(Clone, Copy)]
+enum AudioResponse {
+    None,
+    Full,
+    Partial { start: u64, end: u64, length: u64 },
+    Unsatisfiable { length: u64 },
+}
+
+fn audio_response(headers: &str, length: u64) -> AudioResponse {
+    let mut ranges = headers.lines().skip(1).filter_map(|line| {
+        let (name, value) = line.split_once(':')?;
+        name.eq_ignore_ascii_case("Range").then_some(value.trim())
+    });
+    let Some(range) = ranges.next() else {
+        return AudioResponse::Full;
+    };
+    let unsatisfiable = AudioResponse::Unsatisfiable { length };
+    if ranges.next().is_some() || length == 0 {
+        return unsatisfiable;
+    }
+    let Some((unit, range)) = range.split_once('=') else {
+        return unsatisfiable;
+    };
+    if !unit.eq_ignore_ascii_case("bytes") {
+        return AudioResponse::Full;
+    }
+    let Some((start, end)) = range.split_once('-') else {
+        return unsatisfiable;
+    };
+    let digit = |value: &str| {
+        value
+            .bytes()
+            .all(|byte| byte.is_ascii_digit())
+            .then(|| value.parse::<u64>().ok())
+            .flatten()
+    };
+    let (start, end) = if start.is_empty() {
+        match digit(end) {
+            Some(count) if count > 0 => (length.saturating_sub(count), length - 1),
+            _ => return unsatisfiable,
+        }
+    } else {
+        match (digit(start), digit(end), end.is_empty()) {
+            (Some(start), _, true) if start < length => (start, length - 1),
+            (Some(start), Some(end), false) if start < length && start <= end => {
+                (start, end.min(length - 1))
+            }
+            _ => return unsatisfiable,
+        }
+    };
+    AudioResponse::Partial { start, end, length }
+}
+
 const MAX_ASSET_BYTES: u64 = 16 * 1024 * 1024;
 const COPY_BUFFER_BYTES: usize = 32 * 1024;
 enum Body {
@@ -133,8 +309,16 @@ pub(super) fn serve_inspector_file(stream: TcpStream, hub: Arc<Mutex<Hub>>, toke
 }
 // Serve an asset only after validating its owner, path, grant and origin
 fn serve_scoped_file(mut stream: TcpStream, hub: Arc<Mutex<Hub>>, scope: Option<&str>) {
-    let _ = stream.set_write_timeout(Some(Duration::from_secs(1)));
-    let result = (|| -> Result<(Body, &str), String> {
+    // Accepted sockets may inherit the listener's nonblocking mode on macOS
+    // Use the bounded read/write timeouts instead of truncating a response on WouldBlock
+    if stream.set_nonblocking(false).is_err()
+        || stream
+            .set_write_timeout(Some(Duration::from_secs(1)))
+            .is_err()
+    {
+        return;
+    }
+    let result = (|| -> Result<(Body, &str, AudioResponse), String> {
         let mut header = Vec::new();
         let mut buffer = [0; 1024];
         let deadline = std::time::Instant::now() + Duration::from_secs(5);
@@ -208,42 +392,60 @@ fn serve_scoped_file(mut stream: TcpStream, hub: Arc<Mutex<Hub>>, scope: Option<
                 );
             }
         })?;
-        let extension = path.extension().and_then(|s| s.to_str()).unwrap_or("");
-        let mime = match extension {
-            "html" | "htm" => "text/html; charset=utf-8",
-            "js" | "mjs" => "text/javascript; charset=utf-8",
-            "css" => "text/css; charset=utf-8",
-            "json" => "application/json",
-            "png" => "image/png",
-            "jpg" | "jpeg" => "image/jpeg",
-            "svg" => "image/svg+xml",
-            "gif" => "image/gif",
-            "webp" => "image/webp",
-            "woff" => "font/woff",
-            "woff2" => "font/woff2",
-            "ttf" => "font/ttf",
-            _ => return Err("file type not served".into()),
-        };
-        let file = std::fs::File::open(&path).map_err(|e| e.to_string())?;
+        let mime = asset_mime(&path).ok_or("file type not served")?;
+        let mut file = std::fs::File::open(&path).map_err(|e| e.to_string())?;
         let metadata = file.metadata().map_err(|e| e.to_string())?;
         if !metadata.is_file() || metadata.len() > MAX_ASSET_BYTES {
             return Err("file size limit".into());
         }
-        let body = if extension == "html" || extension == "htm" {
+        let audio = if mime.starts_with("audio/") {
+            audio_response(headers, metadata.len())
+        } else {
+            AudioResponse::None
+        };
+        let body = if is_html(&path)
+            && grant
+                .runtime_entry
+                .as_ref()
+                .is_none_or(|entry| *entry == path)
+        {
             Body::Html(read_html(file, &grant.bootstrap)?)
+        } else if let AudioResponse::Partial { start, end, .. } = audio {
+            use std::io::{Seek, SeekFrom};
+            file.seek(SeekFrom::Start(start))
+                .map_err(|e| e.to_string())?;
+            Body::Static(file, end - start + 1)
         } else {
             Body::Static(file, metadata.len())
         };
-        Ok((body, mime))
+        Ok((body, mime, audio))
     })();
     match result {
-        Ok((body, mime)) => {
+        Ok((body, mime, audio)) => {
             let isolated = if scope.is_some() {
                 "Content-Security-Policy: frame-ancestors 'none'; object-src 'none'; frame-src 'none'; base-uri 'self'; form-action 'self'\r\nCross-Origin-Resource-Policy: same-origin\r\nPermissions-Policy: camera=(), microphone=(), geolocation=(), display-capture=(), clipboard-read=(), clipboard-write=(), fullscreen=(), payment=(), usb=(), serial=(), hid=(), bluetooth=()\r\nReferrer-Policy: no-referrer\r\n"
             } else {
                 ""
             };
-            if write!(stream,"HTTP/1.1 200 OK\r\nContent-Type: {mime}\r\nContent-Length: {}\r\nX-Content-Type-Options: nosniff\r\nCache-Control: no-store\r\n{isolated}Connection: close\r\n\r\n",body.len()).is_err() {
+            let (status, range_headers, body_bytes) = match audio {
+                AudioResponse::None => ("200 OK", String::new(), body.len()),
+                AudioResponse::Full => ("200 OK", "Accept-Ranges: bytes\r\n".into(), body.len()),
+                AudioResponse::Partial { start, end, length } => (
+                    "206 Partial Content",
+                    format!(
+                        "Accept-Ranges: bytes\r\nContent-Range: bytes {start}-{end}/{length}\r\n"
+                    ),
+                    body.len(),
+                ),
+                AudioResponse::Unsatisfiable { length } => (
+                    "416 Range Not Satisfiable",
+                    format!("Accept-Ranges: bytes\r\nContent-Range: bytes */{length}\r\n"),
+                    0,
+                ),
+            };
+            if write!(stream,"HTTP/1.1 {status}\r\nContent-Type: {mime}\r\nContent-Length: {body_bytes}\r\nX-Content-Type-Options: nosniff\r\nCache-Control: no-store\r\n{isolated}{range_headers}Connection: close\r\n\r\n").is_err()
+                || matches!(audio, AudioResponse::Unsatisfiable { .. })
+            {
                 return;
             }
             match body {
@@ -383,9 +585,8 @@ mod tests {
         let script = bootstrap(
             1234,
             "token",
-            "registerPlugin",
             &json!({"name":"</script><script>evil()"}),
-            &json!({}),
+            BootstrapRole::Runtime,
         );
         assert_eq!(script.matches("</script>").count(), 1);
         assert!(script.contains("\\u003c"));
@@ -393,14 +594,317 @@ mod tests {
         let inspector = bootstrap(
             1234,
             "token",
-            "registerPropertyInspector",
             &json!({}),
-            &json!({"context":"settings-draft:</script>"}),
+            BootstrapRole::Inspector(&json!({"context":"settings-draft:</script>"})),
         );
         assert_eq!(inspector.matches("</script>").count(), 1);
         assert!(inspector.contains("stream-dock-manager-cancel-settings"));
         assert!(inspector.contains("settings-draft:\\u003c/script>"));
     }
+    #[test]
+    fn shared_vsd_html_has_distinct_runtime_and_inspector_callback_arguments() {
+        let info = json!({"application":{"version":"3.10"}});
+        let details = json!({
+            "action":"org.fixture.action",
+            "context":"settings-draft:fixture",
+            "payload":{"settings":{"label":"fixture"},"scope":"action"}
+        });
+        let callback_args = |script: &str| {
+            let (_, arguments) = script.split_once("const args=").unwrap();
+            let (arguments, _) = arguments.split_once(";const info=").unwrap();
+            serde_json::from_str::<Vec<String>>(arguments).unwrap()
+        };
+        let runtime = bootstrap(1234, "runtime-token", &info, BootstrapRole::Runtime);
+        let inspector = bootstrap(
+            1234,
+            "inspector-token",
+            &info,
+            BootstrapRole::Inspector(&details),
+        );
+        let runtime_args = callback_args(&runtime);
+        let inspector_args = callback_args(&inspector);
+        assert_eq!(
+            runtime_args,
+            vec![
+                "1234".into(),
+                "runtime-token".into(),
+                "registerPlugin".into(),
+                info.to_string()
+            ]
+        );
+        assert_eq!(
+            inspector_args,
+            vec![
+                "1234".into(),
+                "inspector-token".into(),
+                "registerPropertyInspector".into(),
+                info.to_string(),
+                details.to_string()
+            ]
+        );
+        // A same-file starter treats a nonempty fifth string as the inspector.
+        let uses_inspector = |args: &[String]| args.get(4).is_some_and(|arg| !arg.is_empty());
+        assert!(!uses_inspector(&runtime_args));
+        assert!(uses_inspector(&inspector_args));
+
+        for script in [runtime, inspector] {
+            let html = read_html(&b"<html><main id=app></main></html>"[..], &script).unwrap();
+            let html = std::str::from_utf8(&html).unwrap();
+            assert_eq!(html.matches("window.addEventListener('load'").count(), 1);
+            assert_eq!(html.matches("connect(...args)").count(), 1);
+            assert!(html.contains("{once:true}"));
+            assert!(html.contains("window.connectOpenActionSocket||window.connectElgatoStreamDeckSocket||window.connectSocket"));
+        }
+    }
+
+    #[test]
+    fn legacy_vsd_canvas_actions_receive_manifest_defaults_and_initial_title_once() {
+        let root = tempfile::tempdir().unwrap();
+        let owner = "fixture.canvas";
+        let action = "fixture.canvas.action";
+        let package = root.path().join("fixture.canvas.sdPlugin");
+        std::fs::create_dir(&package).unwrap();
+        std::fs::write(package.join("index.html"), "<html></html>").unwrap();
+        std::fs::write(
+            package.join("icon.svg"),
+            "<svg xmlns='http://www.w3.org/2000/svg'/>",
+        )
+        .unwrap();
+        std::fs::write(
+            package.join("manifest.json"),
+            json!({
+                "UUID":owner,"Name":"Canvas fixture","Version":"1.0","SDKVersion":1,
+                "CodePath":"index.html","StreamDockManager":{"ManifestDialect":"vsd"},
+                "Actions":[{
+                    "UUID":action,"Name":"Canvas clock","Controllers":["Keypad","Information"],
+                    "Settings":{"theme":"theme1","zone":"system","enabled":true,"title":"Default",
+                                "nullable":"seed","nested":{"x":1},"deep":0},
+                    "States":[{"Image":"icon.svg","FontSize":"10","FontStyle":"Bold"}],
+                    "PropertyInspectorPath":"index.html"
+                }]
+            })
+            .to_string(),
+        )
+        .unwrap();
+        let mut host = lifecycle_tests::host(root.path());
+        host.enable(owner, true).unwrap();
+        lifecycle_tests::demand(&mut host, owner);
+        let overrides = json!({"title":"Saved","enabled":false,"nullable":null,"nested":{"y":2}});
+        let expected = json!({
+            "title":"Saved","enabled":false,"nullable":null,"nested":{"y":2},
+            "theme":"theme1","zone":"system","deep":0
+        });
+        let active = || ActiveAction {
+            plugin_id: owner.into(),
+            action_id: action.into(),
+            device_id: "device".into(),
+            control_id: "key".into(),
+            scope: "profile:page".into(),
+            settings: overrides.clone(),
+            surface: None,
+            column: 1,
+            row: 2,
+            encoder: false,
+        };
+        host.synchronize(vec![active()], vec![json!({"id":"device"})]);
+        host.synchronize(vec![active()], vec![json!({"id":"device"})]);
+        let context = {
+            let hub = host.hub.lock().unwrap();
+            let events: Vec<_> = hub.sessions.queues[owner]
+                .iter()
+                .filter(|entry| entry["action"] == action)
+                .collect();
+            assert_eq!(events.len(), 2);
+            assert_eq!(events[0]["event"], "willAppear");
+            assert_eq!(events[0]["payload"]["settings"], expected);
+            assert_eq!(events[1]["event"], "titleParametersDidChange");
+            assert_eq!(events[1]["context"], events[0]["context"]);
+            assert_eq!(events[1]["payload"]["titleParameters"]["fontSize"], 10.0);
+            assert_eq!(events[1]["payload"]["titleParameters"]["fontStyle"], "Bold");
+            assert_eq!(
+                events[1]["payload"]["titleParameters"]["titleColor"],
+                "#FFFFFF"
+            );
+            assert_eq!(events[1]["payload"]["titleParameters"]["showTitle"], true);
+            events[0]["context"].as_str().unwrap().to_owned()
+        };
+        assert!(!host
+            .hide_title_parameters(owner, "profile:page", "device", "key", "")
+            .unwrap());
+        let authored = json!({"fontSize":18,"titleColor":"#000000"});
+        assert!(host
+            .update_title_parameters(
+                owner,
+                "profile:page",
+                "device",
+                "key",
+                "Authored",
+                authored.clone()
+            )
+            .unwrap());
+        assert_eq!(
+            host.hub.lock().unwrap().context_state.title_parameters[&context]["titleParameters"],
+            authored
+        );
+
+        host.dispatch(
+            owner,
+            action,
+            "device",
+            "secondary",
+            "profile:page",
+            &hardware_core::Input::Pulse,
+            &overrides,
+        )
+        .unwrap();
+        {
+            let hub = host.hub.lock().unwrap();
+            let context = hub
+                .lookup_binding_context(owner, "profile:page", "device", "secondary")
+                .unwrap();
+            let events: Vec<_> = hub.sessions.queues[owner]
+                .iter()
+                .filter(|entry| entry["context"] == context)
+                .collect();
+            let names: Vec<_> = events
+                .iter()
+                .map(|entry| entry["event"].as_str().unwrap())
+                .collect();
+            assert_eq!(
+                names,
+                ["willAppear", "titleParametersDidChange", "keyDown", "keyUp"]
+            );
+            assert_eq!(events[0]["payload"]["settings"], expected);
+            assert_eq!(events[2]["payload"]["settings"], expected);
+        }
+        let panel = host
+            .settings_panel(owner, Some(action), &overrides)
+            .unwrap();
+        assert_eq!(host.panel_settings(&panel.token).unwrap(), expected);
+        host.close_inspector(&panel.token);
+        assert_eq!(host.action_defaults(owner, action).unwrap(), json!({}));
+        assert!(Hub::load(host.storage())
+            .unwrap()
+            .context_state
+            .settings
+            .is_empty());
+
+        let nonobject = json!([1]);
+        let plugin = host.plugins.get_mut(owner).unwrap();
+        assert_eq!(
+            vsd_action_settings(plugin, action, &nonobject).as_ref(),
+            &nonobject
+        );
+        plugin.info.dialect = "openaction".into();
+        assert_eq!(
+            vsd_action_settings(plugin, action, &overrides).as_ref(),
+            &overrides
+        );
+        assert!(
+            vsd_initial_title(plugin, &json!({"action":action,"payload":{"state":0}})).is_none()
+        );
+    }
+
+    #[test]
+    fn runtime_http_only_bootstraps_primary_html_and_serves_bounded_local_audio_ranges() {
+        let dir = tempfile::tempdir().unwrap();
+        let root = dir.path().canonicalize().unwrap();
+        let main = root.join("plugin.HTML");
+        std::fs::write(&main, "<main>entry</main>").unwrap();
+        std::fs::write(root.join("other.HTM"), "<main>auxiliary</main>").unwrap();
+        std::fs::write(root.join("sound.MP3"), b"0123456789").unwrap();
+        std::fs::write(root.join("digits.TTF"), b"fixture font bytes").unwrap();
+        std::fs::write(root.join("other.exe"), b"not served").unwrap();
+        let mut hub = Hub::default();
+        hub.sessions
+            .tokens
+            .insert("testtoken".into(), "fixture".into());
+        hub.sessions.files.insert(
+            "testtoken".into(),
+            FileGrant {
+                root,
+                runtime_entry: Some(main),
+                bootstrap: "<script>startFixtureOnce();</script>".into(),
+                context: None,
+                setup_runtime: false,
+            },
+        );
+        let hub = Arc::new(Mutex::new(hub));
+        let get = |target: &str, request_headers: &str| {
+            let listener = std::net::TcpListener::bind("127.0.0.1:0").unwrap();
+            let address = listener.local_addr().unwrap();
+            let hub = hub.clone();
+            let worker = std::thread::spawn(move || serve_file(listener.accept().unwrap().0, hub));
+            let mut client = TcpStream::connect(address).unwrap();
+            client
+                .set_read_timeout(Some(Duration::from_secs(2)))
+                .unwrap();
+            write!(
+                client,
+                "GET /files/{target} HTTP/1.1\r\nHost: {address}\r\n{request_headers}\r\n"
+            )
+            .unwrap();
+            let mut response = String::new();
+            client.read_to_string(&mut response).unwrap();
+            worker.join().unwrap();
+            response
+        };
+        let sanitize_response = |response: String| {
+            let (headers, body) = response.split_once("\r\n\r\n").unwrap();
+            (headers.to_owned(), body.to_owned())
+        };
+        let (headers, body) = sanitize_response(get("testtoken/plugin.HTML", ""));
+        assert!(headers.contains("Content-Type: text/html; charset=utf-8"));
+        assert_eq!(body.matches("startFixtureOnce()").count(), 1);
+        let (headers, body) = sanitize_response(get("testtoken/other.HTM", ""));
+        assert!(headers.contains("Content-Type: text/html; charset=utf-8"));
+        assert_eq!(body, "<main>auxiliary</main>");
+        let (headers, body) = sanitize_response(get("testtoken/digits.TTF", ""));
+        assert!(headers.contains("Content-Type: font/ttf"));
+        assert_eq!(body, "fixture font bytes");
+
+        let (headers, body) = sanitize_response(get("testtoken/sound.MP3", ""));
+        assert!(headers.starts_with("HTTP/1.1 200 OK"));
+        assert!(headers.contains("Content-Type: audio/mpeg"));
+        assert!(headers.contains("Accept-Ranges: bytes"));
+        assert_eq!(body, "0123456789");
+        for (request, expected_range, expected_body) in [
+            ("bytes=0-1", "0-1/10", "01"),
+            ("bytes=3-99", "3-9/10", "3456789"),
+            ("bytes=7-", "7-9/10", "789"),
+            ("bytes=-2", "8-9/10", "89"),
+        ] {
+            let (headers, body) =
+                sanitize_response(get("testtoken/sound.MP3", &format!("Range: {request}\r\n")));
+            assert!(headers.starts_with("HTTP/1.1 206 Partial Content"));
+            assert!(headers.contains(&format!("Content-Range: bytes {expected_range}")));
+            assert!(headers.contains(&format!("Content-Length: {}", expected_body.len())));
+            assert_eq!(body, expected_body);
+        }
+        for invalid in [
+            "Range: bytes=10-\r\n",
+            "Range: bytes=0-1,3-4\r\n",
+            "Range: bytes=6-4\r\n",
+            "Range: bytes=-0\r\n",
+            "Range: bytes=0-1\r\nrange: bytes=3-4\r\n",
+        ] {
+            let (headers, body) = sanitize_response(get("testtoken/sound.MP3", invalid));
+            assert!(headers.starts_with("HTTP/1.1 416 Range Not Satisfiable"));
+            assert!(headers.contains("Content-Range: bytes */10"));
+            assert!(body.is_empty());
+        }
+
+        for target in [
+            "testtoken/other.exe",
+            "revoked/sound.MP3",
+            "testtoken/%2e%2e/sound.MP3",
+        ] {
+            assert!(get(target, "Range: bytes=0-1\r\n").starts_with("HTTP/1.1 403 Forbidden"));
+        }
+        let (_, body) = sanitize_response(get("testtoken/plugin.HTML", "Range: bytes=0-1\r\n"));
+        assert!(body.contains("startFixtureOnce()"));
+    }
+
     #[test]
     // Verify encoded traversal is still checked by safe path
     fn encoded_traversal_is_still_checked_by_safe_path() {

@@ -21,6 +21,8 @@ const cleanupCommands = new Set([
     'release_media',
     'release_archive_export',
     'discard_media_drop',
+    'discard_archive_drop',
+    'vault_cancel_entry_import',
     'finish_window_action',
     'finish_keyboard_preview',
     'abort_window_action',

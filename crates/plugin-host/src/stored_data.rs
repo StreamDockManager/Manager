@@ -50,7 +50,7 @@ fn summary(
     installed: bool,
     retained: bool,
 ) -> Result<StoredPluginData, String> {
-    let generation = storage_rpc::generation(conn, owner)?;
+    let generation = storage_rpc::plugin_storage_generation(conn, owner)?;
     let mut digest = Sha256::new();
     digest.update(generation.as_bytes());
     let mut count = 0u64;
@@ -58,26 +58,35 @@ fn summary(
     for domain in [Domain::PluginGlobals, Domain::PluginDefaults] {
         let mut stmt = conn
             .prepare(&format!(
-                "SELECT revision,length(CAST(payload AS BLOB)) FROM {} WHERE key=?1",
+                "SELECT revision FROM {} WHERE key=?1",
                 domain.table()
             ))
             .map_err(|e| e.to_string())?;
         let mut rows = stmt.query([owner]).map_err(|e| e.to_string())?;
         if let Some(row) = rows.next().map_err(|e| e.to_string())? {
             let revision: i64 = row.get(0).map_err(|e| e.to_string())?;
-            let size: u64 = row.get(1).map_err(|e| e.to_string())?;
+            // Measure the logical settings, including values now held in the encrypted database.
+            let size = stream_dock_manager_storage::read_json::<Value>(
+                conn,
+                domain,
+                owner,
+                stream_dock_manager_storage::MAX_RECORD_BYTES,
+            )?
+            .ok_or("Plugin settings disappeared while reading their size")?
+            .to_string()
+            .len() as u64;
             count += 1;
             bytes += size;
             digest.update(format!("{}:{revision}:{size};", domain.table()).as_bytes());
         }
     }
-    let (private_count,private_bytes):(u64,u64)=conn.query_row("SELECT count(*),coalesce(sum(encoded_bytes),0) FROM plugin_storage_records WHERE plugin_id=?1",[owner],|r|Ok((r.get(0)?,r.get(1)?))).map_err(|e|e.to_string())?;
+    let (private_count,private_bytes):(u64,u64)=conn.query_row("SELECT count(*),coalesce(sum(encoded_bytes),0) FROM settings_vault.plugin_storage_records WHERE plugin_id=?1",[owner],|r|Ok((r.get(0)?,r.get(1)?))).map_err(|e|e.to_string())?;
     count += private_count;
     bytes += private_bytes;
-    let mut statement=conn.prepare("SELECT namespace,revision FROM plugin_storage_namespaces WHERE plugin_id=?1 ORDER BY namespace COLLATE BINARY").map_err(|e|e.to_string())?;
+    let mut statement=conn.prepare("SELECT namespace,revision FROM settings_vault.plugin_storage_namespaces WHERE plugin_id=?1 ORDER BY namespace COLLATE BINARY").map_err(|e|e.to_string())?;
     let namespaces = statement
         .query_map([owner], |r| {
-            Ok((r.get::<_, String>(0)?, r.get::<_, String>(1)?))
+            Ok((r.get::<_, String>(0)?, r.get::<_, [u8; 8]>(1)?))
         })
         .map_err(|e| e.to_string())?;
     for row in namespaces {
@@ -132,7 +141,7 @@ impl PluginHost {
             .collect();
         self.storage().run(move|conn| {
             let mut ids:std::collections::BTreeSet<String>=names.keys().chain(retained.keys()).cloned().collect();
-            let mut stmt=conn.prepare("SELECT key FROM plugin_globals UNION SELECT key FROM plugin_defaults UNION SELECT plugin_id FROM plugin_storage_namespaces").map_err(|e|e.to_string())?;
+            let mut stmt=conn.prepare("SELECT key FROM plugin_globals UNION SELECT key FROM plugin_defaults UNION SELECT plugin_id FROM settings_vault.plugin_storage_namespaces").map_err(|e|e.to_string())?;
             for id in stmt.query_map([],|r|r.get::<_,String>(0)).map_err(|e|e.to_string())? {ids.insert(id.map_err(|e|e.to_string())?);}
             if ids.len()>4096 {return Err("Stored plugin inventory exceeds limit".into());}
             ids.into_iter().map(|id| {let mut row=summary(conn,&id,names.get(&id).or_else(||retained.get(&id)).cloned().unwrap_or_else(||id.clone()),names.contains_key(&id),retained.contains_key(&id))?;row.enabled=enabled.contains(&id);Ok(row)}).collect()
@@ -246,20 +255,14 @@ impl PluginHost {
                 .map(|(id, token)| id.len() + token.len())
                 .sum(),
             move |tx| {
-                let mut retained: HashMap<String, String> = stream_dock_manager_storage::read_json(
-                    tx,
-                    Domain::PluginMetadata,
-                    "retained",
-                    1024 * 1024,
-                )?
-                .unwrap_or_default();
                 for (owner, expected) in &selections {
                     if summary(
                         tx,
                         owner,
                         String::new(),
                         false,
-                        retained.contains_key(owner),
+                        stream_dock_manager_storage::plugin_installations::get(tx, owner)?
+                            .is_some_and(|state| state.retained_name.is_some()),
                     )?
                     .review_token
                         != *expected
@@ -279,18 +282,17 @@ impl PluginHost {
                         Domain::PluginMetadata,
                         &format!("storage-removed:{owner}"),
                     )?;
-                    retained.remove(owner);
+                    stream_dock_manager_storage::delete(
+                        tx,
+                        Domain::PluginMetadata,
+                        &format!("retained-family:{owner}"),
+                    )?;
+                    stream_dock_manager_storage::plugin_installations::clear_retained(tx, owner)?;
                 }
-                stream_dock_manager_storage::write_json(
-                    tx,
-                    Domain::PluginMetadata,
-                    "retained",
-                    &retained,
-                    1024 * 1024,
-                )?;
                 Ok(())
             },
         )?;
+        hub.invalidate_persistence_sizes();
         for id in &selected {
             hub.context_state
                 .binding_settings
@@ -383,7 +385,28 @@ mod tests {
         let latest = host.stored_data().unwrap().pop().unwrap();
         host.purge_stored_data("fixture.purge", &latest.review_token)
             .unwrap();
-        let row = host.stored_data().unwrap().pop().unwrap();
+        {
+            let mut hub = host.hub.lock().unwrap();
+            assert!(hub.persistence_sizes.lock().unwrap().is_none());
+            hub.globals
+                .insert("fixture.after-purge".into(), json!({"saved":true}));
+            hub.persist_scoped(persistence::Scope {
+                globals: &["fixture.after-purge"],
+                defaults: &[],
+                metadata: &[],
+            })
+            .unwrap();
+            assert!(!Hub::load(hub.store.as_ref().unwrap())
+                .unwrap()
+                .globals
+                .contains_key("fixture.purge"));
+        }
+        let row = host
+            .stored_data()
+            .unwrap()
+            .into_iter()
+            .find(|row| row.plugin_id == "fixture.purge")
+            .unwrap();
         assert_eq!(row.record_count, 0);
         assert_ne!(row.generation, latest.generation);
         assert!(host

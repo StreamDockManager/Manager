@@ -129,6 +129,7 @@ fn clear_draft(draft: &mut Draft, id: &str) -> bool {
     if value.get("actionDraft").is_some_and(|draft| {
         draft["action"]["kind"] == "plugin" && draft["action"]["plugin_id"] == id
     }) && value.get("dialActions").is_none_or(Value::is_null)
+        && value.get("eventActions").is_none()
     {
         for key in ["asset", "pluginAppearance", "composition"] {
             changed |= value.remove(key).is_some();
@@ -204,6 +205,7 @@ impl StyleChanges {
                 && draft.value["actionDraft"]["action"]["kind"] == "plugin"
                 && draft.value["actionDraft"]["action"]["plugin_id"] == id
                 && draft.value.get("dialActions").is_none_or(Value::is_null)
+                && draft.value.get("eventActions").is_none()
             {
                 drafts_changed = true;
                 return false;
@@ -244,13 +246,11 @@ impl StyleChanges {
                 if let Some(action) = draft.value.get_mut("actionDraft") {
                     drafts_changed |= purge_action_draft(action, id);
                 }
-                if let Some(lanes) = draft
-                    .value
-                    .get_mut("dialActions")
-                    .and_then(Value::as_array_mut)
-                {
-                    for lane in lanes {
-                        drafts_changed |= purge_action_draft(lane, id);
+                for key in ["dialActions", "eventActions"] {
+                    if let Some(lanes) = draft.value.get_mut(key).and_then(Value::as_array_mut) {
+                        for lane in lanes {
+                            drafts_changed |= purge_action_draft(lane, id);
+                        }
                     }
                 }
             }

@@ -67,7 +67,7 @@ pub(super) fn effect(
     }
     if matches!(
         action,
-        Action::Macro { .. } | Action::Dial { .. } | Action::Delay { .. }
+        Action::Macro { .. } | Action::Dial { .. } | Action::Events { .. } | Action::Delay { .. }
     ) {
         return None;
     }

@@ -490,7 +490,7 @@ impl Runtime {
             {
                 return Err("Grouped key updates are unavailable for this model.".into());
             }
-            selected_surfaces(&device, &config.workload)?;
+            selected_surfaces(&device.manifest, &config.workload)?;
             Some(device)
         };
         if config.target == "plugins" {
@@ -638,11 +638,14 @@ struct Surface {
     width: u16,
     height: u16,
     background: bool,
+    rotation: u16,
 }
 // Choose drawable device surfaces for the requested benchmark workload
-fn selected_surfaces(device: &DeviceInfo, workload: &str) -> Result<Vec<Surface>, String> {
-    let mut keys: Vec<_> = device
-        .manifest
+fn selected_surfaces(
+    manifest: &hardware_core::ModelManifest,
+    workload: &str,
+) -> Result<Vec<Surface>, String> {
+    let mut keys: Vec<_> = manifest
         .controls
         .iter()
         .filter(|c| c.image_slot.is_some() && (c.kind == "button" || workload == "all_screens"))
@@ -651,11 +654,11 @@ fn selected_surfaces(device: &DeviceInfo, workload: &str) -> Result<Vec<Surface>
             width: c.image_width.unwrap_or(c.width),
             height: c.image_height.unwrap_or(c.height),
             background: false,
+            rotation: manifest.layout.rotation,
         })
         .collect();
     if keys.is_empty() {
-        keys = device
-            .manifest
+        keys = manifest
             .controls
             .iter()
             .filter(|c| c.image_slot.is_some())
@@ -664,6 +667,7 @@ fn selected_surfaces(device: &DeviceInfo, workload: &str) -> Result<Vec<Surface>
                 width: c.image_width.unwrap_or(c.width),
                 height: c.image_height.unwrap_or(c.height),
                 background: false,
+                rotation: manifest.layout.rotation,
             })
             .collect();
     }
@@ -678,8 +682,7 @@ fn selected_surfaces(device: &DeviceInfo, workload: &str) -> Result<Vec<Surface>
     }
     keys.truncate(n);
     if workload == "mixed" {
-        for c in device
-            .manifest
+        for c in manifest
             .controls
             .iter()
             .filter(|c| c.image_slot.is_some() && c.kind != "button")
@@ -690,17 +693,19 @@ fn selected_surfaces(device: &DeviceInfo, workload: &str) -> Result<Vec<Surface>
                     width: c.image_width.unwrap_or(c.width),
                     height: c.image_height.unwrap_or(c.height),
                     background: false,
+                    rotation: manifest.layout.rotation,
                 });
             }
         }
     }
     if ["background", "key_background", "all_background", "mixed"].contains(&workload) {
-        if let Some([width, height]) = device.manifest.capabilities.background_size {
+        if let Some([width, height]) = manifest.capabilities.background_size {
             keys.push(Surface {
                 id: "@background".into(),
                 width,
                 height,
                 background: true,
+                rotation: manifest.layout.rotation,
             });
         } else if workload != "mixed" {
             return Err("Model has no background surface.".into());
@@ -783,11 +788,27 @@ fn generate(surface: &Surface, frame: u64, format: &str, pattern: &str) -> Resul
         &source.into_inner(),
         surface.width,
         surface.height,
-        0,
+        surface.rotation,
         format,
     )
     .map_err(|e| e.to_string())
 }
+#[cfg(all(test, target_os = "macos"))]
+pub(crate) fn qualification_key_numbers(
+    manifest: &hardware_core::ModelManifest,
+) -> Result<Vec<DeviceCommand>, String> {
+    selected_surfaces(manifest, "all_keys")?
+        .iter()
+        .enumerate()
+        .map(|(index, surface)| {
+            Ok(DeviceCommand::Image {
+                control_id: surface.id.clone(),
+                data: generate(surface, index as u64 + 1, "png", "numbered")?,
+            })
+        })
+        .collect()
+}
+
 struct Sink;
 impl Transport for Sink {
     // Write the supplied benchmark data
@@ -922,7 +943,7 @@ fn run_cell(
         .unwrap()
         .get(&device.id)
         .ok_or("Device disconnected.")?;
-    let surfaces = selected_surfaces(device, &config.workload)?;
+    let surfaces = selected_surfaces(&device.manifest, &config.workload)?;
     let module = hardware_registry::modules()
         .into_iter()
         .find(|m| m.manifest().model_id == device.model_id)
@@ -1717,6 +1738,7 @@ mod tests {
             width: 32,
             height: 32,
             background: false,
+            rotation: 0,
         };
         let a = generate(&surface, 42, "png", "numbered").unwrap();
         assert_eq!(a, generate(&surface, 42, "png", "numbered").unwrap());
@@ -1755,7 +1777,7 @@ mod tests {
                 .iter()
                 .find(|device| device.id == id)
                 .unwrap();
-            let surfaces = selected_surfaces(device, "all_screens").unwrap();
+            let surfaces = selected_surfaces(&device.manifest, "all_screens").unwrap();
             let expected: BTreeMap<_, _> = manifest
                 .controls
                 .iter()
@@ -1775,7 +1797,7 @@ mod tests {
                 .map(|surface| (surface.id.as_str(), (surface.width, surface.height)))
                 .collect();
             assert_eq!(actual, expected, "{}", manifest.model_id);
-            let mixed = selected_surfaces(device, "mixed").unwrap();
+            let mixed = selected_surfaces(&device.manifest, "mixed").unwrap();
             assert_eq!(
                 mixed.len(),
                 expected.len() + usize::from(manifest.capabilities.background_size.is_some())
@@ -1828,15 +1850,48 @@ mod tests {
         }
     }
     #[test]
+    fn numbered_benchmark_keys_follow_panel_rotation() {
+        for model in ["n4-pro", "n3-vsd", "k1-pro"] {
+            let manifest = hardware_registry::manifests()
+                .into_iter()
+                .find(|m| m.model_id == model)
+                .unwrap();
+            for surface in selected_surfaces(&manifest, "all_keys").unwrap() {
+                let logical = Surface {
+                    rotation: 0,
+                    ..surface.clone()
+                };
+                let pixels = |s: &Surface| {
+                    image::load_from_memory(&generate(s, 7, "png", "numbered").unwrap())
+                        .unwrap()
+                        .into_rgb8()
+                };
+                let expected = if model == "n4-pro" {
+                    image::imageops::rotate180(&pixels(&logical))
+                } else {
+                    pixels(&logical)
+                };
+                assert_eq!(pixels(&surface), expected, "{model} {}", surface.id);
+            }
+        }
+    }
+
+    #[test]
     // Verify that n4 workload maps all keys touch and background
     fn n4_workload_maps_all_keys_touch_and_background() {
         let root = tempfile::tempdir().unwrap();
         let r = crate::test_support::headless(root.path().into()).unwrap();
         r.simulate(true).unwrap();
         let d = r.snapshot().devices.remove(0);
-        assert_eq!(selected_surfaces(&d, "all_keys").unwrap().len(), 10);
-        assert_eq!(selected_surfaces(&d, "mixed").unwrap().len(), 15);
-        assert_eq!(selected_surfaces(&d, "background").unwrap().len(), 1);
+        assert_eq!(
+            selected_surfaces(&d.manifest, "all_keys").unwrap().len(),
+            10
+        );
+        assert_eq!(selected_surfaces(&d.manifest, "mixed").unwrap().len(), 15);
+        assert_eq!(
+            selected_surfaces(&d.manifest, "background").unwrap().len(),
+            1
+        );
     }
     #[test]
     // Verify that manager benchmark is bounded and does not modify profiles

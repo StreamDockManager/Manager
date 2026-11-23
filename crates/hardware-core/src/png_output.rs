@@ -8,12 +8,20 @@ use std::{borrow::Cow, io::Cursor};
 
 /// Encode already transformed device pixels without changing color depth or alpha
 pub fn encode(pixels: &DynamicImage) -> Result<Vec<u8>> {
+    encode_with(pixels, CompressionType::Default, FilterType::Adaptive)
+}
+
+fn encode_with(
+    pixels: &DynamicImage,
+    compression: CompressionType,
+    filter: FilterType,
+) -> Result<Vec<u8>> {
     let mut bytes = Vec::new();
     pixels
         .write_with_encoder(PngEncoder::new_with_quality(
             &mut bytes,
-            CompressionType::Default,
-            FilterType::Adaptive,
+            compression,
+            filter,
         ))
         .map_err(|error| Error::Protocol(error.to_string()))?;
     Ok(bytes)
@@ -37,12 +45,23 @@ pub fn compact(source: &[u8]) -> Result<Cow<'_, [u8]>> {
     let pixels = reader
         .decode()
         .map_err(|error| Error::Protocol(error.to_string()))?;
-    let bytes = encode(&pixels)?;
+    let bytes = encode_key(&pixels)?;
     Ok(if bytes.len() < source.len() {
         Cow::Owned(bytes)
     } else {
         Cow::Borrowed(source)
     })
+}
+
+pub(crate) fn encode_key(pixels: &DynamicImage) -> Result<Vec<u8>> {
+    // On small opaque LCDs the horizontal PNG filter compresses neighboring
+    // RGB samples well with a shorter DEFLATE search. Keep the balanced encoder
+    // for alpha, higher bit depths and the much larger background transfers.
+    if pixels.as_rgb8().is_some() && pixels.width() <= 112 && pixels.height() <= 112 {
+        encode_with(pixels, CompressionType::Level(3), FilterType::Sub)
+    } else {
+        encode(pixels)
+    }
 }
 
 #[cfg(test)]

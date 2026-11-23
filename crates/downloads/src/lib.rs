@@ -211,6 +211,7 @@ pub struct PruneReport {
     pub errors: Vec<String>,
 }
 pub struct DownloadCache {
+    index: stream_dock_manager_storage::cache_index::Table,
     root: PathBuf,
     limits: CacheLimits,
 }
@@ -236,34 +237,36 @@ impl DownloadCache {
     // Open with limits
     pub fn open_with_limits(root: PathBuf, limits: CacheLimits) -> Result<Self, String> {
         storage::directory(&root)?;
+        let root = root.canonicalize().map_err(|e| e.to_string())?;
         Ok(Self {
-            root: root.canonicalize().map_err(|e| e.to_string())?,
+            index: storage::table(&root),
+            root,
             limits,
         })
     }
     // Read the current subsystem statistics
     pub fn stats(&self) -> Result<CacheStats, String> {
-        storage::stats(&self.root)
+        storage::stats(&self.root, &self.index)
     }
     // Prune for the current operation
     pub fn prune(&self) -> Result<PruneReport, String> {
-        storage::prune(&self.root, self.limits, false)
+        storage::prune(&self.root, &self.index, self.limits, false)
     }
     /// Delete only recognized idle entries. Live Artifact handles remain usable
     pub fn clear(&self) -> Result<PruneReport, String> {
-        storage::prune(&self.root, self.limits, true)
+        storage::prune(&self.root, &self.index, self.limits, true)
     }
     // Discard
     pub fn discard(&self, spec: &ArtifactSpec) -> Result<(), String> {
         spec.validate()?;
-        let entry = storage::acquire_with_limits(&self.root, spec, self.limits)?;
+        let entry = storage::acquire_indexed(&self.root, spec, &self.index)?;
         entry.discard()
     }
     /// Discard idle entries for one caller identity, even if freshly verified
     /// metadata has not yet resolved its expected checksum. Live owners remain
     /// protected and perform their own explicit cancellation cleanup.
     pub fn discard_identity(&self, identity: &str) -> Result<(), String> {
-        storage::discard_identity(&self.root, identity)
+        storage::discard_identity(&self.root, &self.index, identity)
     }
     /// Store an artifact whose publisher is trusted through its origin, without
     /// an expected publisher digest. Local checkpoint hashes still detect damage.
@@ -285,7 +288,7 @@ impl DownloadCache {
         control: &dyn Fn() -> Control,
         progress: &dyn Fn(u64, Option<u64>) -> Result<(), String>,
     ) -> Result<Artifact, String> {
-        let mut entry = storage::acquire_with_limits(&self.root, spec, self.limits)?;
+        let mut entry = storage::acquire_indexed(&self.root, spec, &self.index)?;
         entry.check_control(control())?;
         let mut file = storage::private_file(&entry.body)?;
         entry.reset(&mut file)?;
@@ -383,7 +386,7 @@ impl DownloadCache {
         }
         let initial = Url::parse(&spec.url).map_err(|_| "Invalid artifact URL")?;
         (network.validate)(&initial, false)?;
-        let mut entry = storage::acquire_with_limits(&self.root, spec, self.limits)?;
+        let mut entry = storage::acquire_indexed(&self.root, spec, &self.index)?;
         let mut file = storage::private_file(&entry.body)?;
         let mut hash = Sha256::new();
         // A crash may leave bytes beyond the last fsynced checkpoint. Retain only

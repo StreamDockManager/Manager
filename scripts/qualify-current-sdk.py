@@ -180,7 +180,7 @@ def main():
             print(f"Running qualification stage: {name}", flush=True)
             log.write(f"\n=== {name} ===\n")
             log.flush()
-            result = subprocess.run(command, cwd=ROOT if args.production else snapshot, env=env, stdout=log, stderr=subprocess.STDOUT, check=False)
+            result = subprocess.run([sys.executable, str(ROOT / "scripts/with_test_key.py"), *command], cwd=execution_root, env=env, stdout=log, stderr=subprocess.STDOUT, check=False)
             stages.append({"stage": name, "exit_code": result.returncode})
             print(f"Qualification stage {name}: exit {result.returncode}", flush=True)
     print((destination / "test-output.txt").read_text(), end="")

@@ -2,23 +2,23 @@
 
 Explore the M18 layout in the [Stream Dock Manager](../../README.md) simulator. **Physical M18 support is currently disabled**; installing Manager does not enable it.
 
-| At a glance                   | Details                                          |
-| ----------------------------- | ------------------------------------------------ |
-| Model ID                      | `m18`                                            |
-| Adapter status                | Experimental; physical matching disabled         |
-| Registered controls           | 18 buttons                                       |
-| Hardware testing              | No Manager hardware-tested claim for this model. |
-| Exact layout and capabilities | [Device descriptor](device.toml)                 |
+| At a glance             | Details                                  |
+| ----------------------- | ---------------------------------------- |
+| Model ID                | `m18`                                    |
+| Adapter status          | Experimental; physical matching disabled |
+| Controls                | 18 buttons                               |
+| Hardware testing        | Not physically verified by Manager       |
+| Layout and capabilities | [Device descriptor](device.toml)         |
 
 Registered controls describe the simulator model, not verified physical support. The USB identities below document the variants that remain disabled.
 
-## Get started
+## Set up the simulator
 
-Use the simulator to explore the layout and prepare a profile:
+Physical matching is disabled for every listed M18 variant. Use the simulator to prepare profiles:
 
-1. [Install or build Manager](../../README.md).
-2. Open the simulator and choose M18.
-3. Choose a profile, assign actions to compatible controls, and save your bindings.
+1. [Install Manager](../../README.md).
+2. Open the simulator and select **M18**.
+3. Choose a profile, assign actions and save your bindings.
 
 ## Compatibility
 
@@ -53,7 +53,7 @@ cargo test -p stream-dock-manager-hardware-m18
 cargo run -p xtask -- hardware check --model m18
 ```
 
-These checks validate source behavior and fixtures. For physical qualification, follow [verification/plan.toml](verification/plan.toml) on the exact unit, firmware, and platform. Simulated or replayed tests are not physical measurements.
+These checks validate the adapter and its fixtures. For a physical test, follow the [verification plan](verification/plan.toml) and record the exact variant, firmware, and OS. A simulator or replay does not qualify hardware.
 
 <details>
 <summary>Protocol notes and verification details</summary>

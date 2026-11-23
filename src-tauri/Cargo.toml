@@ -8,6 +8,11 @@ build = "build.rs"
 [features]
 # Opt-in standalone disposable WebKit probe; no command exposes its hooks
 native-inspector-probe = []
+native-resource-probe = []
+
+[[example]]
+name = "resource_diagnostics_probe"
+required-features = ["native-resource-probe"]
 
 [[example]]
 name = "vendor_inspector_probe"
@@ -15,18 +20,20 @@ required-features = ["native-inspector-probe"]
 
 [build-dependencies]
 stream-dock-manager-desktop-contract.workspace = true
-tauri-build = { version = "2.7.4", features = [] }
+tauri-build = { version = "2.7.6", features = [] }
 
 [dev-dependencies]
 base64 = "0.23.1"
 # Isolated vendor inspectors never use Tauri webview initialization
-wry = "=0.57.2"
+wry = "=0.57.3"
 stream-dock-manager-runtime = { workspace = true, features = ["test-support"] }
-tauri = { version = "2.12.5", features = ["test"] }
+stream-dock-manager-storage.workspace = true
+tauri = { version = "2.12.7", features = ["test"] }
 
 [dependencies]
+zeroize = "1.8"
 stream-dock-manager-plugin-runtimes.workspace = true
-tauri = { version = "2.12.5", features = ["tray-icon", "unstable"] }
+tauri = { version = "2.12.7", features = ["tray-icon", "unstable"] }
 tauri-plugin-single-instance = { version = "2.5.5", features = ["deep-link"] }
 tauri-plugin-deep-link = "2.6.3"
 tauri-plugin-log = "2.10.2"
@@ -43,7 +50,7 @@ serde.workspace = true
 serde_json.workspace = true
 base64 = "0.23.1"
 # Isolated vendor inspectors never use Tauri webview initialization
-wry = "=0.57.2"
+wry = "=0.57.3"
 tokio = { version = "1.54.1", features = ["time", "macros", "sync"] }
 
 [target.'cfg(any(target_os = "macos", target_os = "windows"))'.dependencies]
@@ -64,7 +71,17 @@ objc2-web-kit = { version = "0.3.2", default-features = false, features = [
   "WKContentWorld"
 ] }
 block2 = "0.6.2"
-objc2 = "0.6.5"
+objc2 = { version = "0.6.5", features = ["exception"] }
+objc2-user-notifications = { version = "0.3.2", default-features = false, features = [
+  "std",
+  "block2",
+  "UNUserNotificationCenter",
+  "UNNotification",
+  "UNNotificationSettings",
+  "UNNotificationContent",
+  "UNNotificationRequest",
+  "UNNotificationTrigger",
+] }
 objc2-app-kit = { version = "0.3.2", default-features = false, features = [
   "NSWorkspace",
   "block2",
@@ -104,7 +121,7 @@ windows = { version = "0.62.2", features = [
 # GTK 0.19 cannot be mixed into that native type graph independently
 gtk = "0.18"
 webkit2gtk = { version = "=2.0.2", features = ["v2_38"] }
-ashpd = { version = "0.14.0", default-features = false, features = [
+ashpd = { version = "0.14.1", default-features = false, features = [
   "tokio",
   "location",
   "global_shortcuts",

@@ -337,7 +337,7 @@ fn inspect_with_identity(
     }
     report.kind = match file.extension().and_then(|s| s.to_str()) {
         Some("js" | "mjs" | "cjs") => "node",
-        Some("html" | "htm") => "browser",
+        _ if browser::is_html(&file) => "browser",
         _ => "native",
     }
     .into();
@@ -1381,28 +1381,37 @@ mod tests {
     }
 
     #[test]
-    // Verify opendeck paths cover native and flatpak without relative XDG
-    fn opendeck_paths_cover_native_and_flatpak_without_relative_xdg() {
-        let home = Path::new("/home/test");
+    fn opendeck_paths_cover_macos_and_windows_sources() {
+        let fixture = tempfile::tempdir().unwrap();
+        let home = fixture.path();
         assert_eq!(
             opendeck_source_paths("macos", Some(home), None, None),
             vec![home.join("Library/Application Support/opendeck/plugins")]
         );
         assert_eq!(
-            opendeck_source_paths("windows", None, Some(Path::new("/roaming")), None),
-            vec![PathBuf::from("/roaming/opendeck/plugins")]
-        );
-        let linux = opendeck_source_paths("linux", Some(home), None, Some(Path::new("/custom")));
-        assert!(linux.contains(&PathBuf::from("/custom/opendeck/plugins")));
-        assert!(
-            linux.contains(&home.join(".var/app/me.amankhanna.opendeck/config/opendeck/plugins"))
-        );
-        assert!(!linux.contains(&home.join(".config/opendeck/plugins")));
-        assert!(
-            opendeck_source_paths("linux", Some(home), None, Some(Path::new("relative")))
-                .contains(&home.join(".config/opendeck/plugins"))
+            opendeck_source_paths("windows", None, Some(home), None),
+            vec![home.join("opendeck/plugins")]
         );
         assert!(opendeck_source_paths("windows", None, None, None).is_empty());
+    }
+
+    #[cfg(unix)]
+    #[test]
+    // Verify OpenDeck Unix path semantics for Linux native and Flatpak discovery
+    fn opendeck_linux_paths_cover_native_and_flatpak_without_relative_xdg() {
+        let home = Path::new("/home/test");
+        let flatpak = home.join(".var/app/me.amankhanna.opendeck/config/opendeck/plugins");
+        let linux = opendeck_source_paths("linux", Some(home), None, Some(Path::new("/custom")));
+        assert_eq!(
+            linux,
+            vec![PathBuf::from("/custom/opendeck/plugins"), flatpak.clone()]
+        );
+        let mut defaults = vec![home.join(".config/opendeck/plugins"), flatpak];
+        defaults.sort();
+        assert_eq!(
+            opendeck_source_paths("linux", Some(home), None, Some(Path::new("relative"))),
+            defaults
+        );
     }
     #[test]
     // Verify opendeck override is blocked without modifying source
@@ -1729,7 +1738,7 @@ mod controlled_probe_tests {
             "/bin/sh",
             &[
                 "-c",
-                "printf '%s' $$ > \"$1\"; sleep 30",
+                "printf '%s' $$ > \"$1.tmp\" && mv \"$1.tmp\" \"$1\" && sleep 30",
                 "probe",
                 marker_arg,
             ],

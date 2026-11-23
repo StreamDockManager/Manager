@@ -95,6 +95,13 @@ class SyntaxGateTests(unittest.TestCase):
         self.assertEqual(checker.cargo_command(config='/tmp/sdk.toml')[-2:],
                          ['--config', '/tmp/sdk.toml'])
 
+    def test_strict_clippy_retains_locked_targets_and_json_ownership_scan(self):
+        self.assertEqual(
+            checker.cargo_command(clippy=True),
+            ['cargo', 'clippy', '--locked', '--all-targets', '--message-format=json', '--workspace',
+             '--', '-D', 'warnings'],
+        )
+
     # Verify python syntax failure does not write bytecode
     def test_python_syntax_failure_does_not_write_bytecode(self):
         with tempfile.TemporaryDirectory() as directory:

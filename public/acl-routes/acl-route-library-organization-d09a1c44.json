@@ -1,0 +1,22 @@
+{
+  "version": 1,
+  "basePath": "..",
+  "components": {
+    "sd-library-organization": {
+      "source": "components/sd-library-organization.html",
+      "dependencies": [],
+      "options": {
+        "shadow": false,
+        "templateRevision": "sha256-g1lqJ_ESLtMqQKz44A8JWYoccAqYpXmwLhRingLUNrU"
+      },
+      "metadata": {
+        "description": "Installation-local library favorites and tag editor."
+      }
+    }
+  },
+  "groups": {
+    "library-organization": [
+      "sd-library-organization"
+    ]
+  }
+}

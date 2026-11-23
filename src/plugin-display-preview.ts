@@ -113,6 +113,8 @@ export function previewElements(
                 ],
                 visible: item.rect[2] > 0 && item.rect[3] > 0,
                 font: 'sans',
+                font_weight: 400,
+                font_italic: false,
                 size: item.font?.size || 16,
                 foreground: item.color || '#edf2fc',
                 align: 'center',
@@ -211,7 +213,7 @@ export function renderPreviewDisplay(
                 content = lines
                     .map(
                         (line, i) =>
-                            `<text x="${tx}" y="${top + size + i * size * 1.2}" text-anchor="${anchor}" font-family="${escape(cssFontFamily(style.font))}" font-size="${size}" fill="${escape(style.foreground)}">${escape(line)}</text>`,
+                            `<text font-weight="${style.font_weight === 700 ? 700 : 400}" font-style="${style.font_italic ? 'italic' : 'normal'}" x="${tx}" y="${top + size + i * size * 1.2}" text-anchor="${anchor}" font-family="${escape(cssFontFamily(style.font))}" font-size="${size}" fill="${escape(style.foreground)}">${escape(line)}</text>`,
                     )
                     .join('');
             } else {

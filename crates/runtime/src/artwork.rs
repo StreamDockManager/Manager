@@ -172,6 +172,7 @@ impl Runtime {
             .into_iter()
             .map(|(id, crop)| {
                 let mut binding = page.bindings.get(&id).cloned().unwrap_or_else(|| Binding {
+                    live_label: Vec::new(),
                     dial_response: None,
                     activation_policy: Default::default(),
                     title: String::new(),

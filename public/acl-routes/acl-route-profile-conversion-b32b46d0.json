@@ -1,0 +1,22 @@
+{
+  "version": 1,
+  "basePath": "..",
+  "components": {
+    "sd-profile-conversion": {
+      "source": "components/sd-profile-conversion.html",
+      "dependencies": [],
+      "options": {
+        "shadow": false,
+        "templateRevision": "sha256-juqtpEOUiZmokWqBqbwjPGFZIaq2vbdzIRwNvgmoU5I"
+      },
+      "metadata": {
+        "description": "Reviewed cross-model profile conversion. Native staging never executes actions."
+      }
+    }
+  },
+  "groups": {
+    "profile-conversion": [
+      "sd-profile-conversion"
+    ]
+  }
+}

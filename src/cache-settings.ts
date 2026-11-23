@@ -20,13 +20,24 @@ export function createCacheSettings(app: () => AppState) {
         get busy() {
             return this.loading || this.clearing;
         },
+        get totalUsage() {
+            const bytes =
+                this.status?.folders.reduce((total, folder) => total + folder.bytes, 0) ?? 0;
+            return cacheBytes(bytes);
+        },
         // Expose the known cache directories
         get folders() {
             return (this.status?.folders ?? []).map((folder) => ({
                 ...folder,
-                usage: `${cacheBytes(folder.bytes)} of ${cacheBytes(folder.max_bytes)}`,
-                count: `${folder.entries} of ${folder.max_entries} entries`,
-                age: `${folder.max_age_seconds / 86400} day${folder.max_age_seconds === 86400 ? '' : 's'}`,
+                used: cacheBytes(folder.bytes),
+                target: cacheBytes(folder.max_bytes),
+                overTarget: folder.bytes > folder.max_bytes,
+                count: folder.max_entries
+                    ? `${folder.entries} / ${folder.max_entries}`
+                    : String(folder.entries),
+                age: folder.max_age_seconds
+                    ? `${folder.max_age_seconds / 86400} day${folder.max_age_seconds === 86400 ? '' : 's'}`
+                    : 'Until cleared',
                 protected: `${folder.protected_entries} protected ${folder.protected_entries === 1 ? 'entry' : 'entries'}`,
             }));
         },

@@ -74,11 +74,23 @@
                 gap: 16px;
             }
             .boot-error {
-                margin: 16px 0 0;
+                margin: 0;
                 max-width: 100%;
-                overflow-wrap: anywhere;
+                overflow-wrap: normal;
                 color: var(--danger-text, #ff7b88);
                 font-size: 14px;
+            }
+            .boot-actions {
+                display: flex;
+                flex-wrap: wrap;
+                justify-content: center;
+                gap: 8px;
+                margin-top: 16px;
+            }
+            .boot-action-status {
+                margin: 0;
+                font-size: 13px;
+                color: var(--muted, var(--boot-muted));
             }
             #boot[data-state='error'] .boot-progress {
                 visibility: hidden;
@@ -186,6 +198,131 @@
                 <div class="boot-details" data-boot-details></div>
             </div>
         </section>
+        <dialog
+            id="transfer-password"
+            class="feature-dialog"
+            aria-labelledby="transfer-password-title"
+        >
+            <form>
+                <header class="picker-header">
+                    <h2 id="transfer-password-title">Transfer password</h2>
+                </header>
+                <div class="feature-body settings-form-grid">
+                    <label>
+                        Password
+                        <input type="password" name="password" required maxlength="1024" />
+                    </label>
+                    <label>
+                        Confirm password
+                        <input
+                            type="password"
+                            name="confirmation"
+                            required
+                            maxlength="1024"
+                            autocomplete="new-password"
+                        />
+                    </label>
+                    <p role="alert" class="danger-text" hidden></p>
+                </div>
+                <footer class="feature-footer">
+                    <button type="button" class="button" data-cancel>Cancel</button>
+                    <button type="submit" class="button primary">Continue</button>
+                </footer>
+            </form>
+        </dialog>
+        <dialog id="vault-password" class="feature-dialog" aria-labelledby="vault-password-title">
+            <form method="dialog" autocomplete="off">
+                <header class="picker-header">
+                    <h2 id="vault-password-title">Master password</h2>
+                </header>
+                <div class="feature-body">
+                    <p data-warning>
+                        If you lose this password, your Vault data cannot be recovered.
+                    </p>
+                    <label>
+                        Current master password
+                        <input
+                            type="password"
+                            name="current"
+                            autocomplete="off"
+                            maxlength="1024"
+                            required
+                        />
+                    </label>
+                    <label>
+                        <span data-password-label>Master password</span>
+                        <input
+                            type="password"
+                            name="password"
+                            autocomplete="off"
+                            maxlength="1024"
+                            required
+                        />
+                    </label>
+                    <label>
+                        Retype new master password
+                        <input
+                            type="password"
+                            name="confirmation"
+                            autocomplete="off"
+                            maxlength="1024"
+                            required
+                        />
+                    </label>
+                    <div class="vault-password-feedback">
+                        <div class="vault-unlock-progress" data-vault-unlock-progress>
+                            <span class="review-spinner" aria-hidden="true" hidden></span>
+                            <span role="status"></span>
+                        </div>
+                        <p class="danger-text" role="alert"></p>
+                    </div>
+                </div>
+                <footer class="feature-footer button-row">
+                    <button type="button" class="button" data-cancel>Cancel</button>
+                    <button type="submit" class="button primary">Unlock</button>
+                </footer>
+            </form>
+        </dialog>
+        <dialog
+            id="startup-vault"
+            class="feature-dialog startup-permissions-dialog"
+            aria-labelledby="startup-vault-title"
+        >
+            <header class="picker-header">
+                <h2 id="startup-vault-title">Unlock Vault</h2>
+            </header>
+            <div class="feature-body">
+                <p>
+                    Enter your master password to unlock Vault, or choose Skip to unlock it later.
+                </p>
+                <p class="field-help">
+                    Other plugins start normally. Plugins that require Vault wait until it’s
+                    unlocked.
+                </p>
+                <label>
+                    Master password
+                    <input
+                        type="password"
+                        data-vault-startup-password
+                        autocomplete="off"
+                        maxlength="1024"
+                    />
+                </label>
+                <div class="vault-password-feedback">
+                    <div class="vault-unlock-progress" data-vault-unlock-progress>
+                        <span class="review-spinner" aria-hidden="true" hidden></span>
+                        <span role="status"></span>
+                    </div>
+                    <p class="danger-text" role="alert" data-vault-startup-error></p>
+                </div>
+            </div>
+            <footer class="feature-footer button-row">
+                <button type="button" class="button" data-vault-startup-skip>Skip</button>
+                <button type="button" class="button primary" data-vault-startup-unlock>
+                    Unlock
+                </button>
+            </footer>
+        </dialog>
         <section
             id="startup-permissions"
             x-data="startupPermissionDialog"
@@ -216,6 +353,11 @@
                         Enable the installed copy in Applications. Permissions granted to Terminal
                         or a development build may not apply. If macOS asks you to quit and reopen
                         Manager, do so after enabling access.
+                    </p>
+                    <p class="field-help" x-show="permissions.canSkip">
+                        Development mode: continue to skip remaining requirements, or skip
+                        individual checks below. Skips last only until this app exits. Device input
+                        and permission-dependent features may not work. No OS permission is granted.
                     </p>
                     <div class="startup-permission-list">
                         <template
@@ -248,6 +390,23 @@
                                     >
                                         Open Settings
                                     </button>
+                                    <button
+                                        type="button"
+                                        class="button"
+                                        x-show="permissions.canSkip && permission.required && permission.status !== 'granted' && permission.status !== 'not_required' && !permissions.skippedPermissions.includes(permission.id)"
+                                        :data-permission="permission.id"
+                                        :disabled="permissions.busy || permissions.opening !== ''"
+                                        @click="skipPermission"
+                                        :aria-label="'Skip ' + permission.title + ' for this session'"
+                                    >
+                                        Skip for this session
+                                    </button>
+                                    <span
+                                        class="field-help"
+                                        x-show="permissions.skippedPermissions.includes(permission.id) && permission.status !== 'granted' && permission.status !== 'not_required'"
+                                    >
+                                        Skipped for this session, not enabled
+                                    </span>
                                 </div>
                             </section>
                         </template>
@@ -273,7 +432,8 @@
                         class="button primary"
                         x-show="!permissions.completed"
                         @click="continueSetup()"
-                        :disabled="permissions.busy || !permissions.ready || permissions.opening !== ''"
+                        :disabled="permissions.busy || !permissions.canRequestContinue || permissions.opening !== ''"
+                        x-text="permissions.ready ? 'Connect devices' : 'Continue in development mode'"
                     >
                         Connect devices
                     </button>
@@ -330,6 +490,15 @@
                 </div>
                 <div x-show="$store.pluginSettings.location" class="field-group">
                     <div class="button-row">
+                        <button
+                            type="button"
+                            class="button"
+                            x-data="locationFieldPicker"
+                            :disabled="$store.pluginSettings.locating"
+                            @click="pick"
+                        >
+                            Find a location
+                        </button>
                         <button
                             class="button"
                             @click="$store.pluginSettings.locate()"
@@ -398,6 +567,301 @@
                     Cancel
                 </button>
             </footer>
+        </dialog>
+        <dialog
+            class="feature-dialog palette-browser"
+            x-ref="paletteBrowser"
+            x-data="paletteBrowser"
+            @open-palette-browser.window="openPaletteBrowser"
+            @keydown="escapePalette"
+            @resize.window="resetPosition"
+            aria-modal="false"
+            aria-labelledby="palette-browser-title"
+            aria-describedby="palette-browser-description"
+            @cancel.prevent="closePaletteBrowser"
+        >
+            <header
+                class="picker-header"
+                @pointerdown="moveStart"
+                @pointermove="movePanel"
+                @pointerup="endMove"
+                @pointercancel="endMove"
+            >
+                <div>
+                    <h2 id="palette-browser-title">Browse palettes</h2>
+                    <p
+                        id="palette-browser-description"
+                        x-text="$store.theme.followsSystem ? 'Preview in this window. Confirm to save.' : 'Confirm to set the palette and appearance.'"
+                    ></p>
+                </div>
+                <button
+                    type="button"
+                    class="icon-button"
+                    aria-label="Close palette browser"
+                    @click="closePaletteBrowser"
+                >
+                    ×
+                </button>
+            </header>
+            <div class="picker-toolbar palette-browser-toolbar">
+                <div
+                    class="catalog-tabs palette-tabs"
+                    role="tablist"
+                    aria-label="Palette appearance"
+                    @keydown="navigatePaletteTabs"
+                >
+                    <button
+                        type="button"
+                        id="palette-tab-light"
+                        x-ref="lightPaletteTab"
+                        role="tab"
+                        aria-controls="palette-tab-panel"
+                        :aria-selected="paletteTab === 'light'"
+                        :tabindex="paletteTab === 'light' ? 0 : -1"
+                        @click="showPaletteTab('light')"
+                    >
+                        Light
+                    </button>
+                    <button
+                        type="button"
+                        id="palette-tab-dark"
+                        x-ref="darkPaletteTab"
+                        role="tab"
+                        aria-controls="palette-tab-panel"
+                        :aria-selected="paletteTab === 'dark'"
+                        :tabindex="paletteTab === 'dark' ? 0 : -1"
+                        @click="showPaletteTab('dark')"
+                    >
+                        Dark
+                    </button>
+                </div>
+                <label class="search-field">
+                    <span aria-hidden="true">⌕</span>
+                    <input
+                        type="search"
+                        x-ref="paletteSearch"
+                        aria-label="Search palettes"
+                        placeholder="Search…"
+                        x-model="paletteQuery"
+                        @input="resetPaletteResults"
+                        @keydown.escape.prevent="closePaletteBrowser"
+                        autofocus
+                    />
+                </label>
+            </div>
+            <div class="palette-browser-body">
+                <aside
+                    class="palette-preview"
+                    aria-label="Palette preview"
+                    :style="previewPalette.style"
+                >
+                    <div class="palette-preview-surface">
+                        <div class="palette-preview-name" aria-live="polite">
+                            <small x-text="previewPalette.modeLabel"></small>
+                            <strong
+                                :title="previewPalette.label"
+                                x-text="previewPalette.label"
+                            ></strong>
+                        </div>
+                        <span class="palette-preview-accent" aria-hidden="true"></span>
+                    </div>
+                </aside>
+                <div
+                    id="palette-tab-panel"
+                    class="palette-results"
+                    x-ref="paletteResults"
+                    role="tabpanel"
+                    :aria-labelledby="'palette-tab-' + paletteTab"
+                    :tabindex="matchingPalettes.length ? -1 : 0"
+                >
+                    <p class="field-help" role="status" x-show="!matchingPalettes.length">
+                        No palettes match your search.
+                    </p>
+                    <ul>
+                        <template x-for="scheme in matchingPalettes" :key="paletteTab + scheme.id">
+                            <li>
+                                <button
+                                    type="button"
+                                    class="button palette-option"
+                                    :aria-current="$store.theme.isActivePalette(paletteTab, scheme.id) ? 'true' : null"
+                                    :aria-pressed="pendingPalette && pendingPalette.mode === paletteTab && pendingPalette.id === scheme.id ? 'true' : 'false'"
+                                    @click="previewChoice(paletteTab, scheme.id)"
+                                >
+                                    <span
+                                        class="theme-swatch"
+                                        :data-theme-swatch="scheme.id"
+                                        :data-swatch-mode="paletteTab"
+                                        :style="scheme.swatch || {}"
+                                        aria-hidden="true"
+                                    >
+                                        <span></span>
+                                        <span></span>
+                                        <span></span>
+                                    </span>
+                                    <span x-text="scheme.label"></span>
+                                    <span
+                                        class="chip"
+                                        x-show="scheme.id === savedPaletteId"
+                                        x-text="$store.theme.isActivePalette(paletteTab, scheme.id) ? 'Active' : 'Selected'"
+                                    ></span>
+                                </button>
+                            </li>
+                        </template>
+                    </ul>
+                </div>
+            </div>
+            <footer class="feature-footer palette-browser-footer">
+                <button type="button" class="button" @click="closePaletteBrowser">Cancel</button>
+                <button
+                    type="button"
+                    class="button primary"
+                    :disabled="!canConfirmPalette"
+                    @click="confirmPalette"
+                >
+                    Confirm
+                </button>
+            </footer>
+        </dialog>
+        <dialog
+            id="location-picker"
+            class="feature-dialog"
+            aria-labelledby="location-picker-title"
+            x-data="locationPicker"
+            @open-location-picker.window="open"
+            @close="closed"
+        >
+            <header class="picker-header">
+                <h2 id="location-picker-title">Find a location</h2>
+                <button class="button" @click="close">Close</button>
+            </header>
+            <div class="feature-body feature-fields">
+                <div class="field-group">
+                    <button class="button" @click="gps" :disabled="busy">
+                        Use current location
+                    </button>
+                    <p class="field-help">
+                        Request one position from your operating system and review it before use.
+                    </p>
+                </div>
+                <form @submit.prevent="search" class="settings-section">
+                    <p class="field-help" x-show="providerReady &amp;&amp; !saved">
+                        Search sends the place name or postal code and country to Open-Meteo. The
+                        free service is for noncommercial use. Do not enter a street address.
+                        Location data by GeoNames (CC BY 4.0).
+                    </p>
+                    <p class="field-help" x-show="providerReady &amp;&amp; saved">
+                        Search sends your query and country to your configured provider.
+                    </p>
+                    <details class="disclosure" x-show="providerReady">
+                        <summary>Search provider</summary>
+                        <div class="disclosure-body location-provider-fields">
+                            <label>
+                                Private endpoint
+                                <input
+                                    type="url"
+                                    x-model="endpoint"
+                                    @input="clearResults"
+                                    :disabled="busy"
+                                    placeholder="https://provider.example/search"
+                                    aria-describedby="location-provider-help"
+                                />
+                            </label>
+                            <button
+                                type="button"
+                                class="button"
+                                @click="saveProvider"
+                                :disabled="busy || saved === endpoint"
+                            >
+                                Save provider
+                            </button>
+                            <p id="location-provider-help" class="field-help">
+                                Use a Nominatim-compatible URL, or leave blank to use Open-Meteo.
+                            </p>
+                        </div>
+                    </details>
+                    <label class="preference-toggle">
+                        <input
+                            type="checkbox"
+                            x-model="postal"
+                            @change="clearResults"
+                            :disabled="busy"
+                        />
+                        <span>Search by postal code</span>
+                    </label>
+                    <div class="location-search-fields">
+                        <label class="location-search-query">
+                            <span x-show="saved">Address, place or postal code</span>
+                            <span x-show="!saved">City or postal code</span>
+                            <input
+                                x-model="query"
+                                @input="clearResults"
+                                :disabled="busy"
+                                maxlength="512"
+                                autocomplete="off"
+                                required
+                            />
+                        </label>
+                        <label>
+                            Country code
+                            <input
+                                x-model="country"
+                                @input="clearResults"
+                                :disabled="busy"
+                                maxlength="2"
+                                :required="postal"
+                                placeholder="US"
+                                autocomplete="off"
+                            />
+                        </label>
+                        <button
+                            type="submit"
+                            class="button primary"
+                            :disabled="busy || !query || !providerReady || saved !== endpoint"
+                        >
+                            Search
+                        </button>
+                    </div>
+                </form>
+                <div class="location-search-feedback" x-show="busy || message || results.length">
+                    <p class="field-help" x-show="busy" role="status">
+                        Waiting for location service…
+                    </p>
+                    <p class="field-help" x-show="message" role="status" x-text="message"></p>
+                    <ul
+                        class="location-results"
+                        x-show="results.length"
+                        aria-label="Location results"
+                        role="list"
+                    >
+                        <template x-for="(row, index) in results" :key="index">
+                            <li class="location-result">
+                                <div class="location-result-info">
+                                    <strong x-text="row.label"></strong>
+                                    <span
+                                        class="location-result-coordinates"
+                                        x-text="row.latitude + ', ' + row.longitude"
+                                    ></span>
+                                </div>
+                                <button
+                                    type="button"
+                                    class="button"
+                                    @click="choose"
+                                    :data-index="index"
+                                    :aria-label="'Use ' + row.label"
+                                >
+                                    Use location
+                                </button>
+                            </li>
+                        </template>
+                    </ul>
+                </div>
+                <p
+                    class="field-help"
+                    x-show="results.length &amp;&amp; results[0].source === 'nominatim'"
+                >
+                    © OpenStreetMap contributors · ODbL 1.0
+                </p>
+            </div>
         </dialog>
     </body>
 </html>

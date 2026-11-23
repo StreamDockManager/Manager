@@ -16,11 +16,15 @@ pub fn protocol_host(root: &std::path::Path) -> Result<PluginHost, String> {
     }
     let storage = runtimes.storage().clone();
     let host = PluginHost::with_storage(root.join("plugins"), runtimes, storage)?;
-    // Synthetic test display metadata, not a claim about this machine
+    set_test_display(&host)?;
+    Ok(host)
+}
+
+pub fn set_test_display(host: &PluginHost) -> Result<(), String> {
     host.set_registration_environment(
         stream_dock_manager_plugin_host::RegistrationEnvironment::new(Some("en"), Some(1.0))?,
     );
-    Ok(host)
+    Ok(())
 }
 
 // Construct demand for the action under test

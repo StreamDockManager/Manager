@@ -19,10 +19,11 @@ pub async fn prepare_boot_logo(
     device_id: String,
     path: String,
     fit: String,
+    crop: Option<[f64; 4]>,
 ) -> Result<stream_dock_manager_runtime::boot_logo::BootLogoPreview, String> {
     let runtime = runtime.inner().clone();
     crate::editor_lifecycle::blocking_result(&_editor_work, move || {
-        runtime.prepare_boot_logo(&device_id, std::path::Path::new(&path), &fit)
+        runtime.prepare_boot_logo(&device_id, std::path::Path::new(&path), &fit, crop)
     })
     .await
 }
@@ -75,6 +76,50 @@ pub fn simulator_models(
     _editor_work: crate::editor_lifecycle::EditorWork,
 ) -> Vec<hardware_core::ModelManifest> {
     hardware_registry::manifests()
+}
+// Arm a scoped gesture listener without dispatching selected live input
+#[expect(
+    clippy::too_many_arguments,
+    reason = "Preserve the existing control event test IPC argument names"
+)]
+#[tauri::command]
+pub fn arm_control_event_test(
+    _editor_work: crate::editor_lifecycle::EditorWork,
+    runtime: tauri::State<Arc<Runtime>>,
+    device_id: String,
+    control_id: String,
+    event_index: usize,
+    assigned: Vec<usize>,
+    multi_press_ms: u16,
+    hold_ms: u16,
+) -> Result<stream_dock_manager_runtime::control_event_test::ControlEventTest, String> {
+    runtime.arm_control_event_test(
+        &device_id,
+        &control_id,
+        event_index,
+        &assigned,
+        multi_press_ms,
+        hold_ms,
+    )
+}
+// Read the current gesture test result
+#[tauri::command]
+pub fn read_control_event_test(
+    _editor_work: crate::editor_lifecycle::EditorWork,
+    runtime: tauri::State<Arc<Runtime>>,
+    token: String,
+) -> Result<stream_dock_manager_runtime::control_event_test::ControlEventTest, String> {
+    runtime.read_control_event_test(&token)
+}
+// Cancel only the named test; a retired token cannot cancel its replacement
+#[tauri::command]
+pub fn cancel_control_event_test(
+    _editor_work: crate::editor_lifecycle::EditorWork,
+    runtime: tauri::State<Arc<Runtime>>,
+    token: String,
+) -> Result<(), String> {
+    runtime.cancel_control_event_test(&token);
+    Ok(())
 }
 // Handle the trigger control desktop command
 #[tauri::command]
@@ -694,6 +739,45 @@ pub async fn check_firmware(
     })
     .await
 }
+// Read cached firmware metadata away from the desktop event loop
+#[tauri::command]
+pub async fn firmware_catalog_status(
+    _editor_work: crate::editor_lifecycle::EditorWork,
+    runtime: tauri::State<'_, Arc<Runtime>>,
+    device_id: String,
+) -> Result<stream_dock_manager_runtime::firmware_catalog::FirmwareCatalogReport, String> {
+    let runtime = runtime.inner().clone();
+    crate::editor_lifecycle::blocking_result(&_editor_work, move || {
+        runtime.firmware_catalog_status(&device_id)
+    })
+    .await
+}
+// Refresh bounded firmware metadata away from the desktop event loop
+#[tauri::command]
+pub async fn refresh_firmware_catalog(
+    _editor_work: crate::editor_lifecycle::EditorWork,
+    runtime: tauri::State<'_, Arc<Runtime>>,
+    device_id: String,
+) -> Result<stream_dock_manager_runtime::firmware_catalog::FirmwareCatalogReport, String> {
+    let runtime = runtime.inner().clone();
+    crate::editor_lifecycle::blocking_result(&_editor_work, move || {
+        runtime.refresh_firmware_catalog(&device_id)
+    })
+    .await
+}
+// Persist the explicit test-catalog preference away from the desktop event loop
+#[tauri::command]
+pub async fn set_firmware_catalog_test(
+    _editor_work: crate::editor_lifecycle::EditorWork,
+    runtime: tauri::State<'_, Arc<Runtime>>,
+    enabled: bool,
+) -> Result<(), String> {
+    let runtime = runtime.inner().clone();
+    crate::editor_lifecycle::blocking_result(&_editor_work, move || {
+        runtime.set_firmware_catalog_test(enabled)
+    })
+    .await
+}
 // Handle the open firmware instructions desktop command
 #[tauri::command]
 pub async fn open_firmware_instructions(
@@ -708,6 +792,10 @@ pub async fn open_firmware_instructions(
     .await
 }
 // Handle the media preview desktop command
+#[expect(
+    clippy::too_many_arguments,
+    reason = "Preserve the named desktop IPC arguments and editor lifecycle guard"
+)]
 #[tauri::command]
 pub async fn media_preview(
     _editor_work: crate::editor_lifecycle::EditorWork,
@@ -836,95 +924,47 @@ pub fn subscribe_surfaces(
 ) -> Result<String, String> {
     let runtime = runtime.inner().clone();
     let id = uuid_id();
-    let subscription = runtime.preview_subscriptions.register(id.clone());
+    let subscription = runtime
+        .preview_subscriptions
+        .register_device(id.clone(), Some(device_id.clone()));
     let result = id.clone();
-    let events = runtime.subscribe();
     std::thread::spawn(move || {
         let _editor_work = _editor_work;
         let worker = subscription;
         let mut preview =
-            stream_dock_manager_runtime::preview::SurfacePreviewStream::new(id.clone());
-        let mut dirty = true;
+            stream_dock_manager_runtime::preview::SurfacePreviewStream::for_browser(id.clone());
+        let mut packet_sequence = 0u64;
         let mut next_frame = std::time::Instant::now();
-        while !worker.canceled() && !runtime.is_stopping() {
-            if dirty && worker.ready() && std::time::Instant::now() >= next_frame {
-                let session = runtime.snapshot().session(&device_id);
-                let next_scene = format!("{}:{}", session.profile_id, session.page_id,);
-                let current = runtime.preview_surfaces_binary(&device_id);
-                if current.is_err() {
-                    runtime.metrics.record("preview_render_retries", 1.0);
+        while worker.wait_for_frame(next_frame) && !runtime.is_stopping() {
+            if let Some((delta, frames)) = preview.render_next(&runtime, &device_id) {
+                packet_sequence += 1;
+                let metadata = serde_json::to_vec(&serde_json::json!({"acknowledgement":{"generation":id,"sequence":packet_sequence},"delta":delta,"frames":frames.iter().map(|(id, bytes)| serde_json::json!({"id":id,"length":bytes.len(),"mime":if bytes.starts_with(&[0xff,0xd8]) {"image/jpeg"} else {"image/png"}})).collect::<Vec<_>>()})).unwrap();
+                let packet_size =
+                    4 + metadata.len() + frames.values().map(|bytes| bytes.len()).sum::<usize>();
+                if metadata.len() > 65536 || packet_size > 32 * 1024 * 1024 {
+                    runtime.metrics.record("preview_packet_limit", 1.0);
+                    break;
                 }
-                let (current, frames) = match current {
-                    Ok((current, frames)) => (Ok(current), frames),
-                    Err(error) => (Err(error), Default::default()),
-                };
-                if let Some(delta) = preview.update_at(
-                    &next_scene,
-                    current,
-                    &runtime.preview_frame_rates(&device_id),
-                    std::time::Instant::now(),
-                ) {
-                    let wanted: std::collections::BTreeSet<_> = delta
-                        .surfaces
-                        .values()
-                        .filter_map(|v| v.as_ref())
-                        .chain(delta.background.iter())
-                        .cloned()
-                        .collect();
-                    let frames: Vec<_> = frames
-                        .into_iter()
-                        .filter(|(id, _)| wanted.contains(id))
-                        .collect();
-                    let metadata = serde_json::to_vec(&serde_json::json!({"delta":delta,"frames":frames.iter().map(|(id, bytes)| serde_json::json!({"id":id,"length":bytes.len(),"mime":if bytes.starts_with(&[0xff,0xd8]) {"image/jpeg"} else {"image/png"}})).collect::<Vec<_>>()})).unwrap();
-                    if metadata.len() > 65536
-                        || frames.iter().map(|(_, bytes)| bytes.len()).sum::<usize>()
-                            + metadata.len()
-                            + 4
-                            > 32 * 1024 * 1024
-                    {
-                        runtime.metrics.record("preview_packet_limit", 1.0);
-                        break;
-                    }
-                    let mut response = (metadata.len() as u32).to_le_bytes().to_vec();
-                    response.extend(metadata);
-                    for (_, bytes) in frames {
-                        response.extend(bytes);
-                    }
-                    runtime
-                        .metrics
-                        .record("preview_bytes", response.len() as f64);
-                    worker.sent();
-                    if on_frame.send(tauri::ipc::Response::new(response)).is_err() {
-                        break;
-                    }
+                let mut response = Vec::with_capacity(packet_size);
+                response.extend_from_slice(&(metadata.len() as u32).to_le_bytes());
+                response.extend_from_slice(&metadata);
+                for (_, bytes) in frames {
+                    response.extend_from_slice(&bytes);
                 }
-                dirty = preview.needs_refresh();
-                next_frame = stream_dock_manager_runtime::media::advance_deadline(
-                    next_frame,
-                    std::time::Instant::now(),
-                    preview.interval(),
-                );
-            }
-            let timeout = if dirty && worker.ready() {
-                next_frame.saturating_duration_since(std::time::Instant::now())
-            } else {
-                std::time::Duration::from_millis(if dirty { 5 } else { 250 })
-            };
-            if let Ok(event) = events.recv_timeout(timeout) {
-                if [
-                    "profiles",
-                    "devices",
-                    "sessions",
-                    "plugin-feedback",
-                    "display-theme",
-                    "live-feedback",
-                    "foreground",
-                ]
-                .contains(&event.kind.as_str())
-                {
-                    dirty = true;
+                runtime
+                    .metrics
+                    .record("preview_bytes", response.len() as f64);
+                worker.sent(&id, packet_sequence);
+                if on_frame.send(tauri::ipc::Response::new(response)).is_err() {
+                    break;
                 }
             }
+            worker.refresh(preview.needs_refresh());
+            next_frame = stream_dock_manager_runtime::media::advance_deadline(
+                next_frame,
+                std::time::Instant::now(),
+                preview.interval(),
+            );
         }
     });
     Ok(result)
@@ -935,8 +975,12 @@ pub fn acknowledge_surface_frame(
     _editor_work: crate::editor_lifecycle::EditorWork,
     runtime: tauri::State<Arc<Runtime>>,
     id: String,
+    generation: String,
+    sequence: u64,
 ) {
-    runtime.preview_subscriptions.acknowledge(&id);
+    runtime
+        .preview_subscriptions
+        .acknowledge(&id, &generation, sequence);
 }
 // Handle the uuid ID desktop command
 fn uuid_id() -> String {
@@ -1006,6 +1050,31 @@ pub fn save_setup_progress(
 pub fn authorize_accessibility(_editor_work: crate::editor_lifecycle::EditorWork) -> bool {
     stream_dock_manager_runtime::automation::title_permission(true)
 }
+#[tauri::command]
+pub fn arm_input_trace(
+    _editor_work: crate::editor_lifecycle::EditorWork,
+    runtime: tauri::State<Arc<Runtime>>,
+    device_id: String,
+) -> Result<stream_dock_manager_runtime::input_trace::InputTrace, String> {
+    runtime.arm_input_trace(&device_id)
+}
+#[tauri::command]
+pub fn read_input_trace(
+    _editor_work: crate::editor_lifecycle::EditorWork,
+    runtime: tauri::State<Arc<Runtime>>,
+    token: String,
+) -> Result<stream_dock_manager_runtime::input_trace::InputTrace, String> {
+    runtime.read_input_trace(&token)
+}
+#[tauri::command]
+pub fn dismiss_input_trace(
+    _editor_work: crate::editor_lifecycle::EditorWork,
+    runtime: tauri::State<Arc<Runtime>>,
+    token: String,
+) {
+    runtime.dismiss_input_trace(&token)
+}
+
 // Handle the evaluate rules desktop command
 #[tauri::command]
 pub fn evaluate_rules(
@@ -1015,6 +1084,15 @@ pub fn evaluate_rules(
 ) -> Vec<stream_dock_manager_runtime::automation::RuleEvaluation> {
     stream_dock_manager_runtime::automation::preview(&runtime, &device_id)
 }
+#[tauri::command]
+pub fn test_automation_rules(
+    _editor_work: crate::editor_lifecycle::EditorWork,
+    runtime: tauri::State<Arc<Runtime>>,
+    request: stream_dock_manager_runtime::automation::RuleTest,
+) -> Result<stream_dock_manager_runtime::automation::RuleTestResult, String> {
+    stream_dock_manager_runtime::automation::test_rules(&runtime.snapshot(), request)
+}
+
 // Handle the preview binding desktop command
 #[tauri::command]
 pub async fn preview_binding(
@@ -1266,10 +1344,16 @@ pub async fn prepare_profile_import(
     _editor_work: crate::editor_lifecycle::EditorWork,
     runtime: tauri::State<'_, Arc<Runtime>>,
     path: String,
+    password: Option<String>,
 ) -> Result<stream_dock_manager_runtime::importing::ImportPreview, String> {
+    let password = password.map(zeroize::Zeroizing::new);
     let runtime = runtime.inner().clone();
     crate::editor_lifecycle::blocking_result(&_editor_work, move || {
-        runtime.prepare_profile_import(std::path::Path::new(&path))
+        stream_dock_manager_runtime::importing::read_transfer(
+            std::path::Path::new(&path),
+            password.as_ref().map(|s| s.as_str()),
+            |p| runtime.prepare_profile_import(p),
+        )
     })
     .await
 }
@@ -1489,6 +1573,10 @@ pub async fn prepare_catalog_download(
     .await
 }
 // Handle the commit plugin package desktop command
+#[expect(
+    clippy::too_many_arguments,
+    reason = "Preserve the existing package review IPC argument names"
+)]
 #[tauri::command]
 pub async fn commit_plugin_package(
     _editor_work: crate::editor_lifecycle::EditorWork,
@@ -1497,6 +1585,8 @@ pub async fn commit_plugin_package(
     id: String,
     allow_channel_change: bool,
     replace: bool,
+    force_reinstall: Option<bool>,
+    approvals: Option<Vec<stream_dock_manager_plugin_host::permissions::ActionScope>>,
 ) -> Result<Snapshot, String> {
     let old_views: Vec<_> = {
         let host = runtime.plugins.lock().unwrap();
@@ -1506,8 +1596,16 @@ pub async fn commit_plugin_package(
             .collect()
     };
     let owned = runtime.inner().clone();
+    let editor = _editor_work.generation()?;
     let result = crate::editor_lifecycle::spawn_blocking(&_editor_work, move || {
-        owned.commit_plugin_package(&id, allow_channel_change, replace)
+        owned.commit_reviewed_plugin_package(
+            &id,
+            allow_channel_change,
+            replace,
+            Some(editor),
+            approvals.as_deref().unwrap_or_default(),
+            force_reinstall.unwrap_or(false),
+        )
     })
     .await
     .map_err(|e| e.to_string())?;
@@ -1731,10 +1829,16 @@ pub async fn prepare_macro_import(
     _editor_work: crate::editor_lifecycle::EditorWork,
     runtime: tauri::State<'_, Arc<Runtime>>,
     path: String,
+    password: Option<String>,
 ) -> Result<stream_dock_manager_runtime::macro_sharing::MacroImportPreview, String> {
+    let password = password.map(zeroize::Zeroizing::new);
     let runtime = runtime.inner().clone();
     crate::editor_lifecycle::blocking_result(&_editor_work, move || {
-        runtime.prepare_macro_import(std::path::Path::new(&path))
+        stream_dock_manager_runtime::importing::read_transfer(
+            std::path::Path::new(&path),
+            password.as_ref().map(|s| s.as_str()),
+            |p| runtime.prepare_macro_import(p),
+        )
     })
     .await
 }
@@ -2201,6 +2305,21 @@ pub async fn media_library(
     })
     .await
 }
+// Audit media ownership only when explicitly requested by the user
+#[tauri::command]
+pub async fn audit_media_library(
+    _editor_work: crate::editor_lifecycle::EditorWork,
+    runtime: tauri::State<'_, Arc<Runtime>>,
+    page: usize,
+    page_size: usize,
+    query: String,
+) -> Result<stream_dock_manager_runtime::media_library::MediaLibraryPage, String> {
+    let runtime = runtime.inner().clone();
+    crate::editor_lifecycle::blocking_result(&_editor_work, move || {
+        runtime.audit_media_library(page, page_size, &query)
+    })
+    .await
+}
 // Handle the media thumbnail desktop command
 #[tauri::command]
 pub async fn media_thumbnail(
@@ -2344,6 +2463,36 @@ pub async fn commit_media_deletion(
     })
     .await
 }
+/// Publish the entire rendered set together. Dropping the private directory removes partial writes.
+#[tauri::command]
+pub async fn write_profile_reference(
+    _editor_work: crate::editor_lifecycle::EditorWork,
+    directory: String,
+    names: Vec<String>,
+    content: Vec<String>,
+) -> Result<String, String> {
+    crate::editor_lifecycle::blocking_result(&_editor_work, move || {
+        crate::profile_reference::write(std::path::Path::new(&directory), &names, &content)
+    })
+    .await
+}
+
+#[tauri::command]
+pub async fn rehearse_export(
+    _editor_work: crate::editor_lifecycle::EditorWork,
+    runtime: tauri::State<'_, Arc<Runtime>>,
+    id: String,
+    expected_revision: u64,
+    sha256: String,
+    model: String,
+) -> Result<Vec<stream_dock_manager_runtime::export_review::RehearsalFinding>, String> {
+    let runtime = runtime.inner().clone();
+    crate::editor_lifecycle::blocking_result(&_editor_work, move || {
+        runtime.rehearse_export(&id, expected_revision, &sha256, &model)
+    })
+    .await
+}
+
 // Handle the update export review desktop command
 #[tauri::command]
 pub async fn update_export_review(
@@ -2378,17 +2527,28 @@ pub async fn discard_export_review(
 pub async fn write_export_review(
     _editor_work: crate::editor_lifecycle::EditorWork,
     app: tauri::AppHandle,
-    runtime: tauri::State<'_, Arc<Runtime>>,
     id: String,
     expected_revision: u64,
     sha256: String,
     path: String,
+    password: Option<String>,
 ) -> Result<Option<String>, String> {
-    let runtime = runtime.inner().clone();
+    let password = password.map(zeroize::Zeroizing::new);
+    let runtime = app
+        .try_state::<Arc<Runtime>>()
+        .ok_or("Manager is unavailable")?
+        .inner()
+        .clone();
     let generation = _editor_work.generation()?;
     crate::editor_lifecycle::blocking_result(&_editor_work, move || {
         let path = std::path::Path::new(&path);
-        runtime.write_export_review(&id, expected_revision, &sha256, path)?;
+        let sha256 = runtime.write_export_transfer(
+            &id,
+            expected_revision,
+            &sha256,
+            path,
+            password.as_ref().map(|s| s.as_str()),
+        )?;
         Ok(crate::archive_drag::reviewed_export(
             &app, generation, path, &sha256,
         ))
@@ -3335,6 +3495,25 @@ pub fn slice_artwork(
 ) -> Result<Snapshot, String> {
     runtime.slice_artwork(request, expected_revision)
 }
+// Temporarily expose a Settings palette to negotiated plugin theme consumers
+#[tauri::command]
+pub fn preview_plugin_palette(
+    _editor_work: crate::editor_lifecycle::EditorWork,
+    runtime: tauri::State<'_, Arc<Runtime>>,
+    palette: stream_dock_manager_runtime::hardware_preview::PaletteDraft,
+) -> Result<String, String> {
+    runtime.inner().preview_plugin_palette(palette)
+}
+// Retire only the matching global plugin palette preview
+#[tauri::command]
+pub fn cancel_plugin_palette_preview(
+    _editor_work: crate::editor_lifecycle::EditorWork,
+    runtime: tauri::State<'_, Arc<Runtime>>,
+    token: String,
+) {
+    runtime.cancel_plugin_palette_preview(Some(&token));
+}
+
 // Handle the preview on dock desktop command
 
 #[tauri::command]
@@ -3402,21 +3581,22 @@ pub async fn resolve_interrupted_startup(
     }
     Ok(status)
 }
-// Handle the open manager logs desktop command
-
+// Open only the selected Manager logs directory from the trusted editor, including failed startup
 #[tauri::command]
 pub async fn open_manager_logs<R: tauri::Runtime>(
-    _editor_work: crate::editor_lifecycle::EditorWork,
+    window: tauri::WebviewWindow<R>,
     app: tauri::AppHandle<R>,
 ) -> Result<(), String> {
-    // Resolve from the running configuration, including an explicit --config
-    // The frontend cannot supply an arbitrary path
-    let path = app.state::<Arc<Runtime>>().logs_directory();
-    crate::editor_lifecycle::spawn_blocking(&_editor_work, move || {
-        crate::manager_log::open_folder(&path)
+    if window.label() != "main" {
+        return Err("Manager logs are restricted to the main window".into());
+    }
+    let path = crate::manager_log::selected_directory(&app)
+        .ok_or("Manager logs folder is not available")?;
+    tauri::async_runtime::spawn_blocking(move || {
+        crate::manager_log::open_folder(&path).map_err(|_| "Could not open Manager logs".into())
     })
     .await
-    .map_err(|error| error.to_string())?
+    .map_err(|_| "Could not open Manager logs".to_owned())?
 }
 // Handle the cache status desktop command
 
@@ -3445,15 +3625,16 @@ pub fn startup_permissions(
     _editor_work: crate::editor_lifecycle::EditorWork,
     runtime: tauri::State<Arc<Runtime>>,
 ) -> stream_dock_manager_runtime::startup_permissions::StartupPermissionReport {
-    runtime.startup_permissions(false)
+    crate::startup_permission_gate::report(&runtime)
 }
 // Handle the complete startup permissions desktop command
 #[tauri::command]
 pub fn complete_startup_permissions(
     _editor_work: crate::editor_lifecycle::EditorWork,
     runtime: tauri::State<Arc<Runtime>>,
-) -> stream_dock_manager_runtime::startup_permissions::StartupPermissionReport {
-    runtime.startup_permissions(true)
+    skip_permission: Option<String>,
+) -> Result<stream_dock_manager_runtime::startup_permissions::StartupPermissionReport, String> {
+    crate::startup_permission_gate::complete(&runtime, skip_permission.as_deref())
 }
 // Handle the open startup permission settings desktop command
 #[tauri::command]

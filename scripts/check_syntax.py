@@ -38,8 +38,8 @@ def owned_warning(record, root):
 
 
 # Construct the locked Cargo check invocation for the requested target
-def cargo_command(*, packages=(), target=None, release=False, config=None):
-    command = ['cargo', 'check', '--locked', '--all-targets', '--message-format=json']
+def cargo_command(*, packages=(), target=None, release=False, config=None, clippy=False):
+    command = ['cargo', 'clippy' if clippy else 'check', '--locked', '--all-targets', '--message-format=json']
     if packages:
         for package in packages:
             command += ['--package', package]
@@ -51,7 +51,7 @@ def cargo_command(*, packages=(), target=None, release=False, config=None):
         command.append('--release')
     if config:
         command += ['--config', str(config)]
-    return command
+    return command + (['--', '-D', 'warnings'] if clippy else [])
 
 
 # Run Rust checks and reject project-owned warnings or compiler failures
@@ -94,6 +94,7 @@ def main():
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument('--config', help='Explicit Cargo configuration file or KEY=VALUE override')
     parser.add_argument('--root', type=Path, default=ROOT, help='Rust workspace directory (with --rust-only)')
+    parser.add_argument('--clippy', action='store_true', help='Run strict Clippy with the same local warning policy')
     parser.add_argument('--rust-only', action='store_true', help='Skip Python/TypeScript checks')
     parser.add_argument('--package', action='append', default=[], help='Select a Rust package (repeatable)')
     parser.add_argument('--target', help='Rust target triple; native prerequisites must be installed')
@@ -110,7 +111,7 @@ def main():
     preparer = args.root.resolve() / 'scripts/prepare_patched_deps.py'
     if preparer.is_file():
         subprocess.run([sys.executable, str(preparer)], cwd=args.root.resolve(), check=True)
-    check_rust(cargo_command(packages=args.package, target=args.target, release=args.release, config=args.config), root=args.root.resolve())
+    check_rust(cargo_command(packages=args.package, target=args.target, release=args.release, config=args.config, clippy=args.clippy), root=args.root.resolve())
     print('Syntax/type and local Rust warning checks passed.', flush=True)
 
 

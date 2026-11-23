@@ -5,6 +5,7 @@ edition.workspace = true
 license.workspace = true
 
 [dependencies]
+zeroize = "1.8"
 stream-dock-manager-runtime.workspace = true
 hardware-core.workspace = true
 hardware-registry.workspace = true

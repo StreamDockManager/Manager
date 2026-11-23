@@ -45,6 +45,7 @@ struct Signals {
 struct State {
     pending: VecDeque<Pending>,
     wake: Option<u64>,
+    media_attention: bool,
     restore: Option<u64>,
     identities: HashMap<(String, u64), Signals>,
     shutdown: Option<mpsc::Sender<()>>,
@@ -527,6 +528,25 @@ impl Receiver {
         std::iter::from_fn(|| self.pop(&mut self.0.state.lock().unwrap()))
     }
 
+    // Wake only maintenance scheduling, without admitting a request or repainting devices
+    pub(crate) fn media_waker(&self) -> impl Fn() + Send + Sync + 'static {
+        let shared = Arc::downgrade(&self.0);
+        move || {
+            if let Some(shared) = shared.upgrade() {
+                let mut state = shared.state.lock().unwrap();
+                if !state.closing && !state.closed && !state.media_attention {
+                    state.media_attention = true;
+                    shared.ready.notify_one();
+                }
+            }
+        }
+    }
+
+    // Acknowledge a pending maintenance wake before reading the authoritative budget
+    pub(crate) fn take_media_attention(&self) -> bool {
+        std::mem::take(&mut self.0.state.lock().unwrap().media_attention)
+    }
+
     // Wait for queued work until timeout, closure or disappearance of all senders
     pub fn recv_timeout(&self, timeout: Duration) -> Result<Received, mpsc::RecvTimeoutError> {
         let deadline = Instant::now() + timeout;
@@ -537,6 +557,9 @@ impl Receiver {
             }
             if state.closed || state.senders == 0 {
                 return Err(mpsc::RecvTimeoutError::Disconnected);
+            }
+            if state.media_attention {
+                return Err(mpsc::RecvTimeoutError::Timeout);
             }
             let remaining = deadline.saturating_duration_since(Instant::now());
             if remaining.is_zero() {
@@ -658,6 +681,12 @@ fn request_bytes(request: &Request) -> usize {
                     .saturating_mul(size_of::<DeviceCommand>()),
             )
             .saturating_add(commands.iter().map(command_bytes).sum::<usize>()),
+        Request::RefreshPluginBindings {
+            device, sources, ..
+        } => device
+            .capacity()
+            .saturating_add(sources.capacity().saturating_mul(size_of::<String>()))
+            .saturating_add(sources.iter().map(String::capacity).sum::<usize>()),
         Request::BenchmarkStart { device, .. }
         | Request::BenchmarkStats { device, .. }
         | Request::BenchmarkOutcomes { device, .. }
@@ -705,3 +734,57 @@ fn reject(request: Request, error: &str) {
 #[cfg(test)]
 #[path = "device_mailbox_tests.rs"]
 mod tests;
+
+#[cfg(test)]
+mod media_tests {
+    use super::*;
+
+    #[test]
+    // A pre-wait notification persists and cannot consume a mailbox command slot
+    fn media_attention_is_coalesced_and_keeps_request_order() {
+        let (sender, receiver) = channel();
+        let wake = receiver.media_waker();
+        wake();
+        wake();
+        assert_eq!(sender.stats().pending_count, 0);
+        sender.send(Request::Restore).unwrap();
+        assert!(matches!(
+            receiver.recv_timeout(Duration::ZERO).unwrap().request,
+            Some(Request::Restore)
+        ));
+        assert!(matches!(
+            receiver.recv_timeout(Duration::from_secs(30)),
+            Err(mpsc::RecvTimeoutError::Timeout)
+        ));
+        assert!(receiver.take_media_attention());
+        assert!(!receiver.take_media_attention());
+        drop(receiver);
+        wake();
+    }
+
+    #[test]
+    // A blocked receiver wakes on maintenance without waiting for its ordinary deadline
+    fn media_attention_interrupts_an_idle_mailbox() {
+        let (_sender, receiver) = channel();
+        let wake = receiver.media_waker();
+        let (started, starting) = mpsc::sync_channel(0);
+        let (finished, completion) = mpsc::sync_channel(1);
+        let thread = std::thread::spawn(move || {
+            started.send(()).unwrap();
+            let result = receiver.recv_timeout(Duration::from_secs(3));
+            finished
+                .send((
+                    matches!(result, Err(mpsc::RecvTimeoutError::Timeout)),
+                    receiver.take_media_attention(),
+                ))
+                .unwrap();
+        });
+        starting.recv().unwrap();
+        wake();
+        assert_eq!(
+            completion.recv_timeout(Duration::from_secs(1)).unwrap(),
+            (true, true)
+        );
+        thread.join().unwrap();
+    }
+}

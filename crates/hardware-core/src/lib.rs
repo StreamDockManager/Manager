@@ -167,6 +167,25 @@ pub trait HardwareSession: Send {
     fn supports_frame_encoding(&self, encoding: FrameEncoding) -> bool {
         encoding == FrameEncoding::IndividualUpdates
     }
+    /// A host-rendered key whose final lossless PNG has already been selected.
+    /// Ordinary image commands, including imported/plugin bytes, use the validating path.
+    fn encode_rendered_key(
+        &mut self,
+        control: String,
+        data: Vec<u8>,
+        encoding: FrameEncoding,
+    ) -> Result<FrameUpload> {
+        let mut uploads = self.encode_frame(
+            vec![DeviceCommand::Image {
+                control_id: control,
+                data,
+            }],
+            encoding,
+        )?;
+        uploads
+            .pop()
+            .ok_or_else(|| Error::Protocol("Missing key upload".into()))
+    }
     // Encode frame with purpose
     fn encode_frame_with_purpose(
         &mut self,

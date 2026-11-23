@@ -14,6 +14,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     let root = tempfile::tempdir()?;
     let path = Path::new(&path);
     let mut host = PluginHost::new(root.path().join("plugins"))?;
+    support::set_test_display(&host)?;
     let prepared = PluginHost::prepare_install(&host.installation_root(), path)?;
     let source = PluginHost::prepared_source(&prepared);
     let manifest = PluginHost::prepared_manifest(&prepared);

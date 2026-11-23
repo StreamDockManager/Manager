@@ -3,11 +3,12 @@
 //! Limits apply independently to each folder. Active leases, unknown content,
 //! and user-facing installers are preserved even when their usage prevents reaching a limit
 use serde::Serialize;
-use std::sync::{Arc, Mutex, Weak};
+use std::sync::{mpsc, Arc, Mutex, OnceLock, Weak};
 use std::time::{Duration, Instant};
-use stream_dock_manager_downloads::DownloadCache;
+use stream_dock_manager_downloads::{DownloadCache, PruneReport};
+use stream_dock_manager_plugin_host::artwork_cache::{self, ArtworkCache};
 
-pub const PRUNE_INTERVAL: Duration = Duration::from_secs(60 * 60);
+pub const PRUNE_INTERVAL: Duration = Duration::from_secs(15 * 60);
 const DOWNLOAD_BYTES: u64 = 2 * 1024 * 1024 * 1024;
 const DOWNLOAD_ENTRIES: usize = 32;
 const DOWNLOAD_AGE: u64 = 24 * 60 * 60;
@@ -44,17 +45,17 @@ pub struct CacheCleanupResult {
 
 pub(crate) struct Maintenance {
     downloads: Arc<DownloadCache>,
-    // Serialize manual clear, hourly prune, and status without blocking transfer
-    // work. Per-entry storage leases arbitrate with transfers and their consumers
-    operation: Mutex<()>,
+    artwork: Arc<ArtworkCache>,
+    worker: OnceLock<mpsc::Sender<Request>>,
     last_errors: Mutex<Vec<String>>,
 }
 impl Maintenance {
     // Initialize cache state from the supplied inputs
-    pub(crate) fn new(downloads: Arc<DownloadCache>) -> Self {
+    pub(crate) fn new(downloads: Arc<DownloadCache>, artwork: Arc<ArtworkCache>) -> Self {
         Self {
             downloads,
-            operation: Mutex::new(()),
+            artwork,
+            worker: OnceLock::new(),
             last_errors: Mutex::new(Vec::new()),
         }
     }
@@ -63,20 +64,49 @@ impl Maintenance {
 impl crate::Runtime {
     // Cache status
     pub fn cache_status(&self) -> Result<CacheStatus, String> {
-        let _operation = self
-            .cache_maintenance
-            .operation
-            .lock()
-            .map_err(|e| e.to_string())?;
-        Ok(self.read_cache_status())
+        let (reply, result) = mpsc::channel();
+        self.send_cache_request(Request::Status(reply))?;
+        result.recv().map_err(|_| "Cache worker stopped".to_owned())
     }
 
-    // Read cache status
-    fn read_cache_status(&self) -> CacheStatus {
-        let mut errors = self.cache_maintenance.last_errors.lock().unwrap().clone();
+    /// Explicitly clear recognized idle data. Consumers with leases, manually
+    /// downloaded installers, unknown files, and symlinks remain untouched
+    pub fn clear_cache(&self) -> Result<CacheCleanupResult, String> {
+        let (reply, result) = mpsc::channel();
+        self.send_cache_request(Request::Clear(reply))?;
+        result.recv().map_err(|_| "Cache worker stopped".to_owned())
+    }
+
+    fn send_cache_request(&self, request: Request) -> Result<(), String> {
+        self.cache_maintenance
+            .worker
+            .get()
+            .ok_or("Cache worker unavailable")?
+            .send(request)
+            .map_err(|_| "Cache worker stopped".into())
+    }
+
+    // Run each owner once. Its report is the inventory after any deletions.
+    fn maintain_cache(&self, clear: Option<bool>) -> CacheCleanupResult {
+        let mut errors = Vec::new();
+        let mut removed_entries = 0;
+        let mut removed_bytes = 0;
+        let downloads = &self.cache_maintenance.downloads;
+        let report = match clear {
+            Some(true) => downloads.clear(),
+            Some(false) => downloads.prune(),
+            None => downloads.stats().map(|stats| PruneReport {
+                stats,
+                ..Default::default()
+            }),
+        };
         let mut folders = vec![];
-        match self.cache_maintenance.downloads.stats() {
-            Ok(stats) => {
+        match report {
+            Ok(r) => {
+                removed_entries += r.removed_entries;
+                removed_bytes += r.removed_bytes;
+                errors.extend(r.errors);
+                let stats = r.stats;
                 if stats.usage_incomplete {
                     errors.push(format!(
                         "Download cache: {} protected entries include contents that could not be measured safely; shown usage may be incomplete.",
@@ -96,100 +126,131 @@ impl crate::Runtime {
             }
             Err(error) => errors.push(format!("Download cache: {error}")),
         }
-        let (update_folders, _, _, update_errors) = self.updates.cache_folders(None);
+        match self.cache_maintenance.artwork.maintain(clear) {
+            Ok(r) => {
+                removed_entries += r.removed_entries;
+                removed_bytes += r.removed_bytes;
+                errors.extend(r.errors);
+                folders.push(CacheFolderStatus {
+                    id: "cached-media".into(),
+                    label: "Cached artwork".into(),
+                    bytes: r.bytes,
+                    entries: r.entries,
+                    max_bytes: artwork_cache::MAX_BYTES,
+                    max_entries: 0,
+                    max_age_seconds: artwork_cache::MAX_AGE.as_secs(),
+                    protected_entries: r.protected_entries,
+                });
+            }
+            Err(e) => errors.push(format!("Cached artwork: {e}")),
+        }
+        let (update_folders, entries, bytes, update_errors) = self.updates.cache_folders(clear);
+        removed_entries += entries;
+        removed_bytes += bytes;
         folders.extend(update_folders);
+        match self.firmware_cache_status(clear) {
+            Ok((folder, report)) => {
+                folders.push(folder);
+                removed_entries += report.removed_entries;
+                removed_bytes += report.removed_bytes;
+                errors.extend(report.errors);
+            }
+            Err(e) => errors.push(format!("Firmware cache: {e}")),
+        }
         errors.extend(update_errors);
+        if clear.is_some() {
+            *self.cache_maintenance.last_errors.lock().unwrap() = errors.clone();
+        } else {
+            errors.extend(
+                self.cache_maintenance
+                    .last_errors
+                    .lock()
+                    .unwrap()
+                    .iter()
+                    .cloned(),
+            );
+        }
         errors.sort();
         errors.dedup();
-        CacheStatus { folders, errors }
-    }
-
-    /// Explicitly clear recognized idle data. Consumers with leases, manually
-    /// downloaded installers, unknown files, and symlinks remain untouched
-    pub fn clear_cache(&self) -> Result<CacheCleanupResult, String> {
-        self.maintain_cache(true)
-    }
-
-    // Prune cache
-    pub(crate) fn prune_cache(&self) -> Result<CacheCleanupResult, String> {
-        self.maintain_cache(false)
-    }
-
-    // Serialize cache maintenance and aggregate removed entries, byte counts and failures
-    fn maintain_cache(&self, clear: bool) -> Result<CacheCleanupResult, String> {
-        let _operation = self
-            .cache_maintenance
-            .operation
-            .lock()
-            .map_err(|e| e.to_string())?;
-        let mut removed_entries = 0;
-        let mut removed_bytes = 0u64;
-        let mut errors = vec![];
-        let result = if clear {
-            self.cache_maintenance.downloads.clear()
-        } else {
-            self.cache_maintenance.downloads.prune()
-        };
-        match result {
-            Ok(report) => {
-                removed_entries += report.removed_entries;
-                removed_bytes = removed_bytes.saturating_add(report.removed_bytes);
-                errors.extend(
-                    report
-                        .errors
-                        .into_iter()
-                        .map(|e| format!("Download cache: {e}")),
-                );
-            }
-            Err(error) => errors.push(format!("Download cache: {error}")),
-        }
-        let (_, entries, bytes, update_errors) = self.updates.cache_folders(Some(clear));
-        removed_entries += entries;
-        removed_bytes = removed_bytes.saturating_add(bytes);
-        errors.extend(update_errors);
-        *self.cache_maintenance.last_errors.lock().unwrap() = errors.clone();
-        let status = self.read_cache_status();
-        Ok(CacheCleanupResult {
-            status,
+        CacheCleanupResult {
+            status: CacheStatus {
+                folders,
+                errors: errors.clone(),
+            },
+            errors,
             removed_entries,
             removed_bytes,
-            errors,
-        })
+        }
     }
 }
 
-/// First pass runs on startup; subsequent passes run hourly even when automatic
-/// update discovery is disabled. The weak owner and short sleeps permit shutdown
-/// without retaining an idle application for an hour
-pub(crate) fn start(runtime: Weak<crate::Runtime>) {
-    std::thread::spawn(move || {
-        let mut next = Instant::now();
-        loop {
-            let Some(owner) = runtime.upgrade() else {
-                break;
-            };
-            if owner.is_stopping() {
-                break;
-            }
-            if Instant::now() >= next {
-                match owner.prune_cache() {
-                    Ok(report) if !report.errors.is_empty() => {
-                        owner.emit(
-                            "cache-maintenance",
-                            None,
-                            None,
-                            Some(report.errors.join("; ")),
-                        );
-                    }
-                    Err(error) => owner.emit("cache-maintenance", None, None, Some(error)),
-                    _ => {}
+enum Request {
+    Status(mpsc::Sender<CacheStatus>),
+    Clear(mpsc::Sender<CacheCleanupResult>),
+}
+
+pub(crate) fn start(runtime: &Arc<crate::Runtime>, periodic: bool) -> Result<(), String> {
+    let (tx, rx) = mpsc::channel();
+    let weak = Arc::downgrade(runtime);
+    std::thread::Builder::new()
+        .name("file-cache-maintenance".into())
+        .spawn(move || run_worker(weak, rx, periodic.then_some(PRUNE_INTERVAL)))
+        .map_err(|e| e.to_string())?;
+    runtime
+        .cache_maintenance
+        .worker
+        .set(tx)
+        .map_err(|_| "Cache worker already running".into())
+}
+fn run_worker(
+    runtime: Weak<crate::Runtime>,
+    rx: mpsc::Receiver<Request>,
+    interval: Option<Duration>,
+) {
+    let mut deadline = Instant::now();
+    loop {
+        if let Some(interval) = interval {
+            if Instant::now() >= deadline {
+                let Some(owner) = runtime.upgrade() else {
+                    break;
+                };
+                if owner.is_stopping() {
+                    break;
                 }
-                next = Instant::now() + PRUNE_INTERVAL;
+                let report = owner.maintain_cache(Some(false));
+                let message = (!report.errors.is_empty()).then(|| report.errors.join("; "));
+                owner.emit("cache-maintenance", None, None, message);
+                deadline = Instant::now() + interval;
             }
-            drop(owner);
-            std::thread::sleep(Duration::from_secs(5));
         }
-    });
+        let request = if interval.is_some() {
+            match rx.recv_timeout(deadline.saturating_duration_since(Instant::now())) {
+                Ok(request) => request,
+                Err(mpsc::RecvTimeoutError::Timeout) => continue,
+                Err(_) => break,
+            }
+        } else {
+            match rx.recv() {
+                Ok(request) => request,
+                Err(_) => break,
+            }
+        };
+        let Some(owner) = runtime.upgrade() else {
+            break;
+        };
+        match request {
+            Request::Status(reply) => {
+                let status = owner.maintain_cache(None).status;
+                drop(owner);
+                let _ = reply.send(status);
+            }
+            Request::Clear(reply) => {
+                let result = owner.maintain_cache(Some(true));
+                drop(owner);
+                let _ = reply.send(result);
+            }
+        }
+    }
 }
 
 #[cfg(test)]
@@ -205,11 +266,17 @@ mod tests {
         let runtime = crate::Runtime::build(root.path().to_path_buf(), false).unwrap();
         let status = runtime.cache_status().unwrap();
         assert!(status.errors.is_empty(), "{:?}", status.errors);
-        assert_eq!(status.folders.len(), 3);
+        assert_eq!(status.folders.len(), 5);
         for folder in status.folders {
             let (bytes, entries, age) = match folder.id.as_str() {
+                "cached-media" => (
+                    artwork_cache::MAX_BYTES,
+                    0,
+                    artwork_cache::MAX_AGE.as_secs(),
+                ),
+                "firmware-cache" => (18 * 1024 * 1024, 3, 0),
                 "download-cache" => (DOWNLOAD_BYTES, DOWNLOAD_ENTRIES, DOWNLOAD_AGE),
-                "updates/cache" => (1024 * 1024 * 1024, 64, 24 * 60 * 60),
+                "updates/cache" => (512 * 1024 * 1024, 64, 24 * 60 * 60),
                 "updates/downloads" => (4 * 1024 * 1024 * 1024, 128, 2 * 24 * 60 * 60),
                 unexpected => panic!("Unexpected cache folder: {unexpected}"),
             };
@@ -263,16 +330,50 @@ mod tests {
         file.set_modified(std::time::UNIX_EPOCH + Duration::from_secs(1))
             .unwrap();
         drop(file);
-        start(Arc::downgrade(&runtime));
+        let artwork = root
+            .path()
+            .join("cached-media")
+            .join(format!("{}.art", "a".repeat(64)));
+        std::fs::create_dir_all(artwork.parent().unwrap()).unwrap();
+        std::fs::write(&artwork, b"old media").unwrap();
+        std::fs::File::options()
+            .write(true)
+            .open(&artwork)
+            .unwrap()
+            .set_modified(std::time::UNIX_EPOCH + Duration::from_secs(1))
+            .unwrap();
+        let (sender, rx) = mpsc::channel();
+        let weak = Arc::downgrade(&runtime);
+        let worker =
+            std::thread::spawn(move || run_worker(weak, rx, Some(Duration::from_millis(25))));
         let deadline = Instant::now() + Duration::from_secs(5);
-        while path.exists() && Instant::now() < deadline {
+        while (path.exists() || artwork.exists()) && Instant::now() < deadline {
             std::thread::sleep(Duration::from_millis(10));
         }
         assert!(
             !path.exists(),
             "startup maintenance never pruned an expired metadata entry"
         );
-        assert_eq!(PRUNE_INTERVAL, Duration::from_secs(3600));
+        assert!(!artwork.exists());
+        // Reuse the migrated path after startup. Even though its mtime is fresh,
+        // a durable deletion hint is picked up by the next scheduled pass.
+        let name = artwork.file_name().unwrap().to_str().unwrap();
+        std::fs::write(&artwork, b"new").unwrap();
+        use stream_dock_manager_storage::cache_index::{Kind, Record, Table};
+        let table = Table::new(&root.path().canonicalize().unwrap(), Kind::Artwork);
+        table.record(&Record::file(name.into(), 3)).unwrap();
+        table.hint(name).unwrap();
+        let deadline = Instant::now() + Duration::from_secs(5);
+        while artwork.exists() && Instant::now() < deadline {
+            std::thread::sleep(Duration::from_millis(10));
+        }
+        assert!(
+            !artwork.exists(),
+            "the second scheduled pass did not reclaim the hinted file"
+        );
+        assert_eq!(PRUNE_INTERVAL, Duration::from_secs(900));
+        drop(sender);
+        worker.join().unwrap();
         runtime.shutdown();
     }
 }

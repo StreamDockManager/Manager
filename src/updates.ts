@@ -1,4 +1,6 @@
+import { unlockVault } from './vault-password';
 import { ApplicationUpdateDraft, CatalogUpdateDraft } from './update-preference-drafts';
+import { paginate } from './pagination';
 import { nextTab, tabNavigationKey } from './tab-navigation';
 import * as fileDialogs from './window-dialogs';
 import { registerArchiveReviewer } from './archive-import';
@@ -7,6 +9,8 @@ import { version as managerVersion } from '../package.json';
 import type AlpineType from '@alpinejs/csp';
 import { bridge, native } from './bridge';
 import type {
+    ActionScope,
+    PermissionScope,
     UpdateStatus,
     PluginPackageReview,
     ReleaseAsset,
@@ -21,6 +25,13 @@ import { PollingReader } from './polling-reader';
 import { ownWindowMethods } from './window-work';
 import { windowCloseOwners } from './window-close-owners';
 import { registerCloseDraft, trackCloseRelease } from './close-releases';
+import { permissionLabel, scopeDetails } from './plugin-permissions';
+import { VaultInstallReview, type VaultSetupSlot } from './vault-install-review';
+
+function displayField(value: string) {
+    const words = value.replace(/[_-]+/g, ' ').replace(/\bapi\b/gi, 'API');
+    return words.charAt(0).toUpperCase() + words.slice(1);
+}
 
 // Build release links only from validated repository and source provenance
 export function managerReleaseLinks(
@@ -60,23 +71,39 @@ export type InstallationReviewPhase =
     | { kind: 'idle' }
     | { kind: 'starting' }
     | { kind: 'downloading'; job: string }
-    | { kind: 'preparing' }
+    | { kind: 'preparing'; fromCache?: boolean }
     | {
           kind: 'reviewing' | 'committing';
           review: PluginPackageReview;
           allowChannelChange: boolean;
           replaceInstalled: boolean;
+          forceReinstall: boolean;
+          fromCache?: boolean;
+          approvals?: ActionScope[];
+          requiredReviewId?: string;
       };
 export type InstallationReviewRequest =
     | { kind: 'local'; review: PluginPackageReview }
     | { kind: 'remote'; id: string; channel: string };
-// Start package review with channel-change and replacement permissions unset
-const reviewing = (review: PluginPackageReview): InstallationReviewPhase => ({
+// Start each package review with every installation acknowledgement unset
+const reviewing = (review: PluginPackageReview, fromCache = false): InstallationReviewPhase => ({
     kind: 'reviewing',
+    ...(review.retained_services?.length ? { approvals: review.retained_services } : {}),
     review,
+    fromCache,
     allowChannelChange: false,
     replaceInstalled: false,
+    forceReinstall: false,
 });
+
+// Match full scopes rather than display labels so different destinations or modes stay separate
+function reviewScopeKey(scope: PermissionScope) {
+    return JSON.stringify(scope, Object.keys(scope).sort());
+}
+
+function reviewGrantKey({ action, scope }: ActionScope) {
+    return JSON.stringify([action, reviewScopeKey(scope)]);
+}
 
 // Register the updates
 export function registerUpdates(Alpine: typeof AlpineType, app: () => AppState) {
@@ -90,6 +117,217 @@ export function registerUpdates(Alpine: typeof AlpineType, app: () => AppState) 
         status: null as UpdateStatus | null,
         reviewPhase: { kind: 'idle' } as InstallationReviewPhase,
         reviewQueue: [] as InstallationReviewRequest[],
+        vaultReview: new VaultInstallReview({
+            list: (id, slotId, action) =>
+                bridge.command('vault_setup_slot_entries', { id, slotId, action }),
+            cancel: (id, ticket) => bridge.command('vault_cancel_picker', { id, ticket }),
+            create: (id, slotId, action, ticket, input) =>
+                bridge.command('vault_setup_create_entry', { id, slotId, action, ticket, input }),
+            status: () => bridge.command('vault_status'),
+            unlock: unlockVault,
+            initialize: () => bridge.command('vault_initialize'),
+            permission: (id, slotId, action, allow) =>
+                bridge.command('vault_setup_permission', { id, slotId, action, allow }),
+            select: (id, slotId, action, ticket, entryId, revision, allowDirectRead) =>
+                bridge.command('vault_setup_select', {
+                    id,
+                    slotId,
+                    action,
+                    ticket,
+                    entryId,
+                    revision,
+                    allowDirectRead,
+                }),
+        }),
+        setServiceGrants(items: ActionScope[], allow: boolean) {
+            const phase = this.reviewPhase;
+            if (phase.kind !== 'reviewing' || !items.length) return;
+            const keys = new Set(items.map(reviewGrantKey));
+            const approvals = (phase.approvals ?? []).filter(
+                (item) => !keys.has(reviewGrantKey(item)),
+            );
+            if (allow) approvals.push(...items);
+            this.reviewPhase = { ...phase, approvals };
+        },
+        reviewServiceSelection(tab: 'required' | 'optional') {
+            const phase = this.reviewPhase;
+            if (phase.kind !== 'reviewing' && phase.kind !== 'committing')
+                return { total: 0, selected: 0 };
+            const items = (phase.review.reviewable_services ?? []).filter(
+                (item) => item.required === (tab === 'required'),
+            );
+            const approved = new Set((phase.approvals ?? []).map(reviewGrantKey));
+            return {
+                total: items.length,
+                selected: items.filter((item) => approved.has(reviewGrantKey(item))).length,
+            };
+        },
+        // Bulk approval never crosses from required to optional or selects Vault entries
+        pickAllServices(event: Event) {
+            const checkbox = event.currentTarget as HTMLInputElement;
+            const review = this.review;
+            const tab = checkbox.dataset.required;
+            if (
+                !review ||
+                checkbox.dataset.review !== review.id ||
+                (tab !== 'required' && tab !== 'optional')
+            )
+                return;
+            const items = (review.reviewable_services ?? []).filter(
+                (grant) => grant.required === (tab === 'required'),
+            );
+            this.setServiceGrants(items, checkbox.checked);
+        },
+        // Toggle one exact action and scope without granting its siblings
+        pickServiceAction(event: Event) {
+            const checkbox = event.currentTarget as HTMLInputElement;
+            const review = this.review;
+            if (!review || checkbox.dataset.review !== review.id) return;
+            const index = Number(checkbox.dataset.index);
+            const grant = review.reviewable_services?.[index];
+            if (grant) this.setServiceGrants([grant], checkbox.checked);
+        },
+        // Apply a purpose checkbox to the exact action grants represented by that reason
+        pickServiceReason(event: Event) {
+            const checkbox = event.currentTarget as HTMLInputElement;
+            const review = this.review;
+            if (!review || checkbox.dataset.review !== review.id) return;
+            const index = Number(checkbox.dataset.index);
+            const changes = this.permissionChanges;
+            const anchor = changes.find((row) => row.index === index && index >= 0);
+            if (!anchor) return;
+            const items = changes.flatMap((row) => {
+                const item = review.reviewable_services?.[row.index];
+                return item &&
+                    row.groupKey === anchor.groupKey &&
+                    row.reasonKey === anchor.reasonKey
+                    ? [item]
+                    : [];
+            });
+            this.setServiceGrants(items, checkbox.checked);
+        },
+        pickServiceGroup(event: Event) {
+            const checkbox = event.currentTarget as HTMLInputElement;
+            const review = this.review;
+            if (!review || checkbox.dataset.review !== review.id) return;
+            const items = this.permissionChanges.flatMap((row) => {
+                const item = review.reviewable_services?.[row.index];
+                return item && row.groupKey === checkbox.dataset.permission ? [item] : [];
+            });
+            this.setServiceGrants(items, checkbox.checked);
+        },
+        reviewActionName(action: string) {
+            const prefix = this.review?.package.id + '.';
+            return displayField(action.startsWith(prefix) ? action.slice(prefix.length) : action);
+        },
+        get permissionChanges() {
+            const diff = this.review?.permission_diff;
+            if (!diff) return [];
+            const reviewable = new Map(
+                (this.review?.reviewable_services ?? []).map((item, index) => [
+                    reviewGrantKey(item),
+                    index,
+                ]),
+            );
+            const phase = this.reviewPhase;
+            const approved = new Set(
+                phase.kind === 'reviewing' || phase.kind === 'committing'
+                    ? phase.approvals?.map(reviewGrantKey)
+                    : [],
+            );
+            return (['added', 'removed', 'unchanged'] as const).flatMap((change) =>
+                diff[change].map((item) => {
+                    const key = reviewGrantKey(item);
+                    const index = change === 'removed' ? -1 : (reviewable.get(key) ?? -1);
+                    const purpose =
+                        this.review?.manifest.permissions?.actions[item.action]?.purpose?.trim() ||
+                        '';
+                    const searchDetails = scopeDetails(item.scope);
+                    return {
+                        key: change + key,
+                        reasonKey: JSON.stringify(
+                            purpose ? ['purpose', purpose] : ['action', item.action],
+                        ),
+                        groupKey: JSON.stringify([
+                            item.required,
+                            reviewScopeKey(item.scope),
+                            change === 'removed'
+                                ? 'removed'
+                                : index >= 0
+                                  ? 'reviewable'
+                                  : 'informational',
+                        ]),
+                        index,
+                        selected: index >= 0 && approved.has(key),
+                        label: permissionLabel(item.scope),
+                        required: item.required,
+                        status: { added: 'Added', removed: 'Removed', unchanged: 'Unchanged' }[
+                            change
+                        ],
+                        action: item.action,
+                        actionLabel: this.reviewActionName(item.action),
+                        purpose,
+                        availability:
+                            change === 'removed'
+                                ? 'Removed'
+                                : item.scope.id === 'vault.read-secret' ||
+                                    item.scope.id === 'vault.read-location'
+                                  ? 'Vault setup'
+                                  : 'Unavailable',
+                        searchDetails,
+                        details:
+                            item.scope.id === 'vault.read-location' &&
+                            item.scope.field === item.scope.entry_kind
+                                ? ''
+                                : searchDetails,
+                    };
+                }),
+            );
+        },
+        get reviewVaultSlots() {
+            return (this.review?.manifest?.setup_slots ?? []) as VaultSetupSlot[];
+        },
+        selectedVaultLabel(slotId: string, action: string) {
+            const review = this.review;
+            return (
+                (review && this.vaultReview.selection(review.id, slotId, action)?.entry.label) ||
+                (review?.retained_slots?.some(
+                    (slot) => slot.id === slotId && slot.action === action,
+                )
+                    ? 'Retaining approved entry for this verified publisher'
+                    : '')
+            );
+        },
+        openVaultSlot(event: Event) {
+            const slotId = (event.currentTarget as HTMLElement).dataset.slotId;
+            const action = (event.currentTarget as HTMLElement).dataset.action;
+            const slot = this.reviewVaultSlots.find(
+                (item) => item.id === slotId && item.action === action,
+            );
+            if (this.review && slot && !this.working)
+                return this.vaultReview.open(
+                    this.review.id,
+                    slot,
+                    event.currentTarget as HTMLElement,
+                );
+        },
+        syncVaultChoice(element: HTMLSelectElement) {
+            const id = this.vaultReview.pending?.id ?? '';
+            // A newly returned inline entry may mount its option in a later Alpine effect.
+            // Observe its list as well as selection, and write the native property after both.
+            const count = this.vaultReview.entries.length;
+            void Alpine.nextTick(() => {
+                if (!element.isConnected || this.vaultReview.entries.length !== count) return;
+                if ((this.vaultReview.pending?.id ?? '') === id) element.value = id;
+            });
+        },
+        chooseVaultEntry(event: Event) {
+            this.vaultReview.choose((event.currentTarget as HTMLSelectElement).value);
+        },
+        confirmVaultEntry() {
+            if (this.review && !this.working)
+                return this.vaultReview.confirm(this.review.id, this.vaultReview.directRead);
+        },
         // Derive review from the current updates state
         get review() {
             return this.reviewPhase.kind === 'reviewing' || this.reviewPhase.kind === 'committing'
@@ -104,7 +342,7 @@ export function registerUpdates(Alpine: typeof AlpineType, app: () => AppState) 
         get startingReview() {
             return this.reviewPhase.kind === 'starting';
         },
-        // Derive preparing review from the current updates state
+        // Report whether package validation is in progress
         get preparingReview() {
             return this.reviewPhase.kind === 'preparing';
         },
@@ -133,6 +371,26 @@ export function registerUpdates(Alpine: typeof AlpineType, app: () => AppState) 
         // Replace the installed
         set replaceInstalled(value: boolean) {
             if (this.reviewPhase.kind === 'reviewing') this.reviewPhase.replaceInstalled = value;
+        },
+        // Offer force reinstall only for an explicitly reviewed catalog version exception
+        get forceReinstallAvailable() {
+            return Boolean(this.review?.compatible && this.review.force_reinstall_available);
+        },
+        // Explain what the selected catalog version would replace
+        get forceReinstallHint() {
+            return this.review?.version_change === 'downgrade'
+                ? 'Replaces the installed version with this older package.'
+                : 'Replaces the installed package with this same-version package.';
+        },
+        get forceReinstall() {
+            return (
+                (this.reviewPhase.kind === 'reviewing' || this.reviewPhase.kind === 'committing') &&
+                this.reviewPhase.forceReinstall
+            );
+        },
+        set forceReinstall(value: boolean) {
+            if (this.reviewPhase.kind === 'reviewing' && this.forceReinstallAvailable)
+                this.reviewPhase.forceReinstall = value;
         },
         // Clear the remote reviews
         clearRemoteReviews() {
@@ -243,11 +501,32 @@ export function registerUpdates(Alpine: typeof AlpineType, app: () => AppState) 
         get reviewDownload() {
             return this.status?.jobs.find((job) => job.id === this.pendingReview);
         },
-        // Derive review loading title from the current updates state
+        // Only label a transfer as downloading after the native job reports it
         get reviewLoadingTitle() {
-            return this.pendingReview && !this.preparingReview
+            if (this.reviewPhase.kind === 'preparing')
+                return this.reviewPhase.fromCache ? 'Using cached package…' : 'Preparing review…';
+            if (this.reviewDownload?.download_phase === 'using_cache')
+                return 'Using cached package…';
+            if (this.reviewDownload?.download_phase === 'resolving_source')
+                return 'Contacting catalog…';
+            return this.reviewDownload?.download_phase === 'downloading'
                 ? 'Downloading package…'
-                : 'Preparing review…';
+                : 'Checking package cache…';
+        },
+        get reviewLoadingDetail() {
+            if (this.reviewPhase.kind === 'preparing')
+                return 'Checking package files and compatibility before installation.';
+            if (this.reviewDownload?.download_phase === 'using_cache')
+                return 'The cached package matches the catalog.';
+            if (this.reviewDownload?.download_phase === 'resolving_source')
+                return 'Finding the package at the catalog source.';
+            return this.reviewDownload?.download_phase === 'downloading'
+                ? 'Getting the package from the catalog source.'
+                : 'Looking for a local copy that matches the catalog.';
+        },
+        get reviewUsedCache() {
+            const phase = this.reviewPhase;
+            return (phase.kind === 'reviewing' || phase.kind === 'committing') && !!phase.fromCache;
         },
         // Derive manager error from the current updates state
         get managerError() {
@@ -365,10 +644,80 @@ export function registerUpdates(Alpine: typeof AlpineType, app: () => AppState) 
                 )
                 .sort((a, b) => a.name.localeCompare(b.name));
         },
+        // Explain the official development publication lane without changing sources.
+        get developmentSourceHint() {
+            return Boolean(
+                this.catalogSource === 'repository' &&
+                this.pluginsRepository.trim().toLowerCase() === 'streamdockmanager/plugins' &&
+                this.browseChannel === 'development' &&
+                this.selectedCatalog &&
+                !this.selectedCatalog.plugins.length &&
+                !this.catalogSearch.trim() &&
+                !this.linkedPlugin &&
+                !this.checking &&
+                !this.pluginsError,
+            );
+        },
         // Derive has catalog from the current updates state
         get hasCatalog() {
             return (
                 this.status?.available_catalogs?.some((c) => c.channel === this.channel) || false
+            );
+        },
+        // Require a visit only for newly declared required grants or required Vault entries
+        get needsRequiredPermissionReview() {
+            const review = this.review;
+            if (!review) return false;
+            const retained = new Set((review.retained_services ?? []).map(reviewGrantKey));
+            return (
+                (review.permission_diff?.added ?? []).some((item) => item.required) ||
+                (review.reviewable_services ?? []).some(
+                    (item) => item.required && !retained.has(reviewGrantKey(item)),
+                ) ||
+                this.reviewVaultSlots.some(
+                    (slot) =>
+                        slot.required &&
+                        !review.retained_slots?.some(
+                            (stored) => stored.action === slot.action && stored.id === slot.id,
+                        ),
+                )
+            );
+        },
+        // Tie the required review step to this package review, not an earlier package
+        markRequiredPermissionsReviewed() {
+            const phase = this.reviewPhase;
+            if (phase.kind === 'reviewing' && phase.requiredReviewId !== phase.review.id)
+                phase.requiredReviewId = phase.review.id;
+        },
+        get requiredPermissionReviewComplete() {
+            return (
+                !this.needsRequiredPermissionReview ||
+                (this.reviewPhase.kind === 'reviewing' &&
+                    this.reviewPhase.requiredReviewId === this.reviewPhase.review.id)
+            );
+        },
+        // Retained grants are preselected; an unchecked required scope always blocks install
+        get missingRequiredServiceApprovals() {
+            const phase = this.reviewPhase;
+            if (phase.kind !== 'reviewing' && phase.kind !== 'committing') return false;
+            const approved = new Set((phase.approvals ?? []).map(reviewGrantKey));
+            return (phase.review.reviewable_services ?? []).some(
+                (grant) => grant.required && !approved.has(reviewGrantKey(grant)),
+            );
+        },
+        get requiredPermissionsReady() {
+            return (
+                !this.missingRequiredServiceApprovals &&
+                (!this.review ||
+                    this.vaultReview.ready(
+                        this.review.id,
+                        this.reviewVaultSlots.filter(
+                            (slot) =>
+                                !this.review?.retained_slots?.some(
+                                    (s) => s.action === slot.action && s.id === slot.id,
+                                ),
+                        ),
+                    ))
             );
         },
         // Derive can commit from the current updates state
@@ -376,7 +725,11 @@ export function registerUpdates(Alpine: typeof AlpineType, app: () => AppState) 
             return (
                 Boolean(this.review?.compatible) &&
                 !this.working &&
+                !this.vaultReview.slot &&
+                this.requiredPermissionReviewComplete &&
+                this.requiredPermissionsReady &&
                 (!this.review?.channel_change || this.allowChannelChange) &&
+                (!this.review?.force_reinstall_available || this.forceReinstall) &&
                 (this.review?.trusted || !this.review?.installed_version || this.replaceInstalled)
             );
         },
@@ -408,7 +761,6 @@ export function registerUpdates(Alpine: typeof AlpineType, app: () => AppState) 
                 return {
                     ...plugin.unified_download,
                     os: 'unified',
-                    compatibility: { status: 'unverified' },
                 };
             }
             return plugin.downloads
@@ -433,11 +785,9 @@ export function registerUpdates(Alpine: typeof AlpineType, app: () => AppState) 
         },
         // Describe the selected artifact's reported VSD Craft compatibility
         vsdCraftLabel(plugin: CatalogPlugin) {
-            const status = this.artifact(plugin)?.compatibility.status;
-            if (!status) return '';
-            if (status === 'verified') return 'VSD Craft: Compatible';
-            if (status === 'incompatible') return 'VSD Craft: Not compatible';
-            return 'VSD Craft: Not verified';
+            return plugin.vsd_craft_compatible
+                ? 'VSD Craft: Compatible'
+                : 'VSD Craft: Not compatible';
         },
         // Label an installed plugin's available update and compatibility
         badge(id: string) {
@@ -459,6 +809,8 @@ export function registerUpdates(Alpine: typeof AlpineType, app: () => AppState) 
             }
             this.catalogTab = tab;
             this.catalogOpen = true;
+            if (typeof window !== 'undefined')
+                window.dispatchEvent(new Event('open-plugin-catalog-dialog'));
         },
         // Clear the linked plugin
         clearLinkedPlugin() {
@@ -523,7 +875,8 @@ export function registerUpdates(Alpine: typeof AlpineType, app: () => AppState) 
                     if (job?.state === 'complete') {
                         const id = this.pendingReview;
                         const epoch = this.reviewEpoch;
-                        this.reviewPhase = { kind: 'preparing' };
+                        const fromCache = job.download_phase === 'using_cache';
+                        this.reviewPhase = { kind: 'preparing', fromCache };
                         try {
                             const review = await bridge.command('prepare_catalog_download', { id });
                             if (
@@ -531,7 +884,7 @@ export function registerUpdates(Alpine: typeof AlpineType, app: () => AppState) 
                                 epoch === this.reviewEpoch &&
                                 !windowCloseOwners.closing
                             )
-                                this.reviewPhase = reviewing(review);
+                                this.reviewPhase = reviewing(review, fromCache);
                             else
                                 await trackCloseRelease(`plugin-package:${review.id}`, () =>
                                     bridge.command('cancel_plugin_package', { id: review.id }),
@@ -748,8 +1101,11 @@ export function registerUpdates(Alpine: typeof AlpineType, app: () => AppState) 
                         id: phase.review.id,
                         allowChannelChange: phase.allowChannelChange,
                         replace: phase.replaceInstalled,
+                        forceReinstall: phase.forceReinstall === true,
+                        ...(phase.approvals?.length ? { approvals: phase.approvals } : {}),
                     }),
                 );
+                this.vaultReview.reset();
                 this.pluginSetupCandidates.push(phase.review.package.id);
                 this.reviewPhase = { kind: 'idle' };
                 this.error = '';
@@ -773,6 +1129,7 @@ export function registerUpdates(Alpine: typeof AlpineType, app: () => AppState) 
             // The UI already blocks close during commit; all other entry points obey it too
             if (this.working) return;
             ++this.reviewEpoch;
+            this.vaultReview.reset();
             const phase = this.reviewPhase;
             const queued = this.reviewQueue.splice(0);
             this.reviewPhase = { kind: 'idle' };
@@ -956,6 +1313,18 @@ export function registerUpdates(Alpine: typeof AlpineType, app: () => AppState) 
         canRetry(job: UpdateJob) {
             return Boolean(job.retry_available && job.state === 'failed');
         },
+        downloadJobLabel(job: UpdateJob) {
+            if (job.state === 'complete' && job.download_phase === 'using_cache')
+                return 'Used cached package';
+            if (job.state !== 'running') return job.state;
+            if (job.download_phase === 'downloading') return 'Downloading…';
+            if (job.download_phase === 'resolving_source') return 'Contacting catalog…';
+            if (job.download_phase === 'using_cache') return 'Using cached package…';
+            return job.operation === 'download' ? 'Checking package cache…' : job.state;
+        },
+        showDownloadProgress(job: UpdateJob) {
+            return job.state === 'running' && job.download_phase === 'downloading' && job.total > 0;
+        },
         // Format completed bytes and the total when the download size is known
         downloadProgress(job: UpdateJob) {
             return job.total > 0
@@ -1060,7 +1429,10 @@ export function registerUpdates(Alpine: typeof AlpineType, app: () => AppState) 
             name: 'Package review',
             // Return a snapshot of the current updates state
             state: () =>
-                reactive.review && (reactive.allowChannelChange || reactive.replaceInstalled)
+                reactive.review &&
+                (reactive.allowChannelChange ||
+                    reactive.replaceInstalled ||
+                    reactive.forceReinstall)
                     ? 'dirty'
                     : 'clean',
             // Discard pending updates edits without saving them
@@ -1157,13 +1529,305 @@ export function registerUpdates(Alpine: typeof AlpineType, app: () => AppState) 
             });
     });
     Alpine.data('pluginCatalog', () => ({
+        pageNumber: 1,
+        matches: [] as CatalogPlugin[],
+        catalogPage: paginate<CatalogPlugin>([], 1, 24),
+        updatePage() {
+            this.catalogPage = paginate(this.matches, this.pageNumber, 24);
+        },
+        updateMatches() {
+            this.matches = reactive.catalogOpen ? reactive.availablePlugins : [];
+        },
+        previousPage() {
+            this.pageNumber = Math.max(1, this.catalogPage.page - 1);
+        },
+        nextPage() {
+            this.pageNumber = Math.min(this.catalogPage.pages, this.catalogPage.page + 1);
+        },
         settingsOpen: false,
         reviewTab: 'overview',
         reviewTabs: [
             { id: 'overview', label: 'Overview' },
             { id: 'compatibility', label: 'Compatibility' },
+            { id: 'permissions', label: 'Permissions' },
             { id: 'package', label: 'Package details' },
         ],
+        permissionTab: 'required',
+        permissionQuery: '',
+        get reviewId() {
+            return reactive.review?.id ?? '';
+        },
+        // Set both native properties so partial approval is announced by assistive technology
+        syncPermissionGroup(input: HTMLInputElement, total: number, selected: number) {
+            input.checked = total > 0 && selected === total;
+            input.indeterminate = selected > 0 && !input.checked;
+        },
+        get requiredPermissionCount() {
+            const review = reactive.review;
+            if (!review || reactive.working) return 0;
+            const visitPending = !reactive.requiredPermissionReviewComplete;
+            const requiredSlots = reactive.reviewVaultSlots.filter((slot) => slot.required);
+            const count = new Set<string>();
+            if (visitPending) {
+                for (const grant of review.permission_diff?.added ?? []) {
+                    if (!grant.required) continue;
+                    const { scope } = grant;
+                    const slot = requiredSlots.find(
+                        (slot) =>
+                            (scope.id === 'vault.read-secret' ||
+                                scope.id === 'vault.read-location') &&
+                            slot.action === grant.action &&
+                            slot.field === scope.field,
+                    );
+                    count.add(
+                        slot
+                            ? JSON.stringify(['slot', slot.action, slot.id])
+                            : reviewScopeKey(scope),
+                    );
+                }
+            }
+            const phase = reactive.reviewPhase;
+            const approved = new Set(
+                phase.kind === 'reviewing' ? phase.approvals?.map(reviewGrantKey) : [],
+            );
+            const retained = new Set(review.retained_services?.map(reviewGrantKey));
+            for (const grant of review.reviewable_services ?? []) {
+                const key = reviewGrantKey(grant);
+                if (grant.required && (!approved.has(key) || (visitPending && !retained.has(key))))
+                    count.add(reviewScopeKey(grant.scope));
+            }
+            for (const slot of requiredSlots) {
+                const retained = review.retained_slots?.some(
+                    (item) => item.action === slot.action && item.id === slot.id,
+                );
+                if (
+                    !retained &&
+                    (visitPending ||
+                        !reactive.vaultReview.selection(review.id, slot.id, slot.action))
+                )
+                    count.add(JSON.stringify(['slot', slot.action, slot.id]));
+            }
+            return count.size;
+        },
+        get pendingPermissionLabel() {
+            const count = this.requiredPermissionCount;
+            return 'Permissions (' + count + ' to review)';
+        },
+        get normalizedPermissionQuery() {
+            return this.permissionQuery.trim().toLowerCase();
+        },
+        permissionTextMatches(value?: string | null) {
+            return (
+                !!this.normalizedPermissionQuery &&
+                !!value?.toLowerCase().includes(this.normalizedPermissionQuery)
+            );
+        },
+        clearPermissionSearch() {
+            this.permissionQuery = '';
+            (this.$refs.permissionSearch as HTMLInputElement)?.focus({ preventScroll: true });
+        },
+        // Open matching reasons during search without losing the previous disclosure state
+        syncPermissionDisclosure(details: HTMLDetailsElement, match: boolean) {
+            if (match && details.dataset.beforeSearch === undefined) {
+                details.dataset.beforeSearch = String(details.open);
+                details.open = true;
+            } else if (!match && details.dataset.beforeSearch !== undefined) {
+                details.open = details.dataset.beforeSearch === 'true';
+                delete details.dataset.beforeSearch;
+            }
+        },
+        get permissionGroups() {
+            const changes = reactive.permissionChanges;
+            const slots = reactive.reviewVaultSlots;
+            const query = this.normalizedPermissionQuery;
+            const matches = (...values: (string | null | undefined)[]) =>
+                values.some((value) => this.permissionTextMatches(value));
+            const groups = (['required', 'optional'] as const).map((id) => {
+                const required = id === 'required';
+                const services = changes.filter((change) => change.required === required);
+                const entries = slots.filter((slot) => slot.required === required);
+                const grouped = new Map<string, typeof services>();
+                for (const row of services) {
+                    const actions = grouped.get(row.groupKey);
+                    if (actions) actions.push(row);
+                    else grouped.set(row.groupKey, [row]);
+                }
+                const shownServices = Array.from(grouped, ([key, actions]) => {
+                    const first = actions[0]!;
+                    const byReason = new Map<string, typeof actions>();
+                    for (const row of actions) {
+                        const reason = byReason.get(row.reasonKey);
+                        if (reason) reason.push(row);
+                        else byReason.set(row.reasonKey, [row]);
+                    }
+                    const reasons = Array.from(byReason, ([key, rows]) => ({
+                        key,
+                        label: rows[0]!.purpose || rows[0]!.actionLabel,
+                        index: rows[0]!.index,
+                        actions: rows
+                            .map((row) => (row.purpose ? row.actionLabel : row.action))
+                            .join(', '),
+                        status: [...new Set(rows.map((row) => row.status))].join(' · '),
+                        actionRows: rows.map((row) => ({
+                            key: row.key,
+                            index: row.index,
+                            label: row.actionLabel,
+                            selected: row.selected,
+                        })),
+                        match: rows.some((row) =>
+                            matches(row.action, row.actionLabel, row.purpose, row.status),
+                        ),
+                        selected: rows.filter((row) => row.selected).length,
+                        total: rows.length,
+                    }));
+                    const titleMatch = matches(
+                        first.label,
+                        first.details ? '' : first.searchDetails,
+                    );
+                    return {
+                        key,
+                        reasons,
+                        titleMatch,
+                        match:
+                            titleMatch ||
+                            matches(first.details) ||
+                            reasons.some((reason) => reason.match),
+                        reasonMatch: reasons.some((reason) => reason.match),
+                        label: first.label,
+                        details: first.details,
+                        availability: first.availability,
+                        total: actions.filter((action) => action.index >= 0).length,
+                        selected: actions.filter((action) => action.selected).length,
+                    };
+                }).filter((permission) => !query || permission.match);
+                const shownSlots = query
+                    ? entries.filter((slot) =>
+                          matches(
+                              slot.action,
+                              this.slotName(slot),
+                              slot.id,
+                              slot.field,
+                              slot.entry_kind,
+                              slot.purpose,
+                              slot.origin,
+                          ),
+                      )
+                    : entries;
+                return {
+                    id,
+                    label: required ? 'Required' : 'Optional',
+                    empty: required
+                        ? 'No required permissions or Vault entries.'
+                        : 'No optional permissions or Vault entries.',
+                    services: shownServices,
+                    slots: shownSlots,
+                    count: grouped.size + entries.length,
+                    matchCount: shownServices.length + shownSlots.length,
+                };
+            });
+            return groups.map((group, index) => {
+                const other = groups[1 - index]!;
+                return {
+                    ...group,
+                    tabCount: query ? group.matchCount : group.count,
+                    other: {
+                        id: other.id,
+                        matchCount: other.matchCount,
+                        label:
+                            other.label +
+                            ': ' +
+                            other.matchCount +
+                            (other.matchCount === 1 ? ' match' : ' matches'),
+                    },
+                };
+            });
+        },
+        showPermissionMatches(event: Event) {
+            const id = (event.currentTarget as HTMLElement).dataset.group;
+            if (id !== 'required' && id !== 'optional') return;
+            this.permissionTab = id;
+            document.getElementById('review-group-' + id)?.focus({ preventScroll: true });
+        },
+        slotName(slot: VaultSetupSlot) {
+            return slot.label || displayField(slot.field);
+        },
+        matchingSlotDetails(slot: VaultSetupSlot) {
+            if (!this.normalizedPermissionQuery) return '';
+            const named = [
+                this.slotName(slot),
+                reactive.reviewActionName(slot.action),
+                slot.origin,
+            ];
+            if (named.some((value) => this.permissionTextMatches(value))) return '';
+            return (
+                [slot.purpose, slot.entry_kind, slot.field, slot.id, slot.action].find((value) =>
+                    this.permissionTextMatches(value),
+                ) ?? ''
+            );
+        },
+        get pickerContext() {
+            const slot = reactive.vaultReview.slot;
+            return slot ? this.slotName(slot) + ' · ' + reactive.reviewActionName(slot.action) : '';
+        },
+        selectPermissionTab(event: Event) {
+            const id = (event.currentTarget as HTMLElement).dataset.group;
+            if (id === 'required' || id === 'optional') {
+                this.permissionTab = id;
+                (event.currentTarget as HTMLButtonElement).focus({ preventScroll: true });
+            }
+        },
+        navigatePermissionTabs(event: KeyboardEvent) {
+            const next = nextTab(['required', 'optional'], this.permissionTab, event.key);
+            if (!next) return;
+            event.preventDefault();
+            this.permissionTab = next;
+            (event.currentTarget as HTMLElement)
+                .querySelector<HTMLButtonElement>(`[data-group="${next}"]`)
+                ?.focus();
+        },
+        reviewRequiredPermissions() {
+            this.reviewTab = 'permissions';
+            this.permissionTab = 'required';
+            this.permissionQuery = '';
+            document.getElementById('review-permissions-tab')?.focus({ preventScroll: true });
+        },
+        // Mark the current package reviewed only while its required permission panel is active
+        recordRequiredPermissionReview() {
+            if (
+                reactive.catalogOpen &&
+                this.reviewTab === 'permissions' &&
+                this.permissionTab === 'required' &&
+                !this.normalizedPermissionQuery &&
+                reactive.needsRequiredPermissionReview
+            )
+                reactive.markRequiredPermissionsReviewed();
+        },
+        resetReviewTabs() {
+            this.permissionQuery = '';
+            this.reviewTab = 'overview';
+            const [required, optional] = this.permissionGroups;
+            this.permissionTab =
+                !reactive.needsRequiredPermissionReview && !required.count && optional.count
+                    ? 'optional'
+                    : 'required';
+        },
+        pickerReturnFocus: null as HTMLElement | null,
+        syncVaultPicker() {
+            const picker = this.$refs.vaultPickerDialog as HTMLDialogElement;
+            if (reactive.catalogOpen && reactive.review && reactive.vaultReview.slot) {
+                if (!picker.open) {
+                    this.pickerReturnFocus = reactive.vaultReview.opener;
+                    picker.showModal();
+                    (picker.querySelector('.feature-body') as HTMLElement).scrollTop = 0;
+                }
+            } else if (picker.open) {
+                picker.close();
+                const opener = this.pickerReturnFocus;
+                this.pickerReturnFocus = null;
+                if (reactive.catalogOpen && reactive.review && opener?.isConnected)
+                    opener.focus({ preventScroll: true });
+            }
+        },
         reviewReturnFocus: null as HTMLElement | null,
         sourceRepository: '',
         sourceUrl: '',
@@ -1226,50 +1890,24 @@ export function registerUpdates(Alpine: typeof AlpineType, app: () => AppState) 
                     },
                 },
             );
-            this.$watch('$store.updates.catalogOpen', () => this.sync());
-            this.$watch('$store.updates.linkedReady', () => this.focusLinkedPlugin());
-            // Complete the deferred updates work using the current operation state
-            this.$watch('$store.updates.review', () => {
-                this.reviewTab = 'overview';
-                // Complete the deferred updates work using the current operation state
-                this.$nextTick(() => {
-                    if (reactive.catalogOpen && reactive.review && !this.settingsOpen) {
-                        (this.$refs.catalogBody as HTMLElement).scrollTop = 0;
-                        (this.$refs.reviewBody as HTMLElement).scrollTop = 0;
-                        this.focusReview();
-                    }
+            for (const field of ['catalogOpen', 'catalogSearch', 'browseChannel', 'linkedPlugin'])
+                this.$watch('$store.updates.' + field, () => {
+                    this.pageNumber = 1;
                 });
-            });
-            // Complete the deferred updates work using the current operation state
-            this.$watch('$store.updates.reviewActive', () => {
-                if (reactive.reviewActive) {
-                    const active = document.activeElement as HTMLElement | null;
-                    if (
-                        !this.reviewReturnFocus &&
-                        (this.$refs.catalogDialog as HTMLElement).contains(active)
-                    )
-                        this.reviewReturnFocus = active;
-                    // Complete the deferred updates work using the current operation state
-                    this.$nextTick(() => {
-                        (this.$refs.catalogBody as HTMLElement).scrollTop = 0;
-                        this.focusReview();
-                    });
-                } else {
-                    const target = this.reviewReturnFocus;
-                    this.reviewReturnFocus = null;
-                    // Complete the deferred updates work using the current operation state
-                    this.$nextTick(() => {
-                        // x-show reveals the listing on the next animation frame
-                        requestAnimationFrame(() => {
-                            if (
-                                reactive.catalogOpen &&
-                                !reactive.reviewActive &&
-                                target?.isConnected
-                            )
-                                target.focus();
-                        });
-                    });
+            this.resetReviewTabs();
+            if (reactive.catalogOpen) this.sync();
+            this.$watch('$store.updates.catalogOpen', () => this.sync());
+            this.$watch('$store.updates.reviewActive', () => this.sync());
+            this.$watch('$store.updates.linkedReady', () => this.focusLinkedPlugin());
+            this.$watch('reviewId', () => {
+                this.resetReviewTabs();
+                if (reactive.review && reactive.catalogOpen) {
+                    (this.$refs.reviewBody as HTMLElement).scrollTop = 0;
+                    this.focusReview();
                 }
+            });
+            this.$watch('reviewTab', () => {
+                (this.$refs.reviewBody as HTMLElement).scrollTop = 0;
             });
             this.$watch('$store.app.route', () => {
                 if (reactive.catalogOpen) void this.close();
@@ -1297,35 +1935,55 @@ export function registerUpdates(Alpine: typeof AlpineType, app: () => AppState) 
         },
         // Sync the updates operation
         sync() {
-            const dialog = this.$refs.catalogDialog as HTMLDialogElement;
-            if (reactive.catalogOpen)
-                // Complete the deferred updates work using the current operation state
+            const catalog = this.$refs.catalogDialog as HTMLDialogElement;
+            const review = this.$refs.reviewDialog as HTMLDialogElement;
+            if (reactive.catalogOpen) {
                 this.$nextTick(() => {
                     if (!reactive.catalogOpen) return;
-                    if (!dialog.open) dialog.showModal();
-                    if (reactive.reviewActive) this.focusReview();
-                    else
-                        (dialog.querySelector('input[type="search"]') as HTMLInputElement)?.focus();
+                    if (reactive.reviewActive) {
+                        if (catalog.open) {
+                            const active = document.activeElement as HTMLElement | null;
+                            if (!this.reviewReturnFocus && catalog.contains(active))
+                                this.reviewReturnFocus = active;
+                            catalog.close();
+                        }
+                        if (!review.open) {
+                            review.showModal();
+                            this.focusReview();
+                        }
+                        return;
+                    }
+                    if (review.open) review.close();
+                    if (!catalog.open) catalog.showModal();
+                    const target = this.reviewReturnFocus;
+                    this.reviewReturnFocus = null;
+                    if (target) {
+                        requestAnimationFrame(() => {
+                            if (catalog.open && !reactive.reviewActive && target.isConnected)
+                                target.focus();
+                        });
+                    } else {
+                        catalog.querySelector<HTMLInputElement>('input[type="search"]')?.focus();
+                    }
                     this.focusLinkedPlugin();
                 });
-            else {
-                reactive.clearLinkedPlugin();
-                reactive.releaseDrag();
-                this.settingsOpen = false;
-                this.sourceError = '';
-                this.sourceToken = '';
-                this.closeBaseline = this.closeValue();
-                this.tokenState = '';
-                const opener = reactive.catalogOpener;
-                reactive.catalogOpener = null;
-                if (dialog.open) {
-                    dialog.close();
-                    // Complete the deferred updates work using the current operation state
-                    this.$nextTick(() => {
-                        if (opener?.isConnected && opener.getClientRects().length) opener.focus();
-                    });
-                }
+                return;
             }
+            reactive.clearLinkedPlugin();
+            reactive.releaseDrag();
+            this.settingsOpen = false;
+            this.sourceError = '';
+            this.sourceToken = '';
+            this.closeBaseline = this.closeValue();
+            this.tokenState = '';
+            this.reviewReturnFocus = null;
+            const opener = reactive.catalogOpener;
+            reactive.catalogOpener = null;
+            if (review.open) review.close();
+            if (catalog.open) catalog.close();
+            this.$nextTick(() => {
+                if (opener?.isConnected && opener.getClientRects().length) opener.focus();
+            });
         },
         // Toggle the settings
         toggleSettings() {
@@ -1499,14 +2157,21 @@ export function registerUpdates(Alpine: typeof AlpineType, app: () => AppState) 
         // Select the review tab
         selectReviewTab(event: Event) {
             const tab = (event.currentTarget as HTMLElement).dataset.reviewTab;
-            if (this.reviewTabs.some((item) => item.id === tab)) this.reviewTab = tab!;
+            if (this.reviewTabs.some((item) => item.id === tab)) {
+                this.reviewTab = tab!;
+                (event.currentTarget as HTMLButtonElement).focus({ preventScroll: true });
+            }
         },
         // Focus the review
         focusReview() {
             this.$nextTick(() =>
                 // Complete the deferred updates work using the current operation state
                 requestAnimationFrame(() => {
-                    if (!reactive.catalogOpen || !reactive.reviewActive || this.settingsOpen)
+                    if (
+                        !reactive.catalogOpen ||
+                        !reactive.reviewActive ||
+                        reactive.vaultReview.slot
+                    )
                         return;
                     // x-show reveals both review states on the next animation frame
                     const target = reactive.reviewLoading

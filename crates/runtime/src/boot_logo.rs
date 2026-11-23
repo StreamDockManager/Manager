@@ -20,6 +20,8 @@ pub struct BootLogoPreview {
     pub size: [u16; 2],
     pub fit: String,
     pub image: String,
+    pub source_image: String,
+    pub source_size: [u32; 2],
     pub simulated: bool,
 }
 #[derive(serde::Serialize, ts_rs::TS)]
@@ -79,11 +81,28 @@ fn target(runtime: &Runtime, id: &str) -> Result<(DeviceInfo, Option<u64>), Stri
     Ok((device, epoch))
 }
 
-// Decode a bounded PNG or JPEG and fit it to the boot-logo dimensions
-fn raster(path: &Path, size: [u16; 2], fit: &str) -> Result<Vec<u8>, String> {
-    if !["contain", "cover"].contains(&fit) {
-        return Err("Choose Fit entire image or Fill and crop".into());
+struct PreparedRaster {
+    png: Vec<u8>,
+    source_image: String,
+    source_size: [u32; 2],
+}
+// Decode once, expose a bounded oriented thumbnail and apply the reviewed normalized crop
+fn prepared_raster(
+    path: &Path,
+    size: [u16; 2],
+    fit: &str,
+    crop: Option<[f64; 4]>,
+) -> Result<PreparedRaster, String> {
+    if !["contain", "cover", "stretch"].contains(&fit) {
+        return Err("Choose Fit, Fill or Stretch".into());
     }
+    let crop = crop.unwrap_or([0.0, 0.0, 1.0, 1.0]);
+    crate::media::MediaOptions {
+        crop,
+        ..Default::default()
+    }
+    .validate()?;
+
     let file = std::fs::File::open(path).map_err(|e| e.to_string())?;
     let metadata = file.metadata().map_err(|e| e.to_string())?;
     const LIMIT: usize = 32 * 1024 * 1024;
@@ -122,9 +141,32 @@ fn raster(path: &Path, size: [u16; 2], fit: &str) -> Result<Vec<u8>, String> {
     let orientation = decoder.orientation().map_err(|e| e.to_string())?;
     let mut source = image::DynamicImage::from_decoder(decoder).map_err(|e| e.to_string())?;
     source.apply_orientation(orientation);
+    let source_size = [source.width(), source.height()];
+    let mut thumbnail = Vec::new();
+    source
+        .thumbnail(512, 512)
+        .write_to(&mut Cursor::new(&mut thumbnail), image::ImageFormat::Png)
+        .map_err(|error| error.to_string())?;
+    let source_image = format!(
+        "data:image/png;base64,{}",
+        base64::engine::general_purpose::STANDARD.encode(thumbnail)
+    );
+    // Match normalized Device background crop rounding after applying source orientation
+    let [x, y, w, h] = crop;
+    let sx = ((x * f64::from(source.width())) as u32).min(source.width() - 1);
+    let sy = ((y * f64::from(source.height())) as u32).min(source.height() - 1);
+    let sw = ((w * f64::from(source.width())).round() as u32)
+        .max(1)
+        .min(source.width() - sx);
+    let sh = ((h * f64::from(source.height())).round() as u32)
+        .max(1)
+        .min(source.height() - sy);
+    source = source.crop_imm(sx, sy, sw, sh);
     let [width, height] = size.map(u32::from);
     let resized = if fit == "cover" {
         source.resize_to_fill(width, height, image::imageops::FilterType::Lanczos3)
+    } else if fit == "stretch" {
+        source.resize_exact(width, height, image::imageops::FilterType::Lanczos3)
     } else {
         source.resize(width, height, image::imageops::FilterType::Lanczos3)
     };
@@ -144,7 +186,17 @@ fn raster(path: &Path, size: [u16; 2], fit: &str) -> Result<Vec<u8>, String> {
     image::DynamicImage::ImageRgba8(output)
         .write_to(&mut Cursor::new(&mut png), image::ImageFormat::Png)
         .map_err(|e| e.to_string())?;
-    Ok(png)
+    Ok(PreparedRaster {
+        png,
+        source_image,
+        source_size,
+    })
+}
+
+#[cfg(test)]
+// Exercise the default whole-image path used before choosing a crop
+fn raster(path: &Path, size: [u16; 2], fit: &str) -> Result<Vec<u8>, String> {
+    Ok(prepared_raster(path, size, fit, None)?.png)
 }
 
 impl Runtime {
@@ -154,6 +206,7 @@ impl Runtime {
         device_id: &str,
         path: &Path,
         fit: &str,
+        crop: Option<[f64; 4]>,
     ) -> Result<BootLogoPreview, String> {
         let _preparation = self
             .boot_logos
@@ -177,7 +230,11 @@ impl Runtime {
             .as_ref()
             .unwrap()
             .size;
-        let png = raster(path, size, fit)?;
+        let PreparedRaster {
+            png,
+            source_image,
+            source_size,
+        } = prepared_raster(path, size, fit, crop)?;
         let module = hardware_registry::modules()
             .into_iter()
             .find(|module| module.manifest().model_id == device.model_id)
@@ -208,6 +265,8 @@ impl Runtime {
             device_id: device_id.into(),
             size,
             fit: fit.into(),
+            source_image,
+            source_size,
             simulated: device.simulated,
             file_name: path
                 .file_name()
@@ -308,6 +367,7 @@ pub(crate) struct PendingUpload {
     pub receipt: mpsc::Receiver<OutputStatus>,
     pub reply: Option<mpsc::Sender<Result<(), String>>>,
     pub deadline: Instant,
+    pub completed: bool,
 }
 impl PendingUpload {
     // Poll boot logo for pending work
@@ -318,7 +378,7 @@ impl PendingUpload {
             self.deadline,
             |status| {
                 match status {
-                OutputStatus::Completed => Ok(()),
+                OutputStatus::Completed => { self.completed = true; Ok(()) },
                 status => Err(failure.map(|error| format!("Startup logo transfer status unknown: {error}. Check the device before retrying.")).unwrap_or_else(|| {
                     format!("Startup logo transfer status unknown ({status:?}); check the device before preparing another upload")
                 })),
@@ -348,7 +408,7 @@ mod tests {
             assert!(runtime.boot_logos.editor_retirement_blocked());
         }
         let preview = runtime
-            .prepare_boot_logo("simulator:n4-pro", &source(root.path()), "contain")
+            .prepare_boot_logo("simulator:n4-pro", &source(root.path()), "contain", None)
             .unwrap();
         assert!(runtime.boot_logos.editor_retirement_blocked());
         runtime.cancel_boot_logo(&preview.id).unwrap();
@@ -384,6 +444,95 @@ mod tests {
         assert!(raster(&path, [80, 48], "contain").is_err());
     }
     #[test]
+    // Use normalized source cropping before framing and bound the uncropped editing thumbnail
+    fn startup_crop_validation_and_bounded_source_preview() {
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("split.png");
+        image::RgbaImage::from_fn(1024, 512, |x, _| {
+            if x < 512 {
+                image::Rgba([255u8, 0, 0, 255])
+            } else {
+                image::Rgba([0u8, 0, 255, 255])
+            }
+        })
+        .save(&path)
+        .unwrap();
+        for fit in ["contain", "cover", "stretch"] {
+            let result = prepared_raster(&path, [80, 48], fit, Some([0.5, 0.0, 0.5, 1.0])).unwrap();
+            assert_eq!(result.source_size, [1024, 512]);
+            let thumbnail = base64::engine::general_purpose::STANDARD
+                .decode(result.source_image.split_once(',').unwrap().1)
+                .unwrap();
+            let thumbnail = image::load_from_memory(&thumbnail).unwrap().to_rgba8();
+            assert_eq!(thumbnail.dimensions(), (512, 256));
+            assert_eq!(thumbnail.get_pixel(10, 10).0, [255, 0, 0, 255]);
+            let pixels = image::load_from_memory(&result.png).unwrap().to_rgba8();
+            assert_eq!(pixels.dimensions(), (80, 48));
+            assert_eq!(pixels.get_pixel(40, 24).0, [0, 0, 255, 255]);
+            assert_eq!(
+                pixels.get_pixel(0, 0).0,
+                if fit == "contain" {
+                    [0, 0, 0, 255]
+                } else {
+                    [0, 0, 255, 255]
+                }
+            );
+        }
+        for crop in [
+            [f64::NAN, 0.0, 1.0, 1.0],
+            [-0.1, 0.0, 1.0, 1.0],
+            [0.0, 0.0, 0.0, 1.0],
+            [0.8, 0.0, 0.4, 1.0],
+        ] {
+            assert!(prepared_raster(&path, [80, 48], "stretch", Some(crop)).is_err());
+        }
+        assert_eq!(
+            raster(&path, [80, 48], "cover").unwrap(),
+            prepared_raster(&path, [80, 48], "cover", Some([0.0, 0.0, 1.0, 1.0]))
+                .unwrap()
+                .png
+        );
+    }
+    #[test]
+    // Encode exactly the cropped preview bytes into the immutable reviewed upload token
+    fn cropped_preview_matches_staged_transaction() {
+        let dir = tempfile::tempdir().unwrap();
+        let runtime = Runtime::build(dir.path().join("manager"), false).unwrap();
+        runtime.simulate(true).unwrap();
+        let path = source(dir.path());
+        let preview = runtime
+            .prepare_boot_logo(
+                "simulator:n4-pro",
+                &path,
+                "stretch",
+                Some([0.25, 0.25, 0.5, 0.5]),
+            )
+            .unwrap();
+        let png = base64::engine::general_purpose::STANDARD
+            .decode(preview.image.split_once(',').unwrap().1)
+            .unwrap();
+        let (device, _) = target(&runtime, &preview.device_id).unwrap();
+        let module = hardware_registry::modules()
+            .into_iter()
+            .find(|module| module.manifest().model_id == device.model_id)
+            .unwrap();
+        let contract = crate::device_contract::resolve(&device).unwrap();
+        let expected = module
+            .session_for(&contract)
+            .unwrap()
+            .encode(hardware_core::DeviceCommand::BootLogo { data: png })
+            .unwrap();
+        assert_eq!(
+            runtime.boot_logos.stages.lock().unwrap()[&preview.id]
+                .transaction
+                .reports,
+            expected.reports
+        );
+        std::fs::remove_file(path).unwrap();
+        assert!(!runtime.commit_boot_logo(&preview.id).unwrap().sent);
+        runtime.shutdown();
+    }
+    #[test]
     // Verify that startup draft cancel simulator and changed device are isolated
     fn startup_draft_cancel_simulator_and_changed_device_are_isolated() {
         let dir = tempfile::tempdir().unwrap();
@@ -392,7 +541,7 @@ mod tests {
         let before = serde_json::to_value(runtime.snapshot()).unwrap();
         let path = source(dir.path());
         let preview = runtime
-            .prepare_boot_logo("simulator:n4-pro", &path, "contain")
+            .prepare_boot_logo("simulator:n4-pro", &path, "contain", None)
             .unwrap();
         assert_eq!(preview.size, [800, 480]);
         assert!(preview.simulated);
@@ -400,7 +549,7 @@ mod tests {
         runtime.cancel_boot_logo(&preview.id).unwrap();
         assert!(runtime.commit_boot_logo(&preview.id).is_err());
         let preview = runtime
-            .prepare_boot_logo("simulator:n4-pro", &path, "cover")
+            .prepare_boot_logo("simulator:n4-pro", &path, "cover", None)
             .unwrap();
         // Apply uses immutable staged bytes, not a reread of the source file
         std::fs::remove_file(&path).unwrap();
@@ -408,7 +557,7 @@ mod tests {
         assert_eq!(serde_json::to_value(runtime.snapshot()).unwrap(), before);
         let path = source(dir.path());
         let preview = runtime
-            .prepare_boot_logo("simulator:n4-pro", &path, "contain")
+            .prepare_boot_logo("simulator:n4-pro", &path, "contain", None)
             .unwrap();
         runtime.simulate(false).unwrap();
         runtime.simulate(true).unwrap();
@@ -418,7 +567,7 @@ mod tests {
         runtime.cancel_boot_logo(&preview.id).unwrap();
         runtime.simulate_device(true, "simulator:h1-pro").unwrap();
         assert!(runtime
-            .prepare_boot_logo("simulator:h1-pro", &path, "contain")
+            .prepare_boot_logo("simulator:h1-pro", &path, "contain", None)
             .is_err());
     }
     #[test]
@@ -436,7 +585,7 @@ mod tests {
             device.variant_id = "usb-6602-1000".into();
         }
         let preview = runtime
-            .prepare_boot_logo(id, &source(dir.path()), "contain")
+            .prepare_boot_logo(id, &source(dir.path()), "contain", None)
             .unwrap();
         {
             let mut state = runtime.state.lock().unwrap();
@@ -455,13 +604,13 @@ mod tests {
             .unwrap()
             .contains_key(&preview.id));
         let preview = runtime
-            .prepare_boot_logo(id, &source(dir.path()), "contain")
+            .prepare_boot_logo(id, &source(dir.path()), "contain", None)
             .unwrap();
         runtime.observe_firmware(id, epoch, Ok(Some("V25.N3.01.000".into())));
         assert!(runtime.commit_boot_logo(&preview.id).is_err());
         assert!(runtime.commit_boot_logo(&preview.id).is_err());
         let preview = runtime
-            .prepare_boot_logo(id, &source(dir.path()), "contain")
+            .prepare_boot_logo(id, &source(dir.path()), "contain", None)
             .unwrap();
         // Same firmware, new observation: the user must review a fresh draft
         runtime.observe_firmware(id, epoch, Ok(Some("V25.N3.01.000".into())));
@@ -479,6 +628,7 @@ mod tests {
             let (send, receipt) = mpsc::channel();
             let (reply, receive) = mpsc::channel();
             let mut pending = PendingUpload {
+                completed: false,
                 receipt,
                 reply: Some(reply),
                 deadline: Instant::now() + Duration::from_secs(1),
@@ -491,6 +641,7 @@ mod tests {
                 .unwrap_err()
                 .contains("status unknown"));
             assert!(pending.reply.is_none());
+            assert!(!pending.completed);
         }
     }
     #[test]
@@ -499,14 +650,17 @@ mod tests {
         let (send, receipt) = mpsc::channel();
         let (reply, receive) = mpsc::channel();
         let mut pending = PendingUpload {
+            completed: false,
             receipt,
             reply: Some(reply),
             deadline: Instant::now(),
         };
         assert!(!pending.poll(None));
+        assert!(!pending.completed);
         assert!(receive.recv().unwrap().is_err());
         assert!(!pending.poll(None));
         send.send(OutputStatus::Completed).unwrap();
         assert!(pending.poll(None));
+        assert!(pending.completed);
     }
 }

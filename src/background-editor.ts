@@ -48,6 +48,15 @@ export function registerBackgroundEditor() {
         asset: '',
         media: defaultMedia(),
         baseline: '',
+        clipEditor: null as { asset: string; label: string; open: () => void } | null,
+        get clipEditLabel() {
+            return this.clipEditor && this.clipEditor.asset === this.asset
+                ? this.clipEditor.label
+                : '';
+        },
+        editClip() {
+            if (this.clipEditLabel && !this.importing && !this.saving) this.clipEditor?.open();
+        },
         profileId: '',
         deviceId: '',
         importing: false,
@@ -66,7 +75,7 @@ export function registerBackgroundEditor() {
         // Describe the profile whose background is being edited
         get subtitle() {
             return app().profile
-                ? `Background for “${app().profile!.name}”. Only button and touch screens display it.`
+                ? `Button and touch screens on “${app().profile!.name}”. Drop an image or clip to change the background.`
                 : '';
         },
         // Check whether the draft can be saved to the current profile
@@ -168,6 +177,7 @@ export function registerBackgroundEditor() {
                 : Promise.resolve();
             this.generation++;
             this.opened = false;
+            this.clipEditor = null;
             this.importing = false;
             this.asset = '';
             this.error = '';
@@ -185,7 +195,9 @@ export function registerBackgroundEditor() {
             this.close();
         },
         // Open the media library for background selection
-        browseMedia() {
+        browseMedia(event?: Event) {
+            if (event?.currentTarget instanceof HTMLButtonElement)
+                event.currentTarget.focus({ preventScroll: true });
             if (!this.opened || !this.current() || this.importing || this.saving) return;
             const generation = this.generation;
             // Reject media selections after the editor session becomes stale

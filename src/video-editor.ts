@@ -1,3 +1,15 @@
+import { videoDecodeQueue, filmstripCache } from './video-filmstrip';
+import { timelinePosition, timelineRange, type TimelineMode } from './video-timeline';
+import {
+    destinationCrop,
+    panDestination,
+    zoomDestination,
+    containRect,
+    normalizeCrop,
+    transformCrop,
+    type CropHandle,
+} from './video-crop';
+import { cloneJson } from './json-clone';
 import { savedMediaComparison } from './media-guidance';
 import { preparedVideoMetadata, type DecoderState } from './video-editor-state';
 import * as fileDialogs from './window-dialogs';
@@ -45,6 +57,10 @@ export function openVideoEditor(request: VideoEditorRequest = {}) {
 export function registerVideoEditor(Alpine: typeof AlpineType, app: () => AppState) {
     // Complete the deferred video editor work using the current operation state
     Alpine.data('videoEditor', () => {
+        // Backend retired owners outlive route components. Never reuse an owner
+        // after remount/reload, even for the same content-addressed recording.
+        const instance = crypto.randomUUID();
+        let preparationGeneration = 0;
         // Cancel the import
         const cancelImport = (id: string) =>
             trackCloseRelease('video-import:' + id, () =>
@@ -79,6 +95,7 @@ export function registerVideoEditor(Alpine: typeof AlpineType, app: () => AppSta
         let timer: ReturnType<typeof setTimeout> | undefined;
         let playOrigin = 0,
             playPosition = 0;
+        let cropObserver: ResizeObserver | undefined;
         let previewInFlight = false;
         let previewRevision = 0;
         let previewPublications = 0;
@@ -86,6 +103,9 @@ export function registerVideoEditor(Alpine: typeof AlpineType, app: () => AppSta
             typeof latestPreview<number, { url: string; position: number; revision: number }>
         >;
         let thumbnailGeneration = 0;
+        const decodeQueue = videoDecodeQueue();
+        const thumbnailCache = filmstripCache();
+        let thumbnailKeys: string[] = [];
         let rangeGeneration = 0;
         let focusReturn: HTMLElement | null = null;
         let preparedSource:
@@ -120,6 +140,8 @@ export function registerVideoEditor(Alpine: typeof AlpineType, app: () => AppSta
                 ++this.generation;
                 frameRunner?.invalidate();
                 ++thumbnailGeneration;
+                decodeQueue.cancelBackground();
+                thumbnailCache.clear();
                 this.pause();
                 session?.close();
                 session = undefined;
@@ -185,24 +207,43 @@ export function registerVideoEditor(Alpine: typeof AlpineType, app: () => AppSta
             windowEnd: 0,
             view: 'device',
             image: '',
+            previewView: '',
             error: '',
             notice: '',
             details: '',
             progress: null as VideoProgress | null,
             clips: [] as VideoClipEntry[],
             thumbnails: [] as { position: number; url: string }[],
+            timelinePointer: null as {
+                id: number;
+                target: HTMLElement;
+                mode: TimelineMode;
+                x: number;
+                left: number;
+                width: number;
+                windowStart: number;
+                windowEnd: number;
+                start: number;
+                end: number;
+                position: number;
+            } | null,
             selectedClip: '',
+            cropBounds: { x: 0, y: 0, width: 1, height: 1 },
             pointerStart: null as {
                 x: number;
                 y: number;
-                crop: number[];
+                crop: [number, number, number, number];
                 width: number;
                 height: number;
-                resize: boolean;
+                handle: CropHandle;
+                pointerId: number;
+                device?: boolean;
+                moved?: boolean;
+                original?: [number, number, number, number];
             } | null,
             // Derive owner from the current video editor state
             get owner() {
-                return `video-editor:${this.deviceId}:${this.generation}`;
+                return `video-editor:${instance}:${this.generation}`;
             },
             // Derive is gif from the current video editor state
             get isGif() {
@@ -278,63 +319,255 @@ export function registerVideoEditor(Alpine: typeof AlpineType, app: () => AppSta
                     this.view === 'device' && this.target
                         ? this.target.height
                         : this.recording?.height || 9;
-                return `aspect-ratio:${width}/${height};max-width:${(340 * width) / height}px`;
+                return {
+                    aspectRatio: `${width}/${height}`,
+                    maxWidth: `${(240 * width) / height}px`,
+                };
             },
-            // Derive crop style from the current video editor state
+            // Keep the crop overlay on the rendered image, excluding letterbox padding.
+            measureCrop() {
+                const frame = this.$refs.sourceFrame as HTMLElement;
+                const img = frame?.querySelector('img');
+                if (!frame || !img || !img.naturalWidth) return;
+                const bounds = frame.getBoundingClientRect();
+                this.cropBounds = containRect(
+                    bounds.width,
+                    bounds.height,
+                    img.naturalWidth,
+                    img.naturalHeight,
+                );
+            },
             get cropStyle() {
                 const [x, y, width, height] = this.options.crop;
-                return `left:${x * 100}%;top:${y * 100}%;width:${width * 100}%;height:${height * 100}%`;
+                const bounds = this.cropBounds;
+                return {
+                    left: `${bounds.x + x * bounds.width}px`,
+                    top: `${bounds.y + y * bounds.height}px`,
+                    width: `${width * bounds.width}px`,
+                    height: `${height * bounds.height}px`,
+                };
             },
-            // Start the crop
-            startCrop(event: PointerEvent) {
-                if (this.busy || this.view !== 'source' || event.button !== 0) return;
+            deviceCrop() {
+                return destinationCrop(
+                    this.options.crop,
+                    this.recording!.width,
+                    this.recording!.height,
+                    this.target!.width,
+                    this.target!.height,
+                    this.options.fit,
+                );
+            },
+            startDevicePan(event: PointerEvent) {
+                if (
+                    this.busy ||
+                    this.view !== 'device' ||
+                    this.previewView !== 'device' ||
+                    !this.target ||
+                    !this.recording ||
+                    event.button !== 0 ||
+                    this.pointerStart
+                )
+                    return;
+                this.measureCrop();
+                const box = (this.$refs.sourceFrame as HTMLElement).getBoundingClientRect();
+                const bounds = this.cropBounds;
+                const px = event.clientX - box.left - bounds.x,
+                    py = event.clientY - box.top - bounds.y;
+                const crop = this.deviceCrop();
+                const content = containRect(
+                    bounds.width,
+                    bounds.height,
+                    crop[2] * this.recording.width,
+                    crop[3] * this.recording.height,
+                );
+                if (
+                    px < 0 ||
+                    py < 0 ||
+                    px > bounds.width ||
+                    py > bounds.height ||
+                    (this.options.fit === 'fit' &&
+                        (px < content.x ||
+                            py < content.y ||
+                            px > content.x + content.width ||
+                            py > content.y + content.height))
+                )
+                    return;
                 event.preventDefault();
-                const frame = this.$refs.sourceFrame as HTMLElement;
-                const bounds = frame.getBoundingClientRect();
+                const target = event.currentTarget as HTMLElement;
+                target.focus();
+                target.setPointerCapture(event.pointerId);
+                this.pause();
+                this.pointerStart = {
+                    x: event.clientX,
+                    y: event.clientY,
+                    crop,
+                    original: [...this.options.crop],
+                    width: bounds.width,
+                    height: bounds.height,
+                    handle: 'move',
+                    pointerId: event.pointerId,
+                    device: true,
+                };
+            },
+            zoomDevice(event: Event) {
+                if (this.busy || !this.target || !this.recording) return;
+                this.cancelCrop();
+                this.options.crop = zoomDestination(
+                    this.deviceCrop(),
+                    Number((event.currentTarget as HTMLElement).dataset.zoom),
+                );
+                this.changed();
+            },
+            devicePanKey(event: KeyboardEvent) {
+                if (
+                    this.busy ||
+                    this.view !== 'device' ||
+                    this.previewView !== 'device' ||
+                    !this.target ||
+                    !this.recording
+                )
+                    return;
+                if (event.key === 'Escape' && this.pointerStart) {
+                    event.preventDefault();
+                    event.stopPropagation();
+                    this.cancelCrop();
+                    return;
+                }
+                const direction: Record<string, number[]> = {
+                    ArrowLeft: [-1, 0],
+                    ArrowRight: [1, 0],
+                    ArrowUp: [0, -1],
+                    ArrowDown: [0, 1],
+                };
+                const delta = direction[event.key];
+                if (!delta) return;
+                event.preventDefault();
+                event.stopPropagation();
+                this.measureCrop();
+                const step = event.shiftKey ? 25 : 5;
+                this.options.crop = panDestination(
+                    this.deviceCrop(),
+                    delta[0] * step,
+                    delta[1] * step,
+                    this.recording.width,
+                    this.recording.height,
+                    this.cropBounds.width,
+                    this.cropBounds.height,
+                    this.options.fit,
+                );
+                this.changed();
+            },
+            startCrop(event: PointerEvent) {
+                if (this.busy || this.view !== 'source' || event.button !== 0 || this.pointerStart)
+                    return;
+                event.preventDefault();
+                this.measureCrop();
+                const target = event.target as HTMLElement;
+                (
+                    target.closest<HTMLElement>('[data-crop-handle]') ||
+                    (event.currentTarget as HTMLElement)
+                ).focus();
+                (event.currentTarget as HTMLElement).setPointerCapture(event.pointerId);
                 this.pointerStart = {
                     x: event.clientX,
                     y: event.clientY,
                     crop: [...this.options.crop],
-                    width: bounds.width,
-                    height: bounds.height,
-                    resize: (event.target as HTMLElement).dataset.resize === 'true',
+                    width: this.cropBounds.width,
+                    height: this.cropBounds.height,
+                    handle: (target.closest<HTMLElement>('[data-crop-handle]')?.dataset
+                        .cropHandle || 'move') as CropHandle,
+                    pointerId: event.pointerId,
                 };
             },
-            // Translate pointer movement into normalized crop movement or resizing
             moveCrop(event: PointerEvent) {
                 const start = this.pointerStart;
-                if (!start || !this.opened) return;
-                const dx = (event.clientX - start.x) / Math.max(1, start.width),
-                    dy = (event.clientY - start.y) / Math.max(1, start.height);
-                const [x, y, width, height] = start.crop;
-                this.options.crop = start.resize
-                    ? [
-                          x,
-                          y,
-                          Math.max(0.01, Math.min(1 - x, width + dx)),
-                          Math.max(0.01, Math.min(1 - y, height + dy)),
-                      ]
-                    : [
-                          Math.max(0, Math.min(1 - width, x + dx)),
-                          Math.max(0, Math.min(1 - height, y + dy)),
-                          width,
-                          height,
-                      ];
+                if (!start || !this.opened || start.pointerId !== event.pointerId) return;
+                if (start.device) {
+                    const distance =
+                        Math.abs(event.clientX - start.x) + Math.abs(event.clientY - start.y);
+                    if (!start.moved && distance < 2) return;
+                    start.moved = true;
+                    if (distance < 2) {
+                        this.options.crop = [...start.original!];
+                        this.changed();
+                        return;
+                    }
+                    this.options.crop = panDestination(
+                        start.crop,
+                        event.clientX - start.x,
+                        event.clientY - start.y,
+                        this.recording!.width,
+                        this.recording!.height,
+                        start.width,
+                        start.height,
+                        this.options.fit,
+                    );
+                    this.changed();
+                    return;
+                }
+                this.options.crop = transformCrop(
+                    start.crop,
+                    (event.clientX - start.x) / Math.max(1, start.width),
+                    (event.clientY - start.y) / Math.max(1, start.height),
+                    start.handle,
+                );
                 this.preparedAsset = '';
             },
-            // End the crop
-            endCrop() {
-                if (this.pointerStart) {
+            endCrop(event?: PointerEvent) {
+                if (
+                    this.pointerStart &&
+                    (!event || event.pointerId === this.pointerStart.pointerId)
+                ) {
+                    const changed = !this.pointerStart.device || this.pointerStart.moved;
                     this.pointerStart = null;
-                    this.changed();
+                    if (changed) this.changed();
                 }
+            },
+            cancelCrop(event?: PointerEvent) {
+                if (
+                    !this.pointerStart ||
+                    (event && event.pointerId !== this.pointerStart.pointerId)
+                )
+                    return;
+                this.options.crop = [...(this.pointerStart.original || this.pointerStart.crop)];
+                this.pointerStart = null;
+                this.changed();
+            },
+            cropKey(event: KeyboardEvent) {
+                if (this.busy || this.view !== 'source') return;
+                if (event.key === 'Escape' && this.pointerStart) {
+                    event.preventDefault();
+                    event.stopPropagation();
+                    this.cancelCrop();
+                    return;
+                }
+                const directions: Record<string, number[]> = {
+                    ArrowLeft: [-1, 0],
+                    ArrowRight: [1, 0],
+                    ArrowUp: [0, -1],
+                    ArrowDown: [0, 1],
+                };
+                const direction = directions[event.key];
+                if (!direction) return;
+                event.preventDefault();
+                event.stopPropagation();
+                const handle = ((event.target as HTMLElement).dataset.cropHandle ||
+                    'move') as CropHandle;
+                const step = event.shiftKey ? 0.05 : 0.01;
+                this.options.crop = transformCrop(
+                    this.options.crop,
+                    direction[0] * step,
+                    direction[1] * step,
+                    handle,
+                );
+                this.changed();
             },
             // Derive selection style from the current video editor state
             get selectionStyle() {
                 const span = Math.max(1, this.windowEnd - this.windowStart);
                 const left = Math.max(0, ((this.clipStart - this.windowStart) / span) * 100);
                 const right = Math.min(100, ((this.clipEnd - this.windowStart) / span) * 100);
-                return `left:${left}%;width:${Math.max(0, right - left)}%`;
+                return { left: `${left}%`, width: `${Math.max(0, right - left)}%` };
             },
             // Derive validation from the current video editor state
             get validation() {
@@ -380,6 +613,11 @@ export function registerVideoEditor(Alpine: typeof AlpineType, app: () => AppSta
             },
             // Initialize video editor state and its required lifecycle hooks
             init() {
+                this.$nextTick(() => {
+                    cropObserver = new ResizeObserver(() => this.measureCrop());
+                    if (this.$refs.sourceFrame)
+                        cropObserver.observe(this.$refs.sourceFrame as HTMLElement);
+                });
                 ownWindowMethods(this, 'recording editor', [
                     'open',
                     'choose',
@@ -392,6 +630,7 @@ export function registerVideoEditor(Alpine: typeof AlpineType, app: () => AppSta
                     'setIn',
                     'setOut',
                     'snapRange',
+                    'endTimeline',
                     'rangeIn',
                     'rangeOut',
                     'changeTime',
@@ -423,86 +662,100 @@ export function registerVideoEditor(Alpine: typeof AlpineType, app: () => AppSta
                 frameRunner = latestPreview(
                     // Complete the deferred video editor work using the current operation state
                     async (position) => {
+                        const generation = this.generation;
                         const revision = previewRevision;
-                        previewInFlight = true;
-                        try {
-                            let bytes: ArrayBuffer;
-                            const prepared =
-                                !session &&
-                                preparedSource?.asset === this.asset &&
-                                position >= preparedSource.start &&
-                                position < preparedSource.end &&
-                                (!this.sourceAvailable ||
-                                    (Math.min(
-                                        this.maxEdge,
-                                        Math.max(this.recording!.width, this.recording!.height),
-                                    ) <= preparedSource.edge &&
-                                        Math.min(
-                                            this.options.max_fps ?? Infinity,
-                                            this.sourceFps,
-                                        ) <=
-                                            preparedSource.fps + 0.01))
-                                    ? preparedSource
-                                    : undefined;
-                            if (prepared)
-                                bytes = await app().bridge.command('prepared_video_frame', {
-                                    asset: prepared.asset,
-                                    positionUs: Math.max(
-                                        0,
-                                        Math.min(
-                                            prepared.end - prepared.start - 1,
-                                            Math.round(position - prepared.start),
+                        return decodeQueue.run(false, async () => {
+                            if (
+                                !this.opened ||
+                                generation !== this.generation ||
+                                revision !== previewRevision
+                            )
+                                throw Error('Superseded video preview');
+                            previewInFlight = true;
+                            try {
+                                let bytes: ArrayBuffer;
+                                const prepared =
+                                    !session &&
+                                    preparedSource?.asset === this.asset &&
+                                    position >= preparedSource.start &&
+                                    position < preparedSource.end &&
+                                    (!this.sourceAvailable ||
+                                        (Math.min(
+                                            this.maxEdge,
+                                            Math.max(this.recording!.width, this.recording!.height),
+                                        ) <= preparedSource.edge &&
+                                            Math.min(
+                                                this.options.max_fps ?? Infinity,
+                                                this.sourceFps,
+                                            ) <=
+                                                preparedSource.fps + 0.01))
+                                        ? preparedSource
+                                        : undefined;
+                                if (prepared)
+                                    bytes = await app().bridge.command('prepared_video_frame', {
+                                        asset: prepared.asset,
+                                        positionUs: Math.max(
+                                            0,
+                                            Math.min(
+                                                prepared.end - prepared.start - 1,
+                                                Math.round(position - prepared.start),
+                                            ),
                                         ),
-                                    ),
-                                    deviceId: this.view === 'device' ? this.deviceId : null,
-                                    controlId: this.controlId,
-                                    options: structuredClone(Alpine.raw(this.options)),
-                                });
-                            else if (session)
-                                bytes = (
-                                    await session.frame(position, this.maxEdge, {
-                                        continuous: this.playing,
-                                        end: this.clipEnd,
-                                        target:
-                                            this.view === 'device' && this.target
-                                                ? {
-                                                      width: this.target.width,
-                                                      height: this.target.height,
-                                                      options: structuredClone(
-                                                          Alpine.raw(this.options),
-                                                      ),
-                                                  }
-                                                : undefined,
-                                    })
-                                ).bytes;
-                            else
-                                bytes = await app().bridge.command('video_recording_frame', {
-                                    recording: this.recording!.id,
-                                    positionUs: Math.min(this.duration - 1, Math.round(position)),
-                                    edge: this.maxEdge,
-                                    deviceId:
-                                        this.isGif && this.view === 'device' ? this.deviceId : null,
-                                    controlId: this.controlId,
-                                    options: structuredClone(Alpine.raw(this.options)),
-                                });
-                            if (this.view === 'device' && !session && !prepared && !this.isGif)
-                                bytes = await invoke('video_preview_frame', bytes, {
-                                    headers: {
-                                        'x-video-device': this.deviceId,
-                                        'x-video-control': this.controlId || '',
-                                        'x-video-options': JSON.stringify(this.options),
-                                    },
-                                });
-                            const frame = new Uint8Array(bytes);
-                            const mime = frame[0] === 0xff ? 'image/jpeg' : 'image/png';
-                            return {
-                                url: URL.createObjectURL(new Blob([frame], { type: mime })),
-                                position,
-                                revision,
-                            };
-                        } finally {
-                            previewInFlight = false;
-                        }
+                                        deviceId: this.view === 'device' ? this.deviceId : null,
+                                        controlId: this.controlId,
+                                        options: structuredClone(Alpine.raw(this.options)),
+                                    });
+                                else if (session)
+                                    bytes = (
+                                        await session.frame(position, this.maxEdge, {
+                                            continuous: this.playing,
+                                            end: this.clipEnd,
+                                            target:
+                                                this.view === 'device' && this.target
+                                                    ? {
+                                                          width: this.target.width,
+                                                          height: this.target.height,
+                                                          options: structuredClone(
+                                                              Alpine.raw(this.options),
+                                                          ),
+                                                      }
+                                                    : undefined,
+                                        })
+                                    ).bytes;
+                                else
+                                    bytes = await app().bridge.command('video_recording_frame', {
+                                        recording: this.recording!.id,
+                                        positionUs: Math.min(
+                                            this.duration - 1,
+                                            Math.round(position),
+                                        ),
+                                        edge: this.maxEdge,
+                                        deviceId:
+                                            this.isGif && this.view === 'device'
+                                                ? this.deviceId
+                                                : null,
+                                        controlId: this.controlId,
+                                        options: structuredClone(Alpine.raw(this.options)),
+                                    });
+                                if (this.view === 'device' && !session && !prepared && !this.isGif)
+                                    bytes = await invoke('video_preview_frame', bytes, {
+                                        headers: {
+                                            'x-video-device': this.deviceId,
+                                            'x-video-control': this.controlId || '',
+                                            'x-video-options': JSON.stringify(this.options),
+                                        },
+                                    });
+                                const frame = new Uint8Array(bytes);
+                                const mime = frame[0] === 0xff ? 'image/jpeg' : 'image/png';
+                                return {
+                                    url: URL.createObjectURL(new Blob([frame], { type: mime })),
+                                    position,
+                                    revision,
+                                };
+                            } finally {
+                                previewInFlight = false;
+                            }
+                        });
                     },
                     // Complete the deferred video editor work using the current operation state
                     (result) => {
@@ -518,6 +771,7 @@ export function registerVideoEditor(Alpine: typeof AlpineType, app: () => AppSta
                             () => {
                                 const previous = this.image;
                                 this.image = result.url;
+                                this.previewView = this.view;
                                 releaseMediaPreview(previous);
                             },
                         )
@@ -540,7 +794,8 @@ export function registerVideoEditor(Alpine: typeof AlpineType, app: () => AppSta
                             });
                     },
                     (error) => {
-                        if (this.opened) this.error = String(error);
+                        if (this.opened && String(error) !== 'Error: Superseded video preview')
+                            this.error = String(error);
                     },
                     (result) => releaseMediaPreview(result.url),
                 );
@@ -586,9 +841,8 @@ export function registerVideoEditor(Alpine: typeof AlpineType, app: () => AppSta
                 this.options = {
                     ...defaultMedia(),
                     ...(request.asset
-                        ? structuredClone(request.options || {})
+                        ? cloneJson(request.options || {})
                         : {
-                              fit: 'fit',
                               min_fps: 5,
                               jpeg_quality: 75,
                               min_frame_edge: 64,
@@ -632,6 +886,8 @@ export function registerVideoEditor(Alpine: typeof AlpineType, app: () => AppSta
             // Release video editor state and associated lifecycle resources
             close() {
                 if (this.cleanupWorking) return;
+                this.cancelTimeline();
+                this.pointerStart = null;
                 this.discardCleanup();
                 void releaseRecording(this.owner).catch(() => {});
                 this.pause();
@@ -652,12 +908,14 @@ export function registerVideoEditor(Alpine: typeof AlpineType, app: () => AppSta
                 this.progress = null;
                 releaseMediaPreview(this.image);
                 this.image = '';
+                this.previewView = '';
                 this.clearThumbnails();
                 (this.$refs.dialog as HTMLDialogElement)?.close();
                 focusReturn?.focus();
             },
             // Release video editor state and associated lifecycle resources
             destroy() {
+                cropObserver?.disconnect();
                 this.unregisterCloseOwner?.();
                 this.close();
             },
@@ -810,6 +1068,7 @@ export function registerVideoEditor(Alpine: typeof AlpineType, app: () => AppSta
                         const metadata = this.rememberPreparation(asset, prepared);
                         session?.close();
                         session = undefined;
+                        this.clearThumbnails();
                         this.decoder = { kind: 'idle' };
                         this.sourceAvailable = false;
                         this.selectedClip = asset;
@@ -974,6 +1233,7 @@ export function registerVideoEditor(Alpine: typeof AlpineType, app: () => AppSta
             },
             // React to changed video editor state
             changed() {
+                ++rangeGeneration;
                 this.preparedAsset = '';
                 this.error = '';
                 this.notice = this.fallback ? 'Using installed FFmpeg for this recording.' : '';
@@ -997,6 +1257,214 @@ export function registerVideoEditor(Alpine: typeof AlpineType, app: () => AppSta
                     ++previewRevision;
                     frameRunner.request(this.position);
                 }
+            },
+            timelinePercent(value: number) {
+                return `${Math.max(0, Math.min(100, (100 * (value - this.windowStart)) / Math.max(1, this.windowEnd - this.windowStart)))}%`;
+            },
+            get timelineInStyle() {
+                return { left: this.timelinePercent(this.clipStart) };
+            },
+            get timelineOutStyle() {
+                return { left: this.timelinePercent(this.clipEnd) };
+            },
+            get timelinePlayheadStyle() {
+                return { left: this.timelinePercent(this.position) };
+            },
+            get timelineBeforeStyle() {
+                return { width: this.timelinePercent(this.clipStart) };
+            },
+            get timelineAfterStyle() {
+                return { left: this.timelinePercent(this.clipEnd) };
+            },
+            startTimeline(event: PointerEvent) {
+                if (this.busy || !this.recording || event.button !== 0) return;
+                event.preventDefault();
+                event.stopPropagation();
+                this.cancelTimeline();
+                this.pause();
+                ++rangeGeneration;
+                const target = event.currentTarget as HTMLElement;
+                const track = target.closest('.video-editor-timeline')!;
+                const rect = track.getBoundingClientRect();
+                this.timelinePointer = {
+                    id: event.pointerId,
+                    target,
+                    mode: (target.dataset.timeline || 'playhead') as TimelineMode,
+                    x: event.clientX,
+                    left: rect.left,
+                    width: rect.width,
+                    windowStart: this.windowStart,
+                    windowEnd: this.windowEnd,
+                    start: this.clipStart,
+                    end: this.clipEnd,
+                    position: this.position,
+                };
+                target.focus();
+                target.setPointerCapture(event.pointerId);
+                this.moveTimeline(event);
+            },
+            moveTimeline(event: PointerEvent) {
+                const drag = this.timelinePointer;
+                if (!drag || drag.id !== event.pointerId) return;
+                if (drag.mode === 'window' && Math.abs(event.clientX - drag.x) < 3) return;
+                const at = timelinePosition(
+                    event.clientX,
+                    drag.left,
+                    drag.width,
+                    drag.windowStart,
+                    drag.windowEnd,
+                );
+                if (drag.mode === 'playhead') {
+                    this.position = Math.max(
+                        this.availableStart,
+                        Math.min(this.availableEnd - 1, at),
+                    );
+                    this.seek();
+                    return;
+                }
+                const delta = Math.round(
+                    ((event.clientX - drag.x) / Math.max(1, drag.width)) *
+                        (drag.windowEnd - drag.windowStart),
+                );
+                [this.clipStart, this.clipEnd] = timelineRange(
+                    drag.mode,
+                    delta,
+                    drag.start,
+                    drag.end,
+                    this.availableStart,
+                    this.availableEnd,
+                    Math.max(1, Math.floor(1_000_000 / (this.sourceFps || 30))),
+                );
+                this.position = drag.mode === 'out' ? this.clipEnd - 1 : this.clipStart;
+                this.changed();
+            },
+            async endTimeline(event: PointerEvent) {
+                const drag = this.timelinePointer;
+                if (!drag || drag.id !== event.pointerId) return;
+                this.moveTimeline(event);
+                this.timelinePointer = null;
+                if (drag.target.hasPointerCapture(drag.id))
+                    drag.target.releasePointerCapture(drag.id);
+                if (drag.mode === 'window' && Math.abs(event.clientX - drag.x) < 3) {
+                    this.position = Math.max(
+                        this.availableStart,
+                        Math.min(
+                            this.availableEnd - 1,
+                            timelinePosition(
+                                event.clientX,
+                                drag.left,
+                                drag.width,
+                                drag.windowStart,
+                                drag.windowEnd,
+                            ),
+                        ),
+                    );
+                    this.seek();
+                    return;
+                }
+                if (drag.mode === 'playhead') return;
+                const revision = ++rangeGeneration,
+                    generation = this.generation;
+                const duration = this.clipEnd - this.clipStart;
+                try {
+                    const position = await this.snapRange(
+                        drag.mode === 'out' ? this.clipEnd : this.clipStart,
+                    );
+                    if (
+                        revision !== rangeGeneration ||
+                        generation !== this.generation ||
+                        !this.opened
+                    )
+                        return;
+                    if (drag.mode === 'window') {
+                        this.clipStart = Math.max(
+                            this.availableStart,
+                            Math.min(this.availableEnd - duration, position),
+                        );
+                        this.clipEnd = this.clipStart + duration;
+                    } else if (drag.mode === 'in')
+                        this.clipStart = Math.max(
+                            this.availableStart,
+                            Math.min(this.clipEnd - 1, position),
+                        );
+                    else
+                        this.clipEnd = Math.min(
+                            this.availableEnd,
+                            Math.max(this.clipStart + 1, position),
+                        );
+                    this.position = drag.mode === 'out' ? this.clipEnd - 1 : this.clipStart;
+                    this.changed();
+                } catch (error) {
+                    if (generation === this.generation) this.error = String(error);
+                }
+            },
+            cancelTimeline() {
+                const drag = this.timelinePointer;
+                if (!drag) return;
+                this.timelinePointer = null;
+                ++rangeGeneration;
+                this.clipStart = drag.start;
+                this.clipEnd = drag.end;
+                this.position = drag.position;
+                if (drag.target.hasPointerCapture(drag.id))
+                    drag.target.releasePointerCapture(drag.id);
+                this.changed();
+            },
+            timelineKey(event: KeyboardEvent) {
+                if (event.key === 'Escape') {
+                    if (this.timelinePointer) {
+                        event.preventDefault();
+                        event.stopPropagation();
+                    }
+                    this.cancelTimeline();
+                    return;
+                }
+                if (this.busy || !['ArrowLeft', 'ArrowRight', 'Home', 'End'].includes(event.key))
+                    return;
+                event.preventDefault();
+                event.stopPropagation();
+                this.pause();
+                ++rangeGeneration;
+                const mode = (event.currentTarget as HTMLElement).dataset.timeline as TimelineMode;
+                if (mode === 'playhead') {
+                    const step =
+                        Math.max(1, Math.round(1_000_000 / (this.sourceFps || 30))) *
+                        (event.shiftKey ? 10 : 1);
+                    this.position =
+                        event.key === 'Home'
+                            ? this.availableStart
+                            : event.key === 'End'
+                              ? this.availableEnd - 1
+                              : Math.max(
+                                    this.availableStart,
+                                    Math.min(
+                                        this.availableEnd - 1,
+                                        this.position + (event.key === 'ArrowLeft' ? -step : step),
+                                    ),
+                                );
+                    this.seek();
+                    return;
+                }
+
+                const step =
+                    Math.max(1, Math.round(1_000_000 / (this.sourceFps || 30))) *
+                    (event.shiftKey ? 10 : 1);
+                let delta = event.key === 'ArrowLeft' ? -step : step;
+                if (event.key === 'Home')
+                    delta = this.availableStart - (mode === 'out' ? this.clipEnd : this.clipStart);
+                if (event.key === 'End')
+                    delta = this.availableEnd - (mode === 'in' ? this.clipStart : this.clipEnd);
+                [this.clipStart, this.clipEnd] = timelineRange(
+                    mode,
+                    delta,
+                    this.clipStart,
+                    this.clipEnd,
+                    this.availableStart,
+                    this.availableEnd,
+                    Math.max(1, Math.floor(1_000_000 / (this.sourceFps || 30))),
+                );
+                this.position = mode === 'out' ? this.clipEnd - 1 : this.clipStart;
+                this.changed();
             },
             // Pause playback and clamp the scrubbed position before requesting a frame
             scrub(event: Event) {
@@ -1086,6 +1554,8 @@ export function registerVideoEditor(Alpine: typeof AlpineType, app: () => AppSta
             },
             // Change the view
             changeView(event: Event) {
+                this.cancelCrop();
+                this.previewView = '';
                 this.view = (event.currentTarget as HTMLElement).dataset.view || 'device';
                 frameRunner.invalidate();
                 this.seek();
@@ -1201,7 +1671,11 @@ export function registerVideoEditor(Alpine: typeof AlpineType, app: () => AppSta
                 else if (field === 'min-edge') this.options.min_frame_edge = Number(input.value);
                 else if (field === 'max-edge') this.options.max_frame_edge = Number(input.value);
                 else if (field?.startsWith('crop-'))
-                    this.options.crop[Number(field.slice(5))] = Number(input.value) / 100;
+                    this.options.crop = normalizeCrop(
+                        this.options.crop.map((value, index) =>
+                            index === Number(field.slice(5)) ? Number(input.value) / 100 : value,
+                        ),
+                    );
                 this.changed();
             },
             // Bound output frame dimensions to the target device and mark the options changed
@@ -1267,14 +1741,33 @@ export function registerVideoEditor(Alpine: typeof AlpineType, app: () => AppSta
             },
             // Clear the thumbnails
             clearThumbnails() {
+                thumbnailKeys = [];
+                ++thumbnailGeneration;
+                decodeQueue.cancelBackground();
+                thumbnailCache.clear();
                 this.thumbnails.forEach((thumbnail) => releaseMediaPreview(thumbnail.url));
                 this.thumbnails = [];
             },
             // Load thumbnails for the video editor workflow
             async loadThumbnails() {
                 const generation = ++thumbnailGeneration;
-                this.clearThumbnails();
+                decodeQueue.cancelBackground();
                 if (!this.recording || this.saving) return;
+                // clearThumbnails retires the source epoch on reopen/reimport even
+                // when the content-addressed recording ID is unchanged.
+                const sourceKey = JSON.stringify([
+                    this.recording.id,
+                    this.recording.sha256,
+                    this.sourceAvailable,
+                    this.sourceAvailable
+                        ? this.decoder.kind === 'ready'
+                            ? this.decoder.backend
+                            : this.decoder.kind
+                        : this.asset,
+                    this.availableStart,
+                    this.availableEnd,
+                    160,
+                ]);
                 for (let i = 0; i < 6; i++) {
                     if (!this.opened || generation !== thumbnailGeneration || this.saving) return;
                     const position = Math.max(
@@ -1286,27 +1779,41 @@ export function registerVideoEditor(Alpine: typeof AlpineType, app: () => AppSta
                             ),
                         ),
                     );
+                    const key = `${sourceKey}:${position}`;
+                    if (thumbnailKeys[i] === key) continue;
                     try {
-                        const bytes = !this.sourceAvailable
-                            ? await app().bridge.command('prepared_video_frame', {
-                                  asset: this.asset,
-                                  positionUs: position - this.availableStart,
-                              })
-                            : session
-                              ? (await session.frame(position, 160)).bytes
-                              : await app().bridge.command('video_recording_frame', {
-                                    recording: this.recording.id,
-                                    positionUs: position,
-                                    edge: 160,
-                                });
+                        const bytes = await thumbnailCache.get(key, () =>
+                            decodeQueue.run(true, async () => {
+                                if (
+                                    !this.opened ||
+                                    generation !== thumbnailGeneration ||
+                                    this.saving
+                                )
+                                    throw Error('Superseded filmstrip request');
+                                return !this.sourceAvailable
+                                    ? await app().bridge.command('prepared_video_frame', {
+                                          asset: this.asset,
+                                          positionUs: position - this.availableStart,
+                                      })
+                                    : session
+                                      ? (await session.frame(position, 160)).bytes
+                                      : await app().bridge.command('video_recording_frame', {
+                                            recording: this.recording!.id,
+                                            positionUs: position,
+                                            edge: 160,
+                                        });
+                            }),
+                        );
                         if (generation !== thumbnailGeneration || !this.opened) return;
-                        this.thumbnails = [
-                            ...this.thumbnails,
-                            {
-                                position,
-                                url: URL.createObjectURL(new Blob([bytes], { type: 'image/jpeg' })),
-                            },
-                        ];
+                        const previous = this.thumbnails[i];
+                        const next = [...this.thumbnails];
+                        next[i] = {
+                            position,
+                            url: URL.createObjectURL(new Blob([bytes], { type: 'image/jpeg' })),
+                        };
+                        this.thumbnails = next;
+                        thumbnailKeys[i] = key;
+                        if (previous) releaseMediaPreview(previous.url);
                     } catch {
                         return;
                     }
@@ -1350,7 +1857,7 @@ export function registerVideoEditor(Alpine: typeof AlpineType, app: () => AppSta
                 this.name = clip.info.name;
                 this.clipStart = clip.info.start_us;
                 this.clipEnd = clip.info.end_us;
-                this.options = structuredClone(clip.info.options);
+                this.options = cloneJson(clip.info.options);
                 const details = await app().bridge.command('video_clip_details', { asset });
                 if (generation !== this.generation) return;
                 const metadata = this.rememberPreparation(asset, details, clip.info.start_us);
@@ -1398,6 +1905,7 @@ export function registerVideoEditor(Alpine: typeof AlpineType, app: () => AppSta
                 frameRunner.invalidate();
                 ++thumbnailGeneration;
                 const generation = this.generation;
+                const operation = ++preparationGeneration;
                 const originalAsset = request.asset || this.asset;
                 this.copyComparison = '';
                 const owner = this.owner;
@@ -1425,14 +1933,14 @@ export function registerVideoEditor(Alpine: typeof AlpineType, app: () => AppSta
                             asset: this.asset,
                             draft,
                             owner,
-                            generation,
+                            generation: operation,
                         });
                     else
                         jobId = await app().bridge.command(
                             this.fallback || this.isGif
                                 ? 'prepare_video_clip_native'
                                 : 'prepare_video_clip',
-                            { draft, owner, generation },
+                            { draft, owner, generation: operation },
                         );
                     if (!this.opened || generation !== this.generation) {
                         await cancelPreparation(jobId);
@@ -1611,6 +2119,8 @@ export function registerVideoEditor(Alpine: typeof AlpineType, app: () => AppSta
                 ++this.generation;
                 frameRunner.invalidate();
                 ++thumbnailGeneration;
+                decodeQueue.cancelBackground();
+                thumbnailCache.clear();
                 this.pause();
                 this.decoder = { kind: 'idle' };
                 if (importJob) await cancelImport(importJob).catch(() => {});

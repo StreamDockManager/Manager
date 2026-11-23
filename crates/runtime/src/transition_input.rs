@@ -10,6 +10,7 @@ pub(crate) struct Transitions {
     devices: HashMap<String, Device>,
 }
 struct Device {
+    origin: Option<crate::input_trace::InputOrigin>,
     epoch: u64,
     generation: u64,
     blocked: bool,
@@ -19,7 +20,28 @@ struct Device {
 impl Transitions {
     // Begin tracking the transition input operation
     pub fn begin(&mut self, id: &str, epoch: u64) -> u64 {
+        self.begin_from(id, epoch, None)
+    }
+    pub fn origin(
+        &self,
+        id: &str,
+        epoch: u64,
+        generation: u64,
+    ) -> Option<crate::input_trace::InputOrigin> {
+        self.devices
+            .get(id)
+            .filter(|d| d.epoch == epoch && d.generation == generation && d.blocked)?
+            .origin
+            .clone()
+    }
+    pub fn begin_from(
+        &mut self,
+        id: &str,
+        epoch: u64,
+        origin: Option<crate::input_trace::InputOrigin>,
+    ) -> u64 {
         let device = self.devices.entry(id.into()).or_insert_with(|| Device {
+            origin: None,
             epoch,
             generation: 0,
             blocked: false,
@@ -29,6 +51,7 @@ impl Transitions {
         if device.epoch != epoch {
             device.suppressed.clear();
         }
+        device.origin = origin;
         device.epoch = epoch;
         device.generation = device.generation.wrapping_add(1).max(1);
         device.blocked = true;

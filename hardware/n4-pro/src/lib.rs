@@ -42,6 +42,30 @@ pub struct Session {
     touch: Option<TouchTrajectory>,
 }
 impl Session {
+    fn key_upload(
+        control: &str,
+        slot: u8,
+        data: &[u8],
+        encoding: FrameEncoding,
+    ) -> Result<FrameUpload> {
+        let grouped = encoding == FrameEncoding::GroupedKeyUpdates;
+        let mut header = b"BAT".to_vec();
+        header.extend((data.len() as u32).to_be_bytes());
+        header.push(slot);
+        Ok(FrameUpload {
+            transaction: transfer(&header, data, !grouped, control.into())?,
+            embedded_commit_count: usize::from(!grouped),
+            commit: if grouped {
+                Some(FrameCommit {
+                    group: "n4-pro-key-stp-v1".into(),
+                    reports: vec![command(b"STP")?],
+                })
+            } else {
+                None
+            },
+        })
+    }
+
     // Finish touch
     fn finish_touch(&mut self) -> Option<ControlEvent> {
         let touch = self.touch.take()?;
@@ -241,6 +265,26 @@ impl HardwareSession for Session {
     fn supports_frame_encoding(&self, _encoding: FrameEncoding) -> bool {
         true
     }
+    fn encode_rendered_key(
+        &mut self,
+        control: String,
+        data: Vec<u8>,
+        encoding: FrameEncoding,
+    ) -> Result<FrameUpload> {
+        let key = MANIFEST.control(&control)?;
+        if key.kind != "button" {
+            return Err(Error::Unsupported(
+                "prepared output needs an LCD key".into(),
+            ));
+        }
+        Self::key_upload(
+            &control,
+            key.image_slot
+                .ok_or_else(|| Error::Unsupported("key image slot".into()))?,
+            &data,
+            encoding,
+        )
+    }
     // Encode frame
     fn encode_frame(
         &mut self,
@@ -260,17 +304,7 @@ impl HardwareSession for Session {
                                 .image_slot
                                 .ok_or_else(|| Error::Unsupported("key image slot".into()))?;
                             let data = png_output::compact(data)?;
-                            let mut header = b"BAT".to_vec();
-                            header.extend((data.len() as u32).to_be_bytes());
-                            header.push(slot);
-                            return Ok(FrameUpload {
-                                transaction: transfer(&header, &data, false, control_id.clone())?,
-                                embedded_commit_count: 0,
-                                commit: Some(FrameCommit {
-                                    group: "n4-pro-key-stp-v1".into(),
-                                    reports: vec![command(b"STP")?],
-                                }),
-                            });
+                            return Self::key_upload(control_id, slot, &data, encoding);
                         }
                     }
                 }

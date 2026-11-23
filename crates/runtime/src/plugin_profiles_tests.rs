@@ -647,8 +647,11 @@ fn bundled_media_is_staged_with_fresh_ids_and_missing_media_is_unavailable() {
 fn packaged_official_suggestions_validate_and_apply_without_plugin_execution() {
     let directory = tempfile::tempdir().unwrap();
     let runtime = Runtime::build(directory.path().join("manager"), false).unwrap();
-    let manager = std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("../..");
-    let base = manager.join("../StreamDockManager-Plugins/dist/packages");
+    let plugins = std::path::PathBuf::from(
+        std::env::var_os("STREAM_DOCK_MANAGER_OFFICIAL_PLUGINS")
+            .expect("supply the built official plugin checkout"),
+    );
+    let base = plugins.join("dist/packages");
     let packages = if cfg!(target_os = "macos") {
         base.join("darwin").join(if cfg!(target_arch = "aarch64") {
             "arm64"
@@ -664,10 +667,7 @@ fn packaged_official_suggestions_validate_and_apply_without_plugin_execution() {
         std::env::consts::OS
     };
     let metadata: Value = serde_json::from_slice(
-        &std::fs::read(manager.join(format!(
-            "../StreamDockManager-Plugins/dist/catalog-{catalog_name}.json"
-        )))
-        .unwrap(),
+        &std::fs::read(plugins.join(format!("dist/catalog-{catalog_name}.json"))).unwrap(),
     )
     .unwrap();
     let arch = if cfg!(target_arch = "aarch64") {
@@ -688,10 +688,9 @@ fn packaged_official_suggestions_validate_and_apply_without_plugin_execution() {
             )
         })
         .collect();
-    let source: Value = serde_json::from_slice(
-        &std::fs::read(manager.join("../StreamDockManager-Plugins/catalog/metadata.json")).unwrap(),
-    )
-    .unwrap();
+    let source: Value =
+        serde_json::from_slice(&std::fs::read(plugins.join("catalog/metadata.json")).unwrap())
+            .unwrap();
     let expected: std::collections::BTreeSet<_> = source
         .as_object()
         .unwrap()

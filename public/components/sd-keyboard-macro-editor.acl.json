@@ -1,7 +1,9 @@
 {
     "version": 1,
-    "groups": ["shell"],
-    "options": { "shadow": false },
+    "groups": ["keyboard-macro-editor"],
+    "options": {
+        "shadow": false
+    },
     "metadata": {
         "description": "Trusted, isolated keyboard recording draft with explicit Apply/Cancel."
     }

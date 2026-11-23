@@ -3,18 +3,45 @@
 //! Use the application's own launch domain, never a global WebKit name search or
 //! responsibility/coalition match: development apps can share those with an IDE
 use crate::process_resources::Snapshot;
-use std::collections::BTreeSet;
+use std::{collections::BTreeSet, time::Instant};
 
 #[derive(Default)]
 pub(super) struct Discovery {
     pub pids: BTreeSet<u32>,
+    pub identities: std::collections::HashMap<u32, (u64, u64)>,
+    pub complete: bool,
     pub note: &'static str,
 }
 
-#[cfg(not(target_os = "macos"))]
-// Discover available webkit candidates
-pub(super) fn discover(_: u32, _: &Snapshot) -> Discovery {
-    Discovery::default()
+/// One launch domain per Manager resources sampler, shared by all reported scopes.
+#[derive(Default)]
+pub(super) struct Cache {
+    #[cfg(target_os = "macos")]
+    entry: Option<macos::Entry>,
+}
+
+impl Cache {
+    pub(super) fn invalidate(&mut self) {
+        #[cfg(target_os = "macos")]
+        {
+            self.entry = None;
+        }
+    }
+
+    pub(super) fn discover(&mut self, root: u32, system: &Snapshot, now: Instant) -> Discovery {
+        #[cfg(target_os = "macos")]
+        {
+            macos::discover(&mut self.entry, root, system, now)
+        }
+        #[cfg(not(target_os = "macos"))]
+        {
+            let _ = (root, system, now);
+            Discovery {
+                complete: true,
+                ..Discovery::default()
+            }
+        }
+    }
 }
 
 #[cfg(any(target_os = "macos", test))]
@@ -108,23 +135,20 @@ fn same_live_process(
 }
 
 #[cfg(target_os = "macos")]
-// Discover available webkit candidates
-pub(super) fn discover(root: u32, system: &Snapshot) -> Discovery {
-    macos::discover(root, system)
-}
-
-#[cfg(target_os = "macos")]
 mod macos {
     use super::*;
     use std::{
         ffi::{c_char, c_int, c_void},
-        io::Read,
+        io::{ErrorKind, Read},
         process::{Command, Stdio},
         thread,
-        time::{Duration, Instant},
+        time::{Duration, SystemTime, UNIX_EPOCH},
     };
 
     const MAX_OUTPUT: u64 = 2 * 1024 * 1024;
+    // Discovery runs only on a sample. An unannounced new helper is picked up
+    // at the next requested sample after this provisional freshness interval.
+    const FRESHNESS: Duration = Duration::from_secs(5);
     const TIMEOUT: Duration = Duration::from_millis(250);
     const UNAVAILABLE: &str =
         "WebKit helper ownership is unavailable; these readings may exclude UI processes.";
@@ -132,6 +156,36 @@ mod macos {
         "Some WebKit helpers could not be measured; these readings may be incomplete.";
     const INCLUDED: &str =
         "Includes this application's macOS WebKit UI, graphics and networking processes.";
+    const CACHED: &str =
+        "Uses recently verified WebKit ownership. New helpers may be missing until the next discovery, on the first sample after 5 seconds.";
+
+    type Identity = (u32, u64, u64);
+
+    #[derive(Clone, Copy)]
+    struct Helper {
+        pid: u32,
+        identity: Identity,
+        name: &'static str,
+    }
+
+    pub(super) struct Entry {
+        owner: (u32, Identity),
+        discovered: Instant,
+        helpers: Vec<Helper>,
+    }
+
+    impl Entry {
+        fn valid(
+            &self,
+            now: Instant,
+            owner: (u32, Identity),
+            mut validate: impl FnMut(Helper) -> bool,
+        ) -> bool {
+            self.owner == owner
+                && now.saturating_duration_since(self.discovered) < FRESHNESS
+                && self.helpers.iter().copied().all(&mut validate)
+        }
+    }
 
     // Public libproc.h / sys/proc_info.h ABI (PROC_PIDTBSDINFO = 3)
     #[repr(C)]
@@ -157,7 +211,7 @@ mod macos {
     }
 
     // Read parent and creation-time evidence for a macOS process identity
-    fn identity(pid: u32) -> Option<(u32, u64, u64)> {
+    fn identity(pid: u32) -> Option<Identity> {
         let mut info = BsdInfo::default();
         let size = std::mem::size_of::<BsdInfo>();
         let count = unsafe {
@@ -169,11 +223,11 @@ mod macos {
                 size as c_int,
             )
         };
-        (count == size as c_int && info.fields[3] == pid).then_some((
-            info.fields[5],
-            info.start_seconds,
-            info.start_micros,
-        ))
+        (count == size as c_int
+            && info.fields[3] == pid
+            && info.start_seconds > 0
+            && info.start_micros < 1_000_000)
+            .then_some((info.fields[5], info.start_seconds, info.start_micros))
     }
 
     // Read the executable path reported by the macOS process API
@@ -220,81 +274,164 @@ mod macos {
                 .spawn()
                 .ok()?,
         );
-        let stdout = child.0.stdout.take()?;
-        let reader = thread::Builder::new()
-            .name("webkit-process-scope".into())
-            .spawn(move || {
-                let mut output = Vec::new();
-                stdout.take(MAX_OUTPUT + 1).read_to_end(&mut output).ok()?;
-                (output.len() as u64 <= MAX_OUTPUT).then_some(output)
-            })
-            .ok()?;
+        let mut stdout = child.0.stdout.take()?;
+        let flags = rustix::fs::fcntl_getfl(&stdout).ok()?;
+        rustix::fs::fcntl_setfl(&stdout, flags | rustix::fs::OFlags::NONBLOCK).ok()?;
         let deadline = Instant::now() + TIMEOUT;
-        let success = loop {
-            match child.0.try_wait() {
-                Ok(Some(status)) => break status.success(),
-                Ok(None) if Instant::now() < deadline => thread::sleep(Duration::from_millis(5)),
-                _ => {
-                    let _ = child.0.kill();
-                    let _ = child.0.wait();
-                    break false;
+        let mut output = Vec::new();
+        let mut buffer = [0u8; 8192];
+        let mut eof = false;
+        loop {
+            if Instant::now() >= deadline {
+                return None;
+            }
+            if !eof {
+                match stdout.read(&mut buffer) {
+                    Ok(0) => eof = true,
+                    Ok(count) => {
+                        if (output.len() + count) as u64 > MAX_OUTPUT {
+                            return None;
+                        }
+                        output.extend_from_slice(&buffer[..count]);
+                        continue;
+                    }
+                    Err(error) if error.kind() == ErrorKind::Interrupted => continue,
+                    Err(error) if error.kind() == ErrorKind::WouldBlock => {}
+                    Err(_) => return None,
                 }
             }
-        };
-        let output = reader.join().ok()??;
-        success.then(|| String::from_utf8(output).ok()).flatten()
+            match child.0.try_wait().ok()? {
+                Some(status) if !status.success() => return None,
+                Some(_) if eof => return String::from_utf8(output).ok(),
+                _ => thread::sleep(Duration::from_millis(5)),
+            }
+        }
     }
 
-    // Discover available webkit candidates
-    pub(super) fn discover(root: u32, system: &Snapshot) -> Discovery {
-        let Some(root_identity) = identity(root) else {
-            return Discovery {
-                note: UNAVAILABLE,
-                ..Discovery::default()
-            };
-        };
-        if !system
-            .processes
-            .get(&root)
-            .is_some_and(|process| process.created == root_identity.1)
-        {
-            return Discovery {
-                note: UNAVAILABLE,
-                ..Discovery::default()
-            };
-        }
-        let Some(services) = domain(root).and_then(|output| parse_services(root, &output)) else {
-            return Discovery {
-                note: UNAVAILABLE,
-                ..Discovery::default()
-            };
-        };
-        let mut result = Discovery {
-            note: INCLUDED,
+    fn unavailable() -> Discovery {
+        Discovery {
+            note: UNAVAILABLE,
             ..Discovery::default()
+        }
+    }
+
+    fn projection(helpers: &[Helper], complete: bool) -> Discovery {
+        Discovery {
+            pids: helpers.iter().map(|helper| helper.pid).collect(),
+            identities: helpers
+                .iter()
+                .map(|helper| (helper.pid, (helper.identity.1, helper.identity.2)))
+                .collect(),
+            complete,
+            note: if complete { INCLUDED } else { INCOMPLETE },
+        }
+    }
+
+    // A process born after a snapshot cannot be matched to its counters, even
+    // if sysinfo's seconds-resolution creation time happens to agree.
+    fn in_snapshot(system: &Snapshot, pid: u32, proof: Identity) -> bool {
+        system
+            .processes
+            .get(&pid)
+            .is_some_and(|process| process.created == proof.1)
+            && proof.1.saturating_mul(1000).saturating_add(proof.2 / 1000) <= system.timestamp_ms
+    }
+
+    // Fail closed when an owner/helper exits, is reused, or cannot be read.
+    // Partial and failed discovery never replace an expired proof as a hit.
+    pub(super) fn discover(
+        cache: &mut Option<Entry>,
+        root: u32,
+        system: &Snapshot,
+        now: Instant,
+    ) -> Discovery {
+        discover_with(
+            cache,
+            root,
+            now,
+            |pid, proof| in_snapshot(system, pid, proof),
+            identity,
+            executable,
+            || {
+                // A candidate born after launchctl starts could be a reused PID
+                // from a different domain. Defer it until a fresh observation.
+                let time = SystemTime::now().duration_since(UNIX_EPOCH).ok()?;
+                let began = (time.as_secs(), u64::from(time.subsec_micros()));
+                Some((began, parse_services(root, &domain(root)?)?))
+            },
+        )
+    }
+
+    type Catalog = ((u64, u64), Vec<(u32, &'static str)>);
+
+    fn discover_with(
+        cache: &mut Option<Entry>,
+        root: u32,
+        now: Instant,
+        has_sample: impl Fn(u32, Identity) -> bool,
+        identity: impl Fn(u32) -> Option<Identity>,
+        executable: impl Fn(u32) -> Option<String>,
+        read_catalog: impl FnOnce() -> Option<Catalog>,
+    ) -> Discovery {
+        let verified_path = |helper: Helper| {
+            executable(helper.pid).is_some_and(|path| apple_executable(&path, helper.name))
+                && identity(helper.pid) == Some(helper.identity)
         };
+        let Some(root_identity) = identity(root).filter(|proof| has_sample(root, *proof)) else {
+            *cache = None;
+            return unavailable();
+        };
+        if let Some(entry) = cache.as_ref().filter(|entry| {
+            entry.valid(now, (root, root_identity), |helper| {
+                has_sample(helper.pid, helper.identity)
+                    && identity(helper.pid) == Some(helper.identity)
+                    && verified_path(helper)
+            }) && identity(root) == Some(root_identity)
+        }) {
+            let mut result = projection(&entry.helpers, true);
+            result.note = CACHED;
+            return result;
+        }
+        *cache = None;
+        let Some((began, services)) = read_catalog() else {
+            return unavailable();
+        };
+        let mut helpers = Vec::new();
+        let mut complete = true;
         for (pid, name) in services {
-            let valid = (|| {
-                let process = system.processes.get(&pid)?;
-                let before = identity(pid)?;
-                if !apple_executable(&executable(pid)?, name)
-                    || !same_live_process(root_identity, process.created, before, identity(pid)?)
-                {
-                    return None;
-                }
-                Some(pid)
-            })();
-            if let Some(pid) = valid {
-                result.pids.insert(pid);
+            let valid = identity(pid)
+                .map(|identity| Helper {
+                    pid,
+                    identity,
+                    name,
+                })
+                .filter(|helper| {
+                    (helper.identity.1, helper.identity.2) < began
+                        && same_live_process(
+                            root_identity,
+                            helper.identity.1,
+                            helper.identity,
+                            helper.identity,
+                        )
+                        && has_sample(helper.pid, helper.identity)
+                        && verified_path(*helper)
+                });
+            if let Some(helper) = valid {
+                helpers.push(helper);
             } else {
-                result.note = INCOMPLETE;
+                complete = false;
             }
         }
         if identity(root) != Some(root_identity) {
-            return Discovery {
-                note: UNAVAILABLE,
-                ..Discovery::default()
-            };
+            return unavailable();
+        }
+        let result = projection(&helpers, complete);
+        if complete {
+            *cache = Some(Entry {
+                owner: (root, root_identity),
+                discovered: now,
+                helpers,
+            });
         }
         result
     }
@@ -302,6 +439,97 @@ mod macos {
     #[cfg(test)]
     mod tests {
         use super::*;
+
+        #[test]
+        fn cache_window_checks_each_helper_and_exact_owner_identity() {
+            let now = Instant::now();
+            let owner = (10, (501, 100, 10));
+            let helper = Helper {
+                pid: 20,
+                identity: (501, 101, 20),
+                name: "com.apple.WebKit.GPU",
+            };
+            let entry = Entry {
+                owner,
+                discovered: now,
+                helpers: vec![helper],
+            };
+            assert!(
+                entry.valid(now + FRESHNESS - Duration::from_millis(1), owner, |seen| {
+                    seen.pid == helper.pid
+                        && seen.identity == helper.identity
+                        && seen.name == helper.name
+                })
+            );
+            assert!(!entry.valid(now + FRESHNESS, owner, |_| panic!(
+                "expired proof revalidated"
+            )));
+            assert!(!entry.valid(now, (10, (501, 100, 11)), |_| panic!(
+                "replaced owner reused"
+            )));
+            assert!(!entry.valid(now, owner, |seen| seen.identity == (501, 101, 21)));
+            assert!(!entry.valid(now, owner, |_| false));
+        }
+
+        #[test]
+        fn a_verified_empty_domain_differs_from_failed_or_partial_discovery() {
+            let now = Instant::now();
+            let owner = (10, (501, 100, 1));
+            let entry = Entry {
+                owner,
+                discovered: now,
+                helpers: vec![],
+            };
+            assert!(entry.valid(now, owner, |_| panic!("no helpers")));
+            assert!(projection(&entry.helpers, true).complete);
+            assert!(!projection(&entry.helpers, false).complete);
+            assert!(!unavailable().complete);
+            assert_ne!(projection(&entry.helpers, false).note, unavailable().note);
+        }
+
+        #[test]
+        fn cache_reuses_one_catalog_then_refreshes_and_fails_closed_on_reuse() {
+            use std::cell::Cell;
+
+            let mut cache = None;
+            let now = Instant::now();
+            let micros = Cell::new(10);
+            let launches = Cell::new(0);
+            let name = "com.apple.WebKit.GPU";
+            let sample = |cache: &mut Option<Entry>, at, failed: bool| {
+                discover_with(
+                    cache,
+                    10,
+                    at,
+                    |_, _| true,
+                    |pid| match pid {
+                        10 => Some((501, 100, 0)),
+                        20 => Some((501, 101, micros.get())),
+                        _ => None,
+                    },
+                    |_| {
+                        Some(format!("/System/Library/Frameworks/WebKit.framework/Versions/A/XPCServices/{name}.xpc/Contents/MacOS/{name}"))
+                    },
+                    || {
+                        launches.set(launches.get() + 1);
+                        (!failed).then_some(((102, 0), vec![(20, name)]))
+                    },
+                )
+            };
+            assert!(sample(&mut cache, now, false).complete);
+            let hit = sample(&mut cache, now + Duration::from_secs(1), true);
+            assert!(hit.complete);
+            assert_eq!(hit.note, CACHED);
+            assert_eq!(launches.get(), 1);
+            assert!(sample(&mut cache, now + FRESHNESS, false).complete);
+            assert_eq!(launches.get(), 2);
+            micros.set(11);
+            let broken = sample(&mut cache, now + FRESHNESS + Duration::from_secs(1), true);
+            assert!(!broken.complete);
+            assert!(broken.pids.is_empty());
+            assert!(cache.is_none());
+            assert_eq!(launches.get(), 3);
+        }
 
         #[test]
         // Verify that command timeout and excess output fail without hanging
@@ -365,9 +593,17 @@ mod tests {
     // Verify that similarly named user executables are not apple helpers
     fn similarly_named_user_executables_are_not_apple_helpers() {
         let name = "com.apple.WebKit.WebContent";
-        assert!(apple_executable(&format!("/System/Library/Frameworks/WebKit.framework/Versions/A/XPCServices/{name}.xpc/Contents/MacOS/{name}"), name));
+        assert!(apple_executable(
+            &format!(
+                "/System/Library/Frameworks/WebKit.framework/Versions/A/XPCServices/{name}.xpc/Contents/MacOS/{name}"
+            ),
+            name
+        ));
         assert!(!apple_executable(&format!("/tmp/{name}"), name));
-        assert!(!apple_executable("/System/Library/Frameworks/WebKit.framework/Versions/A/XPCServices/com.apple.WebKit.GPU.xpc/Contents/MacOS/com.apple.WebKit.GPU", name));
+        assert!(!apple_executable(
+            "/System/Library/Frameworks/WebKit.framework/Versions/A/XPCServices/com.apple.WebKit.GPU.xpc/Contents/MacOS/com.apple.WebKit.GPU",
+            name
+        ));
     }
 
     #[test]
@@ -410,10 +646,11 @@ mod tests {
             sysinfo::ProcessRefreshKind::nothing().with_memory(),
         );
         let snapshot = Snapshot::from_system(&system, std::time::Instant::now(), None);
-        let result = discover(root, &snapshot);
+        let mut cache = Cache::default();
+        let result = cache.discover(root, &snapshot, Instant::now());
         assert!(!result.pids.is_empty(), "{}", result.note);
         assert!(result.note.starts_with("Includes"), "{}", result.note);
-        let own = discover(std::process::id(), &snapshot);
+        let own = cache.discover(std::process::id(), &snapshot, Instant::now());
         assert!(
             own.pids.is_empty(),
             "A separate test process must not inherit Manager's WebKit helpers"

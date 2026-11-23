@@ -24,6 +24,7 @@ fn sender() -> &'static mpsc::SyncSender<Job> {
 pub fn run<T: Send + 'static>(
     work: impl FnOnce() -> Result<T, String> + Send + 'static,
     check: impl Fn() -> Result<(), String>,
+    owned_cancellation: impl Fn() -> bool,
 ) -> Result<T, String> {
     check()?;
     let (reply, result) = mpsc::sync_channel(1);
@@ -33,7 +34,14 @@ pub fn run<T: Send + 'static>(
         }))
         .map_err(|_| "Native action queue is full")?;
     loop {
-        check()?;
+        if let Err(cancelled) = check() {
+            // The worker may still own a pressed key, mouse button, or child process.
+            // Keep the owning lane until its scoped cleanup completes.
+            if owned_cancellation() {
+                let _ = result.recv();
+            }
+            return Err(cancelled);
+        }
         match result.recv_timeout(std::time::Duration::from_millis(10)) {
             Ok(value) => {
                 check()?;

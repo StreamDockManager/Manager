@@ -223,11 +223,25 @@ fn frozen_candidate_uses_reviewed_document_and_asset_bytes_after_workspace_chang
         )
         .is_err());
     assert_eq!(std::fs::read(&output).unwrap(), b"existing output");
-    runtime
+    assert!(runtime
         .write_export_review(&report.id, report.revision, &report.archive_sha256, &output)
+        .is_err());
+    let receipt = runtime
+        .write_export_transfer(
+            &report.id,
+            report.revision,
+            &report.archive_sha256,
+            &output,
+            Some("frozen archive password"),
+        )
         .unwrap();
-    assert_eq!(archive_digest(&output).unwrap(), report.archive_sha256);
-    let (mut zip, document) = profiles::open_archive(&output, "profiles.json").unwrap();
+    assert_eq!(archive_digest(&output).unwrap(), receipt);
+    let (mut zip, document) =
+        crate::importing::read_transfer(&output, Some("frozen archive password"), |p| {
+            assert_eq!(archive_digest(p)?, report.archive_sha256);
+            profiles::open_archive(p, "profiles.json")
+        })
+        .unwrap();
     assert_eq!(document, report.candidate_json);
     let mut bytes = vec![];
     zip.by_name(&format!("assets/{asset}.png"))
@@ -604,5 +618,174 @@ fn bounded_sessions_expire_and_cancel_without_writing_or_leaking_ownership() {
     }
     runtime.discard_export_review(&fresh.id);
     assert!(runtime.exports.lock().unwrap().is_empty());
+    runtime.shutdown();
+}
+
+#[test]
+fn linked_macro_label_asset_rehearsal_and_trace_roundtrip() {
+    use crate::profiles::LinkMember;
+    use base64::{engine::general_purpose::STANDARD, Engine};
+    let f: Value = serde_json::from_str(include_str!(
+        "../../../../tests/fixtures/manager-feature-profile.json"
+    ))
+    .unwrap();
+    let root = tempfile::tempdir().unwrap();
+    let runtime = Runtime::build(root.path().into(), false).unwrap();
+    let device = "simulator:features";
+    let snapshot = runtime.simulate_device(true, device).unwrap();
+    let mut p = snapshot
+        .profiles
+        .iter()
+        .find(|p| p.id == snapshot.session(device).profile_id)
+        .unwrap()
+        .clone();
+    let path = root.path().join("image.png");
+    std::fs::write(&path, STANDARD.decode(f["png"].as_str().unwrap()).unwrap()).unwrap();
+    let asset = runtime.profiles.import_asset(&path).unwrap();
+    let mut other = p.pages[0].clone();
+    let first = p.pages[0].id.clone();
+    other.id = f["target"].as_str().unwrap().into();
+    other.name = f["page_name"].as_str().unwrap().into();
+    p.parameters
+        .push(serde_json::from_value(f["parameter"].clone()).unwrap());
+    let b = p.pages[0].bindings.get_mut("key-1").unwrap();
+    b.title = f["title"].as_str().unwrap().into();
+    b.action = serde_json::from_value(f["action"].clone()).unwrap();
+    b.live_label = serde_json::from_value(f["live_label"].clone()).unwrap();
+    b.activation_policy = crate::actions::ActivationPolicy::Restart;
+    b.asset = Some(asset.clone());
+    p.pages.push(other.clone());
+    p.link(
+        LinkMember {
+            page_id: first.clone(),
+            control_id: "key-1".into(),
+        },
+        LinkMember {
+            page_id: other.id.clone(),
+            control_id: "key-1".into(),
+        },
+    )
+    .unwrap();
+    runtime
+        .save_profile(p.clone(), snapshot.configuration_revision)
+        .unwrap();
+    let before = runtime.snapshot();
+    let report = runtime
+        .prepare_export_review(request("profiles", vec![p.id.clone()], true))
+        .unwrap();
+    let findings = runtime
+        .rehearse_export(
+            &report.id,
+            report.revision,
+            &report.archive_sha256,
+            &p.model_id,
+        )
+        .unwrap();
+    assert!(
+        !findings.iter().any(|f| f.group == "Blockers"),
+        "{findings:?}"
+    );
+    let different = hardware_registry::manifests()
+        .iter()
+        .find(|m| m.model_id != p.model_id)
+        .unwrap()
+        .model_id
+        .clone();
+    assert!(runtime
+        .rehearse_export(
+            &report.id,
+            report.revision,
+            &report.archive_sha256,
+            &different
+        )
+        .unwrap()
+        .iter()
+        .any(|f| f.control_id == "key-1" && f.page_id == other.id));
+    assert_eq!(
+        before.configuration_revision,
+        runtime.snapshot().configuration_revision
+    );
+    let out = root.path().join("reference.sdmprofile");
+    runtime
+        .write_export_transfer(
+            &report.id,
+            report.revision,
+            &report.archive_sha256,
+            &out,
+            Some("rehearsal password"),
+        )
+        .unwrap();
+    let imported = crate::importing::read_transfer(&out, Some("rehearsal password"), |p| {
+        crate::importing::stage_portable(p, 0)
+    })
+    .unwrap();
+    let q = &imported.data.profiles[0];
+    q.validate_links().unwrap();
+    assert_eq!(imported.data.minimum_manager.as_deref(), Some("0.1.1"));
+    let b = &q.pages[1].bindings["key-1"];
+    assert_eq!(b.asset.as_ref(), Some(&asset));
+    let rendered = crate::live_label::resolve(
+        b,
+        |name| crate::live_label::parameter(q, &Default::default(), device, name),
+        String::new,
+        None,
+    )
+    .unwrap();
+    assert_eq!(rendered.title, "Level 0");
+    assert_eq!(b.title, f["title"]);
+    // Transport-free physical-ingress fixture. No HID, keyboard or mouse output.
+    runtime
+        .state
+        .lock()
+        .unwrap()
+        .devices
+        .iter_mut()
+        .find(|d| d.id == device)
+        .unwrap()
+        .simulated = false;
+    let trace = runtime.arm_input_trace(device).unwrap();
+    let epoch = runtime.connection_epochs.lock().unwrap()[device];
+    let input = hardware_core::ControlEvent {
+        control_id: "key-1".into(),
+        input: hardware_core::Input::Pulse,
+    };
+    assert!(runtime
+        .input_trace
+        .ingress("other", epoch, &input)
+        .is_none());
+    let token = runtime.input_trace.ingress(device, epoch, &input).unwrap();
+    assert!(runtime.input_trace.ingress(device, epoch, &input).is_none());
+    runtime.dispatch_observed(device, &input, Some(token));
+    let end = std::time::Instant::now() + std::time::Duration::from_secs(3);
+    loop {
+        let view = runtime.read_input_trace(&trace.token).unwrap();
+        if let Some(outcome) = view.outcome {
+            // Changing the active page retires runs owned by the previous page.
+            assert_eq!(outcome, "Cancelled", "{:?}", view.steps);
+            assert_eq!(view.steps.iter().filter(|s| s.contains("delay")).count(), 1);
+            assert!(!view.steps.join(" ").contains("Level 0"));
+            break;
+        }
+        assert!(std::time::Instant::now() < end, "trace never completed");
+        std::thread::sleep(std::time::Duration::from_millis(10));
+    }
+    assert_eq!(runtime.snapshot().session(device).page_id, other.id);
+    runtime.dismiss_input_trace(&trace.token);
+    let stale = runtime
+        .prepare_export_review(request("profiles", vec![p.id.clone()], true))
+        .unwrap();
+    p.name.push_str(" edited");
+    runtime
+        .save_profile(p, runtime.snapshot().configuration_revision)
+        .unwrap();
+    assert!(runtime
+        .rehearse_export(
+            &stale.id,
+            stale.revision,
+            &stale.archive_sha256,
+            &q.model_id
+        )
+        .unwrap_err()
+        .contains("changed"));
     runtime.shutdown();
 }

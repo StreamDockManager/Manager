@@ -38,8 +38,13 @@ pub enum ActivationPolicy {
     Queue,
     IgnoreBusy,
     ReplacePending,
+    Restart,
+    Cancel,
 }
 impl ActivationPolicy {
+    pub fn interrupts(self) -> bool {
+        matches!(self, Self::Restart | Self::Cancel)
+    }
     // Report whether queue
     pub fn is_queue(&self) -> bool {
         *self == Self::Queue
@@ -116,6 +121,73 @@ pub(crate) fn navigation_destination(
     }
 }
 
+pub const DEFAULT_MULTI_PRESS_MS: u16 = 300;
+pub const MIN_MULTI_PRESS_MS: u16 = 100;
+pub const MAX_MULTI_PRESS_MS: u16 = 750;
+pub const DEFAULT_HOLD_MS: u16 = 600;
+pub const MIN_HOLD_MS: u16 = 250;
+pub const MAX_HOLD_MS: u16 = 2500;
+
+#[derive(
+    Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, ts_rs::TS, schemars::JsonSchema,
+)]
+#[repr(usize)]
+#[serde(rename_all = "snake_case")]
+pub enum EventSlot {
+    PressDown = 0,
+    PressUp = 1,
+    SinglePress = 2,
+    DoublePress = 3,
+    TriplePress = 4,
+    LongHold = 5,
+    TurnLeft = 6,
+    TurnRight = 7,
+    HeldTurnLeft = 8,
+    HeldTurnRight = 9,
+    SwipeLeft = 10,
+    SwipeRight = 11,
+    SwipeUp = 12,
+    SwipeDown = 13,
+}
+impl EventSlot {
+    pub const COUNT: usize = 14;
+    pub const ALL: [Self; Self::COUNT] = [
+        Self::PressDown,
+        Self::PressUp,
+        Self::SinglePress,
+        Self::DoublePress,
+        Self::TriplePress,
+        Self::LongHold,
+        Self::TurnLeft,
+        Self::TurnRight,
+        Self::HeldTurnLeft,
+        Self::HeldTurnRight,
+        Self::SwipeLeft,
+        Self::SwipeRight,
+        Self::SwipeUp,
+        Self::SwipeDown,
+    ];
+
+    // Read the permanent child path for this event
+    pub const fn index(self) -> usize {
+        self as usize
+    }
+
+    // Read the capability bit for this event
+    pub const fn bit(self) -> u16 {
+        1 << self.index()
+    }
+
+    // Resolve a stored child index to the corresponding event
+    pub const fn from_index(index: usize) -> Option<Self> {
+        if index < Self::COUNT {
+            Some(Self::ALL[index])
+        } else {
+            None
+        }
+    }
+}
+
 #[derive(Debug, Clone, Serialize, Deserialize, ts_rs::TS, schemars::JsonSchema)]
 #[serde(tag = "kind", rename_all = "snake_case", deny_unknown_fields)]
 pub enum Action {
@@ -176,6 +248,12 @@ pub enum Action {
         #[ts(optional, as = "Option<bool>")]
         linked_turns: bool,
     },
+    /// A control-level assignment with fixed independent paths for each physical or interpreted event
+    Events {
+        actions: Vec<Action>,
+        multi_press_ms: u16,
+        hold_ms: u16,
+    },
     Toggle {
         on: Box<Action>,
         off: Box<Action>,
@@ -231,6 +309,9 @@ impl Action {
                 return Err("Swipe navigation target must be page or profile".into());
             }
             Self::OpenUrl { url } => {
+                if url.contains("${vault.") {
+                    crate::builtins::web_url::validate_template(url)?;
+                }
                 if !url.starts_with("https://")
                     && !url.starts_with("http://")
                     && crate::parameters::reference(url).is_none()
@@ -280,6 +361,22 @@ impl Action {
                     action.validate_with_draft(depth + 1, draft)?;
                 }
             }
+            Self::Events {
+                actions,
+                multi_press_ms,
+                hold_ms,
+            } => {
+                if depth != 0 {
+                    return Err("Event assignments must be at the top of a control binding".into());
+                }
+                if actions.len() != EventSlot::COUNT {
+                    return Err("Event bindings need exactly 14 independent action slots".into());
+                }
+                Self::validate_event_timing(*multi_press_ms, *hold_ms)?;
+                for action in actions {
+                    action.validate_with_draft(depth + 1, draft)?;
+                }
+            }
             Self::Macro { actions } => {
                 if actions.len() > 100 {
                     return Err("macro exceeds 100 actions".into());
@@ -316,12 +413,33 @@ impl Action {
         }
         Ok(())
     }
+
+    // Check bounds shared by saved assignments and their editor drafts
+    pub(crate) fn validate_event_timing(multi_press_ms: u16, hold_ms: u16) -> Result<(), String> {
+        if !(MIN_MULTI_PRESS_MS..=MAX_MULTI_PRESS_MS).contains(&multi_press_ms) {
+            return Err("Multi-press gap must be between 100 and 750 ms".into());
+        }
+        if !(MIN_HOLD_MS..=MAX_HOLD_MS).contains(&hold_ms) {
+            return Err("Hold threshold must be between 250 and 2500 ms".into());
+        }
+        Ok(())
+    }
+
+    // Restrict event wrappers to binding roots rather than stored macros
+    pub(crate) fn validate_saved_macro(&self) -> Result<(), String> {
+        if matches!(self, Self::Events { .. }) {
+            return Err("Saved macros cannot contain control event assignments".into());
+        }
+        self.validate(0)
+    }
 }
 impl Action {
     /// Sequence-backed children only; use the visitors for complete structural traversal
     pub fn children(&self) -> &[Action] {
         match self {
-            Self::Macro { actions } | Self::Dial { actions, .. } => actions,
+            Self::Macro { actions } | Self::Dial { actions, .. } | Self::Events { actions, .. } => {
+                actions
+            }
             Self::Builtin { action } => action.children(),
             _ => &[],
         }
@@ -329,7 +447,9 @@ impl Action {
     // Borrow child action nodes for in-place editing
     pub fn children_mut(&mut self) -> &mut [Action] {
         match self {
-            Self::Macro { actions } | Self::Dial { actions, .. } => actions,
+            Self::Macro { actions } | Self::Dial { actions, .. } | Self::Events { actions, .. } => {
+                actions
+            }
             Self::Builtin { action } => action.children_mut(),
             _ => &mut [],
         }
@@ -427,6 +547,9 @@ pub(crate) fn dial_input(input: &Input) -> Option<(usize, Input)> {
 }
 #[derive(Clone)]
 pub struct Request {
+    pub event_slot: Option<EventSlot>,
+    pub physical_activation: Option<String>,
+    pub trace: Option<String>,
     pub manual: bool,
     pub activation_policy: ActivationPolicy,
     pub icon_signature: Option<u64>,
@@ -459,6 +582,7 @@ pub fn node_scope(scope: &str, path: &[usize]) -> String {
         )
     }
 }
+
 /// Final effect boundary. Structural actions and supervised native operations belong to Run
 #[allow(clippy::too_many_arguments)] // Preserve physical identity and cancellation at the effect boundary
                                      // Execute leaf
@@ -489,8 +613,17 @@ pub(crate) fn execute_leaf(
         | Action::Delay { .. }
         | Action::Macro { .. }
         | Action::Dial { .. }
+        | Action::Events { .. }
         | Action::Toggle { .. } => Err("Action requires a run context".into()),
-        Action::OpenUrl { url } => open(url),
+        Action::OpenUrl { url } => {
+            if !url.starts_with("https://") && !url.starts_with("http://") {
+                return Err("only HTTP(S) URLs allowed".into());
+            }
+            if url.contains("${vault.") {
+                return Err("Unresolved Vault reference in URL".into());
+            }
+            crate::builtins::native::open_web(url)
+        }
         Action::OpenPath { path } | Action::Application { path } => open(path),
         Action::Media { command } => media(command),
         Action::Volume { delta } => volume(match input {
@@ -523,11 +656,18 @@ pub(crate) fn execute_leaf(
                 *target,
                 *direction,
             )?;
+            let profile_swipe =
+                *target == NavigationTarget::Profile && matches!(input, Input::Swipe { .. });
+            if profile_swipe && profile == session.profile_id {
+                return Ok(());
+            }
+            // As with the built-in strip defaults, restore this device's last page
+            // when a swipe changes profiles, rather than selecting a shared default.
             runtime
                 .select_device_profile(
                     device,
                     &profile,
-                    Some(&page),
+                    (!profile_swipe).then_some(page.as_str()),
                     *target == NavigationTarget::Profile,
                 )
                 .map(|_| ())
@@ -615,6 +755,14 @@ fn status(command: &mut Command) -> Result<(), String> {
 }
 /// Open a path or URL with the system's default handler
 pub fn open(value: &str) -> Result<(), String> {
+    open_target(value, false)
+}
+
+pub(crate) fn open_website(url: &str) -> Result<(), String> {
+    open_target(url, true).map_err(|_| "Could not open the website".into())
+}
+
+fn open_target(value: &str, #[allow(unused_variables)] website: bool) -> Result<(), String> {
     #[cfg(target_os = "macos")]
     let mut cmd = {
         let mut c = Command::new("open");
@@ -629,7 +777,7 @@ pub fn open(value: &str) -> Result<(), String> {
     };
     #[cfg(target_os = "linux")]
     let mut cmd = {
-        let mut c = Command::new(if value.ends_with(".desktop") {
+        let mut c = Command::new(if !website && value.ends_with(".desktop") {
             "gtk-launch"
         } else {
             "xdg-open"
@@ -991,6 +1139,99 @@ mod dial_tests {
             };
         }
         assert!(nested.validate(0).is_err());
+    }
+}
+
+#[cfg(test)]
+mod event_binding_tests {
+    use super::*;
+    use serde_json::json;
+
+    // Verify durable event indices and independent traversal of resources and settings
+    #[test]
+    fn event_slots_roundtrip_with_stable_child_paths() {
+        let mut slots = vec![json!({"kind": "none"}); EventSlot::COUNT];
+        slots[EventSlot::DoublePress.index()] = json!({
+            "kind": "plugin", "plugin_id": "fixture.events", "action_id": "double",
+            "settings": {"source": "only this slot"},
+            "resources": {"image": format!("{}.png", "b".repeat(64))}
+        });
+        slots[EventSlot::SwipeDown.index()] = json!({
+            "kind": "macro", "actions": [{"kind": "open_path", "path": "/example"}]
+        });
+        let value = json!({
+            "kind": "events", "actions": slots,
+            "multi_press_ms": DEFAULT_MULTI_PRESS_MS, "hold_ms": DEFAULT_HOLD_MS
+        });
+        let mut action: Action = serde_json::from_value(value.clone()).unwrap();
+        action.validate(0).unwrap();
+        assert_eq!(serde_json::to_value(&action).unwrap(), value);
+        for (index, slot) in EventSlot::ALL.into_iter().enumerate() {
+            assert_eq!(slot.index(), index);
+            assert_eq!(slot.bit(), 1 << index);
+            assert_eq!(EventSlot::from_index(index), Some(slot));
+        }
+        assert!(EventSlot::from_index(14).is_none());
+        let mut plugins = Vec::new();
+        let mut local_paths = Vec::new();
+        action
+            .try_visit_fields(
+                &mut |role, value| {
+                    if role.is_local_path() {
+                        local_paths.push(value.clone());
+                    }
+                    Ok::<_, std::convert::Infallible>(())
+                },
+                &mut |id, action, _| {
+                    plugins.push((id.to_owned(), action.to_owned()));
+                    Ok(())
+                },
+            )
+            .unwrap();
+        assert_eq!(
+            plugins,
+            [("fixture.events".to_owned(), "double".to_owned())]
+        );
+        assert_eq!(local_paths, ["/example"]);
+        *action.child_mut(EventSlot::DoublePress.index()).unwrap() = Action::None;
+        assert!(matches!(
+            action.child(EventSlot::SwipeDown.index()),
+            Some(Action::Macro { .. })
+        ));
+    }
+
+    // Reject malformed event data rather than normalizing away assignments
+    #[test]
+    fn event_bindings_require_fixed_slots_bounded_timing_and_a_binding_root() {
+        let events = |count, multi_press_ms, hold_ms| Action::Events {
+            actions: vec![Action::None; count],
+            multi_press_ms,
+            hold_ms,
+        };
+        for (count, gap, hold) in [
+            (13, 300, 600),
+            (15, 300, 600),
+            (14, 99, 600),
+            (14, 751, 600),
+            (14, 300, 249),
+            (14, 300, 2501),
+        ] {
+            assert!(events(count, gap, hold).validate(0).is_err());
+        }
+        events(14, 100, 250).validate(0).unwrap();
+        events(14, 750, 2500).validate(0).unwrap();
+        assert!(events(14, 300, 600).validate_saved_macro().is_err());
+        assert!(Action::Macro {
+            actions: vec![events(14, 300, 600)]
+        }
+        .validate(0)
+        .is_err());
+        let mut full = events(14, 300, 600);
+        *full.child_mut(13).unwrap() = Action::Volume { delta: 101 };
+        assert!(full.validate(0).is_err());
+        let mut malformed = serde_json::to_value(events(14, 300, 600)).unwrap();
+        malformed["other"] = json!(true);
+        assert!(serde_json::from_value::<Action>(malformed).is_err());
     }
 }
 

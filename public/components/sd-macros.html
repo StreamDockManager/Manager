@@ -87,7 +87,12 @@
             <template x-for="macro in macros" :key="macro.id">
                 <article class="macro-library-row" role="listitem" :data-id="macro.id">
                     <span class="macro-library-icon" aria-hidden="true">
-                        <img class="action-icon" src="/appearance/icons/zap.svg" alt="" />
+                        <img
+                            data-resource-role="interface-icon"
+                            class="action-icon"
+                            src="/appearance/icons/zap.svg"
+                            alt=""
+                        />
                     </span>
                     <div class="macro-library-info">
                         <button
@@ -187,7 +192,12 @@
         </div>
         <div class="macro-library-empty" x-show="!macros.length">
             <span class="macro-empty-icon" aria-hidden="true">
-                <img class="action-icon" src="/appearance/icons/zap.svg" alt="" />
+                <img
+                    data-resource-role="interface-icon"
+                    class="action-icon"
+                    src="/appearance/icons/zap.svg"
+                    alt=""
+                />
             </span>
             <h2 x-text="total ? 'No matching macros' : 'No saved macros'"></h2>
             <p

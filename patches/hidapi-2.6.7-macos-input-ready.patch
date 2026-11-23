@@ -1,0 +1,154 @@
+--- a/etc/hidapi/mac/hid.c
++++ b/etc/hidapi/mac/hid.c
+@@ -141,8 +141,30 @@
+ 	pthread_barrier_t barrier; /* Ensures correct startup sequence */
+ 	pthread_barrier_t shutdown_barrier; /* Ensures correct shutdown sequence */
+ 	int shutdown_thread;
++	/* Manager extension: callback owns no reports; serialized by mutex. */
++	void (*input_ready_callback)(void *);
++	void *input_ready_context;
+ 	wchar_t *last_error_str;
+ };
++
++/* Callback must only signal independent state, never call back into HIDAPI. */
++void HID_API_EXPORT hid_darwin_set_input_ready_callback(hid_device *dev,
++    void (*callback)(void *), void *context)
++{
++    pthread_mutex_lock(&dev->mutex);
++    dev->input_ready_callback = callback;
++    dev->input_ready_context = context;
++    if (callback && (dev->input_reports || dev->disconnected || dev->shutdown_thread))
++        callback(context);
++    pthread_mutex_unlock(&dev->mutex);
++}
++
++static void notify_input_ready(hid_device *dev)
++{
++    /* Caller holds dev->mutex. Unregister waits for an active callback. */
++    if (dev->input_ready_callback)
++        dev->input_ready_callback(dev->input_ready_context);
++}
+ 
+ static hid_device *new_hid_device(void)
+ {
+@@ -857,7 +879,10 @@
+ 	/* Stop the Run Loop for this device. */
+ 	hid_device *d = (hid_device*) context;
+ 
++	pthread_mutex_lock(&d->mutex);
+ 	d->disconnected = 1;
++	notify_input_ready(d);
++	pthread_mutex_unlock(&d->mutex);
+ 	CFRunLoopStop(d->run_loop);
+ }
+ 
+@@ -911,6 +936,7 @@
+ 
+ 	/* Signal a waiting thread that there is data. */
+ 	pthread_cond_signal(&dev->condition);
++	notify_input_ready(dev);
+ 
+ 	/* Unlock */
+ 	pthread_mutex_unlock(&dev->mutex);
+@@ -979,6 +1005,7 @@
+ 	   signaled. */
+ 	pthread_mutex_lock(&dev->mutex);
+ 	pthread_cond_broadcast(&dev->condition);
++	notify_input_ready(dev);
+ 	pthread_mutex_unlock(&dev->mutex);
+ 
+ 	/* Wait here until hid_close() is called and makes it past
+--- a/src/lib.rs
++++ b/src/lib.rs
+@@ -109,6 +109,7 @@
+         mod macos;
+         /// A trait with the extra methods that are available on macOS
+         trait HidDeviceBackendMacos {
++            fn set_input_ready_callback(&mut self, callback: Option<Box<dyn Fn() + Send + Sync>>) -> HidResult<()>;
+             /// Get the location ID for a [`HidDevice`] device.
+             fn get_location_id(&self) -> HidResult<u32>;
+ 
+--- a/src/macos.rs
++++ b/src/macos.rs
+@@ -22,6 +22,16 @@
+ }
+ 
+ impl HidDevice {
++    /// Manager extension: observe input readiness without consuming reports.
++    ///
++    /// The callback runs under HIDAPI's input mutex. It must only signal an
++    /// independent synchronization primitive, never call HIDAPI or acquire a
++    /// lock held across a HIDAPI call. Registration signals existing queued data.
++    /// Replacement, removal and device drop synchronously retire the old callback.
++    pub fn set_input_ready_callback(&mut self, callback: Option<Box<dyn Fn() + Send + Sync>>) -> HidResult<()> {
++        self.inner.set_input_ready_callback(callback)
++    }
++
+     /// Get the location ID for a [`HidDevice`] device.
+     pub fn get_location_id(&self) -> HidResult<u32> {
+         self.inner.get_location_id()
+--- a/src/ffi.rs
++++ b/src/ffi.rs
+@@ -110,6 +110,7 @@
+     use super::*;
+ 
+     extern "C" {
++        pub fn hid_darwin_set_input_ready_callback(device: *mut HidDevice, callback: Option<unsafe extern "C" fn(*mut libc::c_void)>, context: *mut libc::c_void);
+         pub fn hid_darwin_get_location_id(device: *mut HidDevice, location_id: *mut u32) -> c_int;
+         pub fn hid_darwin_set_open_exclusive(open_exclusive: c_int);
+         pub fn hid_darwin_get_open_exclusive() -> c_int;
+--- a/src/hidapi.rs
++++ b/src/hidapi.rs
+@@ -147,12 +147,16 @@
+ /// Object for accessing HID device
+ pub struct HidDevice {
+     _hid_device: *mut ffi::HidDevice,
++    #[cfg(target_os = "macos")]
++    input_ready_callback: Option<Box<Box<dyn Fn() + Send + Sync>>>,
+ }
+ 
+ impl HidDevice {
+     pub fn from_raw(device: *mut ffi::HidDevice) -> Self {
+         Self {
+             _hid_device: device,
++            #[cfg(target_os = "macos")]
++            input_ready_callback: None,
+         }
+     }
+ }
+@@ -167,6 +171,8 @@
+ 
+ impl Drop for HidDevice {
+     fn drop(&mut self) {
++        #[cfg(target_os = "macos")]
++        unsafe { ffi::macos::hid_darwin_set_input_ready_callback(self._hid_device, None, std::ptr::null_mut()); }
+         unsafe { ffi::hid_close(self._hid_device) }
+     }
+ }
+--- a/src/hidapi/macos.rs
++++ b/src/hidapi/macos.rs
+@@ -3,7 +3,24 @@
+ use super::HidDevice;
+ use crate::{ffi, HidDeviceBackendBase, HidDeviceBackendMacos, HidResult};
+ 
++unsafe extern "C" fn input_ready(context: *mut libc::c_void) {
++    let callback = &*(context as *const Box<dyn Fn() + Send + Sync>);
++    // A Rust panic must never unwind through the C callback/run loop.
++    let _ = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| callback()));
++}
++
+ impl HidDeviceBackendMacos for HidDevice {
++    fn set_input_ready_callback(&mut self, callback: Option<Box<dyn Fn() + Send + Sync>>) -> HidResult<()> {
++        // C unregister serializes with any currently running callback. Only then
++        // replace/drop its stable boxed context. A valid device cannot fail this.
++        unsafe { ffi::macos::hid_darwin_set_input_ready_callback(self._hid_device, None, std::ptr::null_mut()); }
++        self.input_ready_callback = callback.map(Box::new);
++        if let Some(callback) = self.input_ready_callback.as_mut() {
++            unsafe { ffi::macos::hid_darwin_set_input_ready_callback(self._hid_device, Some(input_ready), (&mut **callback as *mut Box<dyn Fn() + Send + Sync>).cast()); }
++        }
++        Ok(())
++    }
++
+     fn get_location_id(&self) -> HidResult<u32> {
+         let mut location_id: u32 = 0;
+ 

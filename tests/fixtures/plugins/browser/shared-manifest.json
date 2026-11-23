@@ -1,0 +1,37 @@
+{
+    "UUID": "app.streamdockmanager.plugins.fixture.browser",
+    "Name": "Shared HTML browser fixture",
+    "Author": "Stream Dock Manager",
+    "Description": "Synthetic browser runtime with a shared inspector entry point",
+    "Version": "1.0.0",
+    "SDKVersion": 1,
+    "CodePath": "missing.html",
+    "CodePathMac": "ui/index.HTML",
+    "CodePathWin": "ui/index.HTML",
+    "CodePathLinux": "ui/index.HTML",
+    "Actions": [
+        {
+            "UUID": "app.streamdockmanager.plugins.fixture.browser.action",
+            "Name": "Browser action",
+            "Controllers": ["Keypad"],
+            "Settings": {
+                "theme": "theme1",
+                "zone": "system",
+                "amplify": true,
+                "deep": 0,
+                "surplus": 60000
+            },
+            "PropertyInspectorPath": "ui/index.HTML",
+            "Icon": "icon.svg",
+            "States": [
+                {
+                    "Image": "icon.svg",
+                    "FontSize": "10",
+                    "FontStyle": "Bold",
+                    "TitleAlignment": "bottom"
+                }
+            ]
+        }
+    ],
+    "Icon": "icon.svg"
+}

@@ -129,6 +129,10 @@ impl crate::Runtime {
         }
         self.plugin_monitor_visible
             .store(!consumers.is_empty(), Ordering::Relaxed);
+        self.plugins
+            .lock()
+            .unwrap()
+            .network_monitor_visibility(!consumers.is_empty());
         self.sampling_signal.notify();
         Ok(())
     }
@@ -254,7 +258,13 @@ pub(crate) fn start(runtime: Weak<crate::Runtime>) {
             }
             if sample_remaining(last_sample, Instant::now(), visible).is_zero() {
                 let at = Instant::now();
-                let snapshots = runtime.plugins.lock().unwrap().health_snapshot();
+                let snapshots = {
+                    let plugins = runtime.plugins.lock().unwrap();
+                    if visible {
+                        plugins.request_network_samples();
+                    }
+                    plugins.health_snapshot()
+                };
                 let (changed, alerts) = health.observe(snapshots, at);
                 for message in alerts {
                     runtime.emit("plugin-health-warning", None, None, Some(message));

@@ -1053,6 +1053,7 @@ fn empty_and_defined_controls_keep_transparent_backgrounds_through_native_render
         .find(|control| control.image_width.is_some())
         .unwrap();
     let mut binding = crate::Binding {
+        live_label: Vec::new(),
         dial_response: None,
         title: String::new(),
         color: "#242424".into(),

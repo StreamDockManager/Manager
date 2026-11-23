@@ -1,25 +1,30 @@
 # N4
 
-Use this device with [Stream Dock Manager](../../README.md). Its adapter is included with the app; **no separate adapter download is needed**.
+This adapter is built into [Stream Dock Manager](../../README.md).
 
-| At a glance                   | Details                                          |
-| ----------------------------- | ------------------------------------------------ |
-| Model ID                      | `n4`                                             |
-| Adapter status                | Experimental                                     |
-| Registered controls           | 14 buttons, 4 encoders, 1 touch strip            |
-| Hardware testing              | No Manager hardware-tested claim for this model. |
-| Exact layout and capabilities | [Device descriptor](device.toml)                 |
+| At a glance             | Details                               |
+| ----------------------- | ------------------------------------- |
+| Model ID                | `n4`                                  |
+| Adapter status          | Experimental                          |
+| Controls                | 14 buttons, 4 encoders, 1 touch strip |
+| Hardware testing        | Not physically verified by Manager    |
+| Layout and capabilities | [Device descriptor](device.toml)      |
 
-Registered controls describe the Manager model, not a promise that every control or firmware has been physically verified. Dials are called encoders in the descriptor. Match your USB variant below before relying on a retail product name.
+Match the [USB ID](#compatibility), not just the product name. Dials are called encoders in the descriptor.
 
-## Get started
+## Connect and assign an action
 
-1. [Install or build Manager](../../README.md).
-2. Quit VSD Craft and other software that may be using the device.
-3. Connect the device, open Manager, and select it.
-4. Choose a profile, select a control that supports actions, assign an action, and save the binding.
+1. [Install Manager](../../README.md) and close other dock software, such as VSD Craft.
+2. Connect your dock. Open Manager and select the device and a profile in **Device editor**.
+3. Select a control, choose an action, and save the binding.
 
-You can explore the layout in the simulator without a connected device. On Linux, follow the [installation instructions](../../packaging/install-instructions/linux/INSTALL-INSTRUCTIONS.md) and reconnect after installing applicable USB access rules. Run Manager as your normal desktop user.
+In the editor, the four lower LCD sections form one touch panel. Each section
+retains its own press/release binding and can display feedback from its paired
+dial. Assign the strip's left and right swipes separately. N4 does not expose
+N4 Pro coordinate tracking, vertical swipes, or a shared live background.
+
+- **No hardware?** Select this model in the simulator.
+- **Linux:** Follow the [USB access setup](../../packaging/install-instructions/linux/INSTALL-INSTRUCTIONS.md), then reconnect. Run as your normal desktop user and do not broaden HID permissions.
 
 ## Compatibility
 
@@ -28,18 +33,16 @@ You can explore the layout in the simulator without a connected device. On Linux
 | N4 (6602:1001) | `6602:1001`        | Enabled experimentally |
 | N4 (6603:1007) | `6603:1007`        | Enabled experimentally |
 
-All variants remain **experimental**. Enabled matching is not a claim of full firmware, platform, or hardware qualification. Exact interface/usage selectors and capabilities are defined in [device.toml](device.toml).
+A matching USB ID lets Manager attempt a connection; it does not guarantee every feature on every firmware or OS. See the [device descriptor](device.toml) for exact interface selectors.
 
-Some source-derived interfaces intentionally have no automatic Linux permission grant. Do not work around this by making HID devices world-writable.
+## Troubleshooting
 
-## If it does not work
-
-| Symptom                                | What to check                                                                                                    |
-| -------------------------------------- | ---------------------------------------------------------------------------------------------------------------- |
-| Device is not listed                   | Quit competing device software, reconnect USB, and compare the USB identity with the table above.                |
-| Access is denied on Linux              | Check the package's USB rules and reconnect. Some interfaces deliberately remain unqualified.                    |
-| A control or image behaves differently | Confirm the exact model/variant and consult the protocol notes below; similar names can use different protocols. |
-| Firmware version is unavailable        | See [firmware-read limitations](../README.md#firmware-checks). An unknown version is not treated as current.     |
+| Problem                  | Check                                                                                                         |
+| ------------------------ | ------------------------------------------------------------------------------------------------------------- |
+| Device missing           | Close other dock apps, reconnect USB and match the USB ID above.                                              |
+| Linux access denied      | Use the linked USB setup. Some experimental interfaces have no automatic permission rule.                     |
+| Layout or image differs  | Confirm the exact variant in [device.toml](device.toml); similarly named devices can use different protocols. |
+| Unknown firmware version | See [firmware checks](../README.md#firmware-checks). An unknown version is not an up-to-date result.          |
 
 ## For contributors
 
@@ -51,7 +54,7 @@ cargo test -p stream-dock-manager-hardware-n4
 cargo run -p xtask -- hardware check --model n4
 ```
 
-These checks validate source behavior and fixtures. For physical qualification, follow [verification/plan.toml](verification/plan.toml) on the exact unit, firmware, and platform. Simulated or replayed tests are not physical measurements.
+These checks validate the adapter and its fixtures. For a physical test, follow the [verification plan](verification/plan.toml) and record the exact variant, firmware, and OS. A simulator or replay does not qualify hardware.
 
 <details>
 <summary>Protocol notes and verification details</summary>
@@ -64,7 +67,11 @@ Retired schematic IDs: touch-1, touch-2, touch-3, touch-4. Bindings on retired I
 
 USB matching requires the exact vendor/product and usage 1 on usage pages greater than 1025, as the vendor enumeration does. Its source does not establish an exact interface. No broad automatic Linux permission grant is generated; interface/permission qualification remains pending.
 
-N4 swipe labels follow its pinned model decoder; N4 Pro trajectory observations are not transferred to this model. Former touch-zone IDs require review because this source defines auxiliary button edges.
+N4 swipe labels follow its pinned model decoder. The panel groups the existing
+`aux-key-1` through `aux-key-4` controls with `touch-strip` for editing, but
+does not reinterpret their press/release edges as raw touch coordinates or
+rename any saved binding. N4 Pro trajectory observations are not transferred
+to this model.
 
 Run the module tests and `cargo run -p xtask -- hardware check --model n4`. Populate reviewed physical records only after completing the model plan on the named unit/firmware/session.
 

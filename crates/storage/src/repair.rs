@@ -2,7 +2,10 @@
 //! Corrupt primaries can be owned without opening them for writes
 //! Opening and inspection touch only a disposable snapshot. The root writer lock
 //! is held for the complete session; no ordinary runtime shares this database.
-use crate::{maintenance, own_root, schema, RootOwner};
+use crate::{
+    installation_key::{self, recovery as settings_recovery, KeystoreInitialization},
+    maintenance, own_root, schema, PluginKeystoreBackup, PluginKeystoreReview, RootOwner,
+};
 use rusqlite::Connection;
 use std::{
     path::{Path, PathBuf},
@@ -10,15 +13,28 @@ use std::{
 };
 
 struct State {
-    snapshot: Option<Connection>,
+    snapshot: Option<schema::ScratchDatabase>,
     unavailable: Option<String>,
     fingerprint: schema::Fingerprint,
     revision: String,
+    settings_status: &'static str,
+    settings_review: Option<SettingsReview>,
 }
+
+struct SettingsReview {
+    token: String,
+    operation: SettingsOperation,
+}
+
+enum SettingsOperation {
+    Restore(String, [u8; 32]),
+    Initialize(KeystoreInitialization),
+}
+
 impl State {
     // Return the opened inspection snapshot or explain why it is unavailable
     fn snapshot(&self) -> Result<&Connection, String> {
-        self.snapshot.as_ref().ok_or_else(|| {
+        self.snapshot.as_deref().ok_or_else(|| {
             self.unavailable.clone().unwrap_or_else(|| {
                 "Primary unavailable; select a validated backup for full restore".into()
             })
@@ -27,21 +43,65 @@ impl State {
 }
 // Compute the identity used to reject stale repair edits
 fn editor_fingerprint(root: &Path) -> Result<schema::Fingerprint, String> {
-    let mut fingerprint = schema::fingerprint(&root.join(schema::DATABASE_NAME))?;
+    let mut fingerprint = schema::fingerprint(&crate::database_path(root, schema::DATABASE_NAME))?;
     fingerprint.extend(schema::fingerprint(&root.join(schema::RECOVERY_PENDING))?);
+    fingerprint.extend(schema::fingerprint(&crate::database_path(
+        root,
+        installation_key::NAME,
+    ))?);
     Ok(fingerprint)
 }
 // Load state
 fn load_state(root: &Path) -> Result<State, String> {
     let fingerprint = editor_fingerprint(root)?;
+    let mut settings_status = "unknown";
     let result = if root
         .join(schema::RECOVERY_PENDING)
         .symlink_metadata()
         .is_ok()
     {
-        Err("An interrupted database restore must be resolved before record repair".into())
+        match installation_key::pending_operation(root) {
+            Ok(Some(KeystoreInitialization::Create)) => {
+                settings_status = "missing";
+                Err("An interrupted plugin settings keystore creation must be resumed in Recovery. Original files are preserved.".into())
+            }
+            Ok(Some(KeystoreInitialization::Reset)) => {
+                settings_status = "unavailable";
+                Err("An interrupted plugin settings reset must be resumed in Recovery. Original files are preserved.".into())
+            }
+            Ok(None) => {
+                Err("An interrupted database restore must be resolved before record repair".into())
+            }
+            Err(_) => Err(
+                "An interrupted keystore recovery marker is unreadable. Original files are preserved."
+                    .into(),
+            ),
+        }
     } else {
-        schema::snapshot_copy(&root.join(schema::DATABASE_NAME))
+        schema::snapshot_copy_unattached(&crate::database_path(root, schema::DATABASE_NAME))
+            .and_then(|(copy, _)| {
+                match settings_recovery::is_genuinely_missing(&copy, root) {
+                    Ok(true) => settings_status = "missing",
+                    Ok(false) => {}
+                    Err(error) => {
+                        settings_status = "unavailable";
+                        return Err(error);
+                    }
+                }
+                match settings_recovery::attach_inspection_copy(&copy, root) {
+                    Ok(true) => {
+                        settings_status = "ready";
+                        Ok(copy)
+                    }
+                    Ok(false) => Ok(copy),
+                    Err(error) => {
+                        if settings_status != "missing" {
+                            settings_status = "unavailable";
+                        }
+                        Err(error)
+                    }
+                }
+            })
     };
     if editor_fingerprint(root)? != fingerprint {
         return Err(
@@ -58,6 +118,8 @@ fn load_state(root: &Path) -> Result<State, String> {
         unavailable,
         fingerprint,
         revision: uuid::Uuid::new_v4().to_string(),
+        settings_status,
+        settings_review: None,
     })
 }
 pub struct RecoveryEditor {
@@ -78,6 +140,7 @@ impl RecoveryEditor {
     // Open mode
     fn open_mode(root: PathBuf, allow_unavailable: bool) -> Result<Self, String> {
         let (root, owner) = own_root(&root)?;
+        crate::database_layout::prepare_owned(&root)?;
         let state = load_state(&root)?;
         if !allow_unavailable {
             state.snapshot()?;
@@ -100,6 +163,195 @@ impl RecoveryEditor {
         self.check(&state, None)?;
         Ok(state.unavailable.clone())
     }
+    /// Status of the installation settings keystore, separate from personal Vault.
+    pub fn plugin_settings_status(&self) -> Result<(String, Option<String>), String> {
+        let state = self.state.lock().map_err(|_| "Recovery lock failed")?;
+        self.check(&state, None)?;
+        Ok((state.settings_status.into(), state.unavailable.clone()))
+    }
+
+    /// Revalidate after the OS credential store has been unlocked without
+    /// requiring a change to the database or encrypted file.
+    pub fn retry_plugin_settings(&self, revision: &str) -> Result<(), String> {
+        let mut state = self.state.lock().map_err(|_| "Recovery lock failed")?;
+        self.check(&state, Some(revision))?;
+        *state = load_state(&self.root)?;
+        Ok(())
+    }
+
+    pub fn plugin_settings_backups(&self) -> Result<Vec<PluginKeystoreBackup>, String> {
+        let state = self.state.lock().map_err(|_| "Recovery lock failed")?;
+        self.check(&state, None)?;
+        settings_recovery::backups(&self.root)
+    }
+
+    pub fn preview_plugin_settings_restore(
+        &self,
+        revision: &str,
+        backup_id: &str,
+    ) -> Result<PluginKeystoreReview, String> {
+        let mut state = self.state.lock().map_err(|_| "Recovery lock failed")?;
+        self.check(&state, Some(revision))?;
+        state.settings_review = None;
+        if load_state(&self.root)?.settings_status == "ready" {
+            return Err("The current plugin settings keystore is already available".into());
+        }
+        let candidate = settings_recovery::prepare(&self.root, backup_id)?;
+        self.check(&state, Some(revision))?;
+        let token = uuid::Uuid::new_v4().to_string();
+        state.settings_review = Some(SettingsReview {
+            token: token.clone(),
+            operation: SettingsOperation::Restore(backup_id.to_owned(), candidate.sha256),
+        });
+        Ok(PluginKeystoreReview {
+            token,
+            backup_id: Some(backup_id.to_owned()),
+        })
+    }
+
+    pub fn restore_plugin_settings(
+        &self,
+        revision: &str,
+        backup_id: &str,
+        review_token: &str,
+    ) -> Result<PathBuf, String> {
+        let mut state = self.state.lock().map_err(|_| "Recovery lock failed")?;
+        self.check(&state, Some(revision))?;
+        let review = state
+            .settings_review
+            .take()
+            .filter(|review| review.token == review_token)
+            .and_then(|review| match review.operation {
+                SettingsOperation::Restore(id, digest) => Some((id, digest)),
+                SettingsOperation::Initialize(_) => None,
+            })
+            .ok_or("Review an encrypted plugin settings backup before restoring")?;
+        if review.0 != backup_id {
+            return Err("Plugin settings backup selection changed; review again".into());
+        }
+        if load_state(&self.root)?.settings_status == "ready" {
+            return Err("The current plugin settings keystore is already available".into());
+        }
+        let candidate = settings_recovery::prepare(&self.root, backup_id)?;
+        if candidate.sha256 != review.1 {
+            return Err("Encrypted plugin settings backup changed; review it again".into());
+        }
+        let result = settings_recovery::publish_restore(&self.root, candidate, || {
+            self.check(&state, Some(revision))
+        });
+        self.finalize_settings_recovery(&mut state, result)
+    }
+
+    pub fn preview_plugin_settings_reset(
+        &self,
+        revision: &str,
+    ) -> Result<PluginKeystoreReview, String> {
+        self.preview_plugin_settings_initialization(revision, KeystoreInitialization::Reset)
+    }
+
+    pub fn preview_plugin_settings_create(
+        &self,
+        revision: &str,
+    ) -> Result<PluginKeystoreReview, String> {
+        self.preview_plugin_settings_initialization(revision, KeystoreInitialization::Create)
+    }
+
+    fn preview_plugin_settings_initialization(
+        &self,
+        revision: &str,
+        mode: KeystoreInitialization,
+    ) -> Result<PluginKeystoreReview, String> {
+        let mut state = self.state.lock().map_err(|_| "Recovery lock failed")?;
+        self.check(&state, Some(revision))?;
+        state.settings_review = None;
+        self.check_plugin_settings_initialization_status(mode)?;
+        installation_key::check_reset_available(&self.root, mode)?;
+        self.check(&state, Some(revision))?;
+        let token = uuid::Uuid::new_v4().to_string();
+        state.settings_review = Some(SettingsReview {
+            token: token.clone(),
+            operation: SettingsOperation::Initialize(mode),
+        });
+        Ok(PluginKeystoreReview {
+            token,
+            backup_id: None,
+        })
+    }
+
+    pub fn reset_plugin_settings(
+        &self,
+        revision: &str,
+        review_token: &str,
+    ) -> Result<PathBuf, String> {
+        self.initialize_plugin_settings(revision, review_token, KeystoreInitialization::Reset)
+    }
+
+    pub fn create_plugin_settings(
+        &self,
+        revision: &str,
+        review_token: &str,
+    ) -> Result<PathBuf, String> {
+        self.initialize_plugin_settings(revision, review_token, KeystoreInitialization::Create)
+    }
+
+    fn check_plugin_settings_initialization_status(
+        &self,
+        mode: KeystoreInitialization,
+    ) -> Result<(), String> {
+        // Unlocking the OS store can make a live keystore readable without
+        // changing its on-disk fingerprint, so check its current status.
+        match (mode, load_state(&self.root)?.settings_status) {
+            (KeystoreInitialization::Create, "missing") | (KeystoreInitialization::Reset, "unavailable") => Ok(()),
+            (_, "ready") => Err("The current plugin settings keystore is already available".into()),
+            (KeystoreInitialization::Create, _) => Err("Create is available only when the plugin settings keystore is missing".into()),
+            (KeystoreInitialization::Reset, "missing") => Err("The plugin settings keystore is missing. Choose Create or restore a matching backup.".into()),
+            (KeystoreInitialization::Reset, _) => Err("The plugin settings keystore cannot be reset in the current recovery state".into()),
+        }
+    }
+
+    fn initialize_plugin_settings(
+        &self,
+        revision: &str,
+        review_token: &str,
+        mode: KeystoreInitialization,
+    ) -> Result<PathBuf, String> {
+        let mut state = self.state.lock().map_err(|_| "Recovery lock failed")?;
+        self.check(&state, Some(revision))?;
+        if !state.settings_review.take().is_some_and(|review| {
+            review.token == review_token
+                && matches!(review.operation, SettingsOperation::Initialize(reviewed) if reviewed == mode)
+        }) {
+            return Err("Review this exact plugin settings operation before applying it".into());
+        }
+        self.check_plugin_settings_initialization_status(mode)?;
+        let result = installation_key::reset_for_recovery(&self.root, mode, || {
+            self.check(&state, Some(revision))
+        });
+        self.finalize_settings_recovery(&mut state, result)
+    }
+
+    fn finalize_settings_recovery(
+        &self,
+        state: &mut State,
+        result: Result<PathBuf, String>,
+    ) -> Result<PathBuf, String> {
+        match load_state(&self.root) {
+            Ok(next) => *state = next,
+            Err(error) => {
+                state.snapshot = None;
+                state.unavailable = Some(error.clone());
+                state.settings_status = "unknown";
+                state.settings_review = None;
+                state.revision = uuid::Uuid::new_v4().to_string();
+                return result.and_then(|directory| Err(format!(
+                    "Plugin settings recovery committed; preserved originals in {}. Reopen Manager: {error}",
+                    directory.display()
+                )));
+            }
+        }
+        result
+    }
+
     /// Validate the same reconciliation on disposable copies without publishing
     /// a quarantine directory, marker, or primary. No callback may write originals.
     pub fn preview_restore<F, G>(
@@ -184,6 +436,8 @@ impl RecoveryEditor {
             Err(error) => {
                 state.snapshot = None;
                 state.unavailable = Some(error.clone());
+                state.settings_status = "unknown";
+                state.settings_review = None;
                 state.revision = uuid::Uuid::new_v4().to_string();
                 return Err(if result.is_ok() {
                     format!(
@@ -255,8 +509,9 @@ impl RecoveryEditor {
     ) -> Result<T, String> {
         let state = self.state.lock().map_err(|_| "Recovery lock failed")?;
         self.check(&state, Some(revision))?;
-        let mut copy = Connection::open("").map_err(|e| e.to_string())?;
+        let mut copy = schema::ScratchDatabase::new()?;
         maintenance::copy_database(state.snapshot()?, &mut copy)?;
+        crate::installation_key::attach_preview(&copy, state.snapshot()?)?;
         operation(&mut copy)
     }
     /// Caller validates a candidate first, then repeats validation in this atomic
@@ -268,10 +523,9 @@ impl RecoveryEditor {
     ) -> Result<(T, PathBuf), String> {
         let mut state = self.state.lock().map_err(|_| "Recovery lock failed")?;
         self.check(&state, Some(revision))?;
-        let destination = self.root.join("recovery").join(format!(
-            "before-manual-edit-{}.sqlite3",
-            uuid::Uuid::new_v4()
-        ));
+        let destination = crate::database_layout::ensure_recovery_directory(&self.root)?.join(
+            format!("before-manual-edit-{}.sqlite3", uuid::Uuid::new_v4()),
+        );
         maintenance::backup_connection(
             state.snapshot()?,
             &self.root,
@@ -279,7 +533,9 @@ impl RecoveryEditor {
             &Default::default(),
         )?;
         self.check(&state, Some(revision))?;
-        let mut connection = schema::connect(&self.root.join(schema::DATABASE_NAME))?;
+        let mut connection =
+            schema::connect(&crate::database_path(&self.root, schema::DATABASE_NAME))?;
+        crate::installation_key::attach_live(&connection, &self.root)?;
         let result = (|| {
             let tx = connection
                 .transaction_with_behavior(rusqlite::TransactionBehavior::Immediate)
@@ -298,16 +554,22 @@ impl RecoveryEditor {
         })();
         drop(connection);
         // Even a rolled-back SQLite transaction can change sidecar bytes
-        let (snapshot, _fingerprint) =
-            schema::snapshot_copy_checked(&self.root.join(schema::DATABASE_NAME)).map_err(|error| {
-                if result.is_ok() { format!("Repair was committed. Backup: {}. Could not refresh recovery: {error}. Reopen Manager before further changes.", destination.display()) } else { error }
-            })?;
-        *state = State {
-            snapshot: Some(snapshot),
-            unavailable: None,
-            fingerprint: editor_fingerprint(&self.root)?,
-            revision: uuid::Uuid::new_v4().to_string(),
-        };
+        *state = load_state(&self.root).map_err(|error| {
+            if result.is_ok() {
+                format!("Repair was committed. Backup: {}. Could not refresh recovery: {error}. Reopen Manager before further changes.", destination.display())
+            } else {
+                error
+            }
+        })?;
+        if let Err(error) = state.snapshot() {
+            return Err(match result {
+                Ok(_) => format!(
+                    "Repair was committed. Backup: {}. Could not refresh recovery: {error}. Reopen Manager before further changes.",
+                    destination.display()
+                ),
+                Err(original) => original,
+            });
+        }
         result.map(|value| (value, destination))
     }
 }
@@ -317,31 +579,36 @@ impl RecoveryEditor {
 fn content_identity(connection: &Connection) -> Result<Vec<u8>, String> {
     use sha2::{Digest, Sha256};
     let mut digest = Sha256::new();
-    for table in std::iter::once("database_metadata")
-        .chain(crate::Domain::ALL.map(|d| d.table()))
+    let mut tables: Vec<(&str, &str)> = std::iter::once(("database_metadata", "key"))
+        .chain(crate::Domain::ALL.map(|d| (d.table(), "key")))
         .chain([
-            "plugin_storage_namespaces",
-            "plugin_storage_records",
-            "plugin_storage_receipts",
+            ("plugin_health_summary", "owner"),
+            ("plugin_health_events", "owner,ordinal"),
+            ("plugin_installation_state", "plugin_id"),
+            ("plugin_setting_refs", "domain,record_key,pointer"),
         ])
-    {
+        .collect();
+    if crate::installation_key::attached(connection) {
+        tables.extend([
+            ("settings_vault.plugin_storage_epoch", "singleton"),
+            ("settings_vault.plugin_storage_generations", "plugin_id"),
+            (
+                "settings_vault.plugin_storage_namespaces",
+                "plugin_id,namespace",
+            ),
+            (
+                "settings_vault.plugin_storage_records",
+                "plugin_id,namespace,key",
+            ),
+            (
+                "settings_vault.plugin_storage_receipts",
+                "plugin_id,namespace,operation_id",
+            ),
+        ]);
+    }
+    for (table, order) in tables {
         digest.update(table.as_bytes());
-        let sql = if table == "database_metadata" {
-            "SELECT key,value FROM database_metadata ORDER BY key".to_owned()
-        } else if table.starts_with("plugin_storage_") {
-            format!(
-                "SELECT * FROM {table} ORDER BY {}",
-                if table == "plugin_storage_namespaces" {
-                    "plugin_id,namespace"
-                } else if table == "plugin_storage_records" {
-                    "plugin_id,namespace,key"
-                } else {
-                    "plugin_id,namespace,operation_id"
-                }
-            )
-        } else {
-            format!("SELECT key,payload,revision FROM {table} ORDER BY key")
-        };
+        let sql = format!("SELECT * FROM {table} ORDER BY {order}");
         let mut statement = connection.prepare(&sql).map_err(|e| e.to_string())?;
         let count = statement.column_count();
         let mut rows = statement.query([]).map_err(|e| e.to_string())?;
@@ -349,6 +616,7 @@ fn content_identity(connection: &Connection) -> Result<Vec<u8>, String> {
             digest.update([0xff]);
             for index in 0..count {
                 match row.get_ref(index).map_err(|e| e.to_string())? {
+                    rusqlite::types::ValueRef::Null => digest.update([0]),
                     rusqlite::types::ValueRef::Text(bytes) => {
                         digest.update([1]);
                         digest.update((bytes.len() as u64).to_le_bytes());
@@ -358,87 +626,17 @@ fn content_identity(connection: &Connection) -> Result<Vec<u8>, String> {
                         digest.update([2]);
                         digest.update(value.to_le_bytes());
                     }
+                    rusqlite::types::ValueRef::Blob(bytes) => {
+                        digest.update([3]);
+                        digest.update((bytes.len() as u64).to_le_bytes());
+                        digest.update(bytes);
+                    }
                     _ => return Err("Unsupported database value during recovery".into()),
                 }
             }
         }
     }
     Ok(digest.finalize().to_vec())
-}
-
-#[cfg(test)]
-mod tests {
-    use super::*;
-    use crate::{Domain, Storage};
-    #[test]
-    // Verify external change requires refresh and old revision never becomes valid again
-    fn external_change_requires_refresh_and_old_revision_never_becomes_valid_again() {
-        let root = tempfile::tempdir().unwrap();
-        let storage = Storage::open(root.path().into()).unwrap();
-        storage
-            .write_json(Domain::Profiles, "p", &serde_json::json!({"v":1}), 1024)
-            .unwrap();
-        drop(storage);
-        let editor = RecoveryEditor::open(root.path().into()).unwrap();
-        let token = editor.read(|_, token| Ok(token.to_owned())).unwrap();
-        let conn = Connection::open(root.path().join(schema::DATABASE_NAME)).unwrap();
-        conn.execute(
-            &format!(
-                "UPDATE {} SET payload='{{\"v\":2}}'",
-                Domain::Profiles.table()
-            ),
-            [],
-        )
-        .unwrap();
-        drop(conn);
-        assert!(editor.preview(&token, |_| Ok(())).is_err());
-        editor.refresh().unwrap();
-        assert!(editor.preview(&token, |_| Ok(())).is_err());
-        let new = editor.read(|_, token| Ok(token.to_owned())).unwrap();
-        assert!(editor.preview(&new, |_| Ok(())).is_ok());
-    }
-    #[test]
-    // Verify backup failure and failed operation preserve records
-    fn backup_failure_and_failed_operation_preserve_records() {
-        let root = tempfile::tempdir().unwrap();
-        let storage = Storage::open(root.path().into()).unwrap();
-        storage
-            .write_json(Domain::Profiles, "p", &serde_json::json!({"v":1}), 1024)
-            .unwrap();
-        drop(storage);
-        let editor = RecoveryEditor::open(root.path().into()).unwrap();
-        let token = editor.read(|_, t| Ok(t.to_owned())).unwrap();
-        std::fs::rename(
-            root.path().join("recovery"),
-            root.path().join("existing-recovery"),
-        )
-        .unwrap();
-        std::fs::write(root.path().join("recovery"), "blocked directory").unwrap();
-        assert!(editor.commit(&token, |_| Ok(())).is_err());
-        std::fs::remove_file(root.path().join("recovery")).unwrap();
-        let error = editor.commit(&token, |conn| {
-            conn.execute(&format!("DELETE FROM {}", Domain::Profiles.table()), [])
-                .unwrap();
-            Err::<(), _>("forced rollback".into())
-        });
-        assert!(error.is_err());
-        editor
-            .read(|conn, _| {
-                assert!(
-                    crate::read_json::<serde_json::Value>(conn, Domain::Profiles, "p", 1024)?
-                        .is_some()
-                );
-                Ok(())
-            })
-            .unwrap();
-    }
-    #[test]
-    // Verify content identity covers plugin namespaces and rows
-    fn content_identity_covers_plugin_namespaces_and_rows() {
-        let root = tempfile::tempdir().unwrap();
-        let storage = Storage::open(root.path().into()).unwrap();
-        storage.run(|conn| {let before=content_identity(conn)?;conn.execute("INSERT INTO plugin_storage_namespaces VALUES ('plugin','namespace','generation','revision')",[]).unwrap();assert_ne!(before,content_identity(conn)?);let before=content_identity(conn)?;conn.execute("INSERT INTO plugin_storage_records VALUES ('plugin','namespace','key','{}',2)",[]).unwrap();assert_ne!(before,content_identity(conn)?);Ok(())}).unwrap();
-    }
 }
 
 /// Inspect bounded, standalone backups without requiring a readable primary or a
@@ -460,49 +658,41 @@ fn inspect_backups<T>(
     generation: Option<&str>,
     mut operation: impl FnMut(&str, Option<u64>, &Connection) -> Result<T, String>,
 ) -> Result<(Vec<T>, Vec<String>), String> {
-    let directory = root.join("recovery");
-    if directory.try_exists().map_err(|e| e.to_string())?
-        && !directory
-            .symlink_metadata()
-            .map_err(|e| e.to_string())?
-            .is_dir()
-    {
-        return Err("Recovery backup directory is not a regular directory".into());
-    }
+    let Some(directory) = crate::database_layout::inspect_recovery_directory(root)? else {
+        return Ok((Vec::new(), Vec::new()));
+    };
     let mut paths = Vec::new();
     let mut warnings = Vec::new();
-    if directory.exists() {
-        for (index, entry) in std::fs::read_dir(&directory)
-            .map_err(|e| e.to_string())?
-            .enumerate()
-        {
-            if index >= 1024 {
-                warnings.push("Backup directory scan reached its 1024-entry limit.".into());
-                break;
-            }
-            let entry = match entry {
-                Ok(entry) => entry,
-                Err(error) => {
-                    warnings.push(format!("Backup entry unavailable: {error}"));
-                    continue;
-                }
-            };
-            if !entry
-                .path()
-                .extension()
-                .is_some_and(|extension| extension == "sqlite3")
-            {
-                continue;
-            }
-            if !entry.file_type().is_ok_and(|kind| kind.is_file()) {
-                warnings.push(format!(
-                    "Skipped nonregular backup {}",
-                    entry.file_name().to_string_lossy()
-                ));
-                continue;
-            }
-            paths.push(entry.path());
+    for (index, entry) in std::fs::read_dir(&directory)
+        .map_err(|e| e.to_string())?
+        .enumerate()
+    {
+        if index >= 1024 {
+            warnings.push("Backup directory scan reached its 1024-entry limit.".into());
+            break;
         }
+        let entry = match entry {
+            Ok(entry) => entry,
+            Err(error) => {
+                warnings.push(format!("Backup entry unavailable: {error}"));
+                continue;
+            }
+        };
+        if !entry
+            .path()
+            .extension()
+            .is_some_and(|extension| extension == "sqlite3")
+        {
+            continue;
+        }
+        if !entry.file_type().is_ok_and(|kind| kind.is_file()) {
+            warnings.push(format!(
+                "Skipped nonregular backup {}",
+                entry.file_name().to_string_lossy()
+            ));
+            continue;
+        }
+        paths.push(entry.path());
     }
     paths.sort_by_key(|path| {
         std::cmp::Reverse(std::fs::metadata(path).ok().and_then(|m| m.modified().ok()))
@@ -577,4 +767,80 @@ fn inspect_backups<T>(
         }
     }
     Ok((results, warnings))
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::{Domain, Storage};
+    #[test]
+    // Verify external change requires refresh and old revision never becomes valid again
+    fn external_change_requires_refresh_and_old_revision_never_becomes_valid_again() {
+        let root = tempfile::tempdir().unwrap();
+        let storage = Storage::open(root.path().into()).unwrap();
+        storage
+            .write_json(Domain::Profiles, "p", &serde_json::json!({"v":1}), 1024)
+            .unwrap();
+        drop(storage);
+        let editor = RecoveryEditor::open(root.path().into()).unwrap();
+        let token = editor.read(|_, token| Ok(token.to_owned())).unwrap();
+        let conn =
+            Connection::open(crate::database_path(root.path(), schema::DATABASE_NAME)).unwrap();
+        conn.execute(
+            &format!(
+                "UPDATE {} SET payload='{{\"v\":2}}'",
+                Domain::Profiles.table()
+            ),
+            [],
+        )
+        .unwrap();
+        drop(conn);
+        assert!(editor.preview(&token, |_| Ok(())).is_err());
+        editor.refresh().unwrap();
+        assert!(editor.preview(&token, |_| Ok(())).is_err());
+        let new = editor.read(|_, token| Ok(token.to_owned())).unwrap();
+        editor.preview(&new, |_| Ok(())).unwrap();
+    }
+    #[test]
+    // Verify backup failure and failed operation preserve records
+    fn backup_failure_and_failed_operation_preserve_records() {
+        let root = tempfile::tempdir().unwrap();
+        let storage = Storage::open(root.path().into()).unwrap();
+        storage
+            .write_json(Domain::Profiles, "p", &serde_json::json!({"v":1}), 1024)
+            .unwrap();
+        drop(storage);
+        let editor = RecoveryEditor::open(root.path().into()).unwrap();
+        let token = editor.read(|_, t| Ok(t.to_owned())).unwrap();
+        std::fs::rename(
+            crate::recovery_directory(root.path()),
+            root.path().join("existing-recovery"),
+        )
+        .unwrap();
+        std::fs::write(crate::recovery_directory(root.path()), "blocked directory").unwrap();
+        assert!(editor.commit(&token, |_| Ok(())).is_err());
+        std::fs::remove_file(crate::recovery_directory(root.path())).unwrap();
+        let error = editor.commit(&token, |conn| {
+            conn.execute(&format!("DELETE FROM {}", Domain::Profiles.table()), [])
+                .unwrap();
+            Err::<(), _>("forced rollback".into())
+        });
+        assert!(error.is_err());
+        editor
+            .read(|conn, _| {
+                assert!(
+                    crate::read_json::<serde_json::Value>(conn, Domain::Profiles, "p", 1024)?
+                        .is_some()
+                );
+                Ok(())
+            })
+            .unwrap();
+    }
+    #[test]
+    // Verify content identity covers plugin namespaces and rows
+    fn content_identity_covers_plugin_namespaces_and_rows() {
+        let root = tempfile::tempdir().unwrap();
+        let storage = Storage::open(root.path().into()).unwrap();
+        storage.run(|conn| {let before=content_identity(conn)?;conn.execute("INSERT INTO settings_vault.plugin_storage_namespaces VALUES ('plugin','namespace','generation',X'0000000000000001')",[]).unwrap();assert_ne!(before,content_identity(conn)?);let before=content_identity(conn)?;conn.execute("INSERT INTO settings_vault.plugin_storage_records VALUES ('plugin','namespace','key','{}',2)",[]).unwrap();assert_ne!(before,content_identity(conn)?);Ok(())}).unwrap();
+    }
 }

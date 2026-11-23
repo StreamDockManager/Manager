@@ -13,9 +13,35 @@ pub enum ArchiveImportKind {
 
 /// Identify the review flow without extracting files or staging an import
 pub fn identify(path: &Path) -> Result<ArchiveImportKind, String> {
-    let metadata = path.metadata().map_err(|e| e.to_string())?;
+    let metadata = std::fs::symlink_metadata(path).map_err(|e| e.to_string())?;
+    if metadata.is_dir() {
+        let package = path
+            .file_name()
+            .and_then(|name| name.to_str())
+            .is_some_and(|name| {
+                name.len() > ".sdPlugin".len() && name.to_ascii_lowercase().ends_with(".sdplugin")
+            });
+        if package
+            && std::fs::symlink_metadata(path.join("manifest.json"))
+                .is_ok_and(|manifest| manifest.is_file())
+        {
+            return Ok(ArchiveImportKind::Plugin);
+        }
+        return Err("Choose a .sdPlugin folder with a manifest.json file at its root.".into());
+    }
     if !metadata.is_file() || metadata.len() > MAX_DROPPED_ARCHIVE {
         return Err("Choose a ZIP archive up to 288 MiB.".into());
+    }
+    use stream_dock_manager_storage::vault::transfer;
+    if let Some(kind) = transfer::read_kind(&mut File::open(path).map_err(|e| e.to_string())?)? {
+        return match kind {
+            transfer::Kind::Profiles => Ok(ArchiveImportKind::Profiles),
+            transfer::Kind::Macros => Ok(ArchiveImportKind::Macros),
+            transfer::Kind::Backup => Err("Use data restore for an encrypted full backup.".into()),
+            transfer::Kind::VaultEntries => {
+                Err("Use Import entries from the Vault to open this file.".into())
+            }
+        };
     }
     let mut archive = zip::ZipArchive::new(File::open(path).map_err(|e| e.to_string())?)
         .map_err(|_| "Choose a plugin, profile or macro ZIP archive.")?;
@@ -77,4 +103,28 @@ pub fn identify(path: &Path) -> Result<ArchiveImportKind, String> {
     } else {
         ArchiveImportKind::Profiles
     })
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn identifies_only_plugin_folders_with_a_root_manifest() {
+        let root = tempfile::tempdir().unwrap();
+        let folder = root.path().join("org.example.demo.SdPlugin");
+        std::fs::create_dir(&folder).unwrap();
+        assert!(identify(&folder).is_err());
+        std::fs::write(folder.join("manifest.json"), b"{}").unwrap();
+        assert_eq!(identify(&folder).unwrap(), ArchiveImportKind::Plugin);
+
+        let unrelated = root.path().join("not-a-plugin");
+        std::fs::rename(&folder, &unrelated).unwrap();
+        assert!(identify(&unrelated).is_err());
+        #[cfg(unix)]
+        {
+            std::os::unix::fs::symlink(&unrelated, &folder).unwrap();
+            assert!(identify(&folder).is_err());
+        }
+    }
 }

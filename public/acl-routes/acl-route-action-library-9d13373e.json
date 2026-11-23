@@ -1,0 +1,22 @@
+{
+  "version": 1,
+  "basePath": "..",
+  "components": {
+    "sd-action-library": {
+      "source": "components/sd-action-library.html",
+      "dependencies": [],
+      "options": {
+        "shadow": false,
+        "templateRevision": "sha256-_qOZIdR9cafWCs89qMqLNsHzHFCp_-R1sOSMvjwike4"
+      },
+      "metadata": {
+        "description": "First-party sd-action-library component. Controllers are registered by the trusted application bootstrap."
+      }
+    }
+  },
+  "groups": {
+    "action-library": [
+      "sd-action-library"
+    ]
+  }
+}

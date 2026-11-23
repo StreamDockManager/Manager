@@ -195,6 +195,7 @@ mod tests {
             "token".into(),
             FileGrant {
                 root: root.into(),
+                runtime_entry: None,
                 bootstrap: String::new(),
                 context: Some("context".into()),
                 setup_runtime: false,

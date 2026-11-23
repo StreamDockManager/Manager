@@ -637,6 +637,9 @@ impl Runtime {
                 .iter()
                 .find(|p| p.id == profile_id)
                 .ok_or("Source profile is missing")?;
+            if !source.linked_controls.is_empty() {
+                return Err("This conversion cannot preserve linked controls. Detach the groups before converting.".into());
+            }
             let ids = source
                 .pages
                 .iter()

@@ -1,5 +1,21 @@
-import { isKeyboardNavigationPage } from './keyboard-navigation';
+import { registerProfileReference } from './profile-reference';
+import { registerNavigationMap } from './navigation-map';
+import { previewBrightness } from './preview-brightness';
+import { devicePreviewBackground, isWallpaperAperture } from './device-preview-background';
+import { editorPreviewWork } from './editor-preview-work';
+import { isKeyboardNavigationPage, isKeyboardNavigationControl } from './keyboard-navigation';
 import { ActionDraftTree, type ActionNode } from './action-draft-tree';
+import {
+    controlEventRows,
+    eventCount,
+    convertControlEvents,
+    eventTiming,
+    holdBounds,
+    isSwipeStrip,
+    swipeStripEvents,
+    multiPressBounds,
+    standardControlAction,
+} from './control-events';
 import { setLiveActionPreview, clearLiveActionPreview } from './live-action-preview';
 import { bindingScopePlan, scopedBindingEdits, type BindingScope } from './binding-scope';
 import { dialActionDefault } from './dial-defaults';
@@ -37,12 +53,12 @@ import { windowCloseOwners } from './window-close-owners';
 import { registerCloseDraft } from './close-releases';
 import Alpine from '@alpinejs/csp';
 import { native } from './bridge';
-import { actionKey, builtinCatalog } from './builtin-actions';
+import { actionKey, builtinCatalog, walkAction } from './builtin-actions';
 import { chooseMediaInput, managedFormats, mediaFormats, selectMediaInput } from './media-input';
 import { editPluginSettings } from './plugin-settings';
 import type { Action, Control, Profile } from './types';
 
-import type { Draft, MediaOptions, PluginAppearance } from '../generated/runtime';
+import type { Draft, Edit, MediaOptions, PluginAppearance } from '../generated/runtime';
 import { openActionPicker } from './action-picker';
 import { hasBindingContent } from './bindings';
 import { DEFAULT_BACKGROUND, backgroundRgb, transparentBackground } from './background-color';
@@ -57,7 +73,7 @@ import {
     type WindowFence,
 } from './window-work';
 import { displayPanels, type DisplayPanel } from './display-panels';
-import { previewRowOffsets } from './preview-layout';
+import { previewGeometry } from './preview-layout';
 import devicePalettes from './device-palettes.v1.json';
 
 import { registerAppearanceEditor } from './appearance-editor';
@@ -81,6 +97,15 @@ import {
 } from './route-context';
 // Register the editor handler with its owner
 export function register() {
+    const alternatives = new PluginSettingDrafts();
+    let suspended: { key: string; scope: BindingScope; reviewed: string } | null = null;
+    windowCloseOwners.register({
+        name: 'Alternative plugin settings',
+        state: () => (alternatives.size ? 'dirty' : 'clean'),
+        discard: () => alternatives.clear(),
+    });
+    registerProfileReference(Alpine, app);
+    registerNavigationMap(Alpine, app);
     registerAppearanceEditor();
     registerIconSelector();
     registerProfileCreator(Alpine, app);
@@ -174,8 +199,8 @@ export function register() {
         get swipeHelp() {
             const directions = app().device?.manifest.capabilities.touch_panel?.swipe_directions;
             return directions?.includes('up') && directions.includes('down')
-                ? 'Swipe left/right to change pages. Swipe up for the next profile or down for the previous profile.'
-                : 'Swipe left/right to change pages.';
+                ? 'By default, swipe left/right to change pages. Swipe up for the next profile or down for the previous profile on hardware that supports these directions.'
+                : 'By default, swipe left/right to change pages.';
         },
         // Derive preview help from the current editor state
         get previewHelp() {
@@ -204,6 +229,16 @@ export function register() {
             return app().profile?.name || 'Your workspace';
         },
 
+        get swipeStrips() {
+            const manifest = app().device?.manifest;
+            return (manifest?.controls || []).filter((control) => isSwipeStrip(manifest, control));
+        },
+        configureSwipes(event: Event) {
+            const id = (event.currentTarget as HTMLButtonElement).dataset.id;
+            if (!id || app().busy || !this.swipeStrips.some((control) => control.id === id)) return;
+            app().selectedControls = [];
+            app().controlId = id;
+        },
         // Derive control summary from the current editor state
         get controlSummary() {
             const controls = app().device?.manifest.controls || [];
@@ -574,7 +609,10 @@ export function register() {
                 // Complete the deferred editor work using the current operation state
                 this.pageScrollbarObserver = new ResizeObserver(() => {
                     // Native scrollbar tracks vary by platform and system preference
-                    const size = `${Math.max(0, strip.offsetHeight - strip.clientHeight)}px`;
+                    const style = getComputedStyle(strip);
+                    const borders =
+                        parseFloat(style.borderTopWidth) + parseFloat(style.borderBottomWidth);
+                    const size = `${Math.max(0, strip.offsetHeight - strip.clientHeight - borders)}px`;
                     if (strip.style.getPropertyValue('--page-scrollbar-size') !== size)
                         strip.style.setProperty('--page-scrollbar-size', size);
                     this.revealCurrentPage(app().page);
@@ -645,6 +683,22 @@ export function register() {
         },
     }));
     Alpine.data('preview', () => ({
+        geometry: null as ReturnType<typeof previewGeometry> | null,
+        measureGeometry() {
+            const device = app().device;
+            return previewGeometry(
+                device?.manifest.controls || [],
+                device?.manifest.layout.width || 800,
+                device?.model_id,
+                device?.manifest.capabilities.touch_panel,
+            );
+        },
+        updateGeometry() {
+            this.geometry = this.measureGeometry();
+        },
+        get layoutGeometry() {
+            return this.geometry || this.measureGeometry();
+        },
         // Check whether selected is valid for the current editor state
         isSelected(control: Control) {
             return app().selectedIds.includes(control.id);
@@ -685,6 +739,7 @@ export function register() {
         dragClass(control: Control) {
             return {
                 'gesture-strip': control.preview_hidden,
+                'shared-touch-region': this.isSharedTouch(control),
                 dragging: this.dragSource === control.id,
                 'drop-allowed':
                     this.dragTarget === control.id &&
@@ -708,6 +763,7 @@ export function register() {
                     app().previewBinding(control.id)?.background_source === 'palette' &&
                     !app().previewBinding(control.id)?.asset &&
                     !app().previewBinding(control.id)?.composition,
+                'has-screen-background': this.hasScreenBackground(control),
                 'plain-button': this.isPlainButton(control),
                 'round-button': this.isPlainButton(control) && !control.directional_switch,
                 'strip-region': this.displayPanels.some((panel) =>
@@ -728,6 +784,14 @@ export function register() {
         },
         // Check whether surface is valid for the current editor state
         hasSurface(control: Control) {
+            // Native streamed pixels include the authoritative per-display composition.
+            // Browser-only empty placeholders may reveal the shared wallpaper fallback.
+            if (
+                !app().nativeRendering &&
+                this.hasScreenBackground(control) &&
+                !hasBindingContent(app().previewBinding(control.id))
+            )
+                return false;
             return Boolean(control.image_width && app().previewSurface(control.id));
         },
         // Reset the drag
@@ -833,8 +897,11 @@ export function register() {
         // Derive controls from the current editor state
         get controls() {
             return (app().device?.manifest.controls || []).filter(
-                (c) => !c.semantics.includes('swipe'),
+                (control) => !control.semantics.includes('swipe'),
             );
+        },
+        controlKey(control: Control) {
+            return app().device?.model_id + ':' + control.id;
         },
         // Derive selected dials from the current editor state
         get selectedDials() {
@@ -884,16 +951,32 @@ export function register() {
         },
         // Derive row offsets from the current editor state
         get rowOffsets() {
-            return previewRowOffsets(this.controls, app().device?.manifest.layout.width || 800);
+            return this.layoutGeometry.rowOffsets;
+        },
+        get touchPanels() {
+            return this.layoutGeometry.touchPanels;
+        },
+        isSharedTouch(control: Control) {
+            return this.layoutGeometry.rects.has(control.id);
+        },
+        touchPanelStyle(panel: Control) {
+            const member = this.controls.find((control) => this.isSharedTouch(control));
+            const layout = app().device!.manifest.layout;
+            return {
+                left: `${(100 * (panel.x + (member ? this.rowOffsets.get(member.id) || 0 : 0))) / layout.width}%`,
+                top: `${(100 * panel.y) / layout.height}%`,
+                width: `${(100 * panel.width) / layout.width}%`,
+                height: `${(100 * panel.height) / layout.height}%`,
+                '--device-brightness': previewBrightness(
+                    app().effectiveDeviceOutput.brightness,
+                    app().effectiveDeviceOutput.sleeping,
+                    app().simulated,
+                ),
+            };
         },
         // Derive display panels from the current editor state
         get displayPanels() {
-            return displayPanels(
-                this.controls.map((control) => ({
-                    ...control,
-                    x: control.x + (this.rowOffsets.get(control.id) || 0),
-                })),
-            ).filter((panel) => panel.controlIds.length > 1);
+            return this.layoutGeometry.panels;
         },
         // Convert display-panel geometry to percentages of the device layout
         displayPanelStyle(panel: DisplayPanel) {
@@ -907,23 +990,16 @@ export function register() {
         },
         // Project the control's declared position and dimensions into a rectangle
         controlRect(control: Control) {
+            const shared = this.layoutGeometry.rects.get(control.id);
+            if (shared) return shared;
             return { x: control.x, y: control.y, width: control.width, height: control.height };
         },
         // Check whether screen background is valid for the current editor state
         hasScreenBackground(control: Control) {
-            return Boolean(
-                this.screenBackground &&
-                app().device?.manifest.capabilities.background &&
-                ['button', 'touch'].includes(control.kind) &&
-                control.image_width &&
-                control.image_height &&
-                !control.preview_hidden,
-            );
+            return Boolean(this.screenBackground && isWallpaperAperture(control));
         },
         // Derive screen background from the current editor state
         get screenBackground() {
-            if (native) return app().background;
-            if (app().background) return app().background;
             const theme = Alpine.store('theme') as ReturnType<
                 typeof import('./theme').registerTheme
             >;
@@ -937,26 +1013,38 @@ export function register() {
             const id =
                 mode === 'light' ? appearance.style.lightPalette : appearance.style.darkPalette;
             const variants = devicePalettes.palettes[mode] as Record<string, { wallpaper: string }>;
-            return (
-                'data:image/svg+xml,' +
-                encodeURIComponent((variants[id] || variants.default).wallpaper)
-            );
+            return devicePreviewBackground({
+                native,
+                customPage: Boolean(app().profile?.background_asset),
+                preview: Boolean(theme.palettePreview),
+                paletteAsset: Boolean(
+                    theme.palettePreview?.draft?.wallpaper ||
+                    theme.customPalettes.find((p) => p.id === id && p.mode === mode)?.wallpaper,
+                ),
+                streamed: app().background,
+                palette:
+                    'data:image/svg+xml,' +
+                    encodeURIComponent((variants[id] || variants.default).wallpaper),
+            });
         },
         // Crop the shared device-wide background into the current screen aperture
         screenBackgroundStyle(control: Control) {
             const manifest = app().device!.manifest;
+            // Separate LCDs have no device-wide framebuffer: fit the complete wallpaper
+            // to each aperture, matching native per-display raster composition.
+            if (!manifest.capabilities.background)
+                return { width: '100%', height: '100%', left: '0%', top: '0%' };
             const [width, height] = manifest.capabilities.background_size || [
                 manifest.layout.width,
                 manifest.layout.height,
             ];
-            const rect = this.controlRect(control);
             // Each aperture crops the same device-wide image, preserving alignment
             // across the physical gaps and when the responsive preview resizes
             return {
-                width: `${(100 * width) / rect.width}%`,
-                height: `${(100 * height) / rect.height}%`,
-                left: `${(-100 * rect.x) / rect.width}%`,
-                top: `${(-100 * rect.y) / rect.height}%`,
+                width: `${(100 * width) / control.width}%`,
+                height: `${(100 * height) / control.height}%`,
+                left: `${(-100 * control.x) / control.width}%`,
+                top: `${(-100 * control.y) / control.height}%`,
             };
         },
         // Build control geometry and appearance styles from the preview binding and device output
@@ -980,7 +1068,11 @@ export function register() {
                 height: `${(100 * rect.height) / layout.height}%`,
                 '--key-color': color,
                 '--key-ink': ink,
-                '--device-brightness': output.brightness / 100,
+                '--device-brightness': previewBrightness(
+                    app().effectiveDeviceOutput.brightness,
+                    app().effectiveDeviceOutput.sleeping,
+                    app().simulated,
+                ),
                 '--dial-color': `rgb(${glow.join(',')})`,
             };
         },
@@ -1056,7 +1148,7 @@ export function register() {
         },
     }));
     Alpine.data('inspector', () => ({
-        pluginSettingDrafts: new PluginSettingDrafts(),
+        pluginSettingDrafts: alternatives,
         appearance: defaultAppearance(),
         appearanceEnabled: false,
         composition: undefined as Binding['composition'],
@@ -1071,7 +1163,7 @@ export function register() {
                 ? { curve: this.dialCurve, max_steps: Number(this.dialMaxSteps) }
                 : undefined;
         },
-        activationPolicy: 'queue' as 'queue' | 'ignore_busy' | 'replace_pending',
+        activationPolicy: 'queue' as NonNullable<Binding['activation_policy']>,
         // Derive has display from the current editor state
         get hasDisplay() {
             const control = app().control;
@@ -1091,6 +1183,7 @@ export function register() {
                         context: this.contextKey,
                         defaultAction: this.actionDraft.action,
                         binding: {
+                            live_label: cloneJson(this.liveLabel),
                             title: this.title,
                             color: this.color,
                             custom_background: this.customBackground || undefined,
@@ -1133,6 +1226,7 @@ export function register() {
             if (event.detail.context !== this.contextKey) return;
             for (const key of [
                 'title',
+                'liveLabel',
                 'color',
                 'customBackground',
                 'backgroundSource',
@@ -1148,6 +1242,7 @@ export function register() {
             this.markDirty();
         },
         title: '',
+        liveLabel: [] as NonNullable<Binding['live_label']>,
         color: DEFAULT_BACKGROUND,
         customBackground: false,
         backgroundSource: 'custom' as 'custom' | 'palette',
@@ -1200,6 +1295,349 @@ export function register() {
             this.markDirty();
         },
         actionTree: new ActionDraftTree(),
+        eventConversion: null as {
+            source: string;
+            context: string;
+            value: Action;
+            toEvents: boolean;
+            summary: string;
+            details?: string;
+        } | null,
+        eventTestGeneration: 0,
+        eventTestPending: false,
+        eventTestChoice: null as number | null,
+        eventTestToken: '',
+        eventTestTimer: null as ReturnType<typeof setTimeout> | null,
+        eventTestMessage: '',
+        get eventTestRows() {
+            return this.eventRows.filter((row) => !row.reason);
+        },
+        get eventTestRow() {
+            const rows = this.eventTestRows;
+            return (
+                rows.find((row) => row.index === this.eventTestChoice) ||
+                rows.find((row) => row.selected) ||
+                rows[0]
+            );
+        },
+        get eventTestValue() {
+            return this.eventTestRow?.index ?? '';
+        },
+        get canTestSelectedEvent() {
+            const device = app().device;
+            return (
+                native &&
+                !!device?.connected &&
+                !device.simulated &&
+                !!this.eventTestRow &&
+                !app().navigationPending
+            );
+        },
+        get eventTestHint() {
+            const device = app().device;
+            return !native || !device?.connected || device.simulated
+                ? 'Connect a physical device in the desktop app to test input.'
+                : 'Test physical input without running its action.';
+        },
+        resetEventTest(message = '') {
+            this.eventTestGeneration++;
+            this.eventTestPending = false;
+            this.eventTestMessage = message;
+            if (this.eventTestTimer !== null) clearTimeout(this.eventTestTimer);
+            this.eventTestTimer = null;
+            const token = this.eventTestToken;
+            this.eventTestToken = '';
+            if (token)
+                void app()
+                    .bridge.command('cancel_control_event_test', { token })
+                    .catch(() => {});
+        },
+        changeEventTest(event: Event) {
+            this.resetEventTest();
+            this.eventTestChoice = Number((event.currentTarget as HTMLSelectElement).value);
+        },
+        escapeEventTest(event: KeyboardEvent) {
+            if (!this.eventTestPending) return;
+            event.preventDefault();
+            this.resetEventTest('Test cancelled.');
+        },
+        async testSelectedEvent() {
+            if (this.eventTestPending) {
+                this.resetEventTest('Test cancelled.');
+                return;
+            }
+            const selected = this.eventTestRow;
+            if (!this.canTestSelectedEvent || !selected) return;
+            const generation = ++this.eventTestGeneration;
+            const context = this.contextKey;
+            const current = () =>
+                generation === this.eventTestGeneration && context === this.contextKey;
+            const rows = this.eventTestRows;
+            this.eventTestPending = true;
+            this.eventTestMessage = 'Starting test…';
+            const finish = (message: string) => {
+                this.eventTestPending = false;
+                this.eventTestToken = '';
+                this.eventTestTimer = null;
+                this.eventTestMessage = message;
+            };
+            try {
+                const result = await app().bridge.command('arm_control_event_test', {
+                    deviceId: app().deviceId,
+                    controlId: app().controlId,
+                    eventIndex: selected.index,
+                    assigned: rows.filter((row) => row.assigned).map((row) => row.index),
+                    multiPressMs: this.actionTree.multiPressMs,
+                    holdMs: this.actionTree.holdMs,
+                });
+                const token = result.token;
+                if (!current()) {
+                    void app()
+                        .bridge.command('cancel_control_event_test', { token })
+                        .catch(() => {});
+                    return;
+                }
+                this.eventTestToken = token;
+                const consume = (result: typeof resultInitial) => {
+                    if (!current()) return;
+                    if (result.status === 'waiting') {
+                        this.eventTestMessage = 'Waiting for ' + selected.name + '…';
+                        this.eventTestTimer = setTimeout(() => {
+                            this.eventTestTimer = null;
+                            void app()
+                                .bridge.command('read_control_event_test', { token })
+                                .then(consume)
+                                .catch((error) => {
+                                    if (current())
+                                        this.resetEventTest('Test unavailable: ' + String(error));
+                                });
+                        }, 175);
+                    } else if (result.status === 'matched') {
+                        finish('Matched: ' + selected.name + '.');
+                    } else if (result.status === 'cancelled') {
+                        finish('Test cancelled.');
+                    } else {
+                        const recognized = result.recognized
+                            .map((index) => rows.find((row) => row.index === index)?.name)
+                            .filter(Boolean);
+                        finish(
+                            recognized.length
+                                ? 'Did not match. Detected: ' +
+                                      [...new Set(recognized)].join(', ') +
+                                      '.'
+                                : 'No match: ' + selected.name + '.',
+                        );
+                    }
+                };
+                const resultInitial = result;
+                consume(result);
+            } catch (error) {
+                if (current())
+                    this.resetEventTest(
+                        /command not found/i.test(String(error))
+                            ? 'Rebuild and reopen Manager to enable event testing.'
+                            : 'Test unavailable: ' + String(error),
+                    );
+            }
+        },
+        get swipeStrip() {
+            return isSwipeStrip(app().device?.manifest, app().control);
+        },
+        inspectorDraft(draft: BindingDraft): BindingDraft {
+            const manifest = app().device?.manifest;
+            const control = app().control;
+            if (!isSwipeStrip(manifest, control)) return draft;
+            const supported = controlEventRows(manifest, control).filter((row) => !row.reason);
+            const tree = draft.actionTree.eventLanes
+                ? draft.actionTree
+                : new ActionDraftTree(swipeStripEvents(draft.actionTree.commit(), supported));
+            if (!supported.some((row) => row.index === tree.eventLane)) {
+                const initial =
+                    supported.find((row) => tree.eventLanes?.[row.index]?.action.kind !== 'none') ||
+                    supported[0];
+                if (initial) tree.eventLane = initial.index;
+            }
+            return { ...draft, actionTree: tree };
+        },
+        get eventActions() {
+            return this.actionTree.eventLanes;
+        },
+        get eventRows() {
+            return controlEventRows(app().device?.manifest, app().control).map((row) => {
+                const action = this.eventActions?.[row.index]?.action;
+                return {
+                    ...row,
+                    assigned: !!action && action.kind !== 'none',
+                    summary: this.actionSummary(action),
+                    selected: this.actionTree.eventLane === row.index,
+                };
+            });
+        },
+        get visibleEventRows() {
+            return this.eventRows.filter((row) => !row.reason || row.assigned);
+        },
+        get eventGroups() {
+            const rows = this.visibleEventRows;
+            return ['Press & release', 'Gestures', 'Rotation']
+                .map((name) => ({ name, rows: rows.filter((row) => row.group === name) }))
+                .filter((group) => group.rows.length > 0);
+        },
+        get canEnableEvents() {
+            return (
+                !this.swipeStrip && !this.eventActions && this.eventRows.some((row) => !row.reason)
+            );
+        },
+        get canEditEvent() {
+            return !this.eventActions || this.eventRows.some((row) => row.selected && !row.reason);
+        },
+        get activeEventName() {
+            return this.eventRows.find((row) => row.selected)?.name || 'Event action';
+        },
+        get eventTurns() {
+            return this.eventActions && [6, 7, 8, 9].includes(this.actionTree.eventLane);
+        },
+        get eventDelayWarning() {
+            const active = (index: number) =>
+                this.eventRows.some((row) => row.index === index && row.assigned && !row.reason);
+            const waits = (active(2) && (active(3) || active(4))) || (active(3) && active(4));
+            return waits
+                ? 'A shorter press or tap waits while a longer gesture is still possible.'
+                : '';
+        },
+        get eventEdgeWarning() {
+            const active = (index: number) =>
+                this.eventRows.some((row) => row.index === index && row.assigned && !row.reason);
+            return (active(0) || active(1)) && [2, 3, 4, 5].some(active)
+                ? 'Down and up actions can run in addition to gesture actions.'
+                : '';
+        },
+        get eventShowsGap() {
+            return this.eventRows.some(
+                (row) => [3, 4].includes(row.index) && row.assigned && !row.reason,
+            );
+        },
+        get eventShowsHold() {
+            return this.eventRows.some((row) => row.index === 5 && row.assigned && !row.reason);
+        },
+        setEventGap(event: Event) {
+            const value = Number((event.currentTarget as HTMLInputElement).value);
+            if (!eventTiming(value, multiPressBounds)) return;
+            this.actionTree.multiPressMs = value;
+            this.markDirty();
+        },
+        setEventHold(event: Event) {
+            const value = Number((event.currentTarget as HTMLInputElement).value);
+            if (!eventTiming(value, holdBounds)) return;
+            this.actionTree.holdMs = value;
+            this.markDirty();
+        },
+        previewEventsConversion() {
+            if (!this.canEnableEvents || !this.rememberPluginSettings()) return;
+            try {
+                const legacy = this.actionTree.commit();
+                let needsRelease = false;
+                walkAction(legacy, (action) => {
+                    if (builtinCatalog.find((item) => item.id === actionKey(action))?.release)
+                        needsRelease = true;
+                });
+                if (needsRelease)
+                    throw Error(
+                        'This action needs the original physical press and release. Keep its existing binding.',
+                    );
+                const value = convertControlEvents(legacy, this.eventRows);
+                const assigned = this.eventRows
+                    .filter((row) => value.actions[row.index]?.kind !== 'none')
+                    .map((row) => row.name + (row.reason ? ' (unavailable)' : ''));
+                this.eventConversion = {
+                    source: JSON.stringify(legacy),
+                    context: this.contextKey,
+                    value,
+                    toEvents: true,
+                    summary: 'Keep: ' + assigned.join(', ') + '.',
+                };
+                if (!assigned.length) this.confirmEventsConversion();
+            } catch (error) {
+                app().notify(String(error), 'error');
+            }
+        },
+        previewStandardConversion() {
+            if (this.swipeStrip || !this.eventActions || !this.rememberPluginSettings()) return;
+            try {
+                const current = this.actionTree.commit();
+                if (current.kind !== 'events') return;
+                const { action, kept, removed, sharedSwipe } = standardControlAction(
+                    current,
+                    this.eventRows,
+                    app().controlKind === 'encoder',
+                    this.actionTree.eventLane,
+                );
+                this.eventConversion = {
+                    source: JSON.stringify(current),
+                    context: this.contextKey,
+                    value: action,
+                    toEvents: false,
+                    summary: sharedSwipe
+                        ? 'The selected swipe action will apply to every supported swipe.'
+                        : kept.length
+                          ? 'Keep: ' + kept.join(', ') + '.'
+                          : 'Start with no action assigned.',
+                    details: removed.length ? 'Removed on Save: ' + removed.join(', ') + '.' : '',
+                };
+                if (!kept.length && !removed.length && !sharedSwipe) this.confirmEventsConversion();
+            } catch (error) {
+                app().notify(String(error), 'error');
+            }
+        },
+        confirmEventsConversion() {
+            const plan = this.eventConversion;
+            if (this.swipeStrip || !plan || plan.context !== this.contextKey) return;
+            if (plan.toEvents ? !this.canEnableEvents : !this.eventActions) return;
+            try {
+                if (plan.source !== JSON.stringify(this.actionTree.commit())) {
+                    if (plan.toEvents) this.previewEventsConversion();
+                    else this.previewStandardConversion();
+                    return;
+                }
+                this.actionTree = new ActionDraftTree(plan.value);
+                this.eventConversion = null;
+                this.ensureEditableEvent();
+                this.updateModeSelection = undefined;
+                this.markDirty();
+            } catch (error) {
+                app().notify(String(error), 'error');
+            }
+        },
+        cancelEventsConversion() {
+            this.eventConversion = null;
+        },
+        ensureEditableEvent() {
+            if (!this.eventActions || this.canEditEvent) return;
+            const supported = this.eventRows.filter((row) => !row.reason);
+            const selected = supported.find((row) => row.assigned) || supported[0];
+            if (selected) this.actionTree.eventLane = selected.index;
+        },
+        editEventLane(event: Event) {
+            const index = Number((event.currentTarget as HTMLElement).dataset.eventIndex);
+            const row = this.eventRows.find((row) => row.index === index);
+            if (!this.eventActions || !row || row.reason || !this.rememberPluginSettings()) return;
+            this.actionTree.eventLane = index;
+            this.resetEventTest();
+            this.eventTestChoice = index;
+            this.updateModeSelection = undefined;
+            if (!row.assigned) this.browseActions(event);
+        },
+        clearEventLane(event: Event) {
+            const index = Number((event.currentTarget as HTMLElement).dataset.eventIndex);
+            if (
+                !this.eventActions ||
+                !this.eventRows.some((row) => row.index === index && row.assigned)
+            )
+                return;
+            if (index !== this.actionTree.eventLane && !this.rememberPluginSettings()) return;
+            this.eventActions[index] = new InspectorActionDraft();
+            this.pluginSettingDrafts.clear(this.contextKey + ':event:' + index);
+            this.markDirty();
+        },
         // Derive dial actions from the current editor state
         get dialActions() {
             return this.actionTree.currentLanes;
@@ -1279,7 +1717,7 @@ export function register() {
         },
         // Derive dial volume from the current editor state
         get dialVolume() {
-            return this.separateDialActions && this.kind === 'volume';
+            return (this.separateDialActions || this.eventTurns) && this.kind === 'volume';
         },
         // Derive dial volume direction from the current editor state
         get dialVolumeDirection() {
@@ -1307,7 +1745,10 @@ export function register() {
         },
         // Derive dial navigation from the current editor state
         get dialNavigation() {
-            return this.separateDialActions && ['navigate', 'page', 'profile'].includes(this.kind);
+            return (
+                (this.separateDialActions || this.eventTurns) &&
+                ['navigate', 'page', 'profile'].includes(this.kind)
+            );
         },
         // Derive dial navigation mode from the current editor state
         get dialNavigationMode() {
@@ -1353,17 +1794,32 @@ export function register() {
                 this.dialActionIndex === 1 || (this.linkedDialTurns && this.dialActionIndex === 0)
             );
         },
+        get supportsDialPress() {
+            const semantics = app().control?.semantics;
+            return !!(semantics?.includes('press') || semantics?.includes('pulse'));
+        },
         // Derive dial lane press from the current editor state
         get dialLanePress() {
             return this.dialActionIndex === 2;
         },
         // Derive active action context from the current editor state
         get activeActionContext() {
-            return this.contextKey + (this.dialActions ? ':dial:' + this.dialActionIndex : '');
+            return (
+                this.contextKey +
+                (this.eventActions
+                    ? ':event:' + this.actionTree.eventLane
+                    : this.dialActions
+                      ? ':dial:' + this.dialActionIndex
+                      : '')
+            );
         },
         // Read the saved action or the saved action in the currently edited dial lane
         savedAction(): Action | undefined {
-            let action = this.draftBase?.action;
+            const action = this.draftBase?.action;
+            if (this.eventActions)
+                return action?.kind === 'events'
+                    ? action.actions[this.actionTree.eventLane]
+                    : undefined;
             return this.dialActions && action?.kind === 'dial'
                 ? action.actions[this.dialActionIndex]
                 : action;
@@ -1374,6 +1830,8 @@ export function register() {
             for (let i = 0; i < 3; i++) {
                 this.pluginSettingDrafts.clear(context + ':dial:' + i);
             }
+            for (let i = 0; i < eventCount; i++)
+                this.pluginSettingDrafts.clear(context + ':event:' + i);
         },
         // Select the dial lane
         selectDialLane(event: Event) {
@@ -1392,8 +1850,16 @@ export function register() {
                     : index === this.dialActionIndex
                       ? this.actionDraft.action
                       : this.dialActions?.[index]?.action;
-            if (!action) return 'No action';
+            return this.actionSummary(action);
+        },
+        actionSummary(action?: Action) {
+            if (!action || action.kind === 'none') return 'No action';
             if (action.kind === 'macro') return `Multi-action · ${action.actions.length} steps`;
+            if (action.kind === 'builtin' && action.action.kind === 'saved_macro') {
+                const id = action.action.macro_id;
+                const saved = app().snapshot.saved_macros.find((macro) => macro.id === id);
+                return saved?.name || 'Run saved macro';
+            }
             if (action.kind === 'volume')
                 return action.delta < 0 ? 'Decrease volume' : 'Increase volume';
             if (action.kind === 'navigate')
@@ -1490,14 +1956,27 @@ export function register() {
             this.actionDraft.value = value;
         },
         livePreviewOwner: 'inspector:' + crypto.randomUUID(),
+        previewWork: editorPreviewWork(),
         // Refresh the live preview
         refreshLivePreview() {
+            const context = this.contextKey;
+            this.previewWork.schedule(() => {
+                if (context !== this.contextKey || context !== this.address()) return;
+                this.projectLivePreview();
+            });
+        },
+        projectLivePreview() {
             if (!this.dirty || !this.contextKey || this.contextKey !== this.address()) {
                 void clearLiveActionPreview(this.livePreviewOwner);
                 return;
             }
             try {
-                setLiveActionPreview(this.livePreviewOwner, previewBindingDraft(this));
+                const preview = previewBindingDraft(this);
+                // Visual authoring stays live, but an unsaved event map does not
+                // become the effective binding for hardware or preview input.
+                if (this.eventActions || this.draftBase?.action.kind === 'events')
+                    preview.action = this.draftBase?.action || { kind: 'none' };
+                setLiveActionPreview(this.livePreviewOwner, preview);
             } catch {
                 // Keep the last valid draft visible while advanced JSON is incomplete
             }
@@ -1536,7 +2015,7 @@ export function register() {
             const draft = app().draftStore[this.contextKey];
             if (!draft) return '';
             try {
-                InspectorActionDraft.restore(draft.value as Record<string, unknown>);
+                ActionDraftTree.restore(draft.value as Record<string, unknown>);
                 return '';
             } catch (error) {
                 return String(error);
@@ -1563,7 +2042,7 @@ export function register() {
         },
         // Derive current binding json from the current editor state
         get currentBindingJSON() {
-            return JSON.stringify(app().binding, null, 2);
+            return this.conflict ? JSON.stringify(app().binding, null, 2) : '';
         },
         // Update the structured
         updateStructured(event: CustomEvent<{ action: Action }>) {
@@ -1603,8 +2082,7 @@ export function register() {
                 if (!this.dirty || !this.contextKey) return draftQueue.value;
                 const key = this.contextKey;
                 const existing = app().draftStore[key];
-                if (existing)
-                    InspectorActionDraft.restore(existing.value as Record<string, unknown>);
+                if (existing) ActionDraftTree.restore(existing.value as Record<string, unknown>);
                 if (draftDevice(key) === app().removingSimulatorId) return draftQueue.value;
                 const draft: Draft = JSON.parse(
                     JSON.stringify({
@@ -1632,27 +2110,33 @@ export function register() {
             }
             this.conflict =
                 bindingSignature(draft.base) !== bindingSignature(app().binding || null);
-            Object.assign(this, restored);
+            Object.assign(this, this.inspectorDraft(restored));
+            this.ensureEditableEvent();
             this.draftBase = draft.base;
             this.recovered = true;
             this.dirty = true;
         },
         // Cancel draft scheduling and clear the matching saved recovery draft
         async discardDraft() {
+            this.resetEventTest();
             if (this.draftTimer) clearTimeout(this.draftTimer);
             this.draftTimer = undefined;
             this.releaseDraftTimer?.();
             this.releaseDraftTimer = undefined;
             const key = this.contextKey;
-            const discarded = app().draftStore[key];
-            await draftQueue.clear(key);
-            if (app().draftStore[key] === discarded) delete app().draftStore[key];
+            // Retire queued preview work before resetting the draft. Cleanup is
+            // captured now; its completion must never reset a newly selected target.
+            this.previewWork.cancel();
+            const previewReleased = clearLiveActionPreview(this.livePreviewOwner);
+            const draftCleared = draftQueue.clear(key);
+            delete app().draftStore[key];
             forgetWindowDraft(key);
-            await releaseMediaOwner(app(), 'control:' + key);
+            const mediaReleased = releaseMediaOwner(app(), 'control:' + key);
             this.dirty = false;
             this.recovered = false;
             this.clearPluginAlternatives(key);
             this.load();
+            await Promise.all([previewReleased, draftCleared, mediaReleased]);
         },
         // Replace the conflict
         async replaceConflict() {
@@ -1814,7 +2298,8 @@ export function register() {
         },
         // Derive action name from the current editor state
         get actionName() {
-            if (this.dialActions && this.kind === 'macro') return 'Multi-action';
+            if ((this.dialActions || this.eventActions) && this.kind === 'macro')
+                return 'Multi-action';
             if (this.actionDraft.action.kind === 'navigate')
                 return this.actionDraft.action.target === 'page'
                     ? 'Page navigation'
@@ -1827,13 +2312,15 @@ export function register() {
         },
         // Browse the actions
         browseActions(event: Event, source: 'all' | 'plugins' = 'all') {
+            if (!this.canEditEvent) return;
             const address = this.activeActionContext;
             openActionPicker({
                 owner: event.currentTarget as HTMLElement,
                 current: this.actionChoice,
                 advanced: true,
+                independentEvent: !!this.eventActions,
                 source,
-                label: 'Device editor',
+                label: this.eventActions ? this.activeEventName : 'Device editor',
                 // Report whether the current editor value is valid
                 valid: () => this.activeActionContext === address,
                 // Choose the active item for the editor workflow
@@ -1857,7 +2344,7 @@ export function register() {
         },
         // Select the action
         selectAction(kind: string) {
-            if (!this.rememberPluginSettings()) return;
+            if (!this.canEditEvent || !this.rememberPluginSettings()) return;
             if (kind === 'custom') {
                 this.actionDraft.editJSON();
                 this.markDirty();
@@ -1866,10 +2353,16 @@ export function register() {
             {
                 const action = dialActionDefault(
                     defaultAction(kind),
-                    this.dialActions ? this.dialActionIndex : null,
+                    this.dialActions
+                        ? this.dialActionIndex
+                        : this.eventTurns
+                          ? [6, 8].includes(this.actionTree.eventLane)
+                              ? 0
+                              : 1
+                          : null,
                 );
                 this.actionDraft = new InspectorActionDraft(action);
-                if (!this.draftBase) {
+                if (!this.draftBase && !this.eventActions) {
                     const defaults = actionAppearanceDefaults(action, app().snapshot.plugins);
                     this.feedback = defaults.feedback;
                     if (!this.title) this.title = defaults.title;
@@ -1937,7 +2430,11 @@ export function register() {
                                 profile_id: app().profile?.id ?? '',
                                 page_id: app().page?.id ?? '',
                                 control_id: app().controlId,
-                                path: this.dialActions ? [this.dialActionIndex] : [],
+                                path: this.eventActions
+                                    ? [this.actionTree.eventLane]
+                                    : this.dialActions
+                                      ? [this.dialActionIndex]
+                                      : [],
                             },
                         );
                         if (
@@ -2129,6 +2626,7 @@ export function register() {
                     this.draftTimer = undefined;
                     this.releaseDraftTimer?.();
                     this.releaseDraftTimer = undefined;
+                    this.previewWork.cancel();
                     await clearLiveActionPreview(this.livePreviewOwner);
                     await releaseMediaOwner(app(), 'control:' + this.contextKey);
                 },
@@ -2137,6 +2635,12 @@ export function register() {
             this.updateStructured = this.updateStructured.bind(this);
             this.updateMedia = this.updateMedia.bind(this);
             this.load();
+            if (suspended?.key === this.contextKey && app().draftStore[this.contextKey]) {
+                this.restoreDraft();
+                this.bindingScope = suspended.scope;
+                this.scopeReviewed = suspended.reviewed;
+            }
+            suspended = null;
             this.applyPendingAction();
             this.$watch('selectedAddress', () => this.load());
             this.$watch('$store.app.pendingAction', () => this.applyPendingAction());
@@ -2150,6 +2654,10 @@ export function register() {
                 this.refreshLivePreview();
                 app().dirtyBindingAddress = this.dirty ? this.contextKey : '';
             });
+            if (this.dirty) {
+                app().dirtyBindingAddress = this.contextKey;
+                this.refreshLivePreview();
+            }
             for (const key of bindingDraftFields)
                 // Complete the deferred editor work using the current operation state
                 this.$watch(key, () => {
@@ -2175,13 +2683,13 @@ export function register() {
             }
             const action = app().pendingAction;
             if (!action) return;
-            if (!this.rememberPluginSettings()) {
+            if (!this.canEditEvent || !this.rememberPluginSettings()) {
                 app().pendingAction = null;
                 return;
             }
             if (action.kind === 'builtin') {
                 this.actionDraft = new InspectorActionDraft(action);
-                this.title = app().pendingActionTitle;
+                if (!this.eventActions) this.title = app().pendingActionTitle;
                 this.markDirty();
                 app().pendingAction = null;
                 return;
@@ -2189,7 +2697,7 @@ export function register() {
             if (action.kind !== 'plugin') {
                 this.actionDraft = new InspectorActionDraft(action);
                 this.actionDraft.editJSON();
-                this.title = app().pendingActionTitle;
+                if (!this.eventActions) this.title = app().pendingActionTitle;
                 this.markDirty();
                 app().pendingAction = null;
                 return;
@@ -2206,7 +2714,7 @@ export function register() {
                     ? saved.settings
                     : action.settings,
             );
-            this.title = app().pendingActionTitle;
+            if (!this.eventActions) this.title = app().pendingActionTitle;
             this.dirty = true;
             app().pendingAction = null;
         },
@@ -2246,6 +2754,7 @@ export function register() {
                 windowWork.invalidate();
                 return;
             }
+            this.previewWork.cancel();
             void clearLiveActionPreview(this.livePreviewOwner);
             const oldKey = this.contextKey;
             const pending = this.persistDraft();
@@ -2258,6 +2767,9 @@ export function register() {
                     }),
                 );
             this.linkTurnsPending = false;
+            this.eventConversion = null;
+            this.resetEventTest();
+            this.eventTestChoice = null;
             this.contextKey = this.address();
             this.loadedSignature = this.savedSignature();
             this.recovered = false;
@@ -2268,7 +2780,9 @@ export function register() {
             const b = app().binding;
             Object.assign(
                 this,
-                loadBindingDraft(b, app().controlKind === 'encoder' ? 'linear' : ''),
+                this.inspectorDraft(
+                    loadBindingDraft(b, app().controlKind === 'encoder' ? 'linear' : ''),
+                ),
             );
             if (app().controlKind === 'encoder' && (!b || b.action.kind === 'none')) {
                 this.actionTree = new ActionDraftTree({
@@ -2277,6 +2791,7 @@ export function register() {
                 });
             }
             this.draftBase = cloneJson(b || null);
+            this.ensureEditableEvent();
             if (this.asset)
                 void retainMediaFor(app(), this.asset, this.mediaOwner).catch((error) =>
                     app().notify(String(error), 'error'),
@@ -2286,10 +2801,18 @@ export function register() {
         },
         // Release editor state and associated lifecycle resources
         destroy() {
+            this.resetEventTest();
+            this.previewWork.cancel();
             void clearLiveActionPreview(this.livePreviewOwner);
             app().dirtyBindingAddress = '';
             this.unregisterCloseOwner?.();
             const ownerKey = this.contextKey;
+            if (this.dirty && !windowCloseOwners.closing)
+                suspended = {
+                    key: ownerKey,
+                    scope: this.bindingScope,
+                    reviewed: this.scopeReviewed,
+                };
             if (!windowWork.quiescing && !windowCloseOwners.closing)
                 swallow(
                     // Process the settled editor operation result
@@ -2305,6 +2828,36 @@ export function register() {
             app().bindingCleared = undefined;
             this.assetGeneration++;
         },
+        get savedMacroChoices() {
+            return [...app().snapshot.saved_macros].sort(
+                (a, b) => a.name.localeCompare(b.name) || a.id.localeCompare(b.id),
+            );
+        },
+        get savedMacroHelp() {
+            if (!app().snapshot.saved_macros.length)
+                return 'Create a macro on the Macros page first.';
+            return this.actionDraft.action.kind === 'macro' &&
+                this.actionDraft.action.actions.length
+                ? 'Choosing a macro replaces the inline steps in this draft.'
+                : 'This links to the saved macro. Changes to it apply here too.';
+        },
+        useSavedMacro(event: Event) {
+            const input = event.currentTarget as HTMLSelectElement;
+            const id = input.value;
+            input.value = '';
+            if (
+                !this.canEditEvent ||
+                this.kind !== 'macro' ||
+                this.dialMultiActionOriginal ||
+                !app().snapshot.saved_macros.some((macro) => macro.id === id)
+            )
+                return;
+            this.actionDraft = new InspectorActionDraft({
+                kind: 'builtin',
+                action: { kind: 'saved_macro', macro_id: id },
+            });
+            this.markDirty();
+        },
         // Update the macro
         updateMacro(event: CustomEvent<{ actions: Action[] }>) {
             this.dialMultiActionOriginal = null;
@@ -2314,7 +2867,144 @@ export function register() {
         // Mark the dirty
         markDirty() {
             this.dirty = true;
+            this.resetEventTest();
             this.refreshLivePreview();
+        },
+        linkPage: '',
+        linkControl: '',
+        linkRevision: 0,
+        linkSource: '',
+        linkChoice: '',
+        get linkedMembers() {
+            const profile = app().profile;
+            return (
+                Object.values(profile?.linked_controls || {}).find((g) =>
+                    g?.some(
+                        (m) => m.page_id === app().page?.id && m.control_id === app().controlId,
+                    ),
+                ) || []
+            );
+        },
+        get linkedSummary() {
+            return this.linkedMembers
+                .map(
+                    (m) =>
+                        (app().profile?.pages.find((p) => p.id === m.page_id)?.name || m.page_id) +
+                        ' / ' +
+                        m.control_id,
+                )
+                .join(', ');
+        },
+        get linkPages() {
+            return app().profile?.pages.filter((p) => p.id !== app().page?.id) || [];
+        },
+        get linkControls() {
+            const selected = app().control;
+            return (
+                app().device?.manifest.controls.filter(
+                    (c) =>
+                        c.kind === selected?.kind &&
+                        JSON.stringify(c.semantics) === JSON.stringify(selected.semantics) &&
+                        !c.preview_hidden &&
+                        !isKeyboardNavigationControl(app().profile, this.linkPage, c.id) &&
+                        !Object.values(app().profile?.linked_controls || {}).some((group) =>
+                            group?.some(
+                                (m) => m.page_id === this.linkPage && m.control_id === c.id,
+                            ),
+                        ),
+                ) || []
+            );
+        },
+        get linkDestination() {
+            return app().profile?.pages.find((p) => p.id === this.linkPage)?.bindings[
+                this.linkControl
+            ];
+        },
+        get canLink() {
+            return (
+                !!this.linkPages.length &&
+                this.linkControls.some((c) => c.id === this.linkControl) &&
+                (!this.linkDestination ||
+                    this.linkChoice === 'inspector' ||
+                    this.linkChoice === 'destination')
+            );
+        },
+        get inspectorAssignment() {
+            const b = app().binding;
+            return [app().page?.name, app().controlId, b?.title || b?.action.kind]
+                .filter(Boolean)
+                .join(' / ');
+        },
+        get destinationAssignment() {
+            const target = app().profile?.pages.find((p) => p.id === this.linkPage);
+            const b = this.linkDestination;
+            return [target?.name, this.linkControl, b?.title || b?.action.kind || '(empty)']
+                .filter(Boolean)
+                .join(' / ');
+        },
+        get replacementSummary() {
+            return (
+                'Affected assignments · ' +
+                (this.linkedSummary || this.inspectorAssignment) +
+                ', ' +
+                this.destinationAssignment
+            );
+        },
+        openLink() {
+            this.linkPage = this.linkPages[0]?.id || '';
+            this.linkControl = app().controlId;
+            this.linkChoice = '';
+            this.linkSource = this.contextKey;
+            this.linkRevision = app().configurationRevision;
+            (this.$refs.linkDialog as HTMLDialogElement).showModal();
+        },
+        closeLink() {
+            (this.$refs.linkDialog as HTMLDialogElement).close();
+        },
+        async createLink() {
+            const s = app(),
+                profile = s.profile,
+                page = s.page;
+            if (this.contextKey !== this.linkSource || !profile || !page || !this.canLink) return;
+            const source = { page_id: page.id, control_id: s.controlId };
+            const edits: Edit[] = [];
+            if (this.linkChoice === 'destination' && this.linkDestination) {
+                edits.push({
+                    kind: 'bindings',
+                    profile_id: profile.id,
+                    page_id: page.id,
+                    bindings: { [s.controlId]: cloneJson(this.linkDestination) },
+                });
+            }
+            edits.push({
+                kind: 'link_control',
+                profile_id: profile.id,
+                source,
+                target: { page_id: this.linkPage, control_id: this.linkControl },
+            });
+            try {
+                await s.edit(edits, 'Link controls', this.linkRevision);
+                this.closeLink();
+            } catch (error) {
+                app().notify(String(error), 'error');
+            }
+        },
+        async detachLink() {
+            if (!app().profile || !app().page) return;
+            try {
+                await app().edit(
+                    [
+                        {
+                            kind: 'detach_control',
+                            profile_id: app().profile!.id,
+                            member: { page_id: app().page!.id, control_id: app().controlId },
+                        },
+                    ],
+                    'Detach linked control',
+                );
+            } catch (error) {
+                app().notify(String(error), 'error');
+            }
         },
         bindingScope: 'page' as BindingScope,
         scopeReviewed: '',
@@ -2357,6 +3047,7 @@ export function register() {
         },
         // Save pending changes through the editor workflow
         async save() {
+            this.resetEventTest();
             if (this.updateError) {
                 app().notify(this.updateError, 'error');
                 return;
@@ -2385,8 +3076,7 @@ export function register() {
             this.savingContexts[contextKey] = true;
             try {
                 const existing = app().draftStore[contextKey];
-                if (existing)
-                    InspectorActionDraft.restore(existing.value as Record<string, unknown>);
+                if (existing) ActionDraftTree.restore(existing.value as Record<string, unknown>);
                 const binding = commitBindingDraft(this);
                 const plan = this.bindingScopePlan;
                 if (this.bulkBindingScope && this.scopeReviewed !== plan.signature) {

@@ -1,18 +1,8 @@
-# Build and install Manager packages
+# Manager packaging
 
-Use this guide to create local installers or install a package you already have. The project is **unreleased at 0.1.0**; no public download is assumed. Desktop and CLI packages share the project version, but the desktop app does not require or bundle the CLI.
+[Download Manager](https://github.com/StreamDockManager/Manager/releases/latest) · [Build from source](../README.md#run-from-source)
 
-## Choose your task
-
-| I want to…                            | Start here                                                 |
-| ------------------------------------- | ---------------------------------------------------------- |
-| Install a package I have              | [Platform guides](#install-an-existing-package)            |
-| Package my current checkout           | [Current-platform build](#build-for-your-current-platform) |
-| Build Ubuntu packages on a Mac        | [Docker Linux build](#build-linux-packages-from-macos)     |
-| Build another CPU or operating system | [Target builds](#local-target-builds)                      |
-| Verify an installer                   | [First-launch checks](#first-launch-checks)                |
-
-> Building a package does not publish it. Keep installer generation separate from running it against your real configuration.
+For a first install, choose your platform below, open Manager, then [set up your first control](../README.md#set-up-your-first-control). The CLI is optional and installs separately.
 
 ## Install an existing package
 
@@ -26,82 +16,26 @@ Use the package matching your OS and architecture. Packages include installation
 
 **Packages have no trusted publisher signature, and macOS builds are not notarized.** The desktop app's macOS ad hoc seal checks bundle integrity but does not authenticate a publisher. Review source/build links and included checksums before installing.
 
-## Installer metadata
-
-Edit [`metadata.toml`](metadata.toml) before building. This single file supplies the
-publisher/developer name, homepage, project/package licenses, copyright, descriptions,
-release date, Debian section/priority, and RPM release revision. It applies to desktop
-and CLI installer builds on Linux, macOS, and Windows, including the Docker Linux path.
-Versions and application/package identifiers still come from the existing release sources.
-Changing a declaration does **not** relicense the source or third-party dependencies,
-authenticate a publisher, sign a package, or notarize a macOS application.
-
-```sh
-python3 scripts/package_metadata.py  # Validate metadata without building
-make build-linux PRODUCT=all         # Both desktop and CLI DEB/RPM packages
-```
-
-For a build-specific configuration, copy the entire file somewhere under `packaging/`
-and set `STREAM_DOCK_MANAGER_PACKAGE_METADATA=packaging/my-metadata.toml` before the
-normal build command. Fields and SPDX expression syntax are validated; misspelled/unknown keys are rejected.
-License identifiers and legal correctness still require maintainer review.
-Docker builds forward that relative path and include the configuration in their build
-context. Do not put secrets in this file: its resolved contents are shipped in packages.
-Direct raw `cargo`, Tauri CLI, or `rpmbuild` commands bypass these wrappers; use the
-repository's Make commands, `scripts/tauri.mjs`, or `scripts/package_cli.py`.
-
-| Metadata                         | Where it is used                                                                                                                                                                              |
-| -------------------------------- | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| `package.publisher`              | Desktop bundle publisher (Windows installer publisher and Debian maintainer); AppStream developer; CLI Windows Publisher and Linux maintainer/vendor/packager                                 |
-| `package.website`                | Desktop/CLI Linux homepage, Windows installer information URL where supported, AppStream homepage                                                                                             |
-| `package.license`, `cli.license` | Desktop bundle / CLI RPM license declaration; AppStream project license; full declarations retained in the included metadata document. Existing LICENSE and third-party notices are preserved |
-| `package.copyright`              | Desktop bundle copyright where supported; included metadata document                                                                                                                          |
-| `package.last_updated`           | Optional release date in desktop AppStream and the included metadata document; **not** build time or installation time                                                                        |
-| `desktop.*`                      | AppStream display name/developer identifier and desktop descriptions                                                                                                                          |
-| `cli.summary`, `cli.description` | CLI DEB/RPM descriptions                                                                                                                                                                      |
-| `linux.*`                        | Debian section/priority and RPM release revision                                                                                                                                              |
-
-Use `last_updated = "YYYY-MM-DD"` for a deliberate release date, or leave it empty
-while unreleased. Empty dates produce no AppStream release entry. DEB has no standard
-"last updated" control field; RPM BuildTime and OS installation dates remain tool/OS-owned.
-Tauri does not currently populate the desktop RPM Vendor/Packager tags; the publisher
-is available through AppStream and the included metadata document. The CLI RPM sets
-Vendor/Packager directly. Software centers decide which fields to show and may need refreshed caches. macOS has
-no standard publisher website or last-updated installer field, so these are retained in
-the included metadata document rather than presented as a native field.
-
-Desktop packages include `notices/package-metadata.json` as a bundle resource; DEB/RPM
-also install it under `/usr/share/doc/stream-dock-manager/`. CLI installers and portable ZIPs retain the same resolved metadata in their existing
-`README.md` (Linux: `/usr/share/doc/stream-dock-manager-cli/README.md`).
-Both desktop Linux formats install generated AppStream metadata at
-`/usr/share/metainfo/app.streamdockmanager.manager.metainfo.xml`.
-
 ## Build for your current platform
 
-Install the [development prerequisites](../README.md#requirements), clone the Manager repository, and open a terminal in its root directory. The commands below use GNU Make and Python 3.11+. For a desktop installer:
+From the Manager checkout, install the [development prerequisites](../README.md#requirements), then run:
 
 ```sh
 make deps
 make package
 ```
 
-For only the CLI executable:
+| Command                                      | Default output                                                                        |
+| -------------------------------------------- | ------------------------------------------------------------------------------------- |
+| `make package`                               | Desktop installers under `target/release/bundle/`                                     |
+| `make build-cli`                             | Standalone executable at `target/release/stream-dock-manager-cli` (`.exe` on Windows) |
+| `make package-target TARGET=... PRODUCT=...` | Installer files in a fresh directory under `target/cross/<target>/`                   |
 
-```sh
-make build-cli
-```
-
-| Command                 | Default output                                               | Product                                     |
-| ----------------------- | ------------------------------------------------------------ | ------------------------------------------- |
-| `make package`          | `target/release/bundle/`                                     | Desktop installers for the current platform |
-| `make build-cli`        | `target/release/stream-dock-manager-cli` (`.exe` on Windows) | CLI executable only, not a CLI installer    |
-| `make package-target …` | A fresh directory under `target/cross/<target>/`             | Selected desktop and/or CLI packages        |
-
-These paths assume Cargo's target directory has not been overridden. A release-mode build creates local files; it does not publish a release or establish native qualification. To package the CLI, use a target build below.
+Paths assume Cargo's target directory is not overridden. A local build does not publish anything or qualify native behavior.
 
 ## Local target builds
 
-Run these from the Manager repository root:
+Run these from the Manager checkout:
 
 | Target              | Command                                                |
 | ------------------- | ------------------------------------------------------ |
@@ -123,97 +57,108 @@ Local Linux builds use the pinned Ubuntu 24.04 container; Apple Silicon hosts us
 
 ## Select a macOS architecture
 
-Run these commands from this repository on a Mac with Xcode Command Line Tools:
-
-| Build                        | Command                                            |
-| ---------------------------- | -------------------------------------------------- |
-| Apple Silicon only           | `make build-macos ARCH=arm64`                      |
-| Intel only                   | `make build-macos ARCH=amd64`                      |
-| Both architectures (default) | `make build-macos` or `make build-macos ARCH=both` |
-
-`make build-macos-arm64` and `make build-macos-amd64` are equivalent single-architecture
-aliases. Builds default to desktop and CLI installers; add `PRODUCT=desktop` or `PRODUCT=cli`
-to select one. Both means two separate installer sets, not one universal binary. Existing
-`make build`, `make build-cli`, and `make package` remain native-host commands.
-
-Install only the Rust targets you intend to build:
+Run from macOS with Xcode Command Line Tools and the required Rust targets:
 
 ```sh
-rustup target add aarch64-apple-darwin  # arm64
-rustup target add x86_64-apple-darwin   # amd64
+rustup target add aarch64-apple-darwin
 make build-macos ARCH=arm64 PRODUCT=desktop
 ```
 
-Installers are written under `target/cross/macos-arm64/installers-*/` or
-`target/cross/macos-amd64/installers-*/`. Building one architecture does not build the other.
-Cross-building an Intel binary on Apple Silicon does not qualify native Intel runtime behavior.
+Use `x86_64-apple-darwin` and `ARCH=amd64` for Intel. `ARCH=both` is the default
+and creates two separate installer sets, not a universal binary. Outputs go to a new
+`target/cross/macos-*/installers-*/` directory. Cross-building Intel on Apple Silicon
+does not test the installer on an Intel Mac.
 
 ## Build Linux packages from macOS
 
-Start Docker Desktop and wait until its Linux engine is ready, then run from this repository:
+Start Docker with BuildKit and `linux/amd64` support, then run:
 
 ```sh
-make build-linux                         # desktop DEB/RPM and CLI DEB/RPM/ZIP
-make build-linux PRODUCT=desktop         # only the desktop installers
-make build-linux PRODUCT=cli             # only the CLI packages
+make build-linux PRODUCT=all
 ```
 
-This is a containerized Linux release build, not a direct macOS-to-Linux linker invocation.
-The selected Docker Buildx builder must advertise `linux/amd64`; Apple Silicon uses emulation
-and can take substantially longer than an Intel Linux builder. Preflight checks Docker, Buildx
-and amd64 support before sending the source context. Use `docker info` and
-`docker buildx inspect --bootstrap` to diagnose engine/builder setup. The command does not
-install Docker, change its configuration or enable privileged emulation automatically.
+Use `PRODUCT=desktop` for DEB/RPM desktop packages or `PRODUCT=cli` for CLI DEB/RPM/ZIP.
+The pinned Ubuntu 24.04 container handles dependencies and compilers; no Linux Rust target is needed on the Mac. Apple Silicon emulates amd64. Use `WORKSPACE_JOBS=2` to limit build concurrency and `docker info` or `docker buildx inspect --bootstrap` to diagnose Docker setup. Successful runs print the fresh `target/cross/linux-amd64/installers-*/` directory. CLI-only builds do not need Node.
 
-The container supplies Rust, Node.js, GTK/WebKitGTK, Linux linkers and packaging tools. Before packaging, it runs the release-target compiler syntax/type and local-warning gate; desktop frontend assets are built first, while CLI-only builds remain independent of Node dependencies. Warnings from Manager or its local dependency patches fail the build rather than being buried in the package log.
-Installing a Linux target with `rustup` on the Mac is **not** required for this route and,
-on its own, cannot produce the complete desktop release. Dependencies are downloaded on
-first build; subsequent builds reuse Docker layers and builder-owned Cargo caches. Concurrent builds
-serialize access to the shared Cargo caches. Host `node_modules`, Cargo outputs,
-artifacts and local configuration are excluded from the source context. No host directories
-are mounted writable into the build container.
+## Installer metadata
 
-Successful builds print a fresh `target/cross/linux-amd64/installers-*` directory, containing
-separate `desktop/` and `cli/` packages. Failed builds do not publish that installer directory.
-`make build-linux WORKSPACE_JOBS=2` bounds Cargo parallelism. Docker owns its layer cache;
-project cache-cleanup commands do not remove Docker images or builder caches.
+[metadata.toml](metadata.toml) supplies the publisher, website, SPDX licenses,
+copyright, descriptions, release date, and DEB/RPM fields for all installer builders.
+From the Manager root, run `python3 scripts/package_metadata.py` to validate it.
+For overrides, copy it under `packaging/` and set
+`STREAM_DOCK_MANAGER_PACKAGE_METADATA=packaging/my-metadata.toml`.
+Use the Make or supported installer wrappers; raw Cargo/Tauri/RPM commands can bypass
+metadata processing. Do not put credentials here: resolved metadata ships in each package.
 
-These are unsigned local packages, not a published release. Building on Ubuntu 24.04 does
-not qualify older distributions, a real graphical session, device access or installer lifecycle.
-Test the resulting packages on the Linux release targets before publishing.
+| Setting                                | Where it appears                                                                                              |
+| -------------------------------------- | ------------------------------------------------------------------------------------------------------------- |
+| `package.publisher`, `package.website` | Maintainer, publisher, developer, and website fields where the platform supports them                         |
+| `package.license`, `cli.license`       | Package and AppStream declarations; shipped project and third-party notices are preserved                     |
+| `package.last_updated`                 | Optional `YYYY-MM-DD` release date in the package metadata and Linux AppStream, not the install or build time |
+| `desktop.*`, `cli.*`, `linux.*`        | Product names/descriptions and package-specific policy                                                        |
+
+Linux desktop packages install AppStream metadata and a copy of the released metadata
+under `/usr/share/doc/stream-dock-manager/`. Desktop bundles also include
+`notices/package-metadata.json`; CLI packages include resolved metadata in their README.
+macOS and some RPM fields have no native equivalent and are still in the bundled
+metadata. These declarations do not sign or relicense anything.
 
 ## First launch checks
 
-1. Install as described in the package's OS guide.
-2. On Linux, reconnect the device after access rules are installed.
-3. Launch as the normal desktop user and complete setup.
-4. Check that profiles and settings survive an app restart.
-5. Verify device input, display output, permissions, and plugin behavior on the actual target platform.
+1. Follow your OS guide above. On Linux, reconnect the dock so access rules apply.
+2. Launch as a normal desktop user and complete setup.
+3. On the target OS, verify a restart keeps settings, permissions work, and the dock sends input and receives display updates.
 
-Installation, upgrades, and ordinary removal preserve user configuration. A direct interactive Windows desktop uninstall can optionally remove the default shared Manager/CLI configuration after explicit confirmation; the choice is unchecked by default. See the [Windows uninstall safeguards and acceptance checks](windows/README.md). A cross-build or container test does not qualify a desktop session, physical hardware, or installer lifecycle.
+Install, upgrade and normal removal preserve user configuration. Direct interactive Windows desktop uninstall offers optional, confirmed permanent deletion; see the [Windows installer guide](windows/README.md). Cross-builds cannot qualify a native desktop session, device or installer lifecycle.
 
 ## Prepare and publish a release
 
-Local package commands above do not publish. On GitHub, run **Prepare Release** from
-`main`, review the successful run, then separately run **Publish Release** from `main`
-with its `prepare_run_id`. Publish reuses the verified `manager-publication` artifact;
-it does not rebuild installers. Both require separate manual dispatches on `main` plus successful builds, package integrity and
-provenance validation, not exhaustive native/vendor/physical qualification. Release notes
-disclose partial compatibility. See the [release steps and retry rules](../CONTRIBUTING.md#prepare-once-publish-the-same-files).
-Private releases require authenticated downloads; publication does not make the
-repository public or establish private-release updater support.
+1. Run **Actions → Prepare Release** on `main`. It builds and verifies artifacts without publishing.
+2. Review the successful run and copy its run ID.
+3. On the canonical product repository, run **Publish Release** on `main` with that
+   `prepare_run_id`. It verifies and reuses `manager-publication` rather than rebuilding.
+
+Both workflows are manual. A rehearsal cannot be published. Releases include checksums and third-party notices; private assets require GitHub authentication.
+See [release and retry rules](../CONTRIBUTING.md#prepare-once-publish-the-same-files).
 
 ## Notes for maintainers
 
-| Area             | Requirement                                                                                                 |
-| ---------------- | ----------------------------------------------------------------------------------------------------------- |
-| Notices          | Preserve GPL and all applicable third-party license files                                                   |
-| Native packaging | Keep desktop and CLI payloads and catalogs separate                                                         |
-| Linux access     | Use generated interface-specific udev rules; do not grant world-writable HID access                         |
-| Media            | Linux packages declare FFmpeg; macOS/Windows fallback uses an installed executable                          |
-| Source archives  | Include locked dependencies and the provisioned caches needed by offline builds                             |
-| Release recovery | Reuse the original verified artifacts; do not replace them with a new build under the same release identity |
+- Keep desktop and CLI payloads and catalogs separate. Preserve project and third-party notices.
+- Linux packages install interface-specific USB access rules. Do not grant world-writable HID access.
+- A Docker RPM recipe does not qualify native installation or hardware behavior.
+- For retries, reuse the same verified files or prepare a fresh, complete run. Never replace
+  a published version with different bytes.
 
-The Nobara RPM spec is a reproducible-build recipe, not evidence of native qualification. Preserve its pinned build environment and source provenance. For CI branches, native runner requirements, and publication/recovery procedures, see [CONTRIBUTING.md](../CONTRIBUTING.md) and the checked-in [workflows](../.github/workflows/).
+## Manual Blacksmith binary builds
+
+Run **Actions → blacksmith-build → Run workflow**, choose the source ref, then
+choose exactly one `product` (`desktop` or `cli`) and one native `target`:
+
+| Target          | Blacksmith runner                  |
+| --------------- | ---------------------------------- |
+| `linux-amd64`   | `blacksmith-4vcpu-ubuntu-2404`     |
+| `linux-arm64`   | `blacksmith-4vcpu-ubuntu-2404-arm` |
+| `windows-amd64` | `blacksmith-4vcpu-windows-2025`    |
+| `macos-arm64`   | `blacksmith-6vcpu-macos-15`        |
+
+The [official runner inventory](https://docs.blacksmith.sh/blacksmith-runners/overview)
+lists macOS on Apple Silicon only and Windows runners as public beta. There is no
+Intel Mac choice or silent GitHub-hosted fallback. The Blacksmith GitHub App must
+be enabled for **each repository** using the workflow, with runner access and
+billing available there. Source synchronization does not transfer that account
+setup. The workflow is repository-neutral and can be synced without edits.
+
+One job builds only the selected binary. CLI skips Node/frontend setup; desktop
+uses the existing Tauri build wrapper with bundling disabled. There is no test
+matrix, installer packaging, release preparation, tag, publication or deployment.
+Patched dependency integrity checks and a native OS/architecture check remain.
+Download the `blacksmith-<product>-<target>-<commit>` Actions artifact and extract
+the contained `.tar.gz` (which preserves executable permissions).
+
+These are raw candidate binaries, not portable installers or release-qualified
+packages. Linux builds use Ubuntu 24.04 and require matching shared libraries. Desktop needs
+WebKitGTK on Linux and WebView2 on Windows. Raw desktop binaries do not install
+udev rules, file associations, launch services, or a macOS application bundle.
+Use the existing installer/release workflows for those integration steps.
 
 [Back to Manager](../README.md)

@@ -201,9 +201,7 @@ fn open_main(
 fn choose(app: &tauri::AppHandle, lease: &InspectorBrowser, request: Selection) {
     let accepted = WINDOWS.with(|windows| {
         let mut windows = windows.borrow_mut();
-        let Some(window) = windows.get_mut(lease.token()) else {
-            return None;
-        };
+        let window = windows.get_mut(lease.token())?;
         if window.pending.is_some() {
             return None;
         }

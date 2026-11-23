@@ -1,12 +1,21 @@
 //! Foreground data is transient. Window titles never enter workspace history or diagnostics
 use crate::{workspace::AppRule, Runtime};
+mod signal;
+pub(crate) use signal::ObservationSignal;
+#[cfg(target_os = "linux")]
+mod linux_wait;
+#[cfg(target_os = "macos")]
+mod native_wait;
+#[cfg(target_os = "windows")]
+mod windows_wait;
 
 const OBSERVATION_FALLBACK: Duration = Duration::from_secs(1);
+const IDENTITY_SAFETY: Duration = Duration::from_secs(30);
 const FOREGROUND_DEBOUNCE: Duration = Duration::from_millis(250);
 use chrono::{Datelike, Timelike};
 use serde::{Deserialize, Serialize};
 use std::{
-    sync::{mpsc, Arc, Weak},
+    sync::{Arc, Weak},
     time::Duration,
 };
 
@@ -143,7 +152,7 @@ fn title_needed(r: &Runtime) -> bool {
 // Publish the current automation result
 fn publish(
     runtime: &Weak<Runtime>,
-    sender: &mpsc::Sender<String>,
+    sender: &Arc<ObservationSignal>,
     application: String,
     title: Option<String>,
 ) {
@@ -153,11 +162,16 @@ fn publish(
     if let Some(r) = runtime.upgrade() {
         *r.foreground_title.lock().unwrap() = title;
     }
-    let _ = sender.send(application);
+    sender.publish(application);
 }
 // Start the automation operation
 pub fn start(runtime: Weak<Runtime>) {
-    let (sender, receiver) = mpsc::channel();
+    let Some(owner) = runtime.upgrade() else {
+        return;
+    };
+    let signal = owner.automation_signal.clone();
+    let sender = signal.clone();
+    drop(owner);
     let observed = runtime.clone();
     std::thread::spawn(move || {
         if let Err(error) = observe(sender, observed.clone()) {
@@ -166,6 +180,8 @@ pub fn start(runtime: Weak<Runtime>) {
                 s.available = false;
                 s.title_available = false;
                 s.reason = error;
+                drop(s);
+                r.automation_signal.wake();
             }
         }
     });
@@ -176,27 +192,21 @@ pub fn start(runtime: Weak<Runtime>) {
         let mut previous_capabilities = None;
         let mut pending: Option<(String, std::time::Instant)> = None;
         loop {
-            let wait = pending
-                .as_ref()
-                .map_or(OBSERVATION_FALLBACK, |(_, changed)| {
-                    FOREGROUND_DEBOUNCE.saturating_sub(changed.elapsed())
-                });
-            match receiver.recv_timeout(wait) {
-                Ok(application) => {
-                    offer_foreground(&current, &mut pending, application);
-                    while let Ok(next) = receiver.try_recv() {
-                        offer_foreground(&current, &mut pending, next);
-                    }
-                }
-                Err(mpsc::RecvTimeoutError::Timeout) => {}
-                // A failed native observer must not disable schedule-only automation
-                Err(mpsc::RecvTimeoutError::Disconnected) => std::thread::sleep(wait),
+            let (revision, application) = signal.take();
+            if let Some(application) = application {
+                offer_foreground(&current, &mut pending, application);
             }
-            if pending
-                .as_ref()
-                .is_some_and(|(_, changed)| changed.elapsed() < FOREGROUND_DEBOUNCE)
-            {
-                continue;
+            let Some(r) = runtime.upgrade() else { break };
+            if r.is_stopping() {
+                break;
+            }
+            if let Some((_, changed)) = &pending {
+                if changed.elapsed() < FOREGROUND_DEBOUNCE {
+                    let wait = FOREGROUND_DEBOUNCE.saturating_sub(changed.elapsed());
+                    drop(r);
+                    signal.wait(revision, wait);
+                    continue;
+                }
             }
             let changed = if let Some((application, _)) = pending.take() {
                 current = application;
@@ -204,15 +214,12 @@ pub fn start(runtime: Weak<Runtime>) {
             } else {
                 false
             };
-            let Some(r) = runtime.upgrade() else { break };
-            if r.is_stopping() {
-                break;
-            }
             // Identity tracking serves the application picker even with no enabled rules
             let title = r.foreground_title.lock().unwrap().clone();
             let observation_changed = changed || title != previous_title;
             previous_title = title.clone();
             update_foreground_status(&r, &current, observation_changed);
+            let evaluated_at = std::time::Instant::now();
             let now = chrono::Local::now();
             let capabilities = r.automation_status.lock().unwrap().clone();
             let capability_state = (
@@ -241,8 +248,83 @@ pub fn start(runtime: Weak<Runtime>) {
                 }
             }
             signature = next;
+            let wait = evaluation_wait(&r.state.lock().unwrap(), now)
+                .saturating_sub(evaluated_at.elapsed());
+            drop(r);
+            signal.wait(revision, wait);
         }
     });
+}
+// Title-dependent rules retain the bounded fallback; identity uses native events plus a slow safety read.
+fn observation_interval(runtime: &Weak<Runtime>) -> Duration {
+    if runtime.upgrade().is_some_and(|r| title_needed(&r)) {
+        OBSERVATION_FALLBACK
+    } else {
+        IDENTITY_SAFETY
+    }
+}
+// Bound wall-clock/timezone correction to 30 seconds, but wake at actual calendar edges sooner.
+fn evaluation_wait<T: chrono::TimeZone>(
+    state: &crate::Snapshot,
+    now: chrono::DateTime<T>,
+) -> Duration {
+    let day = now.weekday().num_days_from_monday() as u8;
+    let minute = (now.hour() * 60 + now.minute()) as u16;
+    let fraction =
+        Duration::from_secs(now.second() as u64) + Duration::from_nanos(now.nanosecond() as u64);
+    state
+        .rules
+        .iter()
+        .filter(|rule| {
+            state.devices.iter().any(|device| {
+                let session = state.session(&device.id);
+                !device.simulated
+                    && device.persistence_key == rule.device_key
+                    && session.automation_enabled
+                    && !session.automation_paused
+            })
+        })
+        .filter_map(|rule| rule.schedule.as_ref())
+        .map(|schedule| schedule_boundary(schedule, day, minute).saturating_sub(fraction))
+        .fold(
+            // Accessibility permission may change while Manager has focus and publish skips it.
+            // Retain the title/preview capability cadence even without new external observations.
+            if state.rules.iter().any(|rule| rule.title.is_some()) {
+                OBSERVATION_FALLBACK
+            } else {
+                IDENTITY_SAFETY
+            },
+            Duration::min,
+        )
+}
+// Candidate edges cover overnight spans and all-day rules without serializing each minute.
+fn schedule_boundary(schedule: &Schedule, day: u8, minute: u16) -> Duration {
+    let current = u32::from(day) * 1440 + u32::from(minute);
+    let mut next = 7 * 1440;
+    for edge_day in 0..7u8 {
+        for edge_minute in [0, schedule.start, schedule.end] {
+            let previous_day = if edge_minute == 0 {
+                (edge_day + 6) % 7
+            } else {
+                edge_day
+            };
+            let previous_minute = if edge_minute == 0 {
+                1439
+            } else {
+                edge_minute - 1
+            };
+            if schedule.matches(edge_day, edge_minute)
+                == schedule.matches(previous_day, previous_minute)
+            {
+                continue;
+            }
+            let edge = u32::from(edge_day) * 1440 + u32::from(edge_minute);
+            let distance = (edge + 7 * 1440 - current) % (7 * 1440);
+            // The current minute has already been evaluated; don't spin on its start.
+            next = next.min(if distance == 0 { 7 * 1440 } else { distance });
+        }
+    }
+    Duration::from_secs(u64::from(next) * 60)
 }
 // Keep external application identity current without triggering rule work for idle installations
 fn update_foreground_status(runtime: &Runtime, application: &str, changed: bool) {
@@ -266,7 +348,7 @@ fn evaluation_signature(
     minute: u16,
 ) -> Option<String> {
     let mut sessions = Vec::new();
-    let mut scheduled = false;
+    let mut schedules = Vec::new();
     let mut titled = false;
     for device in &state.devices {
         let session = state.session(&device.id);
@@ -288,7 +370,12 @@ fn evaluation_signature(
         {
             continue;
         }
-        scheduled |= rules.iter().any(|rule| rule.schedule.is_some());
+        schedules.extend(
+            rules
+                .iter()
+                .filter_map(|rule| rule.schedule.as_ref())
+                .map(|s| s.matches(day, minute)),
+        );
         titled |= rules.iter().any(|rule| rule.title.is_some());
         sessions.push((
             device.id.clone(),
@@ -313,7 +400,7 @@ fn evaluation_signature(
         titled.then_some(title),
         state.configuration_revision,
         sessions,
-        scheduled.then_some((day, minute)),
+        schedules,
     ))
     .ok()
 }
@@ -456,6 +543,163 @@ pub fn preview(runtime: &Runtime, device_id: &str) -> Vec<RuleEvaluation> {
         (now.hour() * 60 + now.minute()) as u16,
     )
 }
+
+fn destination<'a>(
+    state: &'a crate::Snapshot,
+    device: &crate::DeviceInfo,
+    session: &'a crate::workspace::DeviceSession,
+    rule: Option<&'a AppRule>,
+) -> Option<(&'a str, Option<&'a str>)> {
+    Some(if let Some(rule) = rule {
+        (rule.profile_id.as_str(), rule.page_id.as_deref())
+    } else if session.automation_restore_on_exit {
+        let (profile_id, page_id) = session.automation_origin.as_ref()?;
+        if let Some(profile) = state
+            .profiles
+            .iter()
+            .find(|p| p.id == *profile_id && p.model_id == device.model_id)
+        {
+            (
+                profile.id.as_str(),
+                profile
+                    .pages
+                    .iter()
+                    .find(|p| p.id == *page_id)
+                    .map(|p| p.id.as_str())
+                    .or(Some(profile.active_page.as_str())),
+            )
+        } else {
+            (session.manual_profile.as_str(), None)
+        }
+    } else {
+        (session.manual_profile.as_str(), None)
+    })
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, ts_rs::TS, schemars::JsonSchema)]
+#[serde(deny_unknown_fields)]
+pub struct RuleTest {
+    pub device_id: String,
+    pub rules: Vec<AppRule>,
+    pub application: String,
+    pub title: Option<String>,
+    pub weekday: u8,
+    pub minute: u16,
+    pub enabled: bool,
+    pub paused: bool,
+    pub restore_on_exit: bool,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, ts_rs::TS, schemars::JsonSchema)]
+pub struct RuleTestResult {
+    pub evaluations: Vec<RuleEvaluation>,
+    pub profile_id: Option<String>,
+    pub page_id: Option<String>,
+    pub outcome: String,
+}
+
+pub fn test_rules(state: &crate::Snapshot, test: RuleTest) -> Result<RuleTestResult, String> {
+    if test.weekday > 6
+        || test.minute >= 1440
+        || test.rules.len() > 100
+        || test.application.len() > 4096
+        || test.title.as_ref().is_some_and(|text| text.len() > 4096)
+    {
+        return Err("Choose a valid weekday, time and bounded application and title.".into());
+    }
+    let device = state
+        .devices
+        .iter()
+        .find(|d| d.id == test.device_id)
+        .ok_or("Test device is unavailable")?;
+    let mut ids = std::collections::HashSet::new();
+    for rule in &test.rules {
+        rule.validate()?;
+        if rule.device_key != device.persistence_key
+            || rule.id.is_empty()
+            || rule.id.len() > 1024
+            || !ids.insert(&rule.id)
+            || rule.application.len() > 4096
+            || (rule.application.trim().is_empty()
+                && rule.title.is_none()
+                && rule.schedule.is_none())
+            || !state.profiles.iter().any(|p| {
+                p.id == rule.profile_id
+                    && p.model_id == device.model_id
+                    && rule
+                        .page_id
+                        .as_ref()
+                        .is_none_or(|id| p.pages.iter().any(|page| &page.id == id))
+            })
+        {
+            return Err(
+                "Each test rule needs a unique ID, a condition and a compatible destination."
+                    .into(),
+            );
+        }
+    }
+    let mut session = state.session(&device.id);
+    session.automation_restore_on_exit = test.restore_on_exit;
+    let capabilities = AutomationStatus {
+        available: true,
+        title_available: true,
+        schedules_available: true,
+        ..Default::default()
+    };
+    let evaluations = explain_rules(
+        &test.rules,
+        &device.persistence_key,
+        &test.application,
+        test.title.as_deref(),
+        &capabilities,
+        test.weekday,
+        test.minute,
+    );
+    let winner = evaluations
+        .iter()
+        .position(|r| r.winner)
+        .map(|i| &test.rules[i]);
+    let target = destination(state, device, &session, winner).and_then(|(id, page)| {
+        let p = state
+            .profiles
+            .iter()
+            .find(|p| p.id == id && p.model_id == device.model_id)?;
+        let selected = if page.is_none() && id == session.profile_id {
+            session.page_id.clone()
+        } else {
+            session.destination_page(p, page)
+        };
+        Some((id.to_owned(), selected))
+    });
+    let edge = serde_json::to_string(&(&test.application, winner)).map_err(|e| e.to_string())?;
+    let outcome = if !test.enabled {
+        "Automatic switching is off"
+    } else if test.paused {
+        "Paused after manual selection"
+    } else if device.simulated {
+        "Automatic switching is inactive on simulators"
+    } else if is_manager(&test.application) {
+        "Manager foreground is ignored"
+    } else if session.automation_edge.as_deref() == Some(&edge) {
+        "This foreground and rule were already handled"
+    } else if let Some((id, page)) = &target {
+        if id == &session.profile_id && page == &session.page_id {
+            "Destination already active"
+        } else {
+            "Would switch"
+        }
+    } else {
+        "No destination to switch to"
+    };
+    let (profile_id, page_id) = target.unzip();
+    Ok(RuleTestResult {
+        evaluations,
+        profile_id,
+        page_id,
+        outcome: outcome.into(),
+    })
+}
+
 // Evaluate the automation rules
 pub fn evaluate(runtime: &Arc<Runtime>, application: &str) {
     if is_manager(application) {
@@ -502,31 +746,8 @@ pub fn evaluate(runtime: &Arc<Runtime>, application: &str) {
             live.sessions
                 .insert(device.persistence_key.clone(), current);
         }
-        let (id, page) = if let Some(rule) = rule {
-            (rule.profile_id.as_str(), rule.page_id.as_deref())
-        } else if session.automation_restore_on_exit {
-            let Some((profile_id, page_id)) = session.automation_origin.as_ref() else {
-                continue;
-            };
-            if let Some(profile) = state
-                .profiles
-                .iter()
-                .find(|p| p.id == *profile_id && p.model_id == device.model_id)
-            {
-                (
-                    profile.id.as_str(),
-                    profile
-                        .pages
-                        .iter()
-                        .find(|p| p.id == *page_id)
-                        .map(|p| p.id.as_str())
-                        .or(Some(profile.active_page.as_str())),
-                )
-            } else {
-                (session.manual_profile.as_str(), None)
-            }
-        } else {
-            (session.manual_profile.as_str(), None)
+        let Some((id, page)) = destination(&state, device, &session, rule) else {
+            continue;
         };
         if id != session.profile_id
             || page.is_some_and(|p| p != session.page_id)
@@ -614,61 +835,87 @@ fn mac_title(pid: i32) -> Option<String> {
 }
 #[cfg(target_os = "macos")]
 // Update automation from the new observation
-fn observe(sender: mpsc::Sender<String>, runtime: Weak<Runtime>) -> Result<(), String> {
-    use objc2_app_kit::{NSWorkspace, NSWorkspaceDidActivateApplicationNotification};
-    use objc2_foundation::{NSDate, NSNotification, NSRunLoop};
+fn observe(sender: Arc<ObservationSignal>, runtime: Weak<Runtime>) -> Result<(), String> {
+    use objc2_app_kit::{
+        NSWorkspace, NSWorkspaceDidActivateApplicationNotification, NSWorkspaceDidWakeNotification,
+    };
+    use objc2_foundation::{
+        NSNotification, NSNotificationCenter, NSSystemClockDidChangeNotification,
+    };
+    let wait = native_wait::NativeWait::new(sender.clone())?;
     let center = NSWorkspace::sharedWorkspace().notificationCenter();
     let observed = runtime.clone();
+    let published = sender.clone();
     let notify = Arc::new(move || {
         if !monitoring_enabled(&observed) {
             return;
         }
         if let Some(app) = NSWorkspace::sharedWorkspace().frontmostApplication() {
             if let Some(id) = app.bundleIdentifier() {
+                let application = id.to_string();
+                // Do not request Manager's title while retaining the previous external app.
                 let title = observed
                     .upgrade()
-                    .filter(|r| title_needed(r))
+                    .filter(|r| title_needed(r) && !is_manager(&application))
                     .and_then(|_| mac_title(app.processIdentifier()));
-                publish(&observed, &sender, id.to_string(), title);
+                publish(&observed, &published, application, title);
             }
         }
     });
-    notify();
     let callback_notify = notify.clone();
     let callback =
         block2::RcBlock::new(move |_: std::ptr::NonNull<NSNotification>| callback_notify());
-    // The observer and block live until this worker's run loop exits
-    let token = unsafe {
-        center.addObserverForName_object_queue_usingBlock(
-            Some(NSWorkspaceDidActivateApplicationNotification),
-            None,
-            None,
-            &callback,
+    let changed = sender.clone();
+    let calendar = block2::RcBlock::new(move |_: std::ptr::NonNull<NSNotification>| changed.wake());
+    let defaults = NSNotificationCenter::defaultCenter();
+    let (activation, wake, clock, timezone) = unsafe {
+        (
+            center.addObserverForName_object_queue_usingBlock(
+                Some(NSWorkspaceDidActivateApplicationNotification),
+                None,
+                None,
+                &callback,
+            ),
+            center.addObserverForName_object_queue_usingBlock(
+                Some(NSWorkspaceDidWakeNotification),
+                None,
+                None,
+                &calendar,
+            ),
+            defaults.addObserverForName_object_queue_usingBlock(
+                Some(NSSystemClockDidChangeNotification),
+                None,
+                None,
+                &calendar,
+            ),
+            defaults.addObserverForName_object_queue_usingBlock(
+                Some(objc2_foundation::ns_string!(
+                    "NSSystemTimeZoneDidChangeNotification"
+                )),
+                None,
+                None,
+                &calendar,
+            ),
         )
     };
-    while runtime
-        .upgrade()
-        .is_some_and(|r| !r.stopping.load(std::sync::atomic::Ordering::SeqCst))
-    {
-        notify();
-        let tick = std::time::Instant::now();
-        objc2::rc::autoreleasepool(|_| {
-            NSRunLoop::currentRunLoop().runUntilDate(&NSDate::dateWithTimeIntervalSinceNow(
-                OBSERVATION_FALLBACK.as_secs_f64(),
-            ))
-        });
-        // An empty Cocoa run loop can return immediately; never spin while holding the observer
-        std::thread::sleep(OBSERVATION_FALLBACK.saturating_sub(tick.elapsed()));
+    // Subscribe before the first sample so an activation racing startup is not lost.
+    while monitoring_enabled(&runtime) {
+        let revision = sender.configuration();
+        objc2::rc::autoreleasepool(|_| notify());
+        wait.wait(revision, observation_interval(&runtime));
     }
     unsafe {
-        center.removeObserver((*token).as_ref());
+        center.removeObserver((*activation).as_ref());
+        center.removeObserver((*wake).as_ref());
+        defaults.removeObserver((*clock).as_ref());
+        defaults.removeObserver((*timezone).as_ref());
     }
     Ok(())
 }
 
 #[cfg(target_os = "windows")]
 // Update automation from the new observation
-fn observe(sender: mpsc::Sender<String>, runtime: Weak<Runtime>) -> Result<(), String> {
+fn observe(sender: Arc<ObservationSignal>, runtime: Weak<Runtime>) -> Result<(), String> {
     use std::ffi::c_void;
     type H = *mut c_void;
     #[repr(C)]
@@ -716,7 +963,7 @@ fn observe(sender: mpsc::Sender<String>, runtime: Weak<Runtime>) -> Result<(), S
         ) -> i32;
         fn CloseHandle(handle: H) -> i32;
     }
-    thread_local! { static SENDER: std::cell::RefCell<Option<(mpsc::Sender<String>,Weak<Runtime>)>> = const { std::cell::RefCell::new(None) }; }
+    thread_local! { static SENDER: std::cell::RefCell<Option<(Arc<ObservationSignal>,Weak<Runtime>)>> = const { std::cell::RefCell::new(None) }; }
     // Route the native platform event to its registered runtime owner
     unsafe extern "system" fn callback(
         _: H,
@@ -727,7 +974,15 @@ fn observe(sender: mpsc::Sender<String>, runtime: Weak<Runtime>) -> Result<(), S
         _: u32,
         _: u32,
     ) {
-        if event == 0x800c && (object != 0 || window != GetForegroundWindow()) {
+        if event == 0x800c
+            && (!SENDER.with(|s| {
+                s.borrow()
+                    .as_ref()
+                    .and_then(|(_, r)| r.upgrade())
+                    .is_some_and(|r| title_needed(&r))
+            }) || object != 0
+                || window != GetForegroundWindow())
+        {
             return;
         }
         if !SENDER.with(|s| {
@@ -776,7 +1031,8 @@ fn observe(sender: mpsc::Sender<String>, runtime: Weak<Runtime>) -> Result<(), S
         }
         CloseHandle(process);
     }
-    SENDER.with(|s| *s.borrow_mut() = Some((sender, runtime.clone())));
+    let wait = windows_wait::NativeWait::new(sender.clone())?;
+    SENDER.with(|s| *s.borrow_mut() = Some((sender.clone(), runtime.clone())));
     unsafe {
         let hook = SetWinEventHook(3, 3, std::ptr::null_mut(), Some(callback), 0, 0, 0);
         if hook.is_null() {
@@ -794,33 +1050,45 @@ fn observe(sender: mpsc::Sender<String>, runtime: Weak<Runtime>) -> Result<(), S
         );
         callback(hook, 3, GetForegroundWindow(), 0, 0, 0, 0);
         let mut sampled = std::time::Instant::now();
+        let mut configuration = sender.configuration();
+        let mut result = Ok(());
         while runtime
             .upgrade()
             .is_some_and(|r| !r.stopping.load(std::sync::atomic::Ordering::SeqCst))
         {
-            if sampled.elapsed() >= OBSERVATION_FALLBACK {
+            let revision = sender.configuration();
+            if revision != configuration || sampled.elapsed() >= observation_interval(&runtime) {
+                configuration = revision;
                 callback(hook, 3, GetForegroundWindow(), 0, 0, 0, 0);
                 sampled = std::time::Instant::now();
             }
             let mut msg: Msg = std::mem::zeroed();
-            while PeekMessageW(&mut msg, std::ptr::null_mut(), 0, 0, 1) != 0 {
+            for _ in 0..256 {
+                if PeekMessageW(&mut msg, std::ptr::null_mut(), 0, 0, 1) == 0 {
+                    break;
+                }
                 TranslateMessage(&msg);
                 DispatchMessageW(&msg);
             }
-            std::thread::sleep(Duration::from_millis(50));
+            if let Err(error) =
+                wait.wait(observation_interval(&runtime).saturating_sub(sampled.elapsed()))
+            {
+                result = Err(error);
+                break;
+            }
         }
         if !title_hook.is_null() {
             UnhookWinEvent(title_hook);
         }
         UnhookWinEvent(hook);
         SENDER.with(|sender| *sender.borrow_mut() = None);
+        result
     }
-    Ok(())
 }
 
 #[cfg(target_os = "linux")]
 // Update automation from the new observation
-fn observe(sender: mpsc::Sender<String>, runtime: Weak<Runtime>) -> Result<(), String> {
+fn observe(sender: Arc<ObservationSignal>, runtime: Weak<Runtime>) -> Result<(), String> {
     use x11rb::{
         connection::Connection,
         protocol::{
@@ -864,26 +1132,46 @@ fn observe(sender: mpsc::Sender<String>, runtime: Weak<Runtime>) -> Result<(), S
         .ok()
         .is_some_and(|cookie| cookie.check().is_ok());
     let mut observed_window = None;
-    let mut sampled = std::time::Instant::now() - OBSERVATION_FALLBACK;
+    let mut sampled = std::time::Instant::now() - IDENTITY_SAFETY;
+    let wait = linux_wait::NativeWait::new(sender.clone())?;
+    let mut configuration = sender.configuration();
     while runtime.upgrade().is_some_and(|r| !r.is_stopping()) {
-        let mut changed = false;
+        let revision = sender.configuration();
+        let mut changed = revision != configuration;
+        configuration = revision;
         // Drain notifications without repeating property round trips for every queued event
+        let mut drained = 0;
         for _ in 0..256 {
             let Some(event) = connection.poll_for_event().map_err(|e| e.to_string())? else {
                 break;
             };
+            drained += 1;
             changed |= match event {
                 Event::PropertyNotify(event) => {
                     (root_events && event.window == root && event.atom == active)
                         || (Some(event.window) == observed_window
-                            && (event.atom == pid_atom || title_atoms.contains(&event.atom)))
+                            && (event.atom == pid_atom
+                                || (runtime.upgrade().is_some_and(|r| title_needed(&r))
+                                    && title_atoms.contains(&event.atom))))
                 }
                 Event::DestroyNotify(event) => Some(event.window) == observed_window,
                 _ => false,
             };
         }
-        if !changed && sampled.elapsed() < OBSERVATION_FALLBACK {
-            std::thread::sleep(Duration::from_millis(50));
+        let interval = if root_events {
+            observation_interval(&runtime)
+        } else {
+            OBSERVATION_FALLBACK
+        };
+        if !changed && sampled.elapsed() < interval {
+            // x11rb may have already buffered event 257; readability alone cannot reveal it.
+            if drained == 256 {
+                continue;
+            }
+            wait.wait(
+                connection.stream(),
+                interval.saturating_sub(sampled.elapsed()),
+            )?;
             continue;
         }
         sampled = std::time::Instant::now();
@@ -952,7 +1240,6 @@ fn observe(sender: mpsc::Sender<String>, runtime: Weak<Runtime>) -> Result<(), S
             };
             publish(&runtime, &sender, application, title);
         }
-        std::thread::sleep(Duration::from_millis(50));
     }
     Ok(())
 }
@@ -1002,6 +1289,47 @@ mod observation_tests {
         (root, runtime, state, rule)
     }
 
+    #[test]
+    fn draft_winner_changes_order_without_touching_the_runtime() {
+        let (_root, runtime, state, mut a) = fixture();
+        a.schedule = Some(Schedule {
+            days: vec![6],
+            start: 1380,
+            end: 60,
+        });
+        a.title = Some(TitleCondition {
+            value: "editor".into(),
+            mode: "contains".into(),
+            case_sensitive: false,
+        });
+        let mut b = a.clone();
+        b.id = "second".into();
+        b.title.as_mut().unwrap().mode = "regex".into();
+        let device = state.devices[0].id.clone();
+        let test = RuleTest {
+            device_id: device,
+            rules: vec![a.clone(), b.clone()],
+            application: a.application.clone(),
+            title: Some("Editor window".into()),
+            weekday: 0,
+            minute: 15,
+            enabled: true,
+            paused: false,
+            restore_on_exit: false,
+        };
+        let before = serde_json::to_value(&state).unwrap();
+        let one = test_rules(&state, test.clone()).unwrap();
+        assert!(one.evaluations[0].winner && one.evaluations[1].matched);
+        let mut other = test;
+        other.rules.reverse();
+        other.paused = true;
+        let two = test_rules(&state, other).unwrap();
+        assert_eq!(two.evaluations[0].id, b.id);
+        assert!(two.outcome.contains("Paused"));
+        assert_eq!(one.page_id, two.page_id);
+        assert_eq!(serde_json::to_value(&state).unwrap(), before);
+        runtime.shutdown();
+    }
     #[test]
     // Retain external application identity without requesting evaluation for a zero-rule installation
     fn zero_rules_skip_evaluation_but_keep_external_application_picker_current() {
@@ -1229,6 +1557,113 @@ mod observation_tests {
             before,
             evaluation_signature(&state, "external.app", None, &capabilities, 0, 0)
         );
+        runtime.shutdown();
+    }
+}
+
+#[cfg(test)]
+mod scheduling_tests {
+    use super::*;
+    use chrono::TimeZone;
+    #[test]
+    fn overnight_and_all_day_boundaries_include_midnight_and_week_rollover() {
+        let schedule = Schedule {
+            days: vec![6],
+            start: 23 * 60,
+            end: 60,
+        };
+        assert_eq!(
+            schedule_boundary(&schedule, 6, 23 * 60 + 59),
+            Duration::from_secs(61 * 60)
+        );
+        assert_eq!(schedule_boundary(&schedule, 0, 59), Duration::from_secs(60));
+        let all_day = Schedule {
+            days: vec![0, 1],
+            start: 0,
+            end: 0,
+        };
+        assert_eq!(
+            schedule_boundary(&all_day, 0, 1439),
+            Duration::from_secs(1441 * 60)
+        );
+        assert_eq!(
+            schedule_boundary(&all_day, 1, 1439),
+            Duration::from_secs(60)
+        );
+        assert_eq!(
+            schedule_boundary(&all_day, 2, 0),
+            Duration::from_secs(5 * 24 * 60 * 60)
+        );
+    }
+    #[test]
+    fn identity_only_mode_is_slow_but_title_previews_retain_fast_fallback() {
+        let root = tempfile::tempdir().unwrap();
+        let runtime = Runtime::build(root.path().into(), false).unwrap();
+        let weak = Arc::downgrade(&runtime);
+        assert_eq!(observation_interval(&weak), IDENTITY_SAFETY);
+        runtime.state.lock().unwrap().rules.push(AppRule {
+            id: "title".into(),
+            device_key: "test".into(),
+            application: String::new(),
+            title: Some(TitleCondition {
+                value: "title".into(),
+                mode: "contains".into(),
+                case_sensitive: false,
+            }),
+            schedule: None,
+            profile_id: "test".into(),
+            page_id: None,
+        });
+        assert_eq!(observation_interval(&weak), OBSERVATION_FALLBACK);
+        assert_eq!(
+            evaluation_wait(&runtime.state.lock().unwrap(), chrono::Utc::now()),
+            OBSERVATION_FALLBACK
+        );
+        runtime.shutdown();
+    }
+    #[test]
+    fn calendar_edges_recompute_from_wall_time_after_timezone_or_resume_changes() {
+        let root = tempfile::tempdir().unwrap();
+        let runtime = Runtime::build(root.path().into(), false).unwrap();
+        let mut state = runtime
+            .simulate_device(true, "simulator:clock-test")
+            .unwrap();
+        state.devices[0].simulated = false;
+        let device = state.devices[0].clone();
+        let mut session = state.session(&device.id);
+        session.automation_enabled = true;
+        state
+            .sessions
+            .insert(device.persistence_key.clone(), session.clone());
+        state.rules.push(AppRule {
+            id: "clock".into(),
+            device_key: device.persistence_key.clone(),
+            application: String::new(),
+            title: None,
+            schedule: Some(Schedule {
+                days: vec![0],
+                start: 9 * 60,
+                end: 10 * 60,
+            }),
+            profile_id: session.profile_id,
+            page_id: None,
+        });
+        let utc = chrono::Utc
+            .with_ymd_and_hms(2026, 11, 16, 8, 59, 50)
+            .unwrap();
+        assert_eq!(evaluation_wait(&state, utc), Duration::from_secs(10));
+        let moved_zone = utc.with_timezone(&chrono::FixedOffset::west_opt(3600).unwrap());
+        assert_eq!(evaluation_wait(&state, moved_zone), IDENTITY_SAFETY);
+        let resumed = chrono::Utc
+            .with_ymd_and_hms(2026, 11, 16, 9, 59, 55)
+            .unwrap();
+        assert_eq!(evaluation_wait(&state, resumed), Duration::from_secs(5));
+        state
+            .sessions
+            .get_mut(&device.persistence_key)
+            .unwrap()
+            .automation_paused = true;
+        assert_eq!(evaluation_wait(&state, resumed), IDENTITY_SAFETY);
         runtime.shutdown();
     }
 }

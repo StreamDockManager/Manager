@@ -14,6 +14,8 @@ use std::{
 };
 
 pub use stream_dock_manager_plugin_host::CAPABILITIES;
+#[path = "catalog_transport.rs"]
+mod catalog_transport;
 #[path = "plugin_catalog.rs"]
 mod plugin_catalog;
 #[path = "plugin_github.rs"]
@@ -153,12 +155,25 @@ pub struct CheckState {
     pub catalog: Option<ReleaseCatalog>,
     pub notified_versions: Vec<String>,
 }
+#[derive(
+    Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, ts_rs::TS, schemars::JsonSchema,
+)]
+#[serde(rename_all = "snake_case")]
+pub enum DownloadPhase {
+    CheckingCache,
+    ResolvingSource,
+    Downloading,
+    UsingCache,
+}
 #[derive(Debug, Clone, Serialize, Deserialize, ts_rs::TS, schemars::JsonSchema)]
 pub struct UpdateJob {
     pub id: String,
     pub product: String,
     pub operation: String,
     pub state: String,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    #[ts(optional)]
+    pub download_phase: Option<DownloadPhase>,
     #[ts(type = "number")]
     pub completed: u64,
     #[ts(type = "number")]
@@ -202,11 +217,13 @@ pub struct UpdateStatus {
 }
 #[derive(Default, Serialize, Deserialize)]
 struct Store {
+    #[serde(skip)]
+    catalog_generation: u64,
     #[serde(default)]
     catalog_source_url: Option<String>,
     #[serde(default)]
     github_credential_repositories: std::collections::BTreeSet<String>,
-    #[serde(default)]
+    #[serde(default, deserialize_with = "read_cached_catalogs")]
     catalogs: BTreeMap<String, PluginCatalog>,
     #[serde(default)]
     preferences: UpdatePreferences,
@@ -214,6 +231,30 @@ struct Store {
     manager: CheckState,
     #[serde(default)]
     plugins: CheckState,
+}
+
+// Discard remote cache entries from a different schema before decoding saved preferences
+fn read_cached_catalogs<'de, D>(
+    deserializer: D,
+) -> Result<BTreeMap<String, PluginCatalog>, D::Error>
+where
+    D: serde::Deserializer<'de>,
+{
+    let mut entries = BTreeMap::<String, serde_json::Value>::deserialize(deserializer)?;
+    entries.retain(|_, entry| {
+        !(entry["product"] == "plugins"
+            && entry["schema_version"]
+                .as_u64()
+                .is_some_and(|schema| schema != u64::from(plugin_catalog::PLUGIN_CATALOG_SCHEMA)))
+    });
+    entries
+        .into_iter()
+        .map(|(channel, value)| {
+            serde_json::from_value(value)
+                .map(|catalog| (channel, catalog))
+                .map_err(serde::de::Error::custom)
+        })
+        .collect()
 }
 
 // Validate storage snapshot
@@ -252,10 +293,16 @@ pub(crate) fn validate_storage_snapshot(
     Ok(())
 }
 pub struct UpdateService {
+    catalog_http_cache: Mutex<catalog_transport::ConditionalCache>,
+    #[cfg(test)]
+    catalog_http_stats: Mutex<catalog_transport::CatalogStats>,
+    repository_catalog_cache: Mutex<plugin_github::CatalogCache>,
     storage: stream_dock_manager_storage::Storage,
     github_credentials: crate::credentials::Credentials,
     selections: Mutex<BTreeMap<String, Arc<CatalogSelection>>>,
     downloads: Arc<stream_dock_manager_downloads::DownloadCache>,
+    metadata_index: stream_dock_manager_storage::cache_index::Table,
+    package_index: stream_dock_manager_storage::cache_index::Table,
     cache_leases: Arc<Mutex<std::collections::HashMap<PathBuf, usize>>>,
     download_requests: Mutex<BTreeMap<String, DownloadRequest>>,
     user_cancelled: Mutex<std::collections::HashSet<String>>,
@@ -264,12 +311,17 @@ pub struct UpdateService {
     jobs: Mutex<BTreeMap<String, (UpdateJob, Arc<AtomicBool>)>>,
 }
 // Serialize JSON to a synchronized temporary file and atomically publish it at the destination
-fn atomic_json(path: &Path, value: &impl Serialize) -> Result<(), String> {
+fn publish_json(
+    path: &Path,
+    value: &impl Serialize,
+    track: impl FnOnce(u64) -> Result<(), String>,
+) -> Result<(), String> {
     let mut f = tempfile::NamedTempFile::new_in(path.parent().ok_or("No parent")?)
         .map_err(|e| e.to_string())?;
     f.write_all(&serde_json::to_vec_pretty(value).map_err(|e| e.to_string())?)
         .map_err(|e| e.to_string())?;
     f.as_file().sync_all().map_err(|e| e.to_string())?;
+    track(f.as_file().metadata().map_err(|e| e.to_string())?.len())?;
     f.persist(path).map_err(|e| e.to_string())?;
     Ok(())
 }
@@ -553,24 +605,43 @@ impl UpdateService {
             }
         }
         store.plugins.catalog = None;
-        let repository = store.preferences.plugins_repository.clone();
+        let catalog_preferences = store.preferences.clone();
         let source = plugin_catalog::effective_catalog_url(&store.preferences).ok();
-        if store.catalog_source_url != source || source.is_none() {
+        let source_changed = store.catalog_source_url != source || source.is_none();
+        if source_changed {
             store.catalogs.clear();
-            store.plugins = CheckState {
-                notified_versions: store.plugins.notified_versions.clone(),
-                state: "unavailable".into(),
-                ..Default::default()
-            };
         }
         store.catalog_source_url = source.clone();
         store.catalogs.retain(|channel, catalog| {
             catalog
-                .validate_source(&repository, channel, source.as_deref())
+                .validate_source(
+                    plugin_catalog::catalog_repository(&catalog_preferences, channel),
+                    channel,
+                    source.as_deref(),
+                )
                 .is_ok()
         });
+        if source_changed
+            || (store.plugins.state == "current"
+                && !store
+                    .catalogs
+                    .contains_key(&store.preferences.plugin_channel))
+        {
+            store.plugins = CheckState {
+                notified_versions: std::mem::take(&mut store.plugins.notified_versions),
+                state: "unavailable".into(),
+                ..Default::default()
+            };
+        }
+        use stream_dock_manager_storage::cache_index::{Kind, Table};
         Ok(Arc::new(Self {
+            metadata_index: Table::new(storage.root(), Kind::UpdateMetadata),
+            package_index: Table::new(storage.root(), Kind::UpdateDownloads),
             storage,
+            repository_catalog_cache: Default::default(),
+            catalog_http_cache: Default::default(),
+            #[cfg(test)]
+            catalog_http_stats: Default::default(),
             github_credentials: crate::credentials::Credentials::with_provider(provider),
             root,
             store: Mutex::new(store),
@@ -662,6 +733,7 @@ impl UpdateService {
                 || p.plugins_catalog_source != s.preferences.plugins_catalog_source
                 || p.plugin_channel != s.preferences.plugin_channel
             {
+                s.catalog_generation = s.catalog_generation.wrapping_add(1);
                 s.catalogs.clear();
                 s.catalog_source_url = plugin_catalog::effective_catalog_url(&p).ok();
                 s.plugins = CheckState {
@@ -707,6 +779,8 @@ impl UpdateService {
                     product: product.into(),
                     operation: operation.into(),
                     state: "running".into(),
+                    download_phase: (operation == "download")
+                        .then_some(DownloadPhase::CheckingCache),
                     completed: 0,
                     total: 0,
                     result: None,
@@ -765,14 +839,21 @@ impl UpdateService {
         });
         Ok(output)
     }
+    // An old worker must not replace status belonging to a newer source/authentication context.
+    fn record_catalog_failure(&self, generation: u64, error: &str) {
+        let mut store = self.store.lock().unwrap();
+        if store.catalog_generation == generation {
+            store.plugins.state = "failed".into();
+            store.plugins.error = Some(error.into());
+        }
+    }
     // Check inner
     fn check_inner(&self, product: &str, cancel: &AtomicBool) -> Result<(), String> {
         if product == "plugins" {
+            let generation = self.store.lock().unwrap().catalog_generation;
             let result = self.check_plugin_catalogs(cancel);
             if let Err(error) = &result {
-                let mut s = self.store.lock().unwrap();
-                s.plugins.state = "failed".into();
-                s.plugins.error = Some(error.clone());
+                self.record_catalog_failure(generation, error);
             }
             self.persist()?;
             return result;
@@ -842,14 +923,28 @@ impl UpdateService {
         cancel: &AtomicBool,
         token: Option<&str>,
     ) -> Result<serde_json::Value, String> {
+        self.api_metadata(client, url, cancel, token, true)
+    }
+    // Catalog discovery deliberately bypasses legacy URL-only validators/body storage.
+    fn api_metadata(
+        &self,
+        client: &Client,
+        url: &str,
+        cancel: &AtomicBool,
+        token: Option<&str>,
+        use_cache: bool,
+    ) -> Result<serde_json::Value, String> {
         if cancel.load(Ordering::SeqCst) {
             return Err("Cancelled".into());
         };
         let key = hex::encode(Sha256::digest(url.as_bytes()));
         let file = self.root.join("cache").join(format!("{key}.json"));
         let _lease = self.cache_lease(&file)?;
-        let cache: serde_json::Value = std::fs::read(&file)
+        let cache: serde_json::Value = use_cache
+            .then(|| std::fs::read(&file))
+            .transpose()
             .ok()
+            .flatten()
             .and_then(|b| serde_json::from_slice(&b).ok())
             .unwrap_or_default();
         let mut req = client
@@ -906,7 +1001,9 @@ impl UpdateService {
             return Err("Metadata exceeds limit".into());
         };
         let data: serde_json::Value = serde_json::from_slice(&bytes).map_err(|e| e.to_string())?;
-        atomic_json(&file, &serde_json::json!({"etag":etag,"data":data}))?;
+        if use_cache {
+            self.publish_metadata(&file, &serde_json::json!({"etag":etag,"data":data}))?;
+        }
         Ok(data)
     }
     // Discover available updates candidates
@@ -1112,25 +1209,34 @@ impl UpdateService {
         });
     }
 }
-// Verify file
+// Verify a regular file without reading beyond the expected size plus one byte
 pub fn verify_file(path: &Path, expected: &str, size: u64) -> Result<(), String> {
     let f = std::fs::File::open(path).map_err(|e| e.to_string())?;
-    if f.metadata().map_err(|e| e.to_string())?.len() != size {
+    let metadata = f.metadata().map_err(|e| e.to_string())?;
+    if !metadata.is_file() || metadata.len() != size {
         return Err("File size mismatch".into());
-    };
+    }
     let mut h = Sha256::new();
-    let mut f = f;
+    let mut f = f.take(size);
     let mut b = [0u8; 65536];
     loop {
         let n = f.read(&mut b).map_err(|e| e.to_string())?;
         if n == 0 {
             break;
-        };
+        }
         h.update(&b[..n])
+    }
+    if f.limit() != 0
+        || f.into_inner()
+            .read(&mut b[..1])
+            .map_err(|e| e.to_string())?
+            != 0
+    {
+        return Err("File size mismatch".into());
     }
     if hex::encode(h.finalize()) != expected {
         return Err("File checksum mismatch".into());
-    };
+    }
     Ok(())
 }
 
@@ -1643,6 +1749,53 @@ mod tests {
         assert!(status.plugins.error.is_some());
     }
     #[test]
+    fn catalog_discovery_does_not_read_or_write_legacy_validator_cache() {
+        let listener = std::net::TcpListener::bind("127.0.0.1:0").unwrap();
+        let url = format!("http://{}/releases", listener.local_addr().unwrap());
+        let server = std::thread::spawn(move || {
+            for _ in 0..3 {
+                let (mut socket, _) = listener.accept().unwrap();
+                socket
+                    .set_read_timeout(Some(Duration::from_secs(3)))
+                    .unwrap();
+                let mut b = [0u8; 4096];
+                let n = socket.read(&mut b).unwrap();
+                assert!(!String::from_utf8_lossy(&b[..n])
+                    .to_ascii_lowercase()
+                    .contains("if-none-match"));
+                socket.write_all(b"HTTP/1.1 200 OK\r\nETag: fresh\r\nContent-Length: 2\r\nConnection: close\r\n\r\n[]").unwrap();
+            }
+        });
+        let dir = tempfile::tempdir().unwrap();
+        let service = UpdateService::open(dir.path().into()).unwrap();
+        let path = service.root.join("cache").join(format!(
+            "{}.json",
+            hex::encode(Sha256::digest(url.as_bytes()))
+        ));
+        let old = serde_json::json!({"etag":"legacy-private","data":["old-private-result"]});
+        service.publish_metadata(&path, &old).unwrap();
+        for token in [None, Some("fixture-a"), Some("fixture-b")] {
+            assert_eq!(
+                service
+                    .api_metadata(
+                        &client().unwrap(),
+                        &url,
+                        &AtomicBool::new(false),
+                        token,
+                        false
+                    )
+                    .unwrap(),
+                serde_json::json!([])
+            );
+        }
+        assert_eq!(
+            serde_json::from_slice::<serde_json::Value>(&std::fs::read(path).unwrap()).unwrap(),
+            old
+        );
+        server.join().unwrap();
+    }
+
+    #[test]
     // Verify that metadata cache honors etag and 304 without external network
     fn metadata_cache_honors_etag_and_304_without_external_network() {
         use std::net::TcpListener;
@@ -1748,7 +1901,7 @@ impl UpdateService {
                 return Err("Catalogue exceeds limit".into());
             }
         }
-        atomic_json(
+        self.publish_metadata(
             &path,
             &MetadataAssetCache {
                 etag,

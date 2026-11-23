@@ -1,6 +1,6 @@
 # N4 Pro rendering methods
 
-For normal setup, use the [N4 Pro guide](README.md) and [Manager getting started](../../README.md#set-up-your-first-profile).
+For normal setup, use the [N4 Pro guide](README.md) and [Manager getting started](../../README.md#set-up-your-first-control).
 This page explains the rendering policy for adapter contributors and troubleshooting.
 
 | Method             | When it is used           | What it does not promise                                |

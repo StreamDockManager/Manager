@@ -737,13 +737,8 @@ fn output(command: &mut Command) -> Result<String, String> {
 }
 // Read clipboard inner
 fn read_clipboard_inner() -> Result<String, String> {
-    #[cfg(target_os = "macos")]
-    let text = output(Command::new("osascript").args(["-e", "the clipboard as «class utf8»"]))?
-        .strip_suffix('\n')
-        .unwrap_or("")
-        .to_string();
-    #[cfg(target_os="windows")]
-    let text=output(crate::native_process::command("powershell").args(["-NoProfile","-NonInteractive","-Command","Add-Type -AssemblyName System.Windows.Forms;if(-not [Windows.Forms.Clipboard]::ContainsText()){exit 2};[Console]::OutputEncoding=[System.Text.Encoding]::UTF8;[Console]::Write([Windows.Forms.Clipboard]::GetText())"]))?;
+    #[cfg(any(target_os = "macos", target_os = "windows"))]
+    let text = crate::clipboard::builtin_text(256 * 1024)?;
     #[cfg(target_os = "linux")]
     let text = if wayland() {
         output(Command::new("wl-paste").args(["--no-newline", "--type", "text"]))?
@@ -1602,7 +1597,7 @@ pub fn open_web(url: &str) -> Result<(), String> {
         testing::record(url);
         return Ok(());
     }
-    crate::actions::open(url)
+    crate::actions::open_website(url)
 }
 
 #[cfg(test)]

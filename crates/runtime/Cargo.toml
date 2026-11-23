@@ -38,7 +38,8 @@ name = "image_shared_perf"
 required-features = ["test-support"]
 
 [dependencies]
-tokio = { version = "1.54.1", features = ["rt", "time", "sync", "macros"] }
+zeroize = "1.8"
+tokio = { version = "1.54.1", features = ["rt", "time", "sync", "macros", "net"] }
 stream-dock-manager-storage.workspace = true
 hex.workspace = true
 stream-dock-manager-plugin-runtimes.workspace = true
@@ -52,7 +53,7 @@ uuid.workspace = true
 image.workspace = true
 base64 = "0.23.1"
 chrono = "0.4.45"
-regex = "1.13.1"
+regex = "1.13.2"
 hidapi = "2.6.7"
 directories = "6.0.0"
 zip.workspace = true
@@ -67,27 +68,30 @@ reqwest = { version = "0.13.5", default-features = false, features = [
   "json",
   "rustls",
 ] }
+crc32fast = "1.5.5"
 sha2 = "0.11.1"
 flate2 = "1.1.11"
 semver = "1.0.28"
-sysinfo = { version = "=0.40.3", default-features = false, features = [
+sysinfo = { version = "=0.40.4", default-features = false, features = [
   "system",
   "disk",
   "network",
 ] }
+jpeg-encoder = "0.7.1"
 
 [target.'cfg(target_os = "linux")'.dependencies]
-zbus = { version = "6.2.1", default-features = false, features = [
+zbus = { version = "6.4.0", default-features = false, features = [
   "tokio",
   "proxy"
 ] }
-ashpd = { version = "0.14.0", default-features = false, features = [
+ashpd = { version = "0.14.1", default-features = false, features = [
   "tokio",
   "remote_desktop",
   "screencast",
 ] }
 futures-util = "0.3.34"
 x11rb = { version = "0.14.0", features = [
+  "xfixes",
   "xkb",
   "xtest",
   "xinput",
@@ -95,7 +99,10 @@ x11rb = { version = "0.14.0", features = [
   "record"
 ] }
 x11rb-protocol = { version = "0.14.0", features = ["std"] }
-rustix = { version = "1.1.6", features = ["event", "net", "process"] }
+rustix = { version = "1.1.6", features = ["event", "net", "pipe", "process"] }
+wayland-client = "0.31"
+wayland-protocols = { version = "0.32", features = ["client", "staging"] }
+wayland-protocols-wlr = { version = "0.3", features = ["client"] }
 
 [target."cfg(unix)".dependencies]
 rustix = { version = "1.1.6", features = ["fs"] }
@@ -107,6 +114,7 @@ objc2-app-kit = { version = "0.3.2", default-features = false, features = [
   "NSWorkspace",
   "NSApplication",
   "NSResponder",
+  "NSPasteboard",
   "NSRunningApplication",
   "libc",
 ] }
@@ -120,17 +128,21 @@ objc2-foundation = { version = "0.3.2", default-features = false, features = [
   "block2",
 ] }
 block2 = "0.6.2"
-objc2 = "0.6.5"
+objc2 = { version = "0.6.5", features = ["exception"] }
 
 [target.'cfg(target_os = "windows")'.dependencies]
 # The implement! macro must use the core ABI exported by windows 0.62
 # Must match windows 0.62: windows-core 0.100 types are not ABI/API interchangeable
 windows-core = "0.62.2"
 windows = { version = "0.62.2", features = [
+  "ApplicationModel_DataTransfer",
   "Wdk_Foundation",
   "Wdk_Storage_FileSystem",
   "Win32_Storage_FileSystem",
   "Win32_System_IO",
+  "Win32_System_DataExchange",
+  "Win32_System_Memory",
+  "Win32_System_Ole",
   "Win32_Media_Audio",
   "Win32_Media_Audio_Endpoints",
   "Win32_System_Com",

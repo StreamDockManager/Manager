@@ -14,7 +14,7 @@ import { registerAccessibility } from './accessibility';
 import { ToastState, registerToasts } from './toasts';
 import type { Bridge } from './bridge';
 import type { LogPluginIdentity } from '../generated/runtime';
-import './styles.css';
+import './plugin-logs-window.css';
 import { registerAutoScrollbars } from './scrollbars';
 registerAutoScrollbars();
 

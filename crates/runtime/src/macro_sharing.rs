@@ -31,6 +31,7 @@ pub struct MacroImportPreview {
     pub warnings: Vec<String>,
 }
 pub(crate) struct StagedMacroImport {
+    settings_omitted: bool,
     data: ProfileData,
     resources: crate::vendor_resources::PreparedResourceImport,
     revision: u64,
@@ -153,12 +154,13 @@ impl Runtime {
     pub fn prepare_macro_import(&self, path: &Path) -> Result<MacroImportPreview, String> {
         // Reuse the bounded, path-checked profile archive reader; only macro data is retained
         let (mut archive, document) = profiles::open_archive(path, "profiles.json")?;
-        let data = macro_only(profiles::parse_data(
-            serde_json::from_str(&document).map_err(|e| e.to_string())?,
-        )?);
+        let mut document = serde_json::from_str(&document).map_err(|e| e.to_string())?;
+        crate::vault::detach_portable_references(&mut document);
+        let data = macro_only(profiles::parse_data(document)?);
         validate_macros(&data)?;
         let resources = crate::vendor_resources::prepare_import(&data, &mut archive)?;
         let stage = StagedMacroImport {
+            settings_omitted: profiles::settings_omitted(&mut archive)?,
             resources,
             data,
             revision: self.snapshot().configuration_revision,
@@ -176,6 +178,12 @@ impl Runtime {
         let snapshot = self.snapshot();
         let mut includes_plugin_settings = false;
         let mut warnings = BTreeSet::new();
+        if stage.settings_omitted {
+            warnings.extend(profiles::omitted_settings_warnings(
+                &stage.data.profiles,
+                &stage.data.saved_macros,
+            ));
+        }
         for macro_ in &stage.data.saved_macros {
             macro_.action.visit(&mut |action| match action {
                 Action::Plugin { plugin_id, action_id, settings, resources, ..} => {

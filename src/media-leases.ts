@@ -2,12 +2,15 @@ import type { AppState } from './state';
 interface OwnedMedia {
     asset: string;
     active: boolean;
+    retiring?: Promise<void>;
 }
 const scopes = new Map<string, Map<string, OwnedMedia>>();
 const epochs = new Map<string, number>();
 const pending = new Map<string, number>();
 const pendingReplies = new Set<Promise<void>>();
-const deleted = new Set<string>();
+// A deletion only needs to outlive selections already in flight. The backend
+// validates asset existence on every subsequent retain, including recovered drafts.
+const pendingAssets = new Map<string, Set<{ deleted: boolean }>>();
 
 /** Includes failed retirements and late retain replies; zero means no frontend token remains. */
 export function mediaWindowOwnership() {
@@ -22,23 +25,35 @@ function prune(owner: string) {
 }
 // Release a retained media handle without losing failed-retirement tracking
 async function retire(app: AppState, owner: string, id: string, record: OwnedMedia) {
+    if (record.retiring) return record.retiring;
     record.active = false;
+    const release = async () => {
+        try {
+            await app.bridge.command('release_media', { id });
+            const records = scopes.get(owner);
+            records?.delete(id);
+            if (!records?.size) scopes.delete(owner);
+        } catch {
+            // Keep the token for a later retry, including during window close.
+        }
+    };
+    record.retiring = release();
     try {
-        await app.bridge.command('release_media', { id });
-        const records = scopes.get(owner);
-        records?.delete(id);
-        if (!records?.size) scopes.delete(owner);
-    } catch {
-        /* Retain the token for a later retirement attempt; native ownership stays conservative. */
+        await record.retiring;
+    } finally {
+        record.retiring = undefined;
     }
 }
 // Retain a media handle for its owner while guarding against stale replies
 export async function retainMediaFor(app: AppState, asset: string, owner: string) {
-    if (deleted.has(asset)) throw Error('This media was deleted. Choose another asset.');
     const existing = [...(scopes.get(owner)?.entries() || [])].find(
         ([, r]) => r.active && r.asset === asset,
     );
     if (existing) return existing[0];
+    const selection = { deleted: false };
+    let selections = pendingAssets.get(asset);
+    if (!selections) pendingAssets.set(asset, (selections = new Set()));
+    selections.add(selection);
     const epoch = epochs.get(owner) || 0;
     let settled!: () => void;
     const reply = new Promise<void>((resolve) => (settled = resolve));
@@ -50,7 +65,7 @@ export async function retainMediaFor(app: AppState, asset: string, owner: string
         let records = scopes.get(owner);
         if (!records) scopes.set(owner, (records = new Map()));
         records.set(id, record);
-        if (deleted.has(asset)) {
+        if (selection.deleted) {
             await retire(app, owner, id, record);
             throw Error('This media was deleted. Choose another asset.');
         }
@@ -67,6 +82,8 @@ export async function retainMediaFor(app: AppState, asset: string, owner: string
         }
         return id;
     } finally {
+        selections.delete(selection);
+        if (!selections.size) pendingAssets.delete(asset);
         settled();
         pendingReplies.delete(reply);
         const count = (pending.get(owner) || 1) - 1;
@@ -96,7 +113,7 @@ export async function releaseMediaOwner(app: AppState, owner: string) {
 }
 // Mark a deleted asset and retire every retained handle that references it
 export async function releaseDeletedMedia(app: AppState, asset: string) {
-    deleted.add(asset);
+    for (const selection of pendingAssets.get(asset) || []) selection.deleted = true;
     await Promise.all(
         [...scopes].flatMap(([owner, records]) =>
             [...records]

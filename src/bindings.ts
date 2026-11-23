@@ -7,6 +7,7 @@ export function hasBindingContent(binding: Binding | undefined): boolean {
         binding &&
         (binding.background_source === 'palette' ||
             binding.dial_response ||
+            binding.live_label?.length ||
             binding.title ||
             binding.asset ||
             binding.action.kind !== 'none' ||
@@ -36,7 +37,7 @@ export function bindingCompatibility(
         const reason = keyLogicActionReason(binding.action, plugins);
         if (reason) return reason;
     }
-    if (control.kind === 'encoder' && !['none', 'dial'].includes(binding.action.kind))
+    if (control.kind === 'encoder' && !['none', 'dial', 'events'].includes(binding.action.kind))
         return 'Unsupported shared dial binding. Assign separate left, right and press actions.';
     if (control.kind === 'display' && binding.action.kind !== 'none')
         return 'This display accepts appearance settings and has no action input.';

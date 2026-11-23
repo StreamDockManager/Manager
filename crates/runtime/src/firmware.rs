@@ -2,9 +2,10 @@
 //! Firmware images and updater programs are never downloaded or executed here
 use crate::Runtime;
 use serde::{Deserialize, Serialize};
+#[cfg(test)]
+use std::io::Read;
 use std::{
     collections::HashMap,
-    io::Read,
     sync::{
         atomic::{AtomicU64, Ordering},
         mpsc, Mutex,
@@ -13,9 +14,29 @@ use std::{
 };
 
 pub type QueryReply = mpsc::Sender<Result<Option<String>, String>>;
+#[derive(Clone)]
+pub(crate) struct QuerySender {
+    sender: mpsc::SyncSender<QueryReply>,
+    wake: std::sync::Arc<dyn Fn() + Send + Sync>,
+}
+impl QuerySender {
+    // Couple a successful firmware enqueue to the connection's input-worker wake
+    pub(crate) fn new(
+        sender: mpsc::SyncSender<QueryReply>,
+        wake: std::sync::Arc<dyn Fn() + Send + Sync>,
+    ) -> Self {
+        Self { sender, wake }
+    }
+    // Publish the request first so a woken worker always sees queued work
+    fn try_send(&self, reply: QueryReply) -> Result<(), mpsc::TrySendError<QueryReply>> {
+        self.sender.try_send(reply)?;
+        (self.wake)();
+        Ok(())
+    }
+}
 #[derive(Default)]
 pub struct Firmware {
-    pub(crate) queries: Mutex<HashMap<String, (u64, mpsc::SyncSender<QueryReply>)>>,
+    pub(crate) queries: Mutex<HashMap<String, (u64, QuerySender)>>,
     observations: Mutex<HashMap<String, (u64, FirmwareStatus)>>,
     release_checks: Mutex<HashMap<String, (u64, u64)>>,
     next_check: AtomicU64,
@@ -33,6 +54,7 @@ pub struct FirmwareStatus {
     pub latest_stale: bool,
     pub last_checked: Option<String>,
     pub instructions: Option<String>,
+    pub instructions_shared: bool,
     pub message: String,
     pub stale: bool,
 }
@@ -111,8 +133,10 @@ pub(crate) fn read_firmware_report(
 
 const RELEASE_URL: &str =
     "https://cdn1.key123.vip/StreamDock/firmware/firmware-version-mirabox.json";
+#[cfg(test)]
 const METADATA_LIMIT: u64 = 256 * 1024;
 struct ReleaseTarget {
+    #[cfg(test)]
     key: &'static str,
     prefix: &'static str,
 }
@@ -120,18 +144,22 @@ struct ReleaseTarget {
 fn release_target(model: &str, variant: &str) -> Option<ReleaseTarget> {
     match (model, variant) {
         ("n4-pro", "vsdinside") => Some(ReleaseTarget {
+            #[cfg(test)]
             key: "VSD_N4Pro",
             prefix: "V4.VSD N4 Pro",
         }),
         ("n4-pro", "mirabox") => Some(ReleaseTarget {
+            #[cfg(test)]
             key: "MBox-N4Pro",
             prefix: "V4.N4 Pro",
         }),
         ("k1-pro", "usb-6603-1015") => Some(ReleaseTarget {
+            #[cfg(test)]
             key: "K1Pro",
             prefix: "V3.K1_PRO",
         }),
         ("k1-pro", "usb-6603-1019") => Some(ReleaseTarget {
+            #[cfg(test)]
             key: "K1ProEU",
             prefix: "V3.K1_PRO_EU",
         }),
@@ -163,6 +191,7 @@ fn version_parts(raw: &str) -> Option<(&str, (u32, u32))> {
     Some((prefix, mirabox_version(&format!("{first}.{last}"))?))
 }
 // Read bounded
+#[cfg(test)]
 fn read_bounded(reader: impl Read) -> Result<Vec<u8>, String> {
     let mut bytes = Vec::new();
     reader
@@ -175,6 +204,7 @@ fn read_bounded(reader: impl Read) -> Result<Vec<u8>, String> {
     Ok(bytes)
 }
 // Release from bytes
+#[cfg(test)]
 fn release_from_bytes(bytes: &[u8], target: &ReleaseTarget) -> Result<Option<String>, String> {
     // Some manufacturer CDN responses are gzip encoded even with identity requested
     let decoded = if bytes.starts_with(&[0x1f, 0x8b]) {
@@ -202,6 +232,7 @@ fn release_from_bytes(bytes: &[u8], target: &ReleaseTarget) -> Result<Option<Str
     Ok(Some(raw.into()))
 }
 // Fetch release
+#[cfg(test)]
 fn fetch_release(target: &ReleaseTarget) -> Result<Option<String>, String> {
     let client = reqwest::blocking::Client::builder()
         .connect_timeout(Duration::from_secs(4))
@@ -335,16 +366,12 @@ impl Runtime {
                     .firmware_report
                     .as_ref()
                     .is_none_or(|r| r.windows_supported));
-        // Exact manufacturer mapping, never infer another brand from a family name
-        let instructions = if device.model_id == "n4-pro" {
-            match device.variant_id.as_str() {
-                "vsdinside" => Some("https://www.vsdinside.com/blogs/tutorial/vsd-stream-dock-connection-issues".into()),
-                "mirabox" | "mirabox-e" => Some("https://mirabox.net/blogs/tutorial/how-to-enable-or-disable-vibration-on-streamdock".into()),
-                _ => None,
-            }
-        } else {
-            None
-        };
+        // Simulators cannot open physical guidance; canonical registry matching rejects invented identities
+        let guidance = (!device.simulated)
+            .then(|| hardware_registry::firmware_instructions(&device.model_id, &device.variant_id))
+            .flatten();
+        let instructions_shared = guidance.as_ref().is_some_and(|(_, shared)| *shared);
+        let instructions = guidance.map(|(url, _)| url);
         let target = release_target(&device.model_id, &device.variant_id);
         Ok(FirmwareStatus {
             state: if supported {
@@ -358,6 +385,7 @@ impl Runtime {
             latest: None,
             last_checked: None,
             instructions,
+            instructions_shared,
             latest_state: if target.is_some() || (device.simulated && supported) {
                 "not_checked"
             } else {
@@ -487,13 +515,25 @@ impl Runtime {
     }
     // Check firmware
     pub fn check_firmware(&self, device_id: &str) -> Result<FirmwareStatus, String> {
-        self.check_firmware_with(device_id, fetch_release)
+        self.check_firmware_query(
+            device_id,
+            None::<fn(&ReleaseTarget) -> Result<Option<String>, String>>,
+        )
     }
     // Check firmware with
+    #[cfg(test)]
     fn check_firmware_with(
         &self,
         device_id: &str,
         fetch: impl FnOnce(&ReleaseTarget) -> Result<Option<String>, String>,
+    ) -> Result<FirmwareStatus, String> {
+        self.check_firmware_query(device_id, Some(fetch))
+    }
+    // Read the installed version independently of catalog discovery and its uncertainty rules
+    fn check_firmware_query(
+        &self,
+        device_id: &str,
+        fetch: Option<impl FnOnce(&ReleaseTarget) -> Result<Option<String>, String>>,
     ) -> Result<FirmwareStatus, String> {
         let status = self.firmware_status(device_id)?;
         let snapshot = self.snapshot();
@@ -543,7 +583,9 @@ impl Runtime {
         }
         self.observe_firmware(device_id, epoch, result);
         // Update discovery is independent of whether the installed read succeeded
-        if let Some(target) = release_target(&device.model_id, &device.variant_id) {
+        if let (Some(target), Some(fetch)) =
+            (release_target(&device.model_id, &device.variant_id), fetch)
+        {
             let result = fetch(&target);
             self.observe_release(device_id, epoch, check, &target, result);
         }
@@ -608,6 +650,13 @@ impl Runtime {
     // Open firmware instructions
     pub fn open_firmware_instructions(&self, device_id: &str) -> Result<(), String> {
         let status = self.firmware_status(device_id)?;
+        if status
+            .instructions
+            .as_deref()
+            .is_some_and(|url| !hardware_core::approved_firmware_instructions(url))
+        {
+            return Err("Firmware instructions URL is not approved".into());
+        }
         crate::actions::open(
             status
                 .instructions
@@ -619,6 +668,51 @@ impl Runtime {
 #[cfg(test)]
 mod tests {
     use super::*;
+    // Simulators never inherit physical guidance and real known variants keep explicit shared provenance
+    #[test]
+    fn instructions_follow_hardware_source_and_absence_is_explicit() {
+        let root = tempfile::tempdir().unwrap();
+        let runtime = Runtime::build(root.path().into(), false).unwrap();
+        let id = "simulator:instructions";
+        runtime.simulate_device(true, id).unwrap();
+        assert!(runtime.firmware_status(id).unwrap().instructions.is_none());
+        {
+            let mut state = runtime.state.lock().unwrap();
+            let device = state.devices.iter_mut().find(|d| d.id == id).unwrap();
+            device.simulated = false;
+            device.model_id = "k1-pro".into();
+            device.variant_id = "usb-5548-1025".into();
+        }
+        let status = runtime.firmware_status(id).unwrap();
+        assert!(status.instructions_shared);
+        assert_eq!(
+            status.instructions,
+            hardware_registry::firmware_instructions("n4-pro", "vsdinside").map(|(url, _)| url)
+        );
+        {
+            let mut state = runtime.state.lock().unwrap();
+            let device = state.devices.iter_mut().find(|d| d.id == id).unwrap();
+            device.model_id = "n4-pro".into();
+            device.variant_id = "mirabox".into();
+        }
+        let status = runtime.firmware_status(id).unwrap();
+        assert!(!status.instructions_shared);
+        assert_eq!(
+            status.instructions,
+            hardware_registry::firmware_instructions("n4-pro", "mirabox").map(|(url, _)| url)
+        );
+        runtime
+            .state
+            .lock()
+            .unwrap()
+            .devices
+            .iter_mut()
+            .find(|d| d.id == id)
+            .unwrap()
+            .model_id = "unknown".into();
+        assert!(runtime.firmware_status(id).unwrap().instructions.is_none());
+        runtime.shutdown();
+    }
     #[test]
     // Verify that queried h1 firmware selects geometry and failed observations revoke it
     fn queried_h1_firmware_selects_geometry_and_failed_observations_revoke_it() {
@@ -941,12 +1035,10 @@ mod tests {
         assert!(lookup_only.latest_message.contains("cannot be compared"));
         let answer = |result: Result<Option<String>, String>| {
             let (query, requests) = mpsc::sync_channel::<QueryReply>(1);
-            runtime
-                .firmware
-                .queries
-                .lock()
-                .unwrap()
-                .insert(id.into(), (11, query));
+            runtime.firmware.queries.lock().unwrap().insert(
+                id.into(),
+                (11, QuerySender::new(query, std::sync::Arc::new(|| {}))),
+            );
             std::thread::spawn(move || {
                 requests
                     .recv_timeout(Duration::from_secs(3))
@@ -1028,5 +1120,42 @@ mod tests {
             assert_eq!(version_parts(&latest).unwrap().0, target.prefix);
             eprintln!("Manufacturer metadata: {variant}: {latest}");
         }
+    }
+}
+
+#[cfg(test)]
+mod query_wake_tests {
+    use super::*;
+    // Firmware wakes happen after publication and never consume or duplicate a reply
+    #[test]
+    fn enqueue_publishes_before_waking_and_busy_requests_do_not_wake() {
+        let (sender, receiver) = mpsc::sync_channel(1);
+        let wakes = std::sync::Arc::new(std::sync::atomic::AtomicUsize::new(0));
+        let count = wakes.clone();
+        let query = QuerySender::new(
+            sender,
+            std::sync::Arc::new(move || {
+                count.fetch_add(1, Ordering::SeqCst);
+            }),
+        );
+        let (reply, result) = mpsc::channel();
+        query.try_send(reply).unwrap();
+        assert_eq!(wakes.load(Ordering::SeqCst), 1);
+        let (extra, _) = mpsc::channel();
+        assert!(matches!(
+            query.try_send(extra),
+            Err(mpsc::TrySendError::Full(_))
+        ));
+        assert_eq!(wakes.load(Ordering::SeqCst), 1);
+        receiver
+            .recv()
+            .unwrap()
+            .send(Ok(Some("fixture".into())))
+            .unwrap();
+        assert_eq!(result.recv().unwrap(), Ok(Some("fixture".into())));
+        drop(receiver);
+        let (extra, _) = mpsc::channel();
+        assert!(query.try_send(extra).is_err());
+        assert_eq!(wakes.load(Ordering::SeqCst), 1);
     }
 }

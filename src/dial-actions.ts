@@ -37,8 +37,3 @@ export function dialActionPresentation(action: Action | undefined, plugins: Plug
             '',
     };
 }
-
-// Return the action only when it is a dial container
-export function selectedDial(action: Action | undefined) {
-    return action?.kind === 'dial' ? action : undefined;
-}

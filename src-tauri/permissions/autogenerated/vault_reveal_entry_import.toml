@@ -1,0 +1,11 @@
+# Automatically generated - DO NOT EDIT!
+
+[[permission]]
+identifier = "allow-vault-reveal-entry-import"
+description = "Enables the vault_reveal_entry_import command without any pre-configured scope."
+commands.allow = ["vault_reveal_entry_import"]
+
+[[permission]]
+identifier = "deny-vault-reveal-entry-import"
+description = "Denies the vault_reveal_entry_import command without any pre-configured scope."
+commands.deny = ["vault_reveal_entry_import"]

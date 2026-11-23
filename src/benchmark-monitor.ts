@@ -158,6 +158,7 @@ export function registerBenchmarkMonitor(
         },
         // Show the benchmark progress dialog
         show() {
+            void read().refresh();
             this.monitor.open(this.$refs.progress as HTMLDialogElement);
         },
         // Hide the progress dialog if it is mounted
@@ -176,7 +177,7 @@ export function registerBenchmarkMonitor(
         // Open diagnostics to view the benchmark results
         viewResults() {
             this.hide();
-            location.hash = '/diagnostics';
+            location.hash = '/diagnostics?tab=benchmarks';
         },
         // Close the progress dialog during controller disposal
         destroy() {

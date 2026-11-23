@@ -46,6 +46,7 @@ pub struct ImportPreview {
     pub recipe_warning: Option<String>,
 }
 pub(crate) struct StagedImport {
+    settings_omitted: bool,
     pub store: ProfileStore,
     pub data: ProfileData,
     pub revision: u64,
@@ -73,6 +74,7 @@ fn action_issues(
     data: &ProfileData,
     plugins: &[stream_dock_manager_plugin_host::PluginInfo],
     kind: &str,
+    local_paths: bool,
     out: &mut Vec<ImportIssue>,
 ) {
     if path.len() > 8 {
@@ -138,7 +140,9 @@ fn action_issues(
                 out,
             )
         }
-        Action::Application { path } | Action::OpenPath { path } if !Path::new(path).exists() => {
+        Action::Application { path } | Action::OpenPath { path }
+            if !local_paths || !Path::new(path).exists() =>
+        {
             issue(
                 "path",
                 path.clone(),
@@ -146,7 +150,7 @@ fn action_issues(
                 out,
             )
         }
-        Action::Command { program, .. } if !program_exists(program) => issue(
+        Action::Command { program, .. } if !local_paths || !program_exists(program) => issue(
             "path",
             program.clone(),
             "Command executable cannot be found".into(),
@@ -168,6 +172,7 @@ fn action_issues(
                             data,
                             plugins,
                             kind,
+                            local_paths,
                             out,
                         );
                     } else {
@@ -199,22 +204,55 @@ fn action_issues(
                 let mut next = path.clone();
                 next.push(i);
                 action_issues(
-                    child, next, profile, page, control, data, plugins, kind, out,
+                    child,
+                    next,
+                    profile,
+                    page,
+                    control,
+                    data,
+                    plugins,
+                    kind,
+                    local_paths,
+                    out,
                 );
             }
         }
-        Action::Macro { actions } | Action::Dial { actions, .. } => {
+        Action::Macro { actions }
+        | Action::Dial { actions, .. }
+        | Action::Events { actions, .. } => {
             for (i, a) in actions.iter().enumerate() {
                 let mut next = path.clone();
                 next.push(i);
-                action_issues(a, next, profile, page, control, data, plugins, kind, out);
+                action_issues(
+                    a,
+                    next,
+                    profile,
+                    page,
+                    control,
+                    data,
+                    plugins,
+                    kind,
+                    local_paths,
+                    out,
+                );
             }
         }
         Action::Toggle { on, off } => {
             for (i, a) in [on, off].into_iter().enumerate() {
                 let mut next = path.clone();
                 next.push(i);
-                action_issues(a, next, profile, page, control, data, plugins, kind, out);
+                action_issues(
+                    a,
+                    next,
+                    profile,
+                    page,
+                    control,
+                    data,
+                    plugins,
+                    kind,
+                    local_paths,
+                    out,
+                );
             }
         }
         _ => {}
@@ -237,10 +275,18 @@ fn program_exists(program: &str) -> bool {
 }
 // Inspect the selected importing resource
 fn inspect(stage: &StagedImport, snapshot: &Snapshot) -> Vec<ImportIssue> {
-    let plugins = &snapshot.plugins;
+    inspect_recipient(stage, &snapshot.profiles, &snapshot.plugins, true)
+}
+
+pub(super) fn inspect_recipient(
+    stage: &StagedImport,
+    profiles: &[crate::Profile],
+    plugins: &[stream_dock_manager_plugin_host::PluginInfo],
+    local_paths: bool,
+) -> Vec<ImportIssue> {
     let mut references = stage.data.clone();
     if stage.mode == "merge" {
-        for profile in &snapshot.profiles {
+        for profile in profiles {
             if !references.profiles.iter().any(|p| p.id == profile.id) {
                 references.profiles.push(profile.clone());
             }
@@ -320,6 +366,7 @@ fn inspect(stage: &StagedImport, snapshot: &Snapshot) -> Vec<ImportIssue> {
                     &stage.store,
                     plugins,
                     target.map(|c| c.kind.as_str()).unwrap_or(""),
+                    local_paths,
                     &mut out,
                 );
             }
@@ -375,8 +422,7 @@ fn inspect(stage: &StagedImport, snapshot: &Snapshot) -> Vec<ImportIssue> {
                         .collect()
                 })
                 .unwrap_or_default(),
-            "plugin" => snapshot
-                .plugins
+            "plugin" => plugins
                 .iter()
                 .flat_map(|p| {
                     p.actions.iter().map(|a| {
@@ -403,6 +449,7 @@ fn binding_issues(
     store: &ProfileStore,
     plugins: &[stream_dock_manager_plugin_host::PluginInfo],
     kind: &str,
+    local_paths: bool,
     out: &mut Vec<ImportIssue>,
 ) {
     if binding.disabled {
@@ -432,6 +479,7 @@ fn binding_issues(
         data,
         plugins,
         kind,
+        local_paths,
         out,
     );
 }
@@ -478,36 +526,57 @@ fn action_mut<'a>(
         crate::workspace::action_at_mut(&mut binding_mut(data, issue)?.action, &path)
     }
 }
+/// Legacy ZIPs go directly to their existing bounded reader. Authenticated transfers
+/// are unpacked only into an owner-private temporary file for that same reader.
+pub fn read_transfer<T>(
+    path: &Path,
+    password: Option<&str>,
+    read: impl FnOnce(&Path) -> Result<T, String>,
+) -> Result<T, String> {
+    let Some(data) = stream_dock_manager_storage::vault::transfer::open(path, password)? else {
+        return read(path);
+    };
+    let mut decrypted = tempfile::Builder::new()
+        .suffix(".zip")
+        .tempfile()
+        .map_err(|e| e.to_string())?;
+    std::io::Write::write_all(decrypted.as_file_mut(), &data).map_err(|e| e.to_string())?;
+    read(decrypted.path())
+}
+pub(super) fn stage_portable(path: &Path, revision: u64) -> Result<StagedImport, String> {
+    let directory = tempfile::tempdir().map_err(|e| e.to_string())?;
+    let store = ProfileStore::staging(&directory)?;
+    let (data, settings_omitted) = store.read_portable_with_report(path, true)?;
+    let mut ids = HashSet::new();
+    for profile in &data.profiles {
+        if profile.id.is_empty() || !ids.insert(profile.id.clone()) {
+            return Err("Archive contains duplicate or empty profile IDs".into());
+        }
+        let mut pages = HashSet::new();
+        if profile.pages.is_empty()
+            || profile
+                .pages
+                .iter()
+                .any(|p| p.id.is_empty() || !pages.insert(p.id.clone()))
+        {
+            return Err("Archive contains duplicate, empty, or missing page IDs".into());
+        }
+    }
+
+    Ok(StagedImport {
+        settings_omitted,
+        store,
+        data,
+        revision,
+        mode: "merge".into(),
+        created: std::time::Instant::now(),
+        _directory: directory,
+    })
+}
 impl Runtime {
     // Prepare profile import
     pub fn prepare_profile_import(&self, path: &Path) -> Result<ImportPreview, String> {
-        let directory = tempfile::tempdir().map_err(|e| e.to_string())?;
-        let store = ProfileStore::open(directory.path().join("profiles"))?;
-        let data = store.import_for_repair(path)?;
-        let mut ids = HashSet::new();
-        for profile in &data.profiles {
-            if profile.id.is_empty() || !ids.insert(profile.id.clone()) {
-                return Err("Archive contains duplicate or empty profile IDs".into());
-            }
-            let mut pages = HashSet::new();
-            if profile.pages.is_empty()
-                || profile
-                    .pages
-                    .iter()
-                    .any(|p| p.id.is_empty() || !pages.insert(p.id.clone()))
-            {
-                return Err("Archive contains duplicate, empty, or missing page IDs".into());
-            }
-        }
-
-        let stage = StagedImport {
-            store,
-            data,
-            revision: self.snapshot().configuration_revision,
-            mode: "merge".into(),
-            created: std::time::Instant::now(),
-            _directory: directory,
-        };
+        let stage = stage_portable(path, self.snapshot().configuration_revision)?;
         let id = crate::review_store::new_id();
         let report = self.import_preview(&id, &stage);
         let mut imports = self.imports.lock().unwrap();
@@ -541,6 +610,12 @@ impl Runtime {
         } else {
             impact.push("Add imported profiles; existing device selections and rules stay in place. Conflicting IDs are remapped.".into());
         }
+        if stage.settings_omitted {
+            impact.extend(crate::profiles::omitted_settings_warnings(
+                &stage.data.profiles,
+                &stage.data.saved_macros,
+            ));
+        }
         let mut includes_settings = false;
         for action in stage
             .data
@@ -553,7 +628,7 @@ impl Runtime {
         {
             action.visit(&mut |a| {
                 if let Action::Plugin { settings, .. } = a {
-                    if settings.as_object().is_some_and(|s| !s.is_empty()) {
+                    if !settings.is_null() && settings != &serde_json::json!({}) {
                         includes_settings = true;
                     }
                 }

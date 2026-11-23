@@ -12,6 +12,13 @@ pub struct ModelManifest {
     #[serde(default, skip_serializing_if = "Option::is_none")]
     #[ts(optional)]
     pub profile_family: Option<String>,
+    /// Reviewed model guidance, with variant-specific instructions taking precedence
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    #[ts(optional)]
+    pub firmware_instructions: Option<String>,
+    /// Shared guidance does not establish exact-model firmware compatibility
+    #[serde(default)]
+    pub firmware_instructions_shared: bool,
     pub protocol: String,
     pub status: String,
     pub variants: Vec<Variant>,
@@ -25,11 +32,31 @@ pub struct Variant {
     pub id: String,
     pub name: String,
     pub identity: HidSelector,
+    /// Reviewed vendor instructions for this exact variant, never a catalog artifact URL
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    #[ts(optional)]
+    pub firmware_instructions: Option<String>,
+    /// General brand guidance must not be presented as exact-variant instructions
+    #[serde(default)]
+    pub firmware_instructions_shared: bool,
     #[serde(default = "variant_available")]
     pub available: bool,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     #[ts(optional)]
     pub unavailable_reason: Option<String>,
+}
+// Permit reviewed vendor documentation origins and simple tutorial slugs only
+pub fn approved_firmware_instructions(url: &str) -> bool {
+    if url.len() > 512 {
+        return false;
+    }
+    [
+        "https://www.vsdinside.com/blogs/tutorial/",
+        "https://mirabox.net/blogs/tutorial/",
+    ]
+    .iter()
+    .filter_map(|prefix| url.strip_prefix(prefix))
+    .any(|slug| !slug.is_empty() && slug.bytes().all(|b| b.is_ascii_alphanumeric() || b == b'-'))
 }
 // Check whether this device variant is available
 fn variant_available() -> bool {
@@ -297,6 +324,28 @@ impl ModelManifest {
     }
     // Validate for the current operation
     pub fn validate(&self) -> Result<()> {
+        if self
+            .firmware_instructions
+            .as_deref()
+            .is_some_and(|url| !approved_firmware_instructions(url))
+            || (self.firmware_instructions_shared && self.firmware_instructions.is_none())
+        {
+            return Err(Error::Descriptor(
+                "Model firmware instructions must use an approved vendor tutorial URL".into(),
+            ));
+        }
+        for variant in &self.variants {
+            if variant
+                .firmware_instructions
+                .as_deref()
+                .is_some_and(|url| !approved_firmware_instructions(url))
+                || (variant.firmware_instructions_shared && variant.firmware_instructions.is_none())
+            {
+                return Err(Error::Descriptor(
+                    "Firmware instructions must use an approved vendor tutorial URL".into(),
+                ));
+            }
+        }
         if let Some(report) = &self.capabilities.firmware_report {
             if !self.capabilities.firmware_query || !(2..=1025).contains(&report.length) {
                 return Err(Error::Descriptor("invalid firmware read contract".into()));
@@ -329,10 +378,16 @@ impl ModelManifest {
                 || panel.button_controls.iter().collect::<HashSet<_>>().len()
                     != panel.button_controls.len()
                 || panel.button_controls.iter().any(|id| {
-                    !self
-                        .controls
-                        .iter()
-                        .any(|c| &c.id == id && c.image_slot.is_some() && c.kind == "touch")
+                    let display_input = self.controls.iter().any(|c| {
+                        &c.id == id
+                            && c.image_slot.is_some()
+                            && (c.kind == "touch"
+                                || (c.kind == "button"
+                                    && ["press", "release"]
+                                        .iter()
+                                        .all(|edge| c.semantics.iter().any(|s| s == edge))))
+                    });
+                    !display_input
                         || self
                             .controls
                             .iter()
@@ -473,7 +528,17 @@ impl ModelManifest {
             if c.semantics.is_empty()
                 || c.semantics.iter().any(|s| {
                     ![
-                        "press", "release", "pulse", "rotate", "touch", "swipe", "display",
+                        "press",
+                        "release",
+                        "pulse",
+                        "rotate",
+                        "rotate_held",
+                        "touch",
+                        "touch_down",
+                        "touch_up",
+                        "touch_hold",
+                        "swipe",
+                        "display",
                     ]
                     .contains(&s.as_str())
                 })
@@ -490,6 +555,29 @@ impl ModelManifest {
                 && c.semantics.iter().any(|s| s == "release")
             {
                 return invalid("encoder cannot claim release");
+            }
+            let has_input = |semantic| c.semantics.iter().any(|entry| entry == semantic);
+            // Supplemental markers require the underlying report types on the same control
+            if has_input("rotate_held")
+                && (c.kind != "encoder"
+                    || !self.capabilities.reliable_encoder_release
+                    || !has_input("press")
+                    || !has_input("release")
+                    || !has_input("rotate"))
+            {
+                return invalid(
+                    "held rotation requires verified encoder press, release and rotation",
+                );
+            }
+            if ["touch_down", "touch_up", "touch_hold"]
+                .into_iter()
+                .any(has_input)
+                && (c.kind != "touch" || !has_input("touch"))
+            {
+                return invalid("touch contact markers require touch input");
+            }
+            if has_input("touch_hold") && !(has_input("touch_down") && has_input("touch_up")) {
+                return invalid("touch hold requires a verified contact lifetime");
             }
             if let Some(surface) = &c.feedback_surface {
                 if !self
@@ -637,5 +725,89 @@ mod selector_tests {
             product_id: 0x1033,
             ..exact
         }));
+    }
+    #[test]
+    // Supplemental input capabilities cannot be added to a pulse or another surface by mistake
+    fn supplemental_input_markers_require_qualified_base_reports() {
+        let mut n4 =
+            ModelManifest::parse(include_str!("../../../hardware/n4/device.toml")).unwrap();
+        let dial = n4
+            .controls
+            .iter()
+            .position(|c| c.kind == "encoder")
+            .unwrap();
+        n4.controls[dial].semantics.push("rotate_held".into());
+        assert!(n4.validate().is_ok());
+        n4.controls[dial]
+            .semantics
+            .retain(|entry| entry != "release");
+        assert!(n4.validate().is_err());
+
+        let mut pro =
+            ModelManifest::parse(include_str!("../../../hardware/n4-pro/device.toml")).unwrap();
+        let dial = pro
+            .controls
+            .iter()
+            .position(|c| c.kind == "encoder")
+            .unwrap();
+        pro.controls[dial].semantics.push("rotate_held".into());
+        assert!(pro.validate().is_err());
+        pro.controls[dial].semantics.pop();
+        let touch = pro.controls.iter().position(|c| c.id == "touch-1").unwrap();
+        pro.controls[touch].semantics.push("touch_hold".into());
+        assert!(pro.validate().is_err());
+        pro.controls[touch]
+            .semantics
+            .extend(["touch_down".into(), "touch_up".into()]);
+        assert!(pro.validate().is_ok());
+        pro.controls[touch]
+            .semantics
+            .retain(|entry| entry != "touch");
+        assert!(pro.validate().is_err());
+    }
+
+    // Instructions must be optional per exact variant and cannot escape reviewed HTTPS documentation origins
+    #[test]
+    fn firmware_instructions_are_exact_variant_and_restricted() {
+        let mut manifest =
+            ModelManifest::parse(include_str!("../../../hardware/n4-pro/device.toml")).unwrap();
+        assert!(manifest
+            .variants
+            .iter()
+            .find(|v| v.id == "vsdinside")
+            .unwrap()
+            .firmware_instructions
+            .as_ref()
+            .unwrap()
+            .contains("vsd-stream-dock-connection-issues"));
+        assert!(
+            manifest
+                .variants
+                .iter()
+                .find(|v| v.id == "mirabox-e")
+                .unwrap()
+                .firmware_instructions_shared
+        );
+        for url in [
+            "http://mirabox.net/blogs/tutorial/example",
+            "https://mirabox.net.evil.test/blogs/tutorial/example",
+            "https://user@mirabox.net/blogs/tutorial/example",
+            "https://mirabox.net:8443/blogs/tutorial/example",
+            "https://mirabox.net/blogs/tutorial/../download.exe",
+            "https://mirabox.net/blogs/tutorial/example?url=other",
+            "https://cdn1.key123.vip/StreamDock/firmware/download/test.img",
+        ] {
+            assert!(!approved_firmware_instructions(url));
+            manifest.variants[0].firmware_instructions = Some(url.into());
+            assert!(manifest.validate().is_err());
+        }
+        manifest.variants[0].firmware_instructions = None;
+        assert!(manifest.validate().is_ok());
+        manifest.firmware_instructions = Some("https://example.com/firmware".into());
+        assert!(manifest.validate().is_err());
+        manifest.firmware_instructions = None;
+        assert!(manifest.validate().is_err());
+        manifest.firmware_instructions_shared = false;
+        assert!(manifest.validate().is_ok());
     }
 }

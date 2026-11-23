@@ -407,6 +407,41 @@
           ]
         },
         {
+          "description": "A control-level assignment with fixed independent paths for each physical or interpreted event",
+          "type": "object",
+          "properties": {
+            "actions": {
+              "type": "array",
+              "items": {
+                "$ref": "#/$defs/Action"
+              }
+            },
+            "hold_ms": {
+              "type": "integer",
+              "format": "uint16",
+              "maximum": 65535,
+              "minimum": 0
+            },
+            "kind": {
+              "type": "string",
+              "const": "events"
+            },
+            "multi_press_ms": {
+              "type": "integer",
+              "format": "uint16",
+              "maximum": 65535,
+              "minimum": 0
+            }
+          },
+          "additionalProperties": false,
+          "required": [
+            "kind",
+            "actions",
+            "multi_press_ms",
+            "hold_ms"
+          ]
+        },
+        {
           "type": "object",
           "properties": {
             "kind": {
@@ -592,12 +627,40 @@
         "states"
       ]
     },
+    "ActionPermissions": {
+      "type": "object",
+      "properties": {
+        "optional": {
+          "type": "array",
+          "default": [],
+          "items": {
+            "$ref": "#/$defs/PermissionScope"
+          }
+        },
+        "purpose": {
+          "type": "string"
+        },
+        "required": {
+          "type": "array",
+          "default": [],
+          "items": {
+            "$ref": "#/$defs/PermissionScope"
+          }
+        }
+      },
+      "additionalProperties": false,
+      "required": [
+        "purpose"
+      ]
+    },
     "ActivationPolicy": {
       "type": "string",
       "enum": [
         "queue",
         "ignore_busy",
-        "replace_pending"
+        "replace_pending",
+        "restart",
+        "cancel"
       ]
     },
     "AppRule": {
@@ -660,6 +723,17 @@
         "font": {
           "type": "string",
           "default": "sans"
+        },
+        "font_italic": {
+          "type": "boolean",
+          "default": false
+        },
+        "font_weight": {
+          "type": "integer",
+          "format": "uint16",
+          "default": 400,
+          "maximum": 65535,
+          "minimum": 0
         },
         "foreground": {
           "type": "string",
@@ -861,6 +935,12 @@
             "string",
             "null"
           ]
+        },
+        "live_label": {
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/LabelSegment"
+          }
         },
         "media": {
           "$ref": "#/$defs/MediaOptions",
@@ -2131,6 +2211,7 @@
         "minimum_manager": {
           "type": "string"
         },
+        "permissions": true,
         "plugin_settings": {
           "type": [
             "string",
@@ -2560,6 +2641,7 @@
         "brightness": {
           "type": "integer",
           "format": "uint8",
+          "default": 50,
           "maximum": 255,
           "minimum": 0
         },
@@ -2626,7 +2708,6 @@
       "additionalProperties": false,
       "required": [
         "sleeping",
-        "brightness",
         "lighting_brightness",
         "lighting_colors"
       ]
@@ -2824,6 +2905,17 @@
         "font": {
           "type": "string",
           "default": "sans"
+        },
+        "font_italic": {
+          "type": "boolean",
+          "default": false
+        },
+        "font_weight": {
+          "type": "integer",
+          "format": "uint16",
+          "default": 400,
+          "maximum": 65535,
+          "minimum": 0
         },
         "foreground": {
           "type": "string",
@@ -3497,6 +3589,86 @@
       },
       "additionalProperties": false
     },
+    "LabelSegment": {
+      "oneOf": [
+        {
+          "type": "object",
+          "properties": {
+            "kind": {
+              "type": "string",
+              "const": "literal"
+            },
+            "text": {
+              "type": "string"
+            }
+          },
+          "additionalProperties": false,
+          "required": [
+            "kind",
+            "text"
+          ]
+        },
+        {
+          "type": "object",
+          "properties": {
+            "fallback": {
+              "type": "string"
+            },
+            "kind": {
+              "type": "string",
+              "const": "parameter"
+            },
+            "name": {
+              "type": "string"
+            }
+          },
+          "additionalProperties": false,
+          "required": [
+            "kind",
+            "name",
+            "fallback"
+          ]
+        },
+        {
+          "type": "object",
+          "properties": {
+            "fallback": {
+              "type": "string"
+            },
+            "kind": {
+              "type": "string",
+              "const": "macro_state"
+            }
+          },
+          "additionalProperties": false,
+          "required": [
+            "kind",
+            "fallback"
+          ]
+        },
+        {
+          "type": "object",
+          "properties": {
+            "fallback": {
+              "type": "string"
+            },
+            "key": {
+              "type": "string"
+            },
+            "kind": {
+              "type": "string",
+              "const": "display"
+            }
+          },
+          "additionalProperties": false,
+          "required": [
+            "kind",
+            "key",
+            "fallback"
+          ]
+        }
+      ]
+    },
     "Layout": {
       "type": "object",
       "properties": {
@@ -3524,6 +3696,22 @@
         "width",
         "height",
         "rotation"
+      ]
+    },
+    "LinkMember": {
+      "type": "object",
+      "properties": {
+        "control_id": {
+          "type": "string"
+        },
+        "page_id": {
+          "type": "string"
+        }
+      },
+      "additionalProperties": false,
+      "required": [
+        "page_id",
+        "control_id"
       ]
     },
     "MacroArgument": {
@@ -3756,6 +3944,18 @@
             "$ref": "#/$defs/Control"
           }
         },
+        "firmware_instructions": {
+          "description": "Reviewed model guidance, with variant-specific instructions taking precedence",
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "firmware_instructions_shared": {
+          "description": "Shared guidance does not establish exact-model firmware compatibility",
+          "type": "boolean",
+          "default": false
+        },
         "layout": {
           "$ref": "#/$defs/Layout"
         },
@@ -3894,6 +4094,275 @@
         "id",
         "name",
         "bindings"
+      ]
+    },
+    "PermissionDeclaration": {
+      "type": "object",
+      "properties": {
+        "actions": {
+          "type": "object",
+          "additionalProperties": {
+            "$ref": "#/$defs/ActionPermissions"
+          }
+        },
+        "version": {
+          "type": "integer",
+          "format": "uint8",
+          "maximum": 255,
+          "minimum": 0
+        }
+      },
+      "additionalProperties": false,
+      "required": [
+        "version",
+        "actions"
+      ]
+    },
+    "PermissionScope": {
+      "oneOf": [
+        {
+          "type": "object",
+          "properties": {
+            "id": {
+              "type": "string",
+              "const": "ui.popup"
+            },
+            "mode": {
+              "type": "string"
+            }
+          },
+          "additionalProperties": false,
+          "required": [
+            "id",
+            "mode"
+          ]
+        },
+        {
+          "type": "object",
+          "properties": {
+            "id": {
+              "type": "string",
+              "const": "ui.notification"
+            },
+            "mode": {
+              "type": "string"
+            }
+          },
+          "additionalProperties": false,
+          "required": [
+            "id",
+            "mode"
+          ]
+        },
+        {
+          "type": "object",
+          "properties": {
+            "id": {
+              "type": "string",
+              "const": "notifications.create"
+            },
+            "mode": {
+              "type": "string"
+            }
+          },
+          "additionalProperties": false,
+          "required": [
+            "id",
+            "mode"
+          ]
+        },
+        {
+          "type": "object",
+          "properties": {
+            "id": {
+              "type": "string",
+              "const": "clipboard.read-text"
+            },
+            "mode": {
+              "type": "string"
+            }
+          },
+          "additionalProperties": false,
+          "required": [
+            "id",
+            "mode"
+          ]
+        },
+        {
+          "type": "object",
+          "properties": {
+            "id": {
+              "type": "string",
+              "const": "clipboard.write-text"
+            },
+            "mode": {
+              "type": "string"
+            }
+          },
+          "additionalProperties": false,
+          "required": [
+            "id",
+            "mode"
+          ]
+        },
+        {
+          "type": "object",
+          "properties": {
+            "data_class": {
+              "type": "string"
+            },
+            "id": {
+              "type": "string",
+              "const": "network.https"
+            },
+            "origin": {
+              "type": "string"
+            },
+            "recipe": {
+              "type": "string"
+            }
+          },
+          "additionalProperties": false,
+          "required": [
+            "id",
+            "origin",
+            "recipe",
+            "data_class"
+          ]
+        },
+        {
+          "type": "object",
+          "properties": {
+            "data_class": {
+              "type": "string"
+            },
+            "id": {
+              "type": "string",
+              "const": "network.http"
+            },
+            "origin": {
+              "type": "string"
+            },
+            "recipe": {
+              "type": "string"
+            }
+          },
+          "additionalProperties": false,
+          "required": [
+            "id",
+            "origin",
+            "recipe",
+            "data_class"
+          ]
+        },
+        {
+          "type": "object",
+          "properties": {
+            "entry_kind": {
+              "type": "string"
+            },
+            "field": {
+              "type": "string"
+            },
+            "id": {
+              "type": "string",
+              "const": "vault.read-location"
+            },
+            "purpose": {
+              "type": "string"
+            }
+          },
+          "additionalProperties": false,
+          "required": [
+            "id",
+            "field",
+            "entry_kind",
+            "purpose"
+          ]
+        },
+        {
+          "type": "object",
+          "properties": {
+            "entry_kind": {
+              "type": "string"
+            },
+            "field": {
+              "type": "string"
+            },
+            "id": {
+              "type": "string",
+              "const": "vault.read-secret"
+            },
+            "purpose": {
+              "type": "string"
+            }
+          },
+          "additionalProperties": false,
+          "required": [
+            "id",
+            "field",
+            "entry_kind",
+            "purpose"
+          ]
+        },
+        {
+          "type": "object",
+          "properties": {
+            "entry_kind": {
+              "type": "string"
+            },
+            "field": {
+              "type": "string"
+            },
+            "id": {
+              "type": "string",
+              "const": "vault.write-secret"
+            },
+            "purpose": {
+              "type": "string"
+            }
+          },
+          "additionalProperties": false,
+          "required": [
+            "id",
+            "field",
+            "entry_kind",
+            "purpose"
+          ]
+        },
+        {
+          "type": "object",
+          "properties": {
+            "field": {
+              "type": "string"
+            },
+            "id": {
+              "type": "string",
+              "const": "vault.access"
+            },
+            "mode": {
+              "type": "string"
+            },
+            "operation": {
+              "type": "string"
+            },
+            "origin": {
+              "type": "string"
+            },
+            "recipe": {
+              "type": "string"
+            }
+          },
+          "additionalProperties": false,
+          "required": [
+            "id",
+            "mode",
+            "field",
+            "operation",
+            "recipe",
+            "origin"
+          ]
+        }
       ]
     },
     "PhysicalKey": {
@@ -4333,6 +4802,16 @@
         "name": {
           "type": "string"
         },
+        "permissions": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/PermissionDeclaration"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
         "running_runtime": {
           "anyOf": [
             {
@@ -4637,6 +5116,15 @@
         "id": {
           "type": "string"
         },
+        "linked_controls": {
+          "type": "object",
+          "additionalProperties": {
+            "type": "array",
+            "items": {
+              "$ref": "#/$defs/LinkMember"
+            }
+          }
+        },
         "model_id": {
           "type": "string"
         },
@@ -4842,6 +5330,8 @@
         "no_active_device",
         "no_active_profile_demand",
         "no_visible_actions",
+        "vault_locked",
+        "vault_setup_required",
         "required_by_active_profile",
         "manual_action",
         "configuration",
@@ -5017,6 +5507,18 @@
         "available": {
           "type": "boolean",
           "default": true
+        },
+        "firmware_instructions": {
+          "description": "Reviewed vendor instructions for this exact variant, never a catalog artifact URL",
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "firmware_instructions_shared": {
+          "description": "General brand guidance must not be presented as exact-variant instructions",
+          "type": "boolean",
+          "default": false
         },
         "id": {
           "type": "string"

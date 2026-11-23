@@ -1,0 +1,22 @@
+{
+  "version": 1,
+  "basePath": "..",
+  "components": {
+    "sd-keyboard-macro-editor": {
+      "source": "components/sd-keyboard-macro-editor.html",
+      "dependencies": [],
+      "options": {
+        "shadow": false,
+        "templateRevision": "sha256-EevorLQa2rv-wqJxtKFytDUoQReXH66GJXjg_v3ACsU"
+      },
+      "metadata": {
+        "description": "Trusted, isolated keyboard recording draft with explicit Apply/Cancel."
+      }
+    }
+  },
+  "groups": {
+    "keyboard-macro-editor": [
+      "sd-keyboard-macro-editor"
+    ]
+  }
+}

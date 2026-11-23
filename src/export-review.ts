@@ -1,3 +1,4 @@
+import { transferPassword } from './transfer-password';
 import { cloneJson } from './json-clone';
 import * as fileDialogs from './window-dialogs';
 import type AlpineType from '@alpinejs/csp';
@@ -22,6 +23,79 @@ export function registerExportReview(Alpine: typeof AlpineType, app: () => AppSt
         page: 1,
         report: null as ExportReview | null,
         reviewed: false,
+        model: '',
+        findings: [] as import('../generated/runtime').RehearsalFinding[],
+        testedCandidate: '',
+        get models() {
+            return app().models || [];
+        },
+        get candidateKey() {
+            return JSON.stringify([
+                this.report?.id,
+                this.report?.revision,
+                this.model,
+                app().snapshot.configuration_revision,
+            ]);
+        },
+        findingLabel(f: {
+            profile_id: string | null;
+            page_id: string | null;
+            control_id: string | null;
+            message: string;
+        }) {
+            return [f.profile_id, f.page_id, f.control_id, f.message].filter(Boolean).join(' · ');
+        },
+        get rehearsalGroups() {
+            if (!this.testedCandidate || this.testedCandidate !== this.candidateKey) return [];
+            return ['Blockers', 'Recipient prerequisites', 'Verify on a real installation'].map(
+                (group) => ({ group, findings: this.findings.filter((f) => f.group === group) }),
+            );
+        },
+        async rehearse() {
+            if (!this.report || this.busy) return;
+            this.busy = true;
+            this.error = '';
+            this.testedCandidate = '';
+            const key = this.candidateKey,
+                epoch = this.epoch;
+            try {
+                const result = await app().bridge.command('rehearse_export', {
+                    id: this.report.id,
+                    expectedRevision: this.report.revision,
+                    sha256: this.report.archive_sha256,
+                    model: this.model,
+                });
+                if (key === this.candidateKey && epoch === this.epoch) {
+                    this.findings = result;
+                    this.testedCandidate = key;
+                }
+            } catch (error) {
+                if (epoch === this.epoch) this.error = String(error);
+            } finally {
+                if (epoch === this.epoch) this.busy = false;
+            }
+        },
+        canJump(f: import('../generated/runtime').RehearsalFinding) {
+            const profile = app().snapshot.profiles.find((p) => p.id === f.profile_id);
+            return (
+                !!profile?.pages.find((p) => p.id === f.page_id)?.bindings[f.control_id] &&
+                profile.model_id === app().device?.model_id
+            );
+        },
+        async jump(f: import('../generated/runtime').RehearsalFinding) {
+            if (!this.canJump(f)) return;
+            await app().flushDrafts?.();
+            const deviceId = app().deviceId;
+            this.close();
+            if (app().profile?.id !== f.profile_id)
+                app().apply(
+                    await app().command('activate_profile', { id: f.profile_id, deviceId }),
+                );
+            app().apply(await app().command('select_page', { deviceId, pageId: f.page_id }));
+            app().selectedControls = [];
+            app().controlId = f.control_id;
+            location.hash = '#/editor';
+        },
         error: '',
         savedReceipt: '',
         field: null as ExportField | null,
@@ -52,7 +126,13 @@ export function registerExportReview(Alpine: typeof AlpineType, app: () => AppSt
         },
         // Attach export review listeners and window-close coordination
         init() {
-            ownWindowMethods(this, 'export review', ['open', 'applyField', 'write']);
+            ownWindowMethods(this, 'export review', [
+                'open',
+                'applyField',
+                'write',
+                'rehearse',
+                'jump',
+            ]);
             this.unregisterCloseOwner = registerCloseDraft(this, ['open', 'applyField', 'write'], {
                 name: 'Export review',
                 retainOnUnmount: true,
@@ -118,6 +198,8 @@ export function registerExportReview(Alpine: typeof AlpineType, app: () => AppSt
             this.close();
             const epoch = this.epoch;
             this.opened = true;
+            this.testedCandidate = '';
+            this.model = app().device?.model_id || this.models[0]?.model_id || '';
             this.busy = true;
             this.page = 1;
             this.error = '';
@@ -245,7 +327,12 @@ export function registerExportReview(Alpine: typeof AlpineType, app: () => AppSt
             this.writing = true;
             this.error = '';
             try {
+                const password = this.report.include_plugin_settings
+                    ? await transferPassword(true)
+                    : null;
+                if ((this.report?.include_plugin_settings && !password) || !this.report) return;
                 const receipt = await app().bridge.command('write_export_review', {
+                    password,
                     id: this.report.id,
                     expectedRevision: this.report.revision,
                     sha256: this.report.archive_sha256,

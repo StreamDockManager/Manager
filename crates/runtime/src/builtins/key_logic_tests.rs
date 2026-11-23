@@ -27,6 +27,9 @@ fn vendor_flags_fixture(root: &std::path::Path, key_logic: Option<bool>, multi: 
         manifest["Actions"][0]["SupportedInKeyLogicActions"] = json!(value);
     } else {
         manifest["Software"]["MinimumVersion"] = json!("6.9");
+        // The execution test measures multi-action scope and settings; the
+        // explicit Elgato declarations above still test its admission rules
+        crate::test_plugin::use_portable_vendor_on_linux(&mut manifest);
     }
     std::fs::write(package.join("manifest.json"), manifest.to_string()).unwrap();
     let report = stream_dock_manager_plugin_host::preflight::inspect(&package);
@@ -221,6 +224,33 @@ fn key_logic_shared_macro_graphs_are_bounded_and_cycles_are_rejected() {
 }
 
 #[test]
+// Preserve unqualified event rows without evaluating their legacy plugin eligibility
+fn control_events_check_only_qualified_key_logic_children() {
+    use crate::actions::{EventSlot, DEFAULT_HOLD_MS, DEFAULT_MULTI_PRESS_MS};
+    let call = tests::action("saved_macro", json!({"macro_id":"cycle"}));
+    let slot = EventSlot::HeldTurnLeft;
+    let mut actions = vec![Action::None; EventSlot::COUNT];
+    actions[slot.index()] = call.clone();
+    let events = Action::Events {
+        actions,
+        multi_press_ms: DEFAULT_MULTI_PRESS_MS,
+        hold_ms: DEFAULT_HOLD_MS,
+    };
+    validate_key_logic_event_plugins(
+        &events,
+        |_| Some(&call),
+        &[],
+        Some(EventSlot::TurnLeft.bit()),
+    )
+    .unwrap();
+    assert!(
+        validate_key_logic_event_plugins(&events, |_| Some(&call), &[], Some(slot.bit()))
+            .unwrap_err()
+            .contains("cycle")
+    );
+}
+
+#[test]
 // Verify that key logic navigation fences requests that have not registered recognition
 fn key_logic_navigation_fences_requests_that_have_not_registered_recognition() {
     let root = tempfile::tempdir().unwrap();
@@ -362,8 +392,14 @@ fn key_logic_eligible_plugin_branches_reuse_nested_context_settings_and_desired_
     }
     let mut first = vendor_action();
     let mut hold = vendor_action();
-    if let Action::Plugin { settings, .. } = &mut first {
+    if let Action::Plugin {
+        settings,
+        user_desired_state,
+        ..
+    } = &mut first
+    {
         *settings = json!({"branch":"tap"});
+        *user_desired_state = (!cfg!(target_os = "linux")).then_some(1);
     }
     if let Action::Plugin {
         settings,
@@ -372,7 +408,7 @@ fn key_logic_eligible_plugin_branches_reuse_nested_context_settings_and_desired_
     } = &mut hold
     {
         *settings = json!({"branch":"hold"});
-        *user_desired_state = Some(0);
+        *user_desired_state = (!cfg!(target_os = "linux")).then_some(0);
     }
     let action = tests::action(
         "gesture",

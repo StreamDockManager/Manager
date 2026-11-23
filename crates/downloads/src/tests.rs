@@ -360,7 +360,8 @@ fn cache_retention_is_bounded_and_live_reservations_are_not_evicted() {
         spec.identity = i.to_string();
         drop(storage::acquire(&cache.root, &spec).unwrap());
     }
-    assert_eq!(cache.stats().unwrap().entries, 32);
+    assert_eq!(cache.stats().unwrap().entries, 70);
+    assert_eq!(cache.prune().unwrap().stats.entries, 32);
     let live = storage::acquire(&cache.root, &spec("https://fixture.invalid/live", b"x")).unwrap();
     let report = cache.clear().unwrap();
     assert_eq!(report.active_entries, 1);
@@ -425,10 +426,13 @@ fn cached_artifacts_still_require_the_current_origin_policy_and_scope_discard_re
         )
         .unwrap();
     cache.discard_identity(&one.identity).unwrap();
+    assert!(cache.root.join(one.key()).exists());
+    assert_eq!(cache.prune().unwrap().removed_entries, 1);
     assert!(!cache.root.join(one.key()).exists());
     assert_eq!(std::fs::read(active.path()).unwrap(), b"two");
     drop(active);
     cache.discard_identity(&two.identity).unwrap();
+    cache.prune().unwrap();
     assert!(!cache.root.join(two.key()).exists());
 }
 #[test]
@@ -747,11 +751,10 @@ fn retained(cache: &DownloadCache, name: &str, bytes: &[u8]) -> ArtifactSpec {
 }
 // Touch for the current operation
 fn touch(cache: &DownloadCache, spec: &ArtifactSpec, timestamp: u64) {
-    let path = cache.root.join(spec.key()).join("meta.json");
-    let mut json: serde_json::Value =
-        serde_json::from_slice(&std::fs::read(&path).unwrap()).unwrap();
-    json["touched"] = timestamp.into();
-    std::fs::write(path, serde_json::to_vec(&json).unwrap()).unwrap();
+    cache
+        .index
+        .set_used(&spec.key(), (timestamp * 1000) as i64)
+        .unwrap();
 }
 #[test]
 // Verify retention uses actual bytes and lru not declared reservations
@@ -795,6 +798,8 @@ fn retention_expires_at_age_boundary_and_refreshes_on_reuse() {
     touch(&cache, &old, 1);
     touch(&cache, &reused, 1);
     drop(storage::acquire(&cache.root, &reused).unwrap());
+    assert!(root.path().join(old.key()).exists());
+    assert_eq!(cache.prune().unwrap().removed_entries, 1);
     assert!(!root.path().join(old.key()).exists());
     assert!(root.path().join(reused.key()).exists());
     let zero_age = DownloadCache::open_with_limits(
@@ -892,12 +897,12 @@ fn stats_include_preserved_files_and_flag_unmeasurable_contents() {
     let directory = root.path().join("unknown");
     std::fs::create_dir(&directory).unwrap();
     std::fs::write(directory.join("file"), b"123").unwrap();
+    std::fs::create_dir(directory.join("nested")).unwrap();
     let stats = cache.stats().unwrap();
     assert_eq!(stats.entries, 2);
     assert_eq!(stats.skipped_entries, 2);
     assert_eq!(stats.bytes, 8);
-    assert!(!stats.usage_incomplete);
-    std::fs::create_dir(directory.join("nested")).unwrap();
+    assert!(stats.usage_incomplete);
     let report = cache.clear().unwrap();
     assert_eq!(report.removed_entries, 0);
     assert!(report.stats.usage_incomplete);
@@ -1015,6 +1020,9 @@ fn empty_lease_cleanup_protects_active_owners_and_preserves_orphan_files() {
     }
     let report = cache.clear().unwrap();
     assert_eq!(report.removed_entries, 0);
-    assert_eq!(report.skipped_entries, 4);
-    assert_eq!(report.stats.entries, 4);
+    // Unindexed external writes after migration stay outside managed usage and deletion.
+    assert_eq!(report.stats.entries, 0);
+    for i in 0..4 {
+        assert!(cache.root.join(format!("{i:064x}")).is_dir());
+    }
 }

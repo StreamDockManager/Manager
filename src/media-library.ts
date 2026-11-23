@@ -1,3 +1,4 @@
+import { cloneJson } from './json-clone';
 import { mediaOptimizationGuidance, canOptimizeStill } from './media-guidance';
 import { viewportThumbnails } from './viewport-thumbnails';
 import { decodeMediaImages } from './media-decode';
@@ -37,12 +38,22 @@ export function registerMediaLibrary(Alpine: typeof AlpineType, app: () => AppSt
             | ReturnType<typeof viewportThumbnails<{ entry: MediaLibraryEntry; epoch: number }>>
             | undefined;
         let optimizationRevision = 0;
+        let listing = false;
+        let auditNext = false;
+        let pendingListing: {
+            epoch: number;
+            audit: boolean;
+            page: number;
+            pageSize: number;
+            query: string;
+        } | null = null;
         return {
             opened: false,
             unregisterCloseOwner: undefined as (() => void) | undefined,
             busy: false,
             working: false,
             importing: false,
+            auditing: false,
             epoch: 0,
             page: 1,
             pageSize: '12',
@@ -105,12 +116,16 @@ export function registerMediaLibrary(Alpine: typeof AlpineType, app: () => AppSt
                     : 1;
             },
             // Check whether selected media can be reviewed for deletion
+            get retentionChecked() {
+                return this.data?.retention_checked === true;
+            },
             get canReview() {
                 return (
                     !this.request &&
                     !this.busy &&
                     !this.working &&
                     !this.thumbnailBusy &&
+                    this.retentionChecked &&
                     this.data?.cleanup_available &&
                     this.selected.length > 0
                 );
@@ -190,6 +205,7 @@ export function registerMediaLibrary(Alpine: typeof AlpineType, app: () => AppSt
                 ownWindowMethods(this, 'media-library', [
                     'open',
                     'load',
+                    'audit',
                     'loadThumbnails',
                     'selectInput',
                     'choose',
@@ -261,6 +277,9 @@ export function registerMediaLibrary(Alpine: typeof AlpineType, app: () => AppSt
             close() {
                 if (this.working) return;
                 ++this.epoch;
+                pendingListing = null;
+                auditNext = false;
+                this.auditing = false;
                 this.cancelOptimization();
                 this.notice = '';
                 thumbnails?.stop();
@@ -282,6 +301,25 @@ export function registerMediaLibrary(Alpine: typeof AlpineType, app: () => AppSt
                 this.unregisterCloseOwner?.();
                 this.close();
             },
+            // A retention audit is explicit and never delays selecting existing media.
+            async audit() {
+                if (this.busy || this.working || !this.opened) return;
+                const epoch = this.epoch;
+                this.busy = true;
+                this.auditing = true;
+                try {
+                    await app().flushDrafts?.();
+                    if (epoch !== this.epoch || !this.opened) return;
+                    auditNext = true;
+                    await this.load();
+                } catch (error) {
+                    if (epoch === this.epoch) {
+                        this.error = String(error);
+                        this.busy = false;
+                        this.auditing = false;
+                    }
+                }
+            },
             // Fetch the current media-library page and its metadata
             async load() {
                 if (this.working || !this.opened) return;
@@ -294,21 +332,48 @@ export function registerMediaLibrary(Alpine: typeof AlpineType, app: () => AppSt
                 this.selected = [];
                 this.thumbs = {};
                 this.thumbErrors = {};
+                const audit = auditNext;
+                auditNext = false;
+                this.auditing = audit;
+                pendingListing = {
+                    epoch,
+                    audit,
+                    page: this.page,
+                    pageSize: Number(this.pageSize),
+                    query: this.query,
+                };
+                if (listing) return;
+                listing = true;
                 try {
-                    await app().flushDrafts?.();
-                    const data = await app().bridge.command('media_library', {
-                        page: this.page,
-                        pageSize: Number(this.pageSize),
-                        query: this.query,
-                    });
-                    if (epoch !== this.epoch) return;
-                    this.data = data;
-                    this.page = data.page;
-                    void this.loadThumbnails(data.entries, epoch);
-                } catch (error) {
-                    if (epoch === this.epoch) this.error = String(error);
+                    // One scan at a time. Rapid search/page requests replace the queued
+                    // request instead of running redundant native filesystem scans.
+                    while (pendingListing) {
+                        const request = pendingListing;
+                        pendingListing = null;
+                        try {
+                            const data = await app().bridge.command(
+                                request.audit ? 'audit_media_library' : 'media_library',
+                                {
+                                    page: request.page,
+                                    pageSize: request.pageSize,
+                                    query: request.query,
+                                },
+                            );
+                            if (request.epoch !== this.epoch || !this.opened) continue;
+                            this.data = data;
+                            this.page = data.page;
+                            void this.loadThumbnails(data.entries, request.epoch);
+                        } catch (error) {
+                            if (request.epoch === this.epoch) this.error = String(error);
+                        } finally {
+                            if (request.epoch === this.epoch) {
+                                this.busy = false;
+                                this.auditing = false;
+                            }
+                        }
+                    }
                 } finally {
-                    if (epoch === this.epoch) this.busy = false;
+                    listing = false;
                 }
             },
             // Load thumbnail handles only for the current library page
@@ -355,7 +420,10 @@ export function registerMediaLibrary(Alpine: typeof AlpineType, app: () => AppSt
             // Toggle selection of the media entry identified by the event
             toggle(event: Event) {
                 const id = (event.currentTarget as HTMLInputElement).dataset.id || '';
-                if (!this.data?.entries.some((entry) => entry.id === id && entry.can_delete))
+                if (
+                    !this.retentionChecked ||
+                    !this.data?.entries.some((entry) => entry.id === id && entry.can_delete)
+                )
                     return;
                 this.selected = this.selected.includes(id)
                     ? this.selected.filter((value) => value !== id)
@@ -381,7 +449,8 @@ export function registerMediaLibrary(Alpine: typeof AlpineType, app: () => AppSt
                 try {
                     await retainMediaFor(app(), entry.id, request.owner);
                     if (epoch !== this.epoch || !request.current()) return;
-                    await request.choose(entry.id, entry.clip_info?.options);
+                    // Picker entries are reactive proxies; consumers receive detached JSON options
+                    await request.choose(entry.id, cloneJson(entry.clip_info?.options));
                     this.working = false;
                     this.close();
                 } catch (error) {
@@ -538,18 +607,12 @@ export function registerMediaLibrary(Alpine: typeof AlpineType, app: () => AppSt
             },
             // Prepare a deletion review for the selected media entries
             async reviewDeletion(event: Event) {
-                if (
-                    this.busy ||
-                    this.working ||
-                    this.thumbnailBusy ||
-                    !this.data?.cleanup_available
-                )
-                    return;
+                if (this.busy || this.working || !this.data) return;
                 const asset = (event.currentTarget as HTMLElement).dataset.id;
                 if (!asset || !this.data.entries.some((entry) => entry.id === asset)) return;
                 this.deletionFocus = event.currentTarget as HTMLButtonElement;
                 const epoch = this.epoch;
-                this.working = true;
+                this.busy = true;
                 this.deletionError = '';
                 this.error = '';
                 try {
@@ -567,9 +630,9 @@ export function registerMediaLibrary(Alpine: typeof AlpineType, app: () => AppSt
                     (this.$refs.deletion as HTMLDialogElement).showModal();
                     this.$nextTick(() => (this.$refs.cancelDeletion as HTMLButtonElement).focus());
                 } catch (error) {
-                    this.error = String(error);
+                    if (epoch === this.epoch) this.error = String(error);
                 } finally {
-                    this.working = false;
+                    if (epoch === this.epoch) this.busy = false;
                 }
             },
             // Cancel deletion in the current media library draft
@@ -629,9 +692,10 @@ export function registerMediaLibrary(Alpine: typeof AlpineType, app: () => AppSt
             async reviewCleanup() {
                 if (!this.canReview || !this.data) return;
                 const epoch = this.epoch;
-                this.working = true;
+                this.busy = true;
                 this.cleanupError = '';
                 try {
+                    await app().flushDrafts?.();
                     const review = await app().bridge.command('prepare_media_cleanup', {
                         generation: this.data.generation,
                         assets: [...this.selected],
@@ -648,9 +712,9 @@ export function registerMediaLibrary(Alpine: typeof AlpineType, app: () => AppSt
                     (this.$refs.cleanup as HTMLDialogElement).showModal();
                     this.$nextTick(() => (this.$refs.cancelCleanup as HTMLButtonElement).focus());
                 } catch (error) {
-                    this.error = String(error);
+                    if (epoch === this.epoch) this.error = String(error);
                 } finally {
-                    this.working = false;
+                    if (epoch === this.epoch) this.busy = false;
                 }
             },
             // Cancel cleanup in the current media library draft

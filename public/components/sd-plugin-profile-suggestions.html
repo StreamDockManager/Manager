@@ -4,184 +4,195 @@
     @plugin-setup-imports.window="queuePluginSetup"
     @vendor-profile-reviews-refresh.window="refreshVendorReviews"
 >
-    <dialog
-        class="feature-dialog"
-        x-ref="pluginSetupDialog"
-        aria-labelledby="plugin-setup-title"
-        @cancel.prevent="closePluginSetup"
-    >
-        <header class="picker-header">
-            <h2
-                id="plugin-setup-title"
-                x-text="pluginSetup ? pluginSetup.name + ' setup' : 'Plugin setup'"
-            ></h2>
-            <button
-                class="icon-button"
-                aria-label="Close plugin setup"
-                @click="closePluginSetup"
-                :disabled="working"
-            >
-                ×
-            </button>
-        </header>
-        <div class="feature-body settings-section">
-            <p>
-                The plugin is installed. Configure its integration and review a suggested layout
-                when you are ready. New plugins stay disabled until you enable them here or in
-                Plugins.
-            </p>
-            <p
-                id="plugin-setup-settings-help"
-                class="field-help"
-                x-show="pluginSetup && pluginSetup.can_configure && !pluginSetupEnabled"
-            >
-                Opening Plugin settings runs the plugin’s setup tools while the panel is open. You
-                can save your settings before enabling the plugin.
-            </p>
-            <button
-                class="button"
-                x-show="pluginSetup && pluginSetup.can_configure"
-                @click="configureImportedPlugin"
-                :disabled="working"
-                :aria-describedby="pluginSetupEnabled ? null : 'plugin-setup-settings-help'"
-            >
-                Plugin settings
-            </button>
-            <label class="settings-field">
-                Suggested hardware layout
-                <select
-                    aria-label="Suggested hardware layout"
-                    x-model="pluginSuggestion"
-                    @change="chooseSuggestionDevice"
+    <template x-if="setupMounted">
+        <dialog
+            class="feature-dialog"
+            x-ref="pluginSetupDialog"
+            aria-labelledby="plugin-setup-title"
+            @cancel.prevent="closePluginSetup"
+        >
+            <header class="picker-header">
+                <h2
+                    id="plugin-setup-title"
+                    x-text="pluginSetup ? pluginSetup.name + ' setup' : 'Plugin setup'"
+                ></h2>
+                <button
+                    class="icon-button"
+                    aria-label="Close plugin setup"
+                    @click="closePluginSetup"
                     :disabled="working"
                 >
-                    <option value="">Choose a layout</option>
-                    <template x-for="suggestion in pluginSuggestions" :key="suggestion.key">
-                        <option
-                            :value="suggestion.key"
-                            :disabled="suggestion.error"
-                            x-text="suggestion.label"
-                        ></option>
-                    </template>
-                </select>
-            </label>
-            <label class="settings-field">
-                Destination device
-                <select
-                    aria-label="Destination device"
-                    x-model="pluginTargetDevice"
-                    :disabled="working"
+                    ×
+                </button>
+            </header>
+            <div class="feature-body settings-section">
+                <p>
+                    The plugin is installed. Configure its integration and review a suggested layout
+                    when you are ready. New plugins stay disabled until you enable them here or in
+                    Plugins.
+                </p>
+                <p
+                    id="plugin-setup-settings-help"
+                    class="field-help"
+                    x-show="pluginSetup && pluginSetup.can_configure && !pluginSetupEnabled"
                 >
-                    <option value="">Choose a connected device</option>
-                    <template x-for="device in pluginSuggestionDevices" :key="device.id">
-                        <option
-                            :value="device.id"
-                            x-text="device.name + ' (' + device.id + ')'"
-                        ></option>
-                    </template>
-                </select>
-            </label>
-            <p
-                class="field-help"
-                x-show="selectedPluginSuggestion && pluginSuggestionDevices.length === 0"
-            >
-                Connect a device compatible with this layout to import it.
-            </p>
-            <p class="field-help" x-show="pluginSetup && pluginSuggestions.length === 0">
-                This package has no suggested profiles. You can configure its actions from the
-                action library.
-            </p>
-            <template x-for="suggestion in pluginSuggestions" :key="suggestion.key">
+                    Opening Plugin settings runs the plugin’s setup tools while the panel is open.
+                    You can save your settings before enabling the plugin.
+                </p>
+                <button
+                    class="button"
+                    x-show="pluginSetup && pluginSetup.can_configure"
+                    @click="configureImportedPlugin"
+                    :disabled="working"
+                    :aria-describedby="pluginSetupEnabled ? null : 'plugin-setup-settings-help'"
+                >
+                    Plugin settings
+                </button>
+                <label class="settings-field">
+                    Suggested hardware layout
+                    <select
+                        aria-label="Suggested hardware layout"
+                        x-model="pluginSuggestion"
+                        @change="chooseSuggestionDevice"
+                        :disabled="working"
+                    >
+                        <option value="">Choose a layout</option>
+                        <template x-for="suggestion in pluginSuggestions" :key="suggestion.key">
+                            <option
+                                :value="suggestion.key"
+                                :disabled="suggestion.error"
+                                x-text="suggestion.label"
+                            ></option>
+                        </template>
+                    </select>
+                </label>
+                <label class="settings-field">
+                    Destination device
+                    <select
+                        aria-label="Destination device"
+                        x-model="pluginTargetDevice"
+                        :disabled="working"
+                    >
+                        <option value="">Choose a connected device</option>
+                        <template x-for="device in pluginSuggestionDevices" :key="device.id">
+                            <option
+                                :value="device.id"
+                                x-text="device.name + ' (' + device.id + ')'"
+                            ></option>
+                        </template>
+                    </select>
+                </label>
                 <p
                     class="field-help"
-                    x-show="suggestion.key === pluginSuggestion && suggestion.unavailable_actions.length"
-                    x-text="'Actions unavailable on this hardware: ' + suggestion.unavailable_actions.join(', ')"
-                ></p>
-            </template>
-            <template x-for="warning in pluginSetup ? pluginSetup.warnings : []" :key="warning">
-                <p class="field-help danger-text" role="alert" x-text="warning"></p>
-            </template>
-            <p class="danger-text" role="alert" x-show="error" x-text="error"></p>
-        </div>
-        <footer class="feature-footer">
-            <div class="button-row">
+                    x-show="selectedPluginSuggestion && pluginSuggestionDevices.length === 0"
+                >
+                    Connect a device compatible with this layout to import it.
+                </p>
+                <p class="field-help" x-show="pluginSetup && pluginSuggestions.length === 0">
+                    This package has no suggested profiles. You can configure its actions from the
+                    action library.
+                </p>
+                <template x-for="suggestion in pluginSuggestions" :key="suggestion.key">
+                    <p
+                        class="field-help"
+                        x-show="suggestion.key === pluginSuggestion && suggestion.unavailable_actions.length"
+                        x-text="'Actions unavailable on this hardware: ' + suggestion.unavailable_actions.join(', ')"
+                    ></p>
+                </template>
+                <template x-for="warning in pluginSetup ? pluginSetup.warnings : []" :key="warning">
+                    <p class="field-help danger-text" role="alert" x-text="warning"></p>
+                </template>
+                <p class="danger-text" role="alert" x-show="error" x-text="error"></p>
+            </div>
+            <footer class="feature-footer">
+                <div class="button-row">
+                    <button
+                        class="button primary"
+                        x-show="pluginSetup && !pluginSetupEnabled"
+                        @click="enablePluginSetup"
+                        :disabled="working"
+                    >
+                        Enable plugin
+                    </button>
+                    <button class="button" @click="closePluginSetup" :disabled="working">
+                        Done for now
+                    </button>
+                </div>
                 <button
-                    class="button primary"
-                    x-show="pluginSetup && !pluginSetupEnabled"
-                    @click="enablePluginSetup"
+                    class="button"
+                    @click="importPluginSuggestion"
+                    :disabled="working || !pluginTargetDevice || !selectedPluginSuggestion || selectedPluginSuggestion.error"
+                >
+                    Import suggested profile
+                </button>
+            </footer>
+        </dialog>
+    </template>
+    <template x-if="vendorMounted">
+        <dialog
+            class="feature-dialog"
+            x-ref="vendorProfileDialog"
+            aria-labelledby="vendor-profile-title"
+            @cancel.prevent="declineVendorReview"
+        >
+            <header class="picker-header">
+                <h2 id="vendor-profile-title">Add bundled profile?</h2>
+                <button
+                    class="icon-button"
+                    aria-label="Decline bundled profile"
+                    @click="declineVendorReview"
                     :disabled="working"
                 >
-                    Enable plugin
+                    ×
                 </button>
-                <button class="button" @click="closePluginSetup" :disabled="working">
-                    Done for now
+            </header>
+            <div class="feature-body settings-section">
+                <p>This creates a new profile from the plugin’s bundled layout.</p>
+                <p>
+                    <strong>Profile:</strong>
+                    <span x-text="vendorReview ? vendorReview.profile_name : ''"></span>
+                </p>
+                <p>
+                    <strong>Plugin:</strong>
+                    <span x-text="vendorReview ? vendorReview.plugin_name : ''"></span>
+                </p>
+                <p>
+                    <strong>Device:</strong>
+                    <span x-text="vendorReview ? vendorReview.device_name : ''"></span>
+                </p>
+                <p>
+                    <strong>Actions:</strong>
+                    <span x-text="vendorReview ? vendorReview.binding_count : 0"></span>
+                </p>
+                <p
+                    x-text="vendorReview && vendorReview.switch_after_install ? 'Accepting will switch this device to the new profile.' : 'Accepting will not switch the device’s active profile.'"
+                ></p>
+                <p class="field-help">
+                    Reviewing this layout does not run plugin actions. Enabling a plugin does not
+                    accept its bundled profiles.
+                </p>
+                <p class="danger-text" role="alert" x-show="error" x-text="error"></p>
+                <button
+                    class="button"
+                    x-show="error"
+                    @click="reopenVendorReview"
+                    :disabled="working"
+                >
+                    Reload review
                 </button>
             </div>
-            <button
-                class="button"
-                @click="importPluginSuggestion"
-                :disabled="working || !pluginTargetDevice || !selectedPluginSuggestion || selectedPluginSuggestion.error"
-            >
-                Import suggested profile
-            </button>
-        </footer>
-    </dialog>
-    <dialog
-        class="feature-dialog"
-        x-ref="vendorProfileDialog"
-        aria-labelledby="vendor-profile-title"
-        @cancel.prevent="declineVendorReview"
-    >
-        <header class="picker-header">
-            <h2 id="vendor-profile-title">Add bundled profile?</h2>
-            <button
-                class="icon-button"
-                aria-label="Decline bundled profile"
-                @click="declineVendorReview"
-                :disabled="working"
-            >
-                ×
-            </button>
-        </header>
-        <div class="feature-body settings-section">
-            <p>This creates a new profile from the plugin’s bundled layout.</p>
-            <p>
-                <strong>Profile:</strong>
-                <span x-text="vendorReview ? vendorReview.profile_name : ''"></span>
-            </p>
-            <p>
-                <strong>Plugin:</strong>
-                <span x-text="vendorReview ? vendorReview.plugin_name : ''"></span>
-            </p>
-            <p>
-                <strong>Device:</strong>
-                <span x-text="vendorReview ? vendorReview.device_name : ''"></span>
-            </p>
-            <p>
-                <strong>Actions:</strong>
-                <span x-text="vendorReview ? vendorReview.binding_count : 0"></span>
-            </p>
-            <p
-                x-text="vendorReview && vendorReview.switch_after_install ? 'Accepting will switch this device to the new profile.' : 'Accepting will not switch the device’s active profile.'"
-            ></p>
-            <p class="field-help">
-                Reviewing this layout does not run plugin actions. Enabling a plugin does not accept
-                its bundled profiles.
-            </p>
-            <p class="danger-text" role="alert" x-show="error" x-text="error"></p>
-            <button class="button" x-show="error" @click="reopenVendorReview" :disabled="working">
-                Reload review
-            </button>
-        </div>
-        <footer class="feature-footer">
-            <button class="button" @click="declineVendorReview" :disabled="working">Decline</button>
-            <button
-                class="button primary"
-                @click="acceptVendorReview"
-                :disabled="working || !vendorReview"
-            >
-                Create new profile
-            </button>
-        </footer>
-    </dialog>
+            <footer class="feature-footer">
+                <button class="button" @click="declineVendorReview" :disabled="working">
+                    Decline
+                </button>
+                <button
+                    class="button primary"
+                    @click="acceptVendorReview"
+                    :disabled="working || !vendorReview"
+                >
+                    Create new profile
+                </button>
+            </footer>
+        </dialog>
+    </template>
 </div>

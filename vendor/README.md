@@ -1,20 +1,25 @@
 # Reproducible patched Rust dependencies
 
-Manager keeps only [pinned dependency metadata](dependencies.json) and reviewed
-patches in Git. Full third-party source trees are downloaded and prepared locally,
-not checked in. Supported Make, npm desktop/check, packaging and CI entry points
-run preparation before Cargo resolves its path dependencies.
+Manager tracks [pinned metadata](dependencies.json) and reviewed [patches](../patches/), not full third-party source trees. Make, npm desktop builds, packaging and CI prepare the crates for you.
 
-Before using **raw Cargo** from a fresh checkout, run:
+## Use raw Cargo
+
+From the Manager repository root, run:
 
 ```sh
 python3 scripts/prepare_patched_deps.py
 cargo check --locked --workspace
 ```
 
-Cargo must resolve dependency manifests before it can run any `build.rs`, so a
-Cargo build script cannot bootstrap missing path dependencies. The explicit step
-is required for direct Cargo commands and IDEs on a fresh checkout.
+Run preparation once before opening a fresh checkout in an IDE that invokes Cargo. Cargo resolves these path dependencies before it can run any build scripts.
+
+| Preparation mode                        | What it does                                                                                                     |
+| --------------------------------------- | ---------------------------------------------------------------------------------------------------------------- |
+| Default                                 | Verify and reuse the prepared crates, or download and patch the pinned archives.                                 |
+| `--offline` or `CARGO_NET_OFFLINE=true` | Reuse only verified local archives or patched sources. Cargo’s own registry dependencies also need to be cached. |
+| `--check`                               | Verify existing prepared sources without downloading or rebuilding them.                                         |
+
+The disposable `vendor/.cache/` is ignored by Git. Re-run preparation to recreate it. Do not edit or commit generated source trees.
 
 ## Integrity, caching and offline builds
 
@@ -33,20 +38,19 @@ is required for direct Cargo commands and IDEs on a fresh checkout.
   source tree is rebuilt from a verified archive. Unsafe links fail closed.
 - A process lock serializes concurrent preparation. Each crate is fully verified
   in a staging directory before publication. Failures do not publish partial trees.
-- `python3 scripts/prepare_patched_deps.py --offline` (also selected by
-  `CARGO_NET_OFFLINE=true`) never downloads. A verified source tree or cached archive
-  is required; a missing/corrupt offline cache is an actionable error, not an
-  unpatched registry fallback. Once both crates are prepared, Cargo's own registry
-  dependencies must also be cached for `cargo --offline` to work.
-- `python3 scripts/prepare_patched_deps.py --check` only verifies prepared sources;
-  it neither downloads nor rebuilds them. The cache is disposable: preparation
-  recreates it. Do not edit generated sources or commit them.
+  To change a dependency or patch, review the official archive and local diff,
+  update all affected hashes in `dependencies.json`, regenerate from the archive,
+  and run the relevant native tests. Preserve licenses and copyright. Hashes must
+  identify independently reviewed bytes, not be updated merely to accept a cache
+  that failed verification.
 
-To change a dependency or patch, review the official archive and local diff,
-update all affected hashes in `dependencies.json`, regenerate from the archive,
-and run the relevant native tests. Preserve licenses and copyright. Hashes must
-identify independently reviewed bytes, not be updated merely to accept a cache
-that failed verification.
+## Patch overview
+
+| Crate                                       | Why Manager patches it                                                 |
+| ------------------------------------------- | ---------------------------------------------------------------------- |
+| [GLib 0.18.5](#glib-0185-security-backport) | Variant iterator security backport and Rust syntax fixes.              |
+| [Wry 0.57.3](#wry-0573-compiler-fixes)      | Linux WebView IPC lifetime and platform compiler fixes.                |
+| [HIDAPI 2.6.7](#native-hid-readiness)       | Native input readiness on macOS, Windows and supported Linux backends. |
 
 ## GLib 0.18.5 security backport
 
@@ -76,20 +80,17 @@ fixed implementation, retaining the regression. On Linux after preparation:
 cargo test --locked --release -p stream-dock-manager --test glib_variant_iter
 ```
 
-## Wry 0.57.2 lifetime and compiler fixes
+## Wry 0.57.3 compiler fixes
 
-The [weak IPC reference patch](../patches/wry-0.57.2-ipc-weak-reference.patch)
-breaks the Linux ownership cycle in [Wry issue 1871](https://github.com/tauri-apps/wry/issues/1871):
-a WebView owns its user-content manager, so its IPC callback must not hold a strong
-reference back to the view. It upgrades a weak reference only for a live message.
-No helpers are killed and active plugin views remain independent. Tauri's shared
-WebKit context/network helper is still intentionally retained for reuse.
+The upstream [Linux IPC fix](https://github.com/tauri-apps/wry/pull/1939)
+holds a weak reference to the WebView in its IPC handler. Retain the native
+close/reopen regression below when changing this dependency.
 
-The separate [cfg patch](../patches/wry-0.57.2-check-cfg.patch) registers the existing
+The separate [cfg patch](../patches/wry-0.57.3-check-cfg.patch) registers the existing
 `macos_12_unavailable` cfg unconditionally. It neither enables the cfg nor changes
 macOS detection/rendering. Other unexpected cfg names remain checked.
 
-The [platform-warning patch](../patches/wry-0.57.2-platform-warnings.patch)
+The [platform-warning patch](../patches/wry-0.57.3-platform-warnings.patch)
 keeps the WebKitGTK 2.38 minimum: the six legacy JavaScript calls have local
 compatibility annotations because their replacement requires 2.40. It removes
 an undeclared, unreachable `v2_42` feature branch while retaining the existing
@@ -97,9 +98,9 @@ display-capture fallback. On Apple platforms it gates `NSObject` to the debug,
 devtools and proxy configurations that use it, and marks the release-unused
 error parameter without changing debug logging. No crate-wide warnings are disabled.
 
-- Published crate: [wry 0.57.2](https://crates.io/crates/wry/0.57.2), MIT/Apache-2.0.
-- Archive SHA-256: `a490119196d02a51d0871df7b9119a1f3e46d75b7e90053a801454d5c6b3491c`.
-- Published VCS metadata: `bbba6b6312af92fbb969789a63768f4b4bb6d268` (`dirty: true`, as published).
+- Published crate: [wry 0.57.3](https://crates.io/crates/wry/0.57.3), MIT/Apache-2.0.
+- Archive SHA-256: `ceb43f824178e8110e3181bfd478359c43b041452a9560d321bd8d121e468f86`.
+- Published VCS metadata: `3b6eab2de073cd9da7ffeec94016db7441a0caa7` (`dirty: true`, as published).
 
 On Linux with WebKitGTK helpers, normal build libraries and Xvfb, after preparation:
 
@@ -110,3 +111,38 @@ xvfb-run -a cargo test --locked -p stream-dock-manager --test wry_ipc_lifetime -
 The test verifies real IPC before close, release of captured state, and reopening
 with the same retained context. Keep these narrowly scoped patches until the
 supported upstream release contains the fixes.
+
+## Native HID readiness
+
+`hidapi` 2.6.7 uses its crates.io archive checksum plus reviewed Apple, Windows,
+and Linux patches in `patches/`. All patches and the resulting tree are hashed in
+`dependencies.json`. The additive safe Rust callback API owns callback storage,
+contains unwinds, and synchronously retires observers before replacement or close.
+Callbacks may only signal independent synchronization state, never reenter HIDAPI
+or acquire a lock held across a HIDAPI call. Notifications never consume reports.
+
+- Apple signals under the existing input queue mutex on report enqueue,
+  disconnection and reader shutdown, including already queued/closed registration.
+- Windows observes the existing OVERLAPPED read's manual-reset completion event.
+  One cancellable thread notifies once then waits for the next read's explicit
+  rearm. It never opens a device or consumes/resets a completion. The original
+  reader resets the event before arming each read. Close retires the observer and
+  cancels/completes a pending read before releasing its buffer and OVERLAPPED.
+- Bundled Linux static-hidraw observes the existing fd through edge-triggered
+  epoll with eventfd cancellation. It does not reopen, duplicate or read the fd.
+  Other Linux backends and the alternate Windows-native backend return an
+  unsupported error, retaining the caller's bounded fallback.
+
+Runtime attempts supported readiness by default. Setup failure retains bounded
+polling. Terminal observer failure wakes the reader and yields a read error so
+normal connection retirement/reconnect handles it; it cannot silently park forever.
+If an OS cancellation/join unexpectedly fails, callback/device storage remains
+alive rather than risking use-after-free.
+
+`python3 scripts/test_hidapi_readiness.py` compiles the patched Apple C backend,
+checks its symbol, and exercises a synthetic queue and callback retirement.
+`python3 scripts/test_hidapi_windows_readiness.py` builds the actual Windows backend
+and synthetic event fixture using an installed GCC toolchain, and runs the fixture
+only on Windows. Cross-compilation is not native execution. These fixtures never
+open hardware and do not qualify device report latency, firmware transactions,
+unplug/reconnect, or suspend/resume. Native hardware qualification is still pending.

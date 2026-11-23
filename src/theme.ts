@@ -1,3 +1,4 @@
+import type { PaletteCandidate } from './palette-dock-preview';
 import type AlpineType from '@alpinejs/csp';
 import type {
     AppearancePreferences,
@@ -36,6 +37,7 @@ type PalettePreview = {
     mode: ThemeMode;
     id: string;
     draft?: CustomPalette;
+    followNavigation?: boolean;
 };
 
 // Register the theme
@@ -49,6 +51,9 @@ export function registerTheme(Alpine: typeof AlpineType, native: boolean, persis
     let editEpoch = 0;
     let readEpoch = 0;
     let disposed = false;
+    let previewTransport:
+        | ((owner: symbol, candidate: PaletteCandidate | null, followNavigation?: boolean) => void)
+        | undefined;
     let fontsRequest = 0;
     const store = {
         ...initial,
@@ -83,6 +88,17 @@ export function registerTheme(Alpine: typeof AlpineType, native: boolean, persis
         },
         // Derive device appearance from the current theme state
         get deviceAppearance(): ReturnType<typeof profileAppearance> {
+            // A browsed candidate deliberately overrides the saved device/profile palette
+            // for rendering only. Dismissal exposes the unchanged saved configuration.
+            const preview = this.palettePreview;
+            if (preview)
+                return {
+                    preference: preview.mode,
+                    style: {
+                        ...this.style,
+                        [preview.mode === 'light' ? 'lightPalette' : 'darkPalette']: preview.id,
+                    },
+                };
             return profileAppearance(
                 this.deviceTheme.sync ? this.preference : 'dark',
                 this.deviceTheme.sync
@@ -158,6 +174,12 @@ export function registerTheme(Alpine: typeof AlpineType, native: boolean, persis
                 ),
             ];
         },
+        get interfaceFontLabel(): string {
+            return (
+                this.fontOptions.find((font) => font.id === this.style.font)?.label ||
+                this.style.font
+            );
+        },
         // Derive resolved from the current theme state
         get resolved(): 'light' | 'dark' {
             return this.effectiveAppearance.preference === 'system'
@@ -187,16 +209,40 @@ export function registerTheme(Alpine: typeof AlpineType, native: boolean, persis
             const key = mode === 'light' ? 'lightPalette' : 'darkPalette';
             this.saveStyle({ ...this.style, [key]: id }, this.followsSystem ? 'system' : mode);
         },
+        // Bind native preview transports only after the main application store exists.
+        bindPalettePreviewTransport(handler: typeof previewTransport) {
+            previewTransport = handler;
+        },
         // Show the palette preview
-        showPalettePreview(owner: symbol, mode: ThemeMode, id: string, draft?: CustomPalette) {
-            this.palettePreview = { owner, mode, id, draft };
+        showPalettePreview(
+            owner: symbol,
+            mode: ThemeMode,
+            id: string,
+            draft?: CustomPalette,
+            followNavigation = false,
+        ) {
+            this.palettePreview = { owner, mode, id, draft, followNavigation };
             this.applyColors();
+            window.dispatchEvent(new Event('live-preview-invalidated'));
+            previewTransport?.(
+                owner,
+                { mode, id, ...(draft ? { custom: draft } : {}) },
+                followNavigation,
+            );
         },
         // Clear the palette preview
         clearPalettePreview(owner: symbol) {
             if (this.palettePreview?.owner !== owner) return;
             this.palettePreview = null;
             this.applyColors();
+            window.dispatchEvent(new Event('live-preview-invalidated'));
+            previewTransport?.(owner, null);
+        },
+        // Commit only the interface picker's supported style controls as one appearance edit.
+        applyFontStyle(
+            event: CustomEvent<{ font: string; fontWeight: number; fontItalic: boolean }>,
+        ) {
+            this.saveStyle({ ...this.style, ...event.detail });
         },
         // Change the style
         changeStyle(event: Event) {
@@ -256,6 +302,8 @@ export function registerTheme(Alpine: typeof AlpineType, native: boolean, persis
                     (style.lightPalette !== committedStyle.lightPalette ||
                         style.darkPalette !== committedStyle.darkPalette ||
                         style.font !== committedStyle.font ||
+                        style.fontWeight !== committedStyle.fontWeight ||
+                        style.fontItalic !== committedStyle.fontItalic ||
                         style.textScale !== committedStyle.textScale);
                 if (!writeMode && !writeStyle) return;
                 try {

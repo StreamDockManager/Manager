@@ -70,6 +70,32 @@
             ]
         },
         {
+            "id": "plugin-permissions-v1",
+            "implementation": [{ "path": "src/permission_rpc.rs", "symbol": "fn request" }],
+            "tests": [
+                "permission_rpc::tests::review_and_transfer_require_separate_physical_activations"
+            ]
+        },
+        {
+            "id": "plugin-notifications-v1",
+            "implementation": [
+                { "path": "src/permission_rpc.rs", "symbol": "fn create_notification" }
+            ],
+            "tests": [
+                "permission_rpc::tests::notification_requests_need_exact_live_grant_and_are_bounded",
+                "registration_environment::tests::desktop_notification_contract_is_explicit_native_and_survives_display_refresh"
+            ]
+        },
+        {
+            "id": "plugin-http-broker-v1",
+            "implementation": [
+                { "path": "src/permission_rpc.rs", "symbol": "WindowContent::Transfer" }
+            ],
+            "tests": [
+                "permission_rpc::tests::review_and_transfer_require_separate_physical_activations"
+            ]
+        },
+        {
             "id": "plugin-storage-v1",
             "implementation": [
                 {
@@ -80,6 +106,33 @@
             "tests": [
                 "storage_rpc::tests::dedup_precedes_cas_survives_restart_and_purge_fences_old_handles"
             ]
+        },
+        {
+            "id": "plugin-vault-values-v1",
+            "implementation": [{ "path": "src/vault_rpc.rs", "symbol": "dispatch" }],
+            "tests": ["vault_rpc::tests::exact_owner_scope_and_live_response"]
+        },
+        {
+            "id": "plugin-vault-secret-sharing-v1",
+            "implementation": [{ "path": "src/vault_rpc.rs", "symbol": "dispatch" }],
+            "tests": ["vault_rpc::tests::exact_owner_scope_and_live_response"]
+        },
+        {
+            "id": "plugin-vault-writes-v1",
+            "implementation": [{ "path": "src/vault_writes.rs", "symbol": "dispatch" }],
+            "tests": ["vault_writes::tests::rejects_foreign_identity_and_redacts_replies"]
+        },
+        {
+            "id": "plugin-vault-references-v1",
+            "implementation": [{ "path": "src/permission_rpc.rs", "symbol": "reference_request" }],
+            "tests": [
+                "permission_rpc::reference_tests::selected_entry_and_transfer_consent_are_required"
+            ]
+        },
+        {
+            "id": "plugin-text-references-v1",
+            "implementation": [{ "path": "src/vault_text.rs", "symbol": "dispatch" }],
+            "tests": ["vault_text::tests::requires_live_scope_and_bounds_utf8"]
         },
         {
             "id": "desktop-input-v1",
@@ -116,6 +169,11 @@
             "tests": [
                 "monitor::network_tests::cumulative_payload_reports_recover_drops_and_reject_stale_runs_decreases_and_invalid_values"
             ]
+        },
+        {
+            "id": "network-demand-v1",
+            "implementation": [{ "path": "src/monitor.rs", "symbol": "request_network_samples" }],
+            "tests": ["monitor::network_tests::network_sampling_requires_a_consumer_and_sdk_opt_in"]
         },
         {
             "id": "plugin-logs-v1",

@@ -39,6 +39,7 @@ pub enum FailureReason {
     Unwrap,
     PoisonedLock,
     ResourceLoad,
+    ResourceDecode,
     Unknown,
 }
 
@@ -171,16 +172,123 @@ pub struct FrontendFrame {
     pub line: u32,
     pub column: u32,
 }
+#[derive(Debug, Clone, Copy, Serialize, Deserialize, ts_rs::TS, schemars::JsonSchema)]
+#[serde(rename_all = "kebab-case")]
+pub enum ResourceRoute {
+    Editor,
+    ActionLibrary,
+    Macros,
+    Plugins,
+    Settings,
+    Diagnostics,
+    Unknown,
+}
+#[derive(Debug, Clone, Copy, Serialize, Deserialize, ts_rs::TS, schemars::JsonSchema)]
+#[serde(rename_all = "kebab-case")]
+pub enum ResourceOwner {
+    SdActionLibrary,
+    SdActionWorkspace,
+    SdAppShell,
+    SdDeviceOutputDialog,
+    SdDevicePreview,
+    SdEditor,
+    SdInspector,
+    SdMacros,
+    SdMediaLibrary,
+    SdMediaOptions,
+    SdPluginActionGroup,
+    SdPluginCatalogDialog,
+    SdPlugins,
+    SdSettings,
+    SdVideoEditor,
+    Unknown,
+}
+#[derive(Debug, Clone, Copy, Serialize, Deserialize, ts_rs::TS, schemars::JsonSchema)]
+#[serde(rename_all = "kebab-case")]
+pub enum ResourceRole {
+    BindingIcon,
+    ControlSurface,
+    BackgroundPreview,
+    MediaPreview,
+    Thumbnail,
+    InterfaceIcon,
+    PluginIcon,
+    Unknown,
+}
+#[derive(Debug, Clone, Serialize, Deserialize, ts_rs::TS, schemars::JsonSchema)]
+#[serde(deny_unknown_fields)]
+pub struct ResourceContext {
+    pub route: ResourceRoute,
+    pub owner: ResourceOwner,
+    pub role: ResourceRole,
+}
+#[derive(Debug, Clone, Copy, Serialize, Deserialize, ts_rs::TS, schemars::JsonSchema)]
+#[serde(rename_all = "snake_case")]
+pub enum FrontendStartupStage {
+    ModuleImport,
+    NativeHandshake,
+    WorkspaceLoad,
+    ShellMount,
+    InitialRoute,
+    EditorServices,
+    VaultUnlock,
+}
+
+#[derive(Debug, Clone, Copy, Serialize, Deserialize, ts_rs::TS, schemars::JsonSchema)]
+#[serde(rename_all = "SCREAMING_SNAKE_CASE")]
+pub enum StartupLoaderCode {
+    AclAssetLoadFailed,
+    AclComponentLoadFailed,
+    AclManifestFetchFailed,
+    AclManifestHttpError,
+    AclManifestInvalid,
+    #[serde(rename = "ACL_MANIFEST_INVALID_JSON")]
+    AclManifestInvalidJson,
+    AclManifestTimeout,
+    AclManifestTooLarge,
+    AclTemplateFetchFailed,
+    AclTemplateHttpError,
+    AclTemplateTimeout,
+    AclTemplateTooLarge,
+}
+
+#[derive(Debug, Clone, Copy, Serialize, Deserialize, ts_rs::TS, schemars::JsonSchema)]
+#[serde(deny_unknown_fields)]
+pub struct FrontendStartupContext {
+    pub stage: FrontendStartupStage,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    #[ts(optional)]
+    pub loader_code: Option<StartupLoaderCode>,
+}
+
 #[derive(Debug, Clone, Serialize, Deserialize, ts_rs::TS, schemars::JsonSchema)]
 #[serde(deny_unknown_fields)]
 pub struct FrontendDiagnostic {
     pub event: FrontendEvent,
     pub reason: FailureReason,
     pub frames: Vec<FrontendFrame>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    #[ts(optional)]
+    pub resource: Option<ResourceContext>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    #[ts(optional)]
+    pub startup: Option<FrontendStartupContext>,
 }
 impl FrontendDiagnostic {
     // Validate for the current operation
     pub fn validate(&self) -> Result<(), String> {
+        if self.resource.is_some() && !matches!(self.event, FrontendEvent::ResourceError) {
+            return Err("Resource context requires a resource event".into());
+        }
+        if self.startup.is_some() && !matches!(self.event, FrontendEvent::StartupFailed) {
+            return Err("Startup context requires a startup event".into());
+        }
+        if self.startup.is_some_and(|startup| {
+            startup.loader_code.is_some()
+                && !matches!(startup.stage, FrontendStartupStage::ShellMount)
+        }) {
+            return Err("Startup loader code requires the shell mount stage".into());
+        }
         if self.frames.len() > 12
             || self
                 .frames
@@ -220,6 +328,8 @@ mod tests {
         let report = FrontendDiagnostic {
             event: FrontendEvent::RuntimeError,
             reason: FailureReason::Unknown,
+            resource: None,
+            startup: None,
             frames: vec![
                 FrontendFrame {
                     component: FrontendComponent::Main,

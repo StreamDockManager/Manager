@@ -5,6 +5,9 @@ import type {
     FrontendDiagnostic,
     FrontendEvent,
     FrontendFrame,
+    FrontendStartupContext,
+    StartupLoaderCode,
+    ResourceContext,
 } from '../generated/runtime';
 
 const modules: [string, FrontendComponent][] = [
@@ -127,6 +130,63 @@ export function frontendDiagnostic(
     };
 }
 
+const resourceRoutes = [
+    'editor',
+    'action-library',
+    'macros',
+    'plugins',
+    'settings',
+    'diagnostics',
+] as const;
+const resourceOwners = [
+    'sd-action-library',
+    'sd-action-workspace',
+    'sd-app-shell',
+    'sd-device-output-dialog',
+    'sd-device-preview',
+    'sd-editor',
+    'sd-inspector',
+    'sd-macros',
+    'sd-media-library',
+    'sd-media-options',
+    'sd-plugin-action-group',
+    'sd-plugin-catalog-dialog',
+    'sd-plugins',
+    'sd-settings',
+    'sd-video-editor',
+] as const;
+const resourceRoles = [
+    'binding-icon',
+    'control-surface',
+    'background-preview',
+    'media-preview',
+    'thumbnail',
+    'interface-icon',
+    'plugin-icon',
+] as const;
+
+function recognized<T extends string>(values: readonly T[], input?: string | null): T | 'unknown' {
+    return values.find((value) => value === input) ?? 'unknown';
+}
+
+function resourceContext(target: EventTarget | null): ResourceContext {
+    const element = typeof Element !== 'undefined' && target instanceof Element ? target : null;
+    return {
+        route: recognized(
+            resourceRoutes,
+            globalThis.location?.hash ? globalThis.location.hash.slice(2) : 'editor',
+        ),
+        owner: recognized(
+            resourceOwners,
+            element
+                ?.closest('[data-acl-component]')
+                ?.getAttribute('data-acl-component')
+                ?.toLowerCase(),
+        ),
+        role: recognized(resourceRoles, element?.getAttribute('data-resource-role')),
+    };
+}
+
 type Send = (report: FrontendDiagnostic) => Promise<unknown>;
 // Attach browser error reporting and return a cleanup handle
 export function installFrontendDiagnostics(
@@ -138,24 +198,46 @@ export function installFrontendDiagnostics(
 ) {
     let active = true,
         started = now(),
-        count = 0;
+        count = 0,
+        startupCount = 0;
     const recent = new Map<string, number>();
     // Forward a normalized diagnostic through the configured reporting callback
-    const report = (event: FrontendEvent, error: unknown, source = '', line = 0, column = 0) => {
+    const report = (
+        event: FrontendEvent,
+        error: unknown,
+        source = '',
+        line = 0,
+        column = 0,
+        resource?: ResourceContext,
+        decoded = false,
+        startup?: FrontendStartupContext,
+    ) => {
         if (!active) return;
         const value = frontendDiagnostic(event, error, base, source, line, column);
+        if (resource) value.resource = resource;
+        if (startup) value.startup = startup;
+        if (decoded) value.reason = 'resource_decode';
         const time = now();
         if (time - started >= 60_000) {
             started = time;
             count = 0;
+            startupCount = 0;
             recent.clear();
         }
         const signature = JSON.stringify(value);
-        if (count >= 20 || (recent.has(signature) && time - recent.get(signature)! < 5000)) return;
+        if (
+            (startup ? startupCount >= 3 : count >= 20) ||
+            (recent.has(signature) && time - recent.get(signature)! < 5000)
+        )
+            return;
         recent.set(signature, time);
-        count++;
+        if (startup) startupCount++;
+        else count++;
         try {
-            void send(value).catch(() => {});
+            return send(value).then(
+                () => {},
+                () => {},
+            );
         } catch {
             /* Logging never reports its own failures */
         }
@@ -172,8 +254,7 @@ export function installFrontendDiagnostics(
                 error.colno,
             );
         else {
-            const target = event.target as { src?: string; href?: string } | null;
-            report('resource_error', undefined, target?.src || target?.href || '');
+            report('resource_error', undefined, '', 0, 0, resourceContext(event.target));
         }
     };
     // Report an unhandled promise rejection
@@ -222,4 +303,50 @@ export function startFrontendDiagnostics() {
 // Report a handled frontend failure with its component context
 export function reportFrontendError(event: FrontendEvent, error: unknown) {
     reporter?.report(event, error);
+}
+
+// Keep startup phase and exact, finite ACL identifiers instead of logging error text
+const startupLoaderCodes: readonly StartupLoaderCode[] = [
+    'ACL_ASSET_LOAD_FAILED',
+    'ACL_COMPONENT_LOAD_FAILED',
+    'ACL_MANIFEST_FETCH_FAILED',
+    'ACL_MANIFEST_HTTP_ERROR',
+    'ACL_MANIFEST_INVALID',
+    'ACL_MANIFEST_INVALID_JSON',
+    'ACL_MANIFEST_TIMEOUT',
+    'ACL_MANIFEST_TOO_LARGE',
+    'ACL_TEMPLATE_FETCH_FAILED',
+    'ACL_TEMPLATE_HTTP_ERROR',
+    'ACL_TEMPLATE_TIMEOUT',
+    'ACL_TEMPLATE_TOO_LARGE',
+];
+
+export function reportStartupFailure(
+    stage: FrontendStartupContext['stage'],
+    error: unknown,
+    code?: unknown,
+) {
+    const loader_code =
+        stage === 'shell_mount' ? startupLoaderCodes.find((value) => value === code) : undefined;
+    const startup = loader_code ? { stage, loader_code } : { stage };
+    return reporter?.report('startup_failed', error, '', 0, 0, undefined, false, startup);
+}
+
+export function reportDecodeFailure(
+    owner: ResourceContext['owner'],
+    role: ResourceContext['role'],
+) {
+    reporter?.report(
+        'resource_error',
+        undefined,
+        '',
+        0,
+        0,
+        {
+            route: recognized(resourceRoutes, globalThis.location?.hash.slice(2)),
+            owner,
+            role,
+        },
+        true,
+    );
 }

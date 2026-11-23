@@ -1,3 +1,4 @@
+import { readTransfer } from './transfer-password';
 import * as fileDialogs from './window-dialogs';
 import { registerArchiveReviewer } from './archive-import';
 import { openExportReview } from './export-review';
@@ -179,9 +180,9 @@ export function registerMacroSharing() {
                     });
                 }
                 if (!path || generation !== this.generation) return;
-                const imported = await app().command('prepare_macro_import', {
-                    path,
-                });
+                const imported = await readTransfer((password) =>
+                    app().bridge.command('prepare_macro_import', { path: path!, password }),
+                );
                 if (generation !== this.generation) {
                     void trackCloseRelease(
                         'macro-import:' + imported.id,

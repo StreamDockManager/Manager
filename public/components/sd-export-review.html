@@ -42,6 +42,41 @@
                         Plugin action settings and associated files are included. Anyone receiving
                         this archive can read their contents.
                     </p>
+                    <section class="settings-section" x-show="report.kind === 'profiles'">
+                        <label>
+                            Recipient device model
+                            <select x-model="model">
+                                <template x-for="m in models" :key="m.model_id">
+                                    <option :value="m.model_id" x-text="m.name"></option>
+                                </template>
+                            </select>
+                        </label>
+                        <button class="button" :disabled="busy || writing" @click="rehearse">
+                            Rehearse import
+                        </button>
+                        <div role="status">
+                            <template x-for="group in rehearsalGroups" :key="group.group">
+                                <section>
+                                    <h3 x-text="group.group"></h3>
+                                    <p x-show="!group.findings.length">None found.</p>
+                                    <ul>
+                                        <template x-for="(f, i) in group.findings" :key="i">
+                                            <li>
+                                                <span x-text="findingLabel(f)"></span>
+                                                <button
+                                                    class="text-button"
+                                                    x-show="canJump(f)"
+                                                    @click="jump(f)"
+                                                >
+                                                    Edit binding
+                                                </button>
+                                            </li>
+                                        </template>
+                                    </ul>
+                                </section>
+                            </template>
+                        </div>
+                    </section>
                     <template x-for="warning in report.warnings" :key="warning">
                         <p class="field-help" x-text="warning"></p>
                     </template>

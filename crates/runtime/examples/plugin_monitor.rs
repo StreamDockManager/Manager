@@ -14,6 +14,13 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     let temporary = tempfile::tempdir()?;
     let runtime =
         stream_dock_manager_runtime::test_support::headless(temporary.path().join("manager"))?;
+    runtime
+        .plugins
+        .lock()
+        .unwrap()
+        .set_registration_environment(
+            stream_dock_manager_plugin_host::RegistrationEnvironment::new(Some("en"), Some(1.0))?,
+        );
     let ids: Vec<_> = (0..3).map(|i| format!("org.test.monitor.{i}")).collect();
     for id in &ids {
         let source = temporary.path().join(format!("{id}.sdPlugin"));
@@ -24,7 +31,11 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
             "plugin"
         };
         std::fs::copy(Path::new(&executable), source.join(entry))?;
-        std::fs::write(source.join("manifest.json"), json!({"UUID":id,"Name":id,"Version":"0.1.0","CodePath":entry,"Actions":[{"UUID":format!("{id}.action"),"Name":"Fixture","Controllers":["Keypad"]}]}).to_string())?;
+        std::fs::write(
+            source.join("icon.svg"),
+            include_bytes!("../../../tests/fixtures/plugins/browser/icon.svg"),
+        )?;
+        std::fs::write(source.join("manifest.json"), json!({"UUID":id,"Name":id,"Author":"Fixture","Icon":"icon.svg","OS":[{"Platform":"mac"},{"Platform":"linux"},{"Platform":"windows"}],"Version":"0.1.0","CodePath":entry,"Actions":[{"UUID":format!("{id}.action"),"Name":"Fixture","Icon":"icon.svg","States":[{"Image":"icon.svg"}],"Controllers":["Keypad"]}]}).to_string())?;
         let review = runtime.prepare_plugin_package(&source)?;
         assert!(review.can_import && review.can_run);
         runtime.commit_plugin_package(&review.id, false, false)?;

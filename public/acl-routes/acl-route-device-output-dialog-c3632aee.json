@@ -1,0 +1,19 @@
+{
+  "version": 1,
+  "basePath": "..",
+  "components": {
+    "sd-device-output-dialog": {
+      "source": "components/sd-device-output-dialog.html",
+      "dependencies": [],
+      "options": {
+        "shadow": false,
+        "templateRevision": "sha256-0YLt5C1jOEmhhldaNahxPeyENdRQM5NpxDCl9rTRznI"
+      }
+    }
+  },
+  "groups": {
+    "device-output-dialog": [
+      "sd-device-output-dialog"
+    ]
+  }
+}

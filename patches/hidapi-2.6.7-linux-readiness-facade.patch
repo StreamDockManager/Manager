@@ -1,0 +1,101 @@
+--- a/src/lib.rs
++++ b/src/lib.rs
+@@ -489,6 +489,10 @@
+ 
+ /// Trait which the different backends must implement
+ trait HidDeviceBackendBase {
++    #[cfg(target_os = "linux")]
++    fn set_input_ready_callback(&mut self, _callback: Option<Box<dyn Fn() + Send + Sync>>) -> HidResult<()> {
++        Err(HidError::HidApiError { message: "Input readiness unavailable for this backend".into() })
++    }
+     #[cfg(hidapi)]
+     fn check_error(&self) -> HidResult<HidError>;
+     fn write(&self, data: &[u8]) -> HidResult<usize>;
+@@ -689,3 +693,13 @@
+         self.inner.get_device_info()
+     }
+ }
++
++#[cfg(target_os = "linux")]
++impl HidDevice {
++    /// Observe input readiness without consuming reports. Callback must only
++    /// signal independent state; it must not reenter HIDAPI or its outer locks.
++    /// Unsupported backends return an error, retaining caller's bounded fallback.
++    pub fn set_input_ready_callback(&mut self, callback: Option<Box<dyn Fn() + Send + Sync>>) -> HidResult<()> {
++        self.inner.set_input_ready_callback(callback)
++    }
++}
+--- a/src/ffi.rs
++++ b/src/ffi.rs
+@@ -133,3 +133,11 @@
+ 
+     }
+ }
++
++#[cfg(all(target_os = "linux", feature = "linux-static-hidraw"))]
++pub mod linux {
++    use super::*;
++    extern "C" {
++        pub fn hid_linux_set_input_ready_callback(device: *mut HidDevice, callback: Option<unsafe extern "C" fn(*mut libc::c_void)>, context: *mut libc::c_void) -> c_int;
++    }
++}
+--- a/src/hidapi.rs
++++ b/src/hidapi.rs
+@@ -147,7 +147,7 @@
+ /// Object for accessing HID device
+ pub struct HidDevice {
+     _hid_device: *mut ffi::HidDevice,
+-    #[cfg(any(target_os = "macos", target_os = "windows"))]
++    #[cfg(any(target_os = "macos", target_os = "windows", all(target_os = "linux", feature = "linux-static-hidraw")))]
+     input_ready_callback: Option<Box<Box<dyn Fn() + Send + Sync>>>,
+ }
+ 
+@@ -155,7 +155,7 @@
+     pub fn from_raw(device: *mut ffi::HidDevice) -> Self {
+         Self {
+             _hid_device: device,
+-            #[cfg(any(target_os = "macos", target_os = "windows"))]
++            #[cfg(any(target_os = "macos", target_os = "windows", all(target_os = "linux", feature = "linux-static-hidraw")))]
+             input_ready_callback: None,
+         }
+     }
+@@ -179,6 +179,11 @@
+             if let Some(callback) = self.input_ready_callback.take() { std::mem::forget(callback); }
+             return;
+         }
++        #[cfg(all(target_os = "linux", feature = "linux-static-hidraw"))]
++        if unsafe { ffi::linux::hid_linux_set_input_ready_callback(self._hid_device, None, std::ptr::null_mut()) } < 0 {
++            if let Some(callback) = self.input_ready_callback.take() { std::mem::forget(callback); }
++            return;
++        }
+         unsafe { ffi::hid_close(self._hid_device) }
+     }
+ }
+@@ -198,7 +203,27 @@
+     }
+ }
+ 
++#[cfg(all(target_os = "linux", feature = "linux-static-hidraw"))]
++unsafe extern "C" fn input_ready(context: *mut libc::c_void) {
++    let callback = &*(context as *const Box<dyn Fn() + Send + Sync>);
++    let _ = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| callback()));
++}
+ impl HidDeviceBackendBase for HidDevice {
++    #[cfg(all(target_os = "linux", feature = "linux-static-hidraw"))]
++    fn set_input_ready_callback(&mut self, callback: Option<Box<dyn Fn() + Send + Sync>>) -> HidResult<()> {
++        let retired = unsafe { ffi::linux::hid_linux_set_input_ready_callback(self._hid_device, None, std::ptr::null_mut()) };
++        if retired < 0 { return Err(HidError::HidApiError { message: "Could not retire HID input observer".into() }); }
++        self.input_ready_callback = callback.map(Box::new);
++        if let Some(callback) = self.input_ready_callback.as_mut() {
++            let result = unsafe { ffi::linux::hid_linux_set_input_ready_callback(self._hid_device, Some(input_ready), (&mut **callback as *mut Box<dyn Fn() + Send + Sync>).cast()) };
++            if result < 0 {
++                self.input_ready_callback = None;
++                return Err(HidError::HidApiError { message: "Could not create HID input observer".into() });
++            }
++        }
++        Ok(())
++    }
++
+     fn check_error(&self) -> HidResult<HidError> {
+         Ok(HidError::HidApiError {
+             message: unsafe {

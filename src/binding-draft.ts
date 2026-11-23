@@ -8,6 +8,7 @@ import { hasBindingContent } from './bindings';
 
 export interface BindingDraft {
     title: string;
+    liveLabel: NonNullable<Binding['live_label']>;
     color: string;
     customBackground: boolean;
     backgroundSource: string;
@@ -28,6 +29,7 @@ export interface BindingDraft {
 /** The recovery payload and dirty watchers use the same explicit editor-owned inventory */
 export const bindingDraftFields = [
     'title',
+    'liveLabel',
     'color',
     'customBackground',
     'backgroundSource',
@@ -70,6 +72,7 @@ export function loadBindingDraft(
     assertCurrentMediaOptions(binding?.media);
     return {
         title: binding?.title || '',
+        liveLabel: clone(binding?.live_label || []),
         color: binding && hasBindingContent(binding) ? binding.color : DEFAULT_BACKGROUND,
         customBackground: Boolean(binding?.custom_background),
         backgroundSource: binding?.background_source || 'custom',
@@ -101,12 +104,16 @@ export function restoreBindingDraft(
         'dialActions',
         'dialActionIndex',
         'dialLinkedTurns',
+        'eventActions',
+        'eventActionIndex',
+        'eventMultiPressMs',
+        'eventHoldMs',
     ]);
     if (Object.keys(value).some((key) => !recoveryKeys.has(key)))
         throw new Error(
             'Unsupported recovered binding draft format. The saved profile was not changed.',
         );
-    if (fallback.actionTree.currentLanes && value.dialActions == null)
+    if (fallback.actionTree.currentLanes && value.dialActions == null && value.eventActions == null)
         throw Error(
             'Unsupported shared dial draft. Separate left, right and press actions are required.',
         );
@@ -158,6 +165,7 @@ function projectBindingDraft(
 ): Binding {
     return {
         title: draft.title,
+        live_label: draft.liveLabel?.length ? clone(draft.liveLabel) : undefined,
         color: draft.color,
         custom_background: draft.customBackground || undefined,
         background_source: draft.backgroundSource === 'palette' ? 'palette' : undefined,

@@ -5,17 +5,19 @@ The JSON contract is build-validated against its schema and independent support
 registry. The registry selects exact Rust tests, never shell commands. These are
 local disposable fixtures, not installed vendor software or physical hardware.
 """
+import argparse
 import json
 from pathlib import Path
 import subprocess
 import sys
+from with_test_key import test_environment
 
 ROOT = Path(__file__).resolve().parents[1]
 HOST = ROOT / 'crates/plugin-host'
 
 
 # Select and run each declared connection-contract test exactly once
-def run_conformance():
+def run_conformance(workspace=False):
     registry = json.loads((HOST / 'connection-implementations.v1.json').read_text())
     if not all(isinstance(registry.get(key), list) and registry[key]
                for key in ('contract_tests', 'capabilities', 'vendors')):
@@ -32,8 +34,11 @@ def run_conformance():
         requested.update(entry['tests'])
     if not requested or any(not isinstance(name, str) or not name or name.startswith('-') for name in requested):
         raise ValueError('Invalid or empty conformance selection')
+    cargo = ['cargo', 'test', '--locked']
+    selection = ['--offline', '--workspace'] if workspace else ['-p', 'stream-dock-manager-plugin-host', '--lib']
+    command = cargo + selection
     build = subprocess.run(
-        ['cargo', 'test', '--locked', '-p', 'stream-dock-manager-plugin-host', '--lib', '--no-run', '--message-format=json'],
+        command + ['--no-run', '--message-format=json-render-diagnostics'],
         cwd=ROOT, check=True, text=True, stdout=subprocess.PIPE,
     )
     binaries = []
@@ -60,15 +65,28 @@ def run_conformance():
     if requested & ignored_names:
         raise ValueError('Conformance must use executable disposable tests, not ignored probes: '
                          + ', '.join(sorted(requested & ignored_names)))
-    for name in sorted(requested):
-        subprocess.run([binary, '--exact', name, '--nocapture'], cwd=ROOT, check=True)
+    with test_environment() as env:
+        if workspace:
+            # Run the already compiled workspace suite without filters or ignored tests.
+            # That suite includes every exact registered unit test validated above.
+            subprocess.run(command, cwd=ROOT, check=True, env=env)
+        else:
+            for name in sorted(requested):
+                subprocess.run([binary, '--exact', name, '--nocapture'], cwd=ROOT, check=True, env=env)
     print(f'Connection contract: {len(registry["capabilities"])} capabilities, '
           f'{len(registry["vendors"])} vendor subsets, {len(requested)} conformance tests passed')
 
 
 if __name__ == '__main__':
     try:
-        subprocess.run([sys.executable, str(ROOT / 'scripts/prepare_patched_deps.py')], cwd=ROOT, check=True)
-        run_conformance()
+        parser = argparse.ArgumentParser(description=__doc__)
+        parser.add_argument('--workspace', action='store_true',
+                            help='Check the registry on the locked workspace harness and run the full workspace tests once')
+        args = parser.parse_args()
+        prepare = [sys.executable, str(ROOT / 'scripts/prepare_patched_deps.py')]
+        if args.workspace:
+            prepare.append('--offline')
+        subprocess.run(prepare, cwd=ROOT, check=True)
+        run_conformance(workspace=args.workspace)
     except (ValueError, KeyError, OSError, subprocess.CalledProcessError) as error:
         raise SystemExit(str(error)) from error

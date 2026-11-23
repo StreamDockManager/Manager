@@ -1,0 +1,11 @@
+# Automatically generated - DO NOT EDIT!
+
+[[permission]]
+identifier = "allow-vault-installed-review"
+description = "Enables the vault_installed_review command without any pre-configured scope."
+commands.allow = ["vault_installed_review"]
+
+[[permission]]
+identifier = "deny-vault-installed-review"
+description = "Denies the vault_installed_review command without any pre-configured scope."
+commands.deny = ["vault_installed_review"]

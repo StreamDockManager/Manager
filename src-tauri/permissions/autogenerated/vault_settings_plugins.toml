@@ -1,0 +1,11 @@
+# Automatically generated - DO NOT EDIT!
+
+[[permission]]
+identifier = "allow-vault-settings-plugins"
+description = "Enables the vault_settings_plugins command without any pre-configured scope."
+commands.allow = ["vault_settings_plugins"]
+
+[[permission]]
+identifier = "deny-vault-settings-plugins"
+description = "Denies the vault_settings_plugins command without any pre-configured scope."
+commands.deny = ["vault_settings_plugins"]

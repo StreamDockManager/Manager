@@ -1,0 +1,11 @@
+# Automatically generated - DO NOT EDIT!
+
+[[permission]]
+identifier = "allow-append-plugin-folder-drop"
+description = "Enables the append_plugin_folder_drop command without any pre-configured scope."
+commands.allow = ["append_plugin_folder_drop"]
+
+[[permission]]
+identifier = "deny-append-plugin-folder-drop"
+description = "Denies the append_plugin_folder_drop command without any pre-configured scope."
+commands.deny = ["append_plugin_folder_drop"]

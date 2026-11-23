@@ -28,7 +28,7 @@ function sourceModule(name) {
     urls.set(name, url);
     return url;
 }
-const { dialActionPresentation, selectedDial } = await import(sourceModule('dial-actions'));
+const { dialActionPresentation } = await import(sourceModule('dial-actions'));
 const { actionPluginsEnabled } = await import(sourceModule('plugin-actions'));
 // Create a fixture plugin action with its lane ID in settings
 const lane = (id) => ({
@@ -72,6 +72,4 @@ test('all assigned lanes retain their plugin availability checks', () => {
     assert.equal(actionPluginsEnabled(action, [{ id: 'fixture', enabled: true }]), false);
     action.actions[1] = { kind: 'none' };
     assert.equal(actionPluginsEnabled(action, [{ id: 'fixture', enabled: true }]), true);
-    assert.equal(selectedDial(action), action);
-    assert.equal(selectedDial({ kind: 'none' }), undefined);
 });

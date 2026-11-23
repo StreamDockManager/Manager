@@ -1,0 +1,56 @@
+{
+  "version": 1,
+  "basePath": "..",
+  "components": {
+    "sd-media-options": {
+      "source": "components/sd-media-options.html",
+      "dependencies": [],
+      "options": {
+        "shadow": false,
+        "attributes": {
+          "asset": {
+            "type": "String",
+            "default": ""
+          },
+          "control": {
+            "type": "String",
+            "default": ""
+          },
+          "content": {
+            "type": "String",
+            "default": "{}",
+            "reflect": true
+          }
+        },
+        "templateRevision": "sha256-7LBwN1T_cxbrXKdF0CWWaff4DzoZC51wDN5ZBWgrof0"
+      },
+      "metadata": {
+        "description": "Non-destructive media transforms shared with Rust playback."
+      }
+    },
+    "sd-background-editor": {
+      "source": "components/sd-background-editor.html",
+      "dependencies": [
+        "sd-media-options"
+      ],
+      "options": {
+        "shadow": false,
+        "templateRevision": "sha256-mPXbhl0dlbGsOFiBStCmFDFzfCsinZRVqxFEESXGzL8"
+      },
+      "metadata": {
+        "description": "Shared, isolated device background editing dialog."
+      }
+    }
+  },
+  "groups": {
+    "editor": [
+      "sd-media-options"
+    ],
+    "settings": [
+      "sd-media-options"
+    ],
+    "background-editor": [
+      "sd-background-editor"
+    ]
+  }
+}

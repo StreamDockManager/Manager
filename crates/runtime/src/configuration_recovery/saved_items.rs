@@ -27,7 +27,7 @@ pub(super) fn issues(record: &Record, value: &Value) -> Vec<String> {
         if saved.name.trim().is_empty() {
             return Err("$.name: macro name must not be empty".into());
         }
-        saved.action.validate(0)?;
+        saved.action.validate_saved_macro()?;
         crate::macro_inputs::validate_definitions(&saved.inputs)
     };
     validate().err().into_iter().collect()

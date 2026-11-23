@@ -170,11 +170,16 @@ fn lane_users_share_fifo_and_debug_lease_preserves_live_and_normal_state() {
     let first = run.runtime.builtin_state.lane("control".into());
     let second = run.runtime.builtin_state.lane("control".into());
     assert!(Arc::ptr_eq(&first, &second));
-    first.lock().unwrap().push_back("first".into());
-    second.lock().unwrap().push_back("second".into());
+    let mut t = ActivationTicket::for_request(&run.request);
+    t.id = "first".into();
+    first.lock().unwrap().push_back(t);
+    second
+        .lock()
+        .unwrap()
+        .push_back(ActivationTicket::for_request(&run.request));
     drop(first);
     assert_eq!(
-        second.lock().unwrap().front().map(String::as_str),
+        second.lock().unwrap().front().map(|t| t.id.as_str()),
         Some("first")
     );
     drop(second);

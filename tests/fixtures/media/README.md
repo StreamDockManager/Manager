@@ -2,11 +2,7 @@
 
 Tiny, project-generated clips for media decoding, timing, preview, and trimming checks. They contain no third-party footage and use the project license.
 
-## Getting started
-
-Use the checked-in clips as they are. No fixture installation is needed. FFmpeg is needed for regeneration and the optional native MP4 decoding test below. Choose a file from the table, and regenerate only a clip whose behavior you intend to change.
-
-> Regeneration replaces fixture bytes. Review timing and dimensions before committing the result.
+No fixture installation is needed. Use the checked-in clips for tests; install FFmpeg only to run the native check or regenerate a clip.
 
 ## Pick a fixture
 
@@ -24,9 +20,7 @@ Chromium does not decode the MPEG-4 Part 2 clip; use the VP9 derivative for brow
 
 ## Run a native decoding check
 
-From the **Manager repository root**, with the [Rust prerequisites](../../../CONTRIBUTING.md) and FFmpeg installed:
-
-Prepare the [pinned native dependencies](../../../CONTRIBUTING.md#prepare-patched-rust-dependencies) before running raw Cargo commands in a fresh checkout:
+Install the [Manager build prerequisites](../../../CONTRIBUTING.md) and FFmpeg. Run from the **Manager repository root**:
 
 ```sh
 python3 scripts/prepare_patched_deps.py
@@ -37,9 +31,11 @@ cargo test -p stream-dock-manager-runtime --lib \
 
 Manager looks for FFmpeg on `PATH`; alternatively set `STREAM_DOCK_MANAGER_FFMPEG` to its absolute executable path. This checks the red/blue clip's decoded frames and archive roundtrip, not browser decoding or physical display behavior.
 
-## Recreate the red/blue clips
+## Regenerate a fixture
 
-Install FFmpeg with the required encoders, then run from this directory:
+> These commands replace fixture bytes. Run only the command for the clip you intend to change, from this directory.
+
+### Red/blue clips
 
 ```sh
 ffmpeg -f lavfi -i 'color=c=red:s=32x32:r=20:d=0.5' \
@@ -51,7 +47,7 @@ ffmpeg -i red-blue.mp4 -c:v libvpx-vp9 -lossless 1 \
   -an -movflags +faststart red-blue-vp9.mp4
 ```
 
-## Recreate timing and preview clips
+### Timing and preview clips
 
 ```sh
 ffmpeg -f lavfi -i testsrc2=s=96x54:r=120:d=1 \

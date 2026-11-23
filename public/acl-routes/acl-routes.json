@@ -2,55 +2,158 @@
   "version": 1,
   "routes": {
     "plugin-logs": {
-      "manifest": "./acl-route-plugin-logs-b3f88ef9.json",
-      "revision": "sha256-s_iO-TcgEUAwM9QqkoPUvz_2Eo8n5q8DBO1PxFqRtig",
+      "manifest": "./acl-route-plugin-logs-2fafd41d.json",
+      "revision": "sha256-L6_UHW3WEDDz-qafmahWtbAM-ZuaOBxh_gVWysuEx6o",
       "components": [
         "sd-plugin-logs",
         "sd-toasts"
       ]
     },
     "shell": {
-      "manifest": "./acl-route-shell-c152dbd9.json",
-      "revision": "sha256-wVLb2fdFUzY4dUsacVsrax_qwSe0Ut1ZD3Q6LbPW7vs",
+      "manifest": "./acl-route-shell-c9127ea8.json",
+      "revision": "sha256-yRJ-qCYcbY9qd9WZHCoYk5w564AsJLGLb3SugWrRB-U",
       "components": [
-        "sd-application-data",
-        "sd-media-options",
-        "sd-background-editor",
         "sd-benchmark-progress",
-        "sd-export-review",
-        "sd-plugin-catalog-dialog",
-        "sd-plugin-folder-import",
-        "sd-plugin-preflight",
         "sd-plugin-profile-suggestions",
         "sd-profile-archive-import",
-        "sd-profile-sharing-dialog",
-        "sd-runtime-dialog",
         "sd-setup-dialog",
         "sd-feature-dialogs",
-        "sd-keyboard-macro-editor",
-        "sd-library-organization",
-        "sd-macro-sharing",
-        "sd-media-library",
         "sd-plugin-logs",
-        "sd-plugin-management",
-        "sd-profile-conversion",
-        "sd-profile-versions",
         "sd-toasts",
-        "sd-video-editor",
         "sd-app-shell"
       ]
     },
+    "video-editor": {
+      "manifest": "./acl-route-video-editor-4d38bf5d.json",
+      "revision": "sha256-TTi_Xea-2fXnYdfxhULih2z7Sv2e6o5KLgpEZNVm1IY",
+      "components": [
+        "sd-video-editor"
+      ]
+    },
+    "background-editor": {
+      "manifest": "./acl-route-background-editor-95c6f6b0.json",
+      "revision": "sha256-lcb2sC1TyK2-9FwhWTVNSRPp3-rE3rNIG3RHe2YZFn8",
+      "components": [
+        "sd-media-options",
+        "sd-background-editor"
+      ]
+    },
+    "profile-versions": {
+      "manifest": "./acl-route-profile-versions-845b8381.json",
+      "revision": "sha256-hFuDgfN0ZIQUX52XJr6x-5qS23a4Sytfmsuyw3THMHw",
+      "components": [
+        "sd-profile-versions"
+      ]
+    },
+    "profile-conversion": {
+      "manifest": "./acl-route-profile-conversion-b32b46d0.json",
+      "revision": "sha256-sytG0PA0PnvoBaYvWrjuEAoWJwvidut5dJ9Iqqq5I9s",
+      "components": [
+        "sd-profile-conversion"
+      ]
+    },
+    "macro-sharing": {
+      "manifest": "./acl-route-macro-sharing-a4b9eef1.json",
+      "revision": "sha256-pLnu8djzL4eW1ysEX8wANncNWEw7pEfu3hWfCOiNOfQ",
+      "components": [
+        "sd-macro-sharing"
+      ]
+    },
+    "export-review": {
+      "manifest": "./acl-route-export-review-68010e18.json",
+      "revision": "sha256-aAEOGB4RSZfY7H3QlBRCmXMpbPSZnZa1TAJYTawX9B4",
+      "components": [
+        "sd-export-review"
+      ]
+    },
+    "profile-sharing-dialog": {
+      "manifest": "./acl-route-profile-sharing-dialog-298dd4c3.json",
+      "revision": "sha256-KY3Uw6BAhUHZSk9AC69nh5jwTk4Kp46FAGj4QATrO2k",
+      "components": [
+        "sd-profile-sharing-dialog"
+      ]
+    },
+    "plugin-management": {
+      "manifest": "./acl-route-plugin-management-a2ed7c79.json",
+      "revision": "sha256-ou18eWuW8TlS-wjhPtZxa39b4cC5-WiSCBKKWmKusaA",
+      "components": [
+        "sd-plugin-management"
+      ]
+    },
+    "media-library": {
+      "manifest": "./acl-route-media-library-c19ac80d.json",
+      "revision": "sha256-wZrIDf974krFW8m6GpX-vLn6COFD5N1m7_rymlZmvOg",
+      "components": [
+        "sd-media-library"
+      ]
+    },
+    "keyboard-macro-editor": {
+      "manifest": "./acl-route-keyboard-macro-editor-a8a456ee.json",
+      "revision": "sha256-qKRW7hqvgjJy_S3zw2v1h8V01aU9Zw3oYaW8IW_ohmY",
+      "components": [
+        "sd-keyboard-macro-editor"
+      ]
+    },
+    "library-organization": {
+      "manifest": "./acl-route-library-organization-d09a1c44.json",
+      "revision": "sha256-0JocRNrRLBVEN4nnz4yGR8EOyayvuvrzNhlzs1cjyw4",
+      "components": [
+        "sd-library-organization"
+      ]
+    },
+    "device-output-dialog": {
+      "manifest": "./acl-route-device-output-dialog-c3632aee.json",
+      "revision": "sha256-w2Mq7lddVoWYXWJaEIgFhpCbTfXXPnqQOkPZwd2wTK0",
+      "components": [
+        "sd-device-output-dialog"
+      ]
+    },
+    "plugin-catalog-dialog": {
+      "manifest": "./acl-route-plugin-catalog-dialog-91e13794.json",
+      "revision": "sha256-keE3lMTsUlsEjTDSpiCwq9YdZXMTtbrq0QsM6FkwOpM",
+      "components": [
+        "sd-plugin-catalog-dialog"
+      ]
+    },
+    "runtime-dialog": {
+      "manifest": "./acl-route-runtime-dialog-3c7687aa.json",
+      "revision": "sha256-PHaHqt_pyjmYHY-_2SzyaUjC2Ils9csUncPGzXODFVg",
+      "components": [
+        "sd-runtime-dialog"
+      ]
+    },
+    "application-data": {
+      "manifest": "./acl-route-application-data-5d165215.json",
+      "revision": "sha256-XRZSFZmEsAFvdDRe9ZRxgEH-oqLrPqQFUIvKIVS6EOk",
+      "components": [
+        "sd-application-data"
+      ]
+    },
+    "plugin-folder-import": {
+      "manifest": "./acl-route-plugin-folder-import-4dec8970.json",
+      "revision": "sha256-TeyJcL4-W18I-54v5wOC1tZQU06hffQ0Gx9JUYoNBzo",
+      "components": [
+        "sd-plugin-folder-import"
+      ]
+    },
+    "plugin-preflight": {
+      "manifest": "./acl-route-plugin-preflight-d000fd43.json",
+      "revision": "sha256-0AD9Q0hpgfvM_luMm6kKosYI4TTWYGZ5IoKT8Zqs9cs",
+      "components": [
+        "sd-plugin-preflight"
+      ]
+    },
     "editor": {
-      "manifest": "./acl-route-editor-25edcaa2.json",
-      "revision": "sha256-Je3KompmD3w9Lt5Vbtgklrm6meb67eIbw1Ft4Hcv2DQ",
+      "manifest": "./acl-route-editor-d8125a4e.json",
+      "revision": "sha256-2BJaTjavEK8oSi4WHQ6yn3vhL--y4b1TT-iKeI1CaMc",
       "components": [
         "sd-action-fields",
         "sd-macro-debugger",
         "sd-macro-inputs",
         "sd-action-workspace",
         "sd-action-editor",
-        "sd-media-options",
         "sd-automatic-profiles",
+        "sd-media-options",
         "sd-device-preview",
         "sd-device-settings",
         "sd-macro-editor",
@@ -59,15 +162,15 @@
       ]
     },
     "action-library": {
-      "manifest": "./acl-route-action-library-64165271.json",
-      "revision": "sha256-ZBZScfgantScy-bC0iBw9R1-29dEI6caP2I-r6-PxVo",
+      "manifest": "./acl-route-action-library-9d13373e.json",
+      "revision": "sha256-nRM3PhQv39RtgSyj1qLp6q8qdKp1mvo_bo1xTRQ9Pv4",
       "components": [
         "sd-action-library"
       ]
     },
     "macros": {
-      "manifest": "./acl-route-macros-08b9b058.json",
-      "revision": "sha256-CLmwWPzfcM0j3g_VFyQ7mclegnOU-6SIWWYr2AxRj5c",
+      "manifest": "./acl-route-macros-966a5d53.json",
+      "revision": "sha256-lmpdUwi2KsfX9-gp_m7k297085uyS8T2DfwJN7i8xdw",
       "components": [
         "sd-action-fields",
         "sd-macro-debugger",
@@ -79,17 +182,16 @@
       ]
     },
     "plugins": {
-      "manifest": "./acl-route-plugins-c4d1f910.json",
-      "revision": "sha256-xNH5EKBGrEL7a9QRrN0rcBVeYBtFYhFzf6rQjPnwYR8",
+      "manifest": "./acl-route-plugins-32def38a.json",
+      "revision": "sha256-Mt7zinQpjCXVfdDkrd0vbc_bqkquK-7wIxHF8nlh_LY",
       "components": [
         "sd-plugin-action-group",
-        "sd-updates",
         "sd-plugins"
       ]
     },
     "settings": {
-      "manifest": "./acl-route-settings-22263714.json",
-      "revision": "sha256-IiY3FM3v-O6_EEGsWBkImmEx7HWQt8FQMUwPCcN6i7g",
+      "manifest": "./acl-route-settings-3f5acf80.json",
+      "revision": "sha256-P1rPgEVwyOx4JzksM-__y0R9qEGolQSV1c5FGWv5gcY",
       "components": [
         "sd-media-options",
         "sd-device-settings",
@@ -97,9 +199,16 @@
         "sd-settings"
       ]
     },
+    "vault": {
+      "manifest": "./acl-route-vault-2000069c.json",
+      "revision": "sha256-IAAGnKRpA9Apuvmr9QGK6z4xYI5-7aXEex1bhH29pNQ",
+      "components": [
+        "sd-vault"
+      ]
+    },
     "diagnostics": {
-      "manifest": "./acl-route-diagnostics-73951950.json",
-      "revision": "sha256-c5UZUGk5Pcq46zipNk9LuNMEijos9CpIMWr0lGBSbW4",
+      "manifest": "./acl-route-diagnostics-687c1ae6.json",
+      "revision": "sha256-aHwa5teaZAZJ59Umq4qu5v--tzWOn_6-Pfmhmzhl4Mc",
       "components": [
         "sd-diagnostics"
       ]

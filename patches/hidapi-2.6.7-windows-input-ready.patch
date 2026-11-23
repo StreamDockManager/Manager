@@ -1,0 +1,248 @@
+--- a/etc/hidapi/windows/hid.c
++++ b/etc/hidapi/windows/hid.c
+@@ -190,6 +190,10 @@
+ 		unsigned char *feature_buf;
+ 		wchar_t *last_error_str;
+ 		BOOL read_pending;
++        HANDLE input_ready_thread, input_ready_stop, input_ready_rearm;
++        void (*input_ready_callback)(void *);
++        void *input_ready_context;
++        volatile LONG input_ready_failed;
+ 		char *read_buf;
+ 		OVERLAPPED ol;
+ 		OVERLAPPED write_ol;
+@@ -216,7 +220,7 @@
+ 	dev->read_pending = FALSE;
+ 	dev->read_buf = NULL;
+ 	memset(&dev->ol, 0, sizeof(dev->ol));
+-	dev->ol.hEvent = CreateEvent(NULL, FALSE, FALSE /*initial state f=nonsignaled*/, NULL);
++	dev->ol.hEvent = CreateEvent(NULL, TRUE, FALSE /*initial state f=nonsignaled*/, NULL);
+ 	memset(&dev->write_ol, 0, sizeof(dev->write_ol));
+ 	dev->write_ol.hEvent = CreateEvent(NULL, FALSE, FALSE /*initial state f=nonsignaled*/, NULL);
+ 	dev->device_info = NULL;
+@@ -1144,6 +1148,59 @@
+ }
+ 
+ 
++/* Manager readiness observer: no reads and no report ownership. */
++static DWORD WINAPI input_ready_thread(void *context)
++{
++    hid_device *dev = context;
++    HANDLE ready[] = {dev->input_ready_stop, dev->ol.hEvent};
++    HANDLE rearm[] = {dev->input_ready_stop, dev->input_ready_rearm};
++    for (;;) {
++        DWORD result = WaitForMultipleObjects(2, ready, FALSE, INFINITE);
++        if (result == WAIT_OBJECT_0) return 0;
++        if (result != WAIT_OBJECT_0 + 1) break;
++        dev->input_ready_callback(dev->input_ready_context);
++        result = WaitForMultipleObjects(2, rearm, FALSE, INFINITE);
++        if (result == WAIT_OBJECT_0) return 0;
++        if (result != WAIT_OBJECT_0 + 1) break;
++    }
++    InterlockedExchange(&dev->input_ready_failed, 1);
++    dev->input_ready_callback(dev->input_ready_context);
++    return 0;
++}
++
++int HID_API_EXPORT HID_API_CALL hid_winapi_set_input_ready_callback(hid_device *dev,
++    void (*callback)(void *), void *context)
++{
++    if (dev->input_ready_thread) {
++        SetEvent(dev->input_ready_stop);
++        /* Callback only signals independent state; it must never call HIDAPI. */
++        if (WaitForSingleObject(dev->input_ready_thread, INFINITE) != WAIT_OBJECT_0)
++            return -1; /* Keep callback storage/device alive on invalid wait. */
++        CloseHandle(dev->input_ready_thread);
++        CloseHandle(dev->input_ready_stop);
++        CloseHandle(dev->input_ready_rearm);
++        dev->input_ready_thread = NULL;
++    }
++    dev->input_ready_callback = NULL;
++    dev->input_ready_context = NULL;
++    InterlockedExchange(&dev->input_ready_failed, 0);
++    if (!callback) return 0;
++    dev->input_ready_stop = CreateEvent(NULL, TRUE, FALSE, NULL);
++    dev->input_ready_rearm = CreateEvent(NULL, FALSE, FALSE, NULL);
++    if (!dev->input_ready_stop || !dev->input_ready_rearm) goto failure;
++    dev->input_ready_callback = callback;
++    dev->input_ready_context = context;
++    dev->input_ready_thread = CreateThread(NULL, 0, input_ready_thread, dev, 0, NULL);
++    if (dev->input_ready_thread) return 0;
++failure:
++    if (dev->input_ready_stop) CloseHandle(dev->input_ready_stop);
++    if (dev->input_ready_rearm) CloseHandle(dev->input_ready_rearm);
++    dev->input_ready_stop = dev->input_ready_rearm = NULL;
++    dev->input_ready_callback = NULL;
++    dev->input_ready_context = NULL;
++    return -1;
++}
++
+ int HID_API_EXPORT HID_API_CALL hid_read_timeout(hid_device *dev, unsigned char *data, size_t length, int milliseconds)
+ {
+ 	DWORD bytes_read = 0;
+@@ -1152,13 +1209,16 @@
+ 	BOOL overlapped = FALSE;
+ 
+ 	if (!data || !length) {
+-		register_string_error(dev, L"Zero buffer/length");
+-		return -1;
+-	}
+-
+-	register_string_error(dev, NULL);
+-
+-	/* Copy the handle for convenience. */
++        register_string_error(dev, L"Zero buffer/length");
++        return -1;
++    }
++    if (InterlockedCompareExchange(&dev->input_ready_failed, 0, 0)) {
++        register_string_error(dev, L"Native input readiness wait failed");
++        return -1;
++    }
++    register_string_error(dev, NULL);
++
++    /* Copy the handle for convenience. */
+ 	HANDLE ev = dev->ol.hEvent;
+ 
+ 	if (!dev->read_pending) {
+@@ -1166,7 +1226,10 @@
+ 		dev->read_pending = TRUE;
+ 		memset(dev->read_buf, 0, dev->input_report_length);
+ 		ResetEvent(ev);
+-		res = ReadFile(dev->device_handle, dev->read_buf, (DWORD) dev->input_report_length, &bytes_read, &dev->ol);
++        /* Rearm notification after clearing the previous completion, before
++           starting the next read. Auto-reset retains a wake until consumed. */
++        if (dev->input_ready_thread) SetEvent(dev->input_ready_rearm);
++        res = ReadFile(dev->device_handle, dev->read_buf, (DWORD) dev->input_report_length, &bytes_read, &dev->ol);
+ 
+ 		if (!res) {
+ 			if (GetLastError() != ERROR_IO_PENDING) {
+@@ -1195,8 +1258,8 @@
+ 
+ 		/* Get the number of bytes read. The actual data has been copied to the data[]
+ 		   array which was passed to ReadFile(). We must not wait here because we've
+-		   already waited on our event above, and since it's auto-reset, it will have
+-		   been reset back to unsignalled by now. */
++		   already waited on the manual-reset completion event above. The next
++		   read resets it; observers must not consume/reset its signal. */
+ 		res = GetOverlappedResult(dev->device_handle, &dev->ol, &bytes_read, FALSE/*don't wait now - already did on the prev step*/);
+ 	}
+ 	/* Set pending back to false, even if GetOverlappedResult() returned error. */
+@@ -1399,8 +1462,17 @@
+ 	if (!dev)
+ 		return;
+ 
+-	CancelIo(dev->device_handle);
+-	free_hid_device(dev);
++	if (hid_winapi_set_input_ready_callback(dev, NULL, NULL) < 0) return;
++    if (dev->read_pending) {
++        DWORD ignored;
++        /* This exact OVERLAPPED owns read_buf. Cancellation may complete on a
++           different thread; do not free either object until completion. */
++        CancelIoEx(dev->device_handle, &dev->ol);
++        GetOverlappedResult(dev->device_handle, &dev->ol, &ignored, TRUE);
++        dev->read_pending = FALSE;
++    }
++    CancelIo(dev->device_handle);
++    free_hid_device(dev);
+ }
+ 
+ int HID_API_EXPORT_CALL HID_API_CALL hid_get_manufacturer_string(hid_device *dev, wchar_t *string, size_t maxlen)
+--- a/src/lib.rs
++++ b/src/lib.rs
+@@ -99,6 +99,9 @@
+         use windows::GUID;
+         /// A trait with the extra methods that are available on Windows
+         trait HidDeviceBackendWindows {
++            fn set_input_ready_callback(&mut self, _callback: Option<Box<dyn Fn() + Send + Sync>>) -> HidResult<()> {
++                Err(HidError::HidApiError { message: "Input readiness unavailable for this backend".into() })
++            }
+             /// Get the container ID for a HID device
+             fn get_container_id(&self) -> HidResult<GUID>;
+         }
+--- a/src/windows.rs
++++ b/src/windows.rs
+@@ -2,6 +2,13 @@
+ pub use windows_sys::core::GUID;
+ 
+ impl HidDevice {
++    /// Observe input completion without consuming reports. Callback must only
++    /// signal independent state, never call HIDAPI or acquire a HIDAPI-held lock.
++    /// Removal synchronously retires the observer before callback storage drops.
++    pub fn set_input_ready_callback(&mut self, callback: Option<Box<dyn Fn() + Send + Sync>>) -> HidResult<()> {
++        self.inner.set_input_ready_callback(callback)
++    }
++
+     /// Get the container ID for a HID device.
+     ///
+     /// This function returns the `DEVPKEY_Device_ContainerId` property of the
+--- a/src/ffi.rs
++++ b/src/ffi.rs
+@@ -125,6 +125,7 @@
+     use windows_sys::core::GUID;
+ 
+     extern "C" {
++        pub fn hid_winapi_set_input_ready_callback(device: *mut HidDevice, callback: Option<unsafe extern "C" fn(*mut libc::c_void)>, context: *mut libc::c_void) -> c_int;
+         pub fn hid_winapi_get_container_id(
+             device: *mut HidDevice,
+             container_id: *mut GUID,
+--- a/src/hidapi/windows.rs
++++ b/src/hidapi/windows.rs
+@@ -6,7 +6,25 @@
+ use super::HidDevice;
+ use crate::{ffi, HidDeviceBackendBase, HidDeviceBackendWindows, HidResult};
+ 
++unsafe extern "C" fn input_ready(context: *mut libc::c_void) {
++    let callback = &*(context as *const Box<dyn Fn() + Send + Sync>);
++    let _ = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| callback()));
++}
+ impl HidDeviceBackendWindows for HidDevice {
++    fn set_input_ready_callback(&mut self, callback: Option<Box<dyn Fn() + Send + Sync>>) -> HidResult<()> {
++        let retired = unsafe { ffi::windows::hid_winapi_set_input_ready_callback(self._hid_device, None, std::ptr::null_mut()) };
++        if retired < 0 { return Err(crate::HidError::HidApiError { message: "Could not retire HID input observer".into() }); }
++        self.input_ready_callback = callback.map(Box::new);
++        if let Some(callback) = self.input_ready_callback.as_mut() {
++            let result = unsafe { ffi::windows::hid_winapi_set_input_ready_callback(self._hid_device, Some(input_ready), (&mut **callback as *mut Box<dyn Fn() + Send + Sync>).cast()) };
++            if result < 0 {
++                self.input_ready_callback = None;
++                return Err(crate::HidError::HidApiError { message: "Could not create HID input observer".into() });
++            }
++        }
++        Ok(())
++    }
++
+     fn get_container_id(&self) -> HidResult<GUID> {
+         let mut container_id: GUID = unsafe { std::mem::zeroed() };
+ 
+--- a/src/hidapi.rs
++++ b/src/hidapi.rs
+@@ -147,7 +147,7 @@
+ /// Object for accessing HID device
+ pub struct HidDevice {
+     _hid_device: *mut ffi::HidDevice,
+-    #[cfg(target_os = "macos")]
++    #[cfg(any(target_os = "macos", target_os = "windows"))]
+     input_ready_callback: Option<Box<Box<dyn Fn() + Send + Sync>>>,
+ }
+ 
+@@ -155,7 +155,7 @@
+     pub fn from_raw(device: *mut ffi::HidDevice) -> Self {
+         Self {
+             _hid_device: device,
+-            #[cfg(target_os = "macos")]
++            #[cfg(any(target_os = "macos", target_os = "windows"))]
+             input_ready_callback: None,
+         }
+     }
+@@ -173,6 +173,12 @@
+     fn drop(&mut self) {
+         #[cfg(target_os = "macos")]
+         unsafe { ffi::macos::hid_darwin_set_input_ready_callback(self._hid_device, None, std::ptr::null_mut()); }
++        #[cfg(target_os = "windows")]
++        if unsafe { ffi::windows::hid_winapi_set_input_ready_callback(self._hid_device, None, std::ptr::null_mut()) } < 0 {
++            // A failed OS join cannot authorize freeing callback/device memory.
++            if let Some(callback) = self.input_ready_callback.take() { std::mem::forget(callback); }
++            return;
++        }
+         unsafe { ffi::hid_close(self._hid_device) }
+     }
+ }

@@ -12,9 +12,24 @@ pub struct BackgroundDraft {
     pub asset: Option<String>,
     pub media: crate::media::MediaOptions,
 }
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, ts_rs::TS, schemars::JsonSchema)]
+#[serde(deny_unknown_fields)]
+pub struct PaletteDraft {
+    pub mode: String,
+    pub id: String,
+    #[serde(default)]
+    #[ts(optional)]
+    pub custom: Option<serde_json::Value>,
+}
 #[derive(Debug, Clone, Default, Serialize, Deserialize, ts_rs::TS, schemars::JsonSchema)]
 #[serde(deny_unknown_fields)]
 pub struct HardwareDraft {
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    #[ts(optional)]
+    pub display_test: Option<DisplayTest>,
+    #[serde(default)]
+    #[ts(optional)]
+    pub palette: Option<PaletteDraft>,
     pub bindings: BTreeMap<String, Binding>,
     pub background: Option<BackgroundDraft>,
     #[serde(default)]
@@ -24,9 +39,35 @@ pub struct HardwareDraft {
     #[ts(optional, as = "Option<BTreeMap<String, u32>>")]
     pub preview_states: BTreeMap<String, u32>,
 }
+#[derive(
+    Debug, Clone, Copy, PartialEq, Serialize, Deserialize, ts_rs::TS, schemars::JsonSchema,
+)]
+#[serde(rename_all = "snake_case")]
+pub enum Pattern {
+    Red,
+    Green,
+    Blue,
+    Black,
+    White,
+    Alignment,
+    Positions,
+    Marker,
+}
+#[derive(Debug, Clone, Serialize, Deserialize, ts_rs::TS, schemars::JsonSchema)]
+#[serde(deny_unknown_fields)]
+pub struct DisplayTest {
+    pub pattern: Pattern,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    #[ts(optional)]
+    pub background_color: Option<[u8; 3]>,
+    pub frame: u8,
+    pub previous_token: Option<String>,
+}
 pub(crate) struct Lease {
+    started: Instant,
     pub token: String,
     pub epoch: u64,
+    pub revision: u64,
     pub scope: String,
     pub until: Instant,
     pub draft: HardwareDraft,
@@ -38,6 +79,135 @@ pub(crate) struct Previews {
     expiry_worker: bool,
 }
 impl Runtime {
+    pub(super) fn test_pixels(
+        &self,
+        test: &DisplayTest,
+        [w, h]: [u16; 2],
+        rotation: u16,
+        surface: Option<&hardware_core::Control>,
+        device: &str,
+        formats: &[String],
+    ) -> Result<crate::media::SharedBytes, String> {
+        let state = self.state.lock().unwrap();
+        let model = &state
+            .devices
+            .iter()
+            .find(|d| d.id == device)
+            .ok_or("Device disconnected")?
+            .manifest;
+        let surfaces: Vec<_> = model
+            .controls
+            .iter()
+            .filter(|c| c.image_slot.is_some())
+            .collect();
+        let index = surface.and_then(|c| surfaces.iter().position(|s| s.id == c.id));
+        let touch: Vec<_> = surfaces.iter().filter(|c| c.kind == "touch").collect();
+        let active = touch
+            .get(usize::from(test.frame) / 8 % touch.len().max(1))
+            .is_some_and(|c| surface.is_some_and(|s| s.id == c.id));
+        drop(state);
+        let fmt = if formats.iter().any(|f| f == "png") {
+            "png"
+        } else {
+            "jpeg"
+        };
+        let background_color = if surface.is_none() {
+            test.background_color
+        } else {
+            None
+        };
+        self.cached_render(
+            crate::media::RenderKey::from_inputs(&(
+                "display test",
+                test.pattern,
+                background_color,
+                test.frame,
+                index,
+                active,
+                w,
+                h,
+                rotation,
+                fmt,
+            ))?,
+            || {
+                let color = background_color.unwrap_or(match test.pattern {
+                    Pattern::Red => [255, 0, 0],
+                    Pattern::Green => [0, 255, 0],
+                    Pattern::Blue => [0, 0, 255],
+                    Pattern::White => [255; 3],
+                    _ => [0; 3],
+                });
+                let bytes = if background_color.is_none()
+                    && matches!(test.pattern, Pattern::Positions)
+                {
+                    let title = index.map(|i| (i + 1).to_string()).unwrap_or_default();
+                    hardware_core::render::tile(w, h, color, &title, rotation, fmt)
+                } else {
+                    let pixels = image::RgbaImage::from_fn(w.into(), h.into(), |x, y| {
+                        let on = if background_color.is_some() {
+                            false
+                        } else if matches!(test.pattern, Pattern::Alignment) {
+                            x == 0
+                                || y == 0
+                                || x + 1 == u32::from(w)
+                                || y + 1 == u32::from(h)
+                                || x == u32::from(w) / 2
+                                || y == u32::from(h) / 2
+                        } else {
+                            matches!(test.pattern, Pattern::Marker)
+                                && active
+                                && x.abs_diff(
+                                    u32::from(test.frame % 8) * u32::from(w.saturating_sub(1)) / 7,
+                                ) < 3
+                        };
+                        image::Rgba(if on {
+                            [255; 4]
+                        } else {
+                            [color[0], color[1], color[2], 255]
+                        })
+                    });
+                    let img = image::DynamicImage::ImageRgba8(pixels);
+                    let img = match rotation {
+                        90 => img.rotate90(),
+                        180 => img.rotate180(),
+                        270 => img.rotate270(),
+                        _ => img,
+                    };
+                    hardware_core::render::encode_pixels(img, fmt)
+                }
+                .map_err(|e| e.to_string())?;
+                Ok(crate::media::shared_bytes(bytes))
+            },
+        )
+    }
+
+    // Resolve an unsaved visual candidate without mutating plugin theme or persisted state
+    pub(crate) fn resolve_preview_palette(
+        &self,
+        palette: &PaletteDraft,
+    ) -> Result<
+        (
+            serde_json::Value,
+            Option<stream_dock_manager_plugin_host::PaletteWallpaper>,
+        ),
+        String,
+    > {
+        let custom = palette
+            .custom
+            .as_ref()
+            .map(|value| {
+                serde_json::from_value::<stream_dock_manager_plugin_host::CustomPalette>(
+                    value.clone(),
+                )
+                .map_err(|_| "Invalid custom palette draft".to_string())
+            })
+            .transpose()?;
+        self.plugins.lock().unwrap().preview_device_palette(
+            &palette.mode,
+            &palette.id,
+            custom.as_ref(),
+        )
+    }
     // Preview on dock using the current hardware preview state
     pub fn preview_on_dock(
         self: &Arc<Self>,
@@ -45,6 +215,22 @@ impl Runtime {
         expected: u64,
         draft: HardwareDraft,
     ) -> Result<String, String> {
+        let palette = draft
+            .palette
+            .as_ref()
+            .map(|palette| self.resolve_preview_palette(palette))
+            .transpose()?;
+        let palette_asset = palette
+            .as_ref()
+            .and_then(|(_, wallpaper)| wallpaper.as_ref())
+            .map(|wallpaper| wallpaper.asset_id.clone());
+        if let Some((_, Some(wallpaper))) = &palette {
+            self.profiles.asset_extension(&wallpaper.asset_id)?;
+            let media: crate::media::MediaOptions =
+                serde_json::from_value(wallpaper.options.clone())
+                    .map_err(|_| "Invalid palette wallpaper media options")?;
+            media.validate()?;
+        }
         let epochs = self.connection_epochs.lock().unwrap();
         let epoch = *epochs.get(device_id).ok_or("Device disconnected")?;
         let state = self.state.lock().unwrap();
@@ -65,7 +251,7 @@ impl Runtime {
             .iter()
             .find(|d| d.id == device_id && d.connected)
             .ok_or("Device disconnected")?;
-        if device.simulated {
+        if device.simulated && draft.display_test.is_none() {
             return Err("Preview on dock requires a physical device".into());
         }
         if self
@@ -75,7 +261,25 @@ impl Runtime {
         {
             return Err("Wake the dock before previewing".into());
         }
-        if draft.bindings.len() > 100 || draft.bindings.is_empty() && draft.background.is_none() {
+        if draft.display_test.is_some()
+            && (!device
+                .manifest
+                .controls
+                .iter()
+                .any(|c| c.image_slot.is_some())
+                && device.manifest.capabilities.background_size.is_none()
+                || !draft.bindings.is_empty()
+                || draft.palette.is_some()
+                || draft.background.is_some())
+        {
+            return Err("Choose a device with a display to test.".into());
+        }
+        if draft.bindings.len() > 100
+            || draft.bindings.is_empty()
+                && draft.background.is_none()
+                && draft.palette.is_none()
+                && draft.display_test.is_none()
+        {
             return Err("Choose draft surfaces to preview".into());
         }
         if draft
@@ -95,7 +299,7 @@ impl Runtime {
                 return Err("This control has no live output surface".into());
             }
             binding.validate_visual_draft()?;
-            self.validate_binding(binding, source)?;
+            self.validate_binding(binding, &device.manifest, source)?;
         }
         if let Some(background) = &draft.background {
             if !device.manifest.capabilities.background {
@@ -121,18 +325,58 @@ impl Runtime {
                 .bindings
                 .values()
                 .filter_map(|b| b.asset.clone())
-                .chain(draft.background.iter().filter_map(|b| b.asset.clone())),
+                .chain(draft.background.iter().filter_map(|b| b.asset.clone()))
+                .chain(palette_asset),
             "Temporary hardware preview",
         )?;
         let token = uuid::Uuid::new_v4().to_string();
         let mut previews = self.hardware_previews.lock().unwrap();
+        let now = Instant::now();
+        let started = if let Some(previous) = draft
+            .display_test
+            .as_ref()
+            .and_then(|p| p.previous_token.as_ref())
+        {
+            let lease = previews
+                .leases
+                .get_mut(device_id)
+                .filter(|l| {
+                    &l.token == previous
+                        && l.epoch == epoch
+                        && l.revision == expected
+                        && l.scope == scope
+                        && l.until > now
+                        && l.started.elapsed() < Duration::from_secs(30)
+                })
+                .ok_or("Display test expired or another preview took ownership.")?;
+            if lease
+                .draft
+                .display_test
+                .as_ref()
+                .zip(draft.display_test.as_ref())
+                .is_some_and(|(a, b)| {
+                    a.pattern == b.pattern
+                        && a.frame == b.frame
+                        && a.background_color == b.background_color
+                })
+            {
+                lease.until =
+                    (now + Duration::from_secs(5)).min(lease.started + Duration::from_secs(30));
+                return Ok(lease.token.clone());
+            }
+            lease.started
+        } else {
+            now
+        };
         previews.leases.insert(
             device_id.into(),
             Lease {
+                started,
                 token: token.clone(),
                 epoch,
+                revision: expected,
                 scope,
-                until: Instant::now() + Duration::from_secs(5),
+                until: (now + Duration::from_secs(5)).min(started + Duration::from_secs(30)),
                 draft,
                 _assets: assets,
             },
@@ -142,6 +386,8 @@ impl Runtime {
         drop(previews);
         drop(state);
         drop(epochs);
+        self.preview_subscriptions
+            .scene_changed("display-theme", Some(device_id));
         let _ = self.device_commands.send(crate::devices::Request::Wake);
         if start_expiry_worker {
             let weak = Arc::downgrade(self);
@@ -151,22 +397,7 @@ impl Runtime {
                 let Some(runtime) = weak.upgrade() else {
                     return;
                 };
-                let mut previews = runtime.hardware_previews.lock().unwrap();
-                let now = Instant::now();
-                let before = previews.leases.len();
-                previews.leases.retain(|_, lease| lease.until > now);
-                if before != previews.leases.len() {
-                    let _ = runtime.device_commands.send(crate::devices::Request::Wake);
-                }
-                let wait = previews
-                    .leases
-                    .values()
-                    .map(|lease| lease.until - now)
-                    .min();
-                if wait.is_none() {
-                    previews.expiry_worker = false;
-                }
-                drop(previews);
+                let wait = runtime.expire_hardware_previews(Instant::now());
                 drop(runtime);
                 let Some(wait) = wait else { return };
                 std::thread::sleep(wait);
@@ -174,23 +405,67 @@ impl Runtime {
         }
         Ok(token)
     }
-    // Cancel hardware preview
-    pub fn cancel_hardware_preview(&self, token: Option<&str>) {
-        self.hardware_previews
-            .lock()
-            .unwrap()
-            .leases
-            .retain(|_, lease| token.is_some_and(|token| token != lease.token));
+    // Signal visible streams only after lease changes become authoritative and locks are released
+    fn hardware_preview_changed(&self, devices: Vec<String>) {
+        for device in devices {
+            self.preview_subscriptions
+                .scene_changed("display-theme", Some(&device));
+        }
         let _ = self.device_commands.send(crate::devices::Request::Wake);
     }
-    // Invalidate hardware preview
+    // Retire expired leases and wake both physical output and parked software preview subscribers
+    fn expire_hardware_previews(&self, now: Instant) -> Option<Duration> {
+        let mut previews = self.hardware_previews.lock().unwrap();
+        let removed: Vec<_> = previews
+            .leases
+            .iter()
+            .filter(|(_, lease)| lease.until <= now)
+            .map(|(id, _)| id.clone())
+            .collect();
+        previews.leases.retain(|_, lease| lease.until > now);
+        let wait = previews
+            .leases
+            .values()
+            .map(|lease| lease.until.saturating_duration_since(now))
+            .min();
+        if wait.is_none() {
+            previews.expiry_worker = false;
+        }
+        drop(previews);
+        if !removed.is_empty() {
+            self.hardware_preview_changed(removed);
+        }
+        wait
+    }
+    // Cancel only the current matching token without waking unrelated device streams
+    pub fn cancel_hardware_preview(&self, token: Option<&str>) {
+        let mut previews = self.hardware_previews.lock().unwrap();
+        let removed = previews
+            .leases
+            .iter()
+            .filter(|(_, lease)| token.is_none_or(|token| token == lease.token))
+            .map(|(id, _)| id.clone())
+            .collect();
+        previews
+            .leases
+            .retain(|_, lease| token.is_some_and(|token| token != lease.token));
+        drop(previews);
+        self.hardware_preview_changed(removed);
+    }
+    // Invalidate hardware preview and publish the restored software scene after retirement
     pub(crate) fn invalidate_hardware_preview(&self, device: Option<&str>) {
-        self.hardware_previews
-            .lock()
-            .unwrap()
+        let mut previews = self.hardware_previews.lock().unwrap();
+        let removed = previews
+            .leases
+            .keys()
+            .filter(|id| device.is_none_or(|device| device == id.as_str()))
+            .cloned()
+            .collect();
+        previews
             .leases
             .retain(|id, _| device.is_some_and(|device| device != id));
-        let _ = self.device_commands.send(crate::devices::Request::Wake);
+        drop(previews);
+        self.hardware_preview_changed(removed);
     }
     // Read a hardware preview only while its connection, page scope and lease remain current
     pub(crate) fn hardware_preview(&self, device: &str) -> Option<(String, HardwareDraft)> {
@@ -199,9 +474,24 @@ impl Runtime {
         let session = state.session(device);
         let scope = format!("{}:{}", session.profile_id, session.page_id);
         let previews = self.hardware_previews.lock().unwrap();
-        let lease = previews.leases.get(device)?;
-        (lease.epoch == epoch && lease.scope == scope && lease.until > Instant::now())
-            .then(|| (lease.token.clone(), lease.draft.clone()))
+        let local = previews
+            .leases
+            .get(device)
+            .filter(|lease| {
+                lease.epoch == epoch
+                    && lease.revision == state.configuration_revision
+                    && lease.scope == scope
+                    && lease.until > Instant::now()
+            })
+            .map(|lease| (lease.token.clone(), lease.draft.clone()));
+        drop(previews);
+        drop(state);
+        if let Some((global_token, palette)) = self.device_palette_preview() {
+            let (local_token, mut draft) = local.unwrap_or_default();
+            draft.palette = Some(palette);
+            return Some((format!("{global_token}:{local_token}"), draft));
+        }
+        local
     }
     // Read the token for the currently valid hardware preview lease
     pub(crate) fn hardware_preview_token(&self, device: &str) -> Option<String> {
@@ -212,6 +502,308 @@ impl Runtime {
 mod tests {
     use super::*;
     use crate::actions::Action;
+    // Verify a parked subscription wakes without relying on animation or another runtime event
+    fn assert_preview_wake(runtime: &Arc<Runtime>, device: &str, edit: impl FnOnce()) {
+        let id = uuid::Uuid::new_v4().to_string();
+        let subscription = runtime
+            .preview_subscriptions
+            .register_device(id.clone(), Some(device.into()));
+        assert!(subscription.wait_for_frame(Instant::now()));
+        edit();
+        let (send, receive) = std::sync::mpsc::channel();
+        let thread = std::thread::spawn(move || {
+            send.send(subscription.wait_for_frame(Instant::now()))
+                .unwrap()
+        });
+        let result = receive.recv_timeout(Duration::from_secs(1));
+        if result.is_err() {
+            runtime.preview_subscriptions.cancel(&id);
+        }
+        thread.join().unwrap();
+        assert!(
+            result.unwrap(),
+            "Preview lease change did not wake its software stream"
+        );
+    }
+
+    #[test]
+    // Static LCD streams apply and restore temporary palettes even when no other event occurs
+    fn display_test_renews_only_its_lease_and_preserves_the_saved_scene() {
+        let root = tempfile::tempdir().unwrap();
+        let rt = Runtime::build(root.path().into(), false).unwrap();
+        let id = "simulator:display-pattern";
+        let state = rt.simulate_device(true, id).unwrap();
+        let rev = state.configuration_revision;
+        let draft = |pattern, background_color, previous_token| HardwareDraft {
+            display_test: Some(DisplayTest {
+                pattern,
+                background_color,
+                frame: 0,
+                previous_token,
+            }),
+            ..Default::default()
+        };
+        let token = rt
+            .preview_on_dock(id, rev, draft(Pattern::Red, None, None))
+            .unwrap();
+        assert_eq!(
+            rt.preview_on_dock(id, rev, draft(Pattern::Red, None, Some(token.clone())))
+                .unwrap(),
+            token
+        );
+        let device = state.devices.iter().find(|d| d.id == id).unwrap();
+        let surface = device
+            .manifest
+            .controls
+            .iter()
+            .find(|c| c.image_slot.is_some())
+            .unwrap();
+        let data = rt
+            .test_pixels(
+                &DisplayTest {
+                    pattern: Pattern::Red,
+                    background_color: Some([16, 96, 128]),
+                    frame: 0,
+                    previous_token: None,
+                },
+                [8, 4],
+                90,
+                Some(surface),
+                id,
+                &["png".into()],
+            )
+            .unwrap();
+        let image = image::load_from_memory(&data).unwrap().to_rgb8();
+        assert_eq!(image.dimensions(), (4, 8));
+        assert_eq!(image.get_pixel(0, 0).0, [255, 0, 0]);
+        let custom = [16, 96, 128];
+        let updated = rt
+            .preview_on_dock(
+                id,
+                rev,
+                draft(Pattern::Red, Some(custom), Some(token.clone())),
+            )
+            .unwrap();
+        assert_ne!(updated, token);
+        let (_, lease) = rt.hardware_preview(id).unwrap();
+        let test = lease.display_test.as_ref().unwrap();
+        for (surface, expected) in [(None, custom), (Some(surface), [255, 0, 0])] {
+            let pixels = rt
+                .test_pixels(test, [8, 4], 0, surface, id, &["png".into()])
+                .unwrap();
+            assert!(image::load_from_memory(&pixels)
+                .unwrap()
+                .to_rgb8()
+                .pixels()
+                .all(|pixel| pixel.0 == expected));
+        }
+        let next = rt
+            .preview_on_dock(id, rev, draft(Pattern::Blue, None, None))
+            .unwrap();
+        assert!(rt
+            .preview_on_dock(id, rev, draft(Pattern::Red, None, Some(token.clone())))
+            .is_err());
+        rt.cancel_hardware_preview(Some(&token));
+        assert_eq!(rt.hardware_preview_token(id), Some(next.clone()));
+        rt.cancel_hardware_preview(Some(&next));
+        assert!(rt.hardware_preview(id).is_none());
+        assert_eq!(rev, rt.snapshot().configuration_revision);
+        rt.shutdown();
+    }
+    #[test]
+    fn palette_lease_wakes_static_stream_on_start_cancel_and_expiry() {
+        let root = tempfile::tempdir().unwrap();
+        let runtime = Runtime::build(root.path().into(), false).unwrap();
+        let id = "simulator:n4-pro:palette-stream";
+        runtime.simulate_device(true, id).unwrap();
+        runtime.state.lock().unwrap().devices[0].simulated = false;
+        let revision = runtime.snapshot().configuration_revision;
+        let light = PaletteDraft {
+            mode: "light".into(),
+            id: "default".into(),
+            custom: None,
+        };
+        let mode = if runtime.render_scene(id).unwrap().device_surface
+            == runtime.resolve_preview_palette(&light).unwrap().0["surface"]
+                .as_str()
+                .unwrap()
+        {
+            "dark"
+        } else {
+            "light"
+        };
+        let draft = HardwareDraft {
+            palette: Some(PaletteDraft {
+                mode: mode.into(),
+                id: "default".into(),
+                custom: None,
+            }),
+            ..Default::default()
+        };
+        let saved = runtime.preview_surfaces_binary(id).unwrap().0;
+        let mut token = String::new();
+        assert_preview_wake(&runtime, id, || {
+            token = runtime
+                .preview_on_dock(id, revision, draft.clone())
+                .unwrap();
+        });
+        let candidate = runtime.preview_surfaces_binary(id).unwrap().0;
+        assert!(
+            saved.surfaces != candidate.surfaces || saved.background != candidate.background,
+            "Candidate must change actual encoded LCD/background frames"
+        );
+        assert_preview_wake(&runtime, id, || {
+            runtime.cancel_hardware_preview(Some(&token))
+        });
+        let restored = runtime.preview_surfaces_binary(id).unwrap().0;
+        assert_eq!(restored.surfaces, saved.surfaces);
+        assert_eq!(restored.background, saved.background);
+        runtime.preview_on_dock(id, revision, draft).unwrap();
+        assert_preview_wake(&runtime, id, || {
+            runtime.expire_hardware_previews(Instant::now() + Duration::from_secs(6));
+        });
+        assert!(runtime.hardware_preview(id).is_none());
+    }
+
+    #[test]
+    // Candidate colors are isolated to one live lease and never replace saved configuration
+    fn palette_preview_is_scoped_visual_only_and_restores_latest_saved_state() {
+        let root = tempfile::tempdir().unwrap();
+        let runtime = Runtime::build(root.path().into(), false).unwrap();
+        let id = "simulator:n4-pro:palette-candidate";
+        runtime.simulate_device(true, id).unwrap();
+        let other = "simulator:n4-pro:palette-other";
+        runtime.simulate_device(true, other).unwrap();
+        let other_before = runtime.render_scene(other).unwrap().device_surface;
+        let before = runtime.snapshot();
+        let draft = HardwareDraft {
+            palette: Some(PaletteDraft {
+                mode: "light".into(),
+                id: "default".into(),
+                custom: None,
+            }),
+            scope: Some(format!(
+                "{}:{}",
+                before.session(id).profile_id,
+                before.session(id).page_id
+            )),
+            ..Default::default()
+        };
+        assert!(runtime
+            .preview_on_dock(id, before.configuration_revision, draft.clone())
+            .unwrap_err()
+            .contains("physical"));
+        runtime
+            .state
+            .lock()
+            .unwrap()
+            .devices
+            .iter_mut()
+            .find(|d| d.id == id)
+            .unwrap()
+            .simulated = false;
+        let saved = serde_json::to_value(&runtime.snapshot().profiles).unwrap();
+        let original = runtime.render_scene(id).unwrap();
+        let token = runtime
+            .preview_on_dock(id, before.configuration_revision, draft.clone())
+            .unwrap();
+        let preview = runtime.render_scene(id).unwrap();
+        let mut saved_wallpaper = before.profiles[0].clone();
+        saved_wallpaper.background_asset = Some(uuid::Uuid::new_v4().to_string());
+        assert!(original.background_media(Some(&saved_wallpaper)).is_some());
+        assert!(
+            preview.background_media(Some(&saved_wallpaper)).is_some(),
+            "A custom background must take precedence over the candidate palette"
+        );
+        assert!(runtime.hardware_preview(other).is_none());
+        assert_eq!(
+            runtime.render_scene(other).unwrap().device_surface,
+            other_before
+        );
+        let expected = runtime
+            .resolve_preview_palette(draft.palette.as_ref().unwrap())
+            .unwrap()
+            .0;
+        assert_eq!(
+            preview.device_surface,
+            expected["surface"].as_str().unwrap()
+        );
+        assert_eq!(preview.wallpaper, expected["wallpaper"].as_str().unwrap());
+        assert_eq!(
+            serde_json::to_value(&runtime.snapshot().profiles).unwrap(),
+            saved
+        );
+        assert_eq!(
+            runtime.snapshot().configuration_revision,
+            before.configuration_revision
+        );
+        let newer = runtime
+            .preview_on_dock(id, before.configuration_revision, draft.clone())
+            .unwrap();
+        runtime.cancel_hardware_preview(Some(&token));
+        assert_eq!(
+            runtime.hardware_preview_token(id).as_deref(),
+            Some(newer.as_str())
+        );
+        runtime.cancel_hardware_preview(Some(&newer));
+        assert_eq!(
+            runtime.render_scene(id).unwrap().device_surface,
+            original.device_surface
+        );
+        let token = runtime
+            .preview_on_dock(id, before.configuration_revision, draft.clone())
+            .unwrap();
+        runtime
+            .hardware_previews
+            .lock()
+            .unwrap()
+            .leases
+            .get_mut(id)
+            .unwrap()
+            .until = Instant::now();
+        assert!(runtime.hardware_preview_token(id).is_none());
+        runtime.cancel_hardware_preview(Some(&token));
+        runtime
+            .preview_on_dock(id, before.configuration_revision, draft.clone())
+            .unwrap();
+        runtime.state.lock().unwrap().configuration_revision += 1;
+        assert!(
+            runtime.hardware_preview(id).is_none(),
+            "A save must not restore old draft state"
+        );
+        assert!(runtime
+            .preview_on_dock(id, before.configuration_revision, draft)
+            .is_err());
+    }
+
+    #[test]
+    // Invalid candidates cannot replace an active valid visual lease
+    fn invalid_palette_candidate_preserves_current_lease() {
+        let root = tempfile::tempdir().unwrap();
+        let runtime = Runtime::build(root.path().into(), false).unwrap();
+        let id = "simulator:n4-pro:palette-invalid";
+        runtime.simulate_device(true, id).unwrap();
+        runtime.state.lock().unwrap().devices[0].simulated = false;
+        let revision = runtime.snapshot().configuration_revision;
+        let mut draft = HardwareDraft {
+            palette: Some(PaletteDraft {
+                mode: "dark".into(),
+                id: "default".into(),
+                custom: None,
+            }),
+            ..Default::default()
+        };
+        let token = runtime
+            .preview_on_dock(id, revision, draft.clone())
+            .unwrap();
+        draft.palette.as_mut().unwrap().mode = "invalid".into();
+        assert!(runtime.preview_on_dock(id, revision, draft).is_err());
+        assert_eq!(
+            runtime.hardware_preview_token(id).as_deref(),
+            Some(token.as_str())
+        );
+    }
+
     #[test]
     // Verify that empty keyboard draft and repeated live updates are visual only
     fn empty_keyboard_draft_and_repeated_live_updates_are_visual_only() {
@@ -446,8 +1038,8 @@ mod tests {
     }
 
     #[test]
-    // Verify that feedback draft owns surface then restores explicit saved surface
-    fn feedback_draft_owns_surface_then_restores_explicit_saved_surface() {
+    // Verify that editing a dial never steals its independent saved touch surface
+    fn feedback_draft_preserves_independent_saved_surface() {
         let root = tempfile::tempdir().unwrap();
         let runtime = Runtime::build(root.path().into(), false).unwrap();
         let id = "simulator:n4-pro:feedback-draft";
@@ -476,14 +1068,27 @@ mod tests {
             .bindings
             .insert(surface.into(), saved.clone());
         assert_eq!(scene.surface_source(manifest, surface), surface);
-        let mut draft = saved;
+        let mut draft = saved.clone();
         draft.title = "Draft dial".into();
         scene.draft = Some(HardwareDraft {
             bindings: BTreeMap::from([(encoder.id.clone(), draft)]),
             ..Default::default()
         });
-        assert_eq!(scene.surface_source(manifest, surface), encoder.id);
-        assert!(scene.draft_owns_surface(manifest, surface));
+        assert_eq!(scene.surface_source(manifest, surface), surface);
+        assert!(!scene.draft_owns_surface(manifest, surface));
+        scene.page.as_mut().unwrap().bindings.remove(surface);
+        assert_eq!(scene.surface_source(manifest, surface), surface);
+        // A genuine inherited display still follows its encoder draft.
+        let mut inherited = manifest.clone();
+        inherited.capabilities.touch_panel = None;
+        assert_eq!(scene.surface_source(&inherited, surface), encoder.id);
+        assert!(scene.draft_owns_surface(&inherited, surface));
+        scene
+            .page
+            .as_mut()
+            .unwrap()
+            .bindings
+            .insert(surface.into(), saved.clone());
         scene.draft = None;
         assert_eq!(scene.surface_source(manifest, surface), surface);
         assert!(!scene.draft_owns_surface(manifest, surface));
@@ -520,10 +1125,12 @@ mod tests {
         binding.title = "Draft only".into();
         binding.action = Action::Mute;
         let draft = HardwareDraft {
+            display_test: None,
             bindings: BTreeMap::from([("key-1".into(), binding.clone())]),
             background: None,
             scope: None,
             preview_states: Default::default(),
+            palette: None,
         };
         assert!(runtime
             .preview_on_dock(id, revision, draft.clone())
@@ -597,10 +1204,12 @@ mod tests {
                 id,
                 runtime.snapshot().configuration_revision,
                 HardwareDraft {
+                    display_test: None,
                     bindings: BTreeMap::from([("key-1".into(), binding)]),
                     background: None,
                     scope: None,
                     preview_states: Default::default(),
+                    palette: None,
                 },
             )
             .unwrap();

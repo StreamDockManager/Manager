@@ -29,6 +29,16 @@ pub struct DeviceSession {
     pub output: DeviceOutput,
 }
 
+impl DeviceSession {
+    pub(super) fn destination_page(&self, profile: &Profile, page_id: Option<&str>) -> String {
+        page_id
+            .map(String::from)
+            .or_else(|| self.remembered_pages.get(&profile.id).cloned())
+            .filter(|id| profile.pages.iter().any(|p| &p.id == id))
+            .unwrap_or_else(|| profile.active_page.clone())
+    }
+}
+
 // Accept only the retired appearance field at the session load boundary. It is
 // absent from the live model, serializers and generated current contracts
 impl<'de> Deserialize<'de> for DeviceSession {
@@ -111,6 +121,7 @@ pub struct DeviceOutput {
     #[ts(optional)]
     pub keyboard: Option<hardware_core::KeyboardSettings>,
     pub sleeping: bool,
+    #[serde(default = "default_screen_brightness")]
     pub brightness: u8,
     pub lighting_brightness: u8,
     pub lighting_colors: Vec<[u8; 3]>,
@@ -125,13 +136,18 @@ pub struct DeviceOutput {
     #[ts(optional)]
     pub frame_policy: Option<DeviceFramePolicy>,
 }
+// Supply screen brightness only when no saved screen preference exists
+fn default_screen_brightness() -> u8 {
+    50
+}
+
 impl Default for DeviceOutput {
     // Construct the default workspace value
     fn default() -> Self {
         Self {
             keyboard: None,
             sleeping: false,
-            brightness: 65,
+            brightness: default_screen_brightness(),
             lighting_brightness: 15,
             lighting_colors: vec![],
             vibration_enabled: None,
@@ -457,7 +473,10 @@ impl StoredHistory {
             before_hash: &before_hash,
             after_hash: &after_hash,
         };
-        if checkpoint {
+        if checkpoint
+            || stream_dock_manager_storage::plugin_settings::contains_plugin_action(&base)
+            || stream_dock_manager_storage::plugin_settings::contains_plugin_action(&next)
+        {
             return serde_json::to_vec(&full).map_err(|e| e.to_string());
         }
         let mut forward = vec![];
@@ -594,9 +613,22 @@ impl Draft {
         if let Some(binding) = &self.base {
             binding.validate()?;
         }
-        if self.value.get("actionDraft").is_some() || self.value.get("dialActions").is_some() {
+        let event_fields = [
+            "eventActions",
+            "eventActionIndex",
+            "eventMultiPressMs",
+            "eventHoldMs",
+        ];
+        let events = event_fields
+            .iter()
+            .any(|key| self.value.get(*key).is_some());
+        if self.value.get("actionDraft").is_some()
+            || self.value.get("dialActions").is_some()
+            || events
+        {
             const FIELDS: &[&str] = &[
                 "title",
+                "liveLabel",
                 "color",
                 "customBackground",
                 "backgroundSource",
@@ -615,6 +647,10 @@ impl Draft {
                 "dialActions",
                 "dialActionIndex",
                 "dialLinkedTurns",
+                "eventActions",
+                "eventActionIndex",
+                "eventMultiPressMs",
+                "eventHoldMs",
             ];
             let unsupported = self
                 .value
@@ -631,31 +667,66 @@ impl Draft {
                 ));
             }
         }
+        if let Some(label) = self.value.get("liveLabel") {
+            let segments = Vec::<crate::live_label::LabelSegment>::deserialize(label)
+                .map_err(|error| format!("Unsupported saved live label draft: {error}"))?;
+            crate::live_label::validate(&segments)?;
+        }
         if let Some(linked) = self.value.get("dialLinkedTurns") {
             if !linked.is_boolean() {
                 return Err("Saved dial link mode must be a boolean".into());
             }
         }
-        let validate_action = |value: &serde_json::Value| -> Result<(), String> {
-            let action: Action = serde_json::from_value(
-                value
-                    .get("action")
-                    .cloned()
-                    .ok_or("Invalid saved action draft")?,
-            )
-            .map_err(|e| format!("Unsupported saved action draft: {e}"))?;
-            action.validate_draft(0)
+        let parse_action = |value: &serde_json::Value| -> Result<Action, String> {
+            let action: Action =
+                Action::deserialize(value.get("action").ok_or("Invalid saved action draft")?)
+                    .map_err(|e| format!("Unsupported saved action draft: {e}"))?;
+            if matches!(action, Action::Events { .. }) {
+                return Err("Saved editor action lanes cannot contain event assignments".into());
+            }
+            Ok(action)
         };
-        if let Some(action) = self.value.get("actionDraft") {
-            validate_action(action)?;
-        }
-        if let Some(lanes) = self.value.get("dialActions").filter(|v| !v.is_null()) {
-            let lanes = lanes
+        let active = self.value.get("actionDraft");
+        let dial_lanes = self.value.get("dialActions").filter(|v| !v.is_null());
+        if events {
+            if dial_lanes.is_some() {
+                return Err("A saved draft cannot contain both event and dial lanes".into());
+            }
+            let number = |key: &str| -> Result<u16, String> {
+                self.value[key]
+                    .as_u64()
+                    .and_then(|value| value.try_into().ok())
+                    .ok_or_else(|| format!("Invalid saved event draft field $.value[{key:?}]"))
+            };
+            let lanes = self.value["eventActions"]
                 .as_array()
-                .filter(|lanes| lanes.len() == 3)
-                .ok_or("Saved dial draft requires three explicit lanes")?;
-            for lane in lanes {
-                validate_action(lane)?;
+                .filter(|lanes| lanes.len() == crate::actions::EventSlot::COUNT)
+                .ok_or("Saved event draft requires exactly 14 action slots")?;
+            let active_index = usize::from(number("eventActionIndex")?);
+            let selected = lanes
+                .get(active_index)
+                .ok_or("Saved event draft slot is outside range")?;
+            if active != Some(selected) {
+                return Err("Saved event draft selection does not match its action slot".into());
+            }
+            Action::Events {
+                actions: lanes.iter().map(parse_action).collect::<Result<_, _>>()?,
+                multi_press_ms: number("eventMultiPressMs")?,
+                hold_ms: number("eventHoldMs")?,
+            }
+            .validate_draft(0)?;
+        } else {
+            if let Some(action) = active {
+                parse_action(action)?.validate_draft(0)?;
+            }
+            if let Some(lanes) = dial_lanes {
+                let lanes = lanes
+                    .as_array()
+                    .filter(|lanes| lanes.len() == 3)
+                    .ok_or("Saved dial draft requires three explicit lanes")?;
+                for lane in lanes {
+                    parse_action(lane)?.validate_draft(0)?;
+                }
             }
         }
         Ok(())
@@ -694,6 +765,15 @@ pub enum Edit {
         page_id: String,
         bindings: BTreeMap<String, Option<Binding>>,
     },
+    LinkControl {
+        profile_id: String,
+        source: LinkMember,
+        target: LinkMember,
+    },
+    DetachControl {
+        profile_id: String,
+        member: LinkMember,
+    },
     AssignControl {
         profile_id: String,
         page_id: String,
@@ -712,6 +792,42 @@ pub enum Edit {
     },
 }
 
+pub(super) fn validate_assignment_targets(
+    profile: &Profile,
+    profiles: &[Profile],
+    binding: &Binding,
+) -> Result<(), String> {
+    let mut error = None;
+    binding.action.visit(&mut |action| {
+            let local_page = match action {
+                Action::Page { page_id } => Some(page_id),
+                Action::Builtin { action } => match action.as_ref() {
+                    crate::builtins::BuiltinAction::MomentaryPage { page_id }
+                    | crate::builtins::BuiltinAction::BindingLayer { page_id, .. } => Some(page_id),
+                    _ => None,
+                },
+                _ => None,
+            };
+            if let Some(id) = local_page {
+                if crate::parameters::reference(id).is_none()
+                    && crate::macro_inputs::reference(id).is_none()
+                    && !profile.pages.iter().any(|page| page.id == *id) {
+                    error = Some(format!("Page target {id} does not exist in profile {}. Use relative navigation or choose a narrower scope.", profile.name));
+                }
+            }
+            if let Action::Profile { profile_id: id } = action {
+                if crate::parameters::reference(id).is_none()
+                    && crate::macro_inputs::reference(id).is_none()
+                    && !profiles.iter().any(|p| p.id == *id && p.model_id == profile.model_id) {
+                    error = Some("Profile target is missing or belongs to a different device model".into());
+                }
+            }
+        });
+    if let Some(error) = error {
+        return Err(error);
+    }
+    Ok(())
+}
 // Assign a binding across the requested scope while preserving model and protected-control constraints
 fn assign_control(
     data: &mut ProfileData,
@@ -769,48 +885,30 @@ fn assign_control(
     // Reject literal local page references that would stop working in another profile
     // The full runtime/domain validators still validate the completed workspace atomically
     for profile in targets {
-        let mut error = None;
-        binding.action.visit(&mut |action| {
-            let local_page = match action {
-                Action::Page { page_id } => Some(page_id),
-                Action::Builtin { action } => match action.as_ref() {
-                    crate::builtins::BuiltinAction::MomentaryPage { page_id }
-                    | crate::builtins::BuiltinAction::BindingLayer { page_id, .. } => Some(page_id),
-                    _ => None,
-                },
-                _ => None,
-            };
-            if let Some(id) = local_page {
-                if crate::parameters::reference(id).is_none()
-                    && crate::macro_inputs::reference(id).is_none()
-                    && !profile.pages.iter().any(|page| page.id == *id) {
-                    error = Some(format!("Page target {id} does not exist in profile {}. Use relative navigation or choose a narrower scope.", profile.name));
-                }
-            }
-            if let Action::Profile { profile_id: id } = action {
-                if crate::parameters::reference(id).is_none()
-                    && crate::macro_inputs::reference(id).is_none()
-                    && !data.profiles.iter().any(|p| p.id == *id && p.model_id == model_id) {
-                    error = Some("Profile target is missing or belongs to a different device model".into());
-                }
-            }
-        });
-        if let Some(error) = error {
-            return Err(error);
-        }
+        validate_assignment_targets(profile, &data.profiles, &binding)?;
     }
     for profile in data.profiles.iter_mut().filter(|profile| {
         profile.model_id == model_id
             && (matches!(scope, AssignmentScope::Model) || profile.id == profile_id)
     }) {
-        for page in profile
+        let pages: Vec<_> = profile
             .pages
-            .iter_mut()
+            .iter()
             .filter(|page| !matches!(scope, AssignmentScope::Page) || page.id == page_id)
-        {
-            if !crate::keyboard_navigation::protected_control(&model_id, &page.id, control_id) {
-                page.bindings.insert(control_id.into(), binding.clone());
-            }
+            .filter(|page| {
+                !crate::keyboard_navigation::protected_control(&model_id, &page.id, control_id)
+            })
+            .map(|p| p.id.clone())
+            .collect();
+        for id in pages {
+            profile
+                .pages
+                .iter_mut()
+                .find(|p| p.id == id)
+                .unwrap()
+                .bindings
+                .insert(control_id.into(), binding.clone());
+            profile.sync_link(&id, control_id)?;
         }
     }
     Ok(())
@@ -829,11 +927,19 @@ pub(crate) fn now_ms() -> u64 {
 pub(crate) fn snapshot_media(
     connection: &stream_dock_manager_storage::rusqlite::Connection,
 ) -> Result<std::collections::BTreeSet<String>, String> {
+    let data = crate::profile_database::load(connection)?;
+    snapshot_media_for_workspace(connection, data.as_ref())
+}
+
+pub(crate) fn snapshot_media_for_workspace(
+    connection: &stream_dock_manager_storage::rusqlite::Connection,
+    data: Option<&ProfileData>,
+) -> Result<std::collections::BTreeSet<String>, String> {
     use stream_dock_manager_storage::{read_json, Domain};
     let mut assets = std::collections::BTreeSet::new();
-    if let Some(data) = crate::profile_database::load(connection)? {
-        crate::profiles::validate_data(&data)?;
-        assets.extend(crate::profiles::referenced_assets(&data));
+    if let Some(data) = data {
+        crate::profiles::validate_data(data)?;
+        assets.extend(crate::profiles::referenced_assets(data));
         let mut total = 0;
         for item in data.history.undo.iter().chain(&data.history.redo) {
             let value: serde_json::Value =
@@ -960,7 +1066,7 @@ impl ProfileStore {
         history_extra_bytes: usize,
         edit: impl FnOnce(&mut ProfileData) -> Result<(), String>,
     ) -> Result<crate::profile_database::PreparedWorkspace, String> {
-        let mut data = self.load()?;
+        let (mut data, stamp) = self.load_for_edit(true)?;
         if data.configuration_revision != expected {
             return Err("Configuration changed. Refresh before saving.".into());
         }
@@ -971,7 +1077,11 @@ impl ProfileStore {
         crate::keyboard_navigation::normalize(&mut data)?;
         self.detach_deleted_media(&mut data);
         data.update_requirements();
-        let validation = crate::validation::validate_edit(&before, &data)?;
+        let validation = {
+            use stream_dock_manager_storage::timing::{start, Phase};
+            let _validation = start(Phase::WorkspaceValidation);
+            crate::validation::validate_edit(&before, &data)?
+        };
         if !validation.is_current(data.configuration_revision) {
             return Err("Stale workspace validation".into());
         }
@@ -979,10 +1089,12 @@ impl ProfileStore {
         after.history = HistoryIndex::default();
         let before_json = serde_json::to_value(&before).map_err(|e| e.to_string())?;
         let after_json = serde_json::to_value(&after).map_err(|e| e.to_string())?;
+        let rules_changed = before_json["rules"] != after_json["rules"];
         if history_id.is_none() && before_json == after_json {
-            return Ok(crate::profile_database::PreparedWorkspace::new(
-                data, expected, None, None,
-            ));
+            return Ok(
+                crate::profile_database::PreparedWorkspace::new(data, expected, None, None)
+                    .with_scoped_records(stamp, validation, rules_changed),
+            );
         }
         data.configuration_revision += 1;
         let id = history_id
@@ -1021,12 +1133,15 @@ impl ProfileStore {
                 .unwrap()
                 .insert(hex::encode(Sha256::digest(canonical)), history_assets);
         }
-        Ok(crate::profile_database::PreparedWorkspace::new(
-            data,
-            expected,
-            Some((id, value)),
-            None,
-        ))
+        Ok(
+            crate::profile_database::PreparedWorkspace::new(
+                data,
+                expected,
+                Some((id, value)),
+                None,
+            )
+            .with_scoped_records(stamp, validation, rules_changed),
+        )
     }
     // Inspect history
     pub(crate) fn inspect_history(
@@ -1167,19 +1282,43 @@ pub fn apply_edits(data: &mut ProfileData, edits: Vec<Edit>) -> Result<(), Strin
                 page_id,
                 bindings,
             } => {
-                let page = data
+                let profile = data
                     .profiles
                     .iter_mut()
                     .find(|p| p.id == profile_id)
-                    .and_then(|p| p.pages.iter_mut().find(|p| p.id == page_id))
-                    .ok_or("Page missing")?;
+                    .ok_or("Profile missing")?;
                 for (id, binding) in bindings {
+                    let page = profile
+                        .pages
+                        .iter_mut()
+                        .find(|p| p.id == page_id)
+                        .ok_or("Page missing")?;
                     if let Some(binding) = binding {
-                        page.bindings.insert(id, binding);
+                        page.bindings.insert(id.clone(), binding);
+                        profile.sync_link(&page_id, &id)?;
                     } else {
                         page.bindings.remove(&id);
+                        profile.prune_links(|m| m.page_id != page_id || m.control_id != id);
                     }
                 }
+            }
+            Edit::LinkControl {
+                profile_id,
+                source,
+                target,
+            } => {
+                data.profiles
+                    .iter_mut()
+                    .find(|p| p.id == profile_id)
+                    .ok_or("Profile missing")?
+                    .link(source, target)?;
+            }
+            Edit::DetachControl { profile_id, member } => {
+                data.profiles
+                    .iter_mut()
+                    .find(|p| p.id == profile_id)
+                    .ok_or("Profile missing")?
+                    .prune_links(|m| m != &member);
             }
             Edit::AssignControl {
                 profile_id,
@@ -1262,7 +1401,12 @@ impl Snapshot {
             }
         } else {
             session.profile_id.clear();
-            session.page_id.clear();
+            session.page_id =
+                if device.is_some_and(|d| crate::keyboard_navigation::supported(&d.model_id)) {
+                    crate::keyboard_navigation::PAGE_ID.into()
+                } else {
+                    String::new()
+                };
             session.manual_profile.clear();
             session.automation_origin = None;
         }
@@ -1415,6 +1559,153 @@ mod tests {
             serde_json::to_value(&saved.profiles).unwrap()
         );
     }
+    #[test]
+    fn linked_edits_from_either_page_are_atomic_and_detach_preserves_the_assignment() {
+        let (_root, store) = assignment_fixture();
+        let before = store.load().unwrap();
+        let profile = &before.profiles[0];
+        let src = LinkMember {
+            page_id: profile.pages[0].id.clone(),
+            control_id: "key-1".into(),
+        };
+        let dst = LinkMember {
+            page_id: profile.pages[1].id.clone(),
+            control_id: "key-1".into(),
+        };
+        let edit = |rev, e| store.edit(rev, "Link fixture", |d| apply_edits(d, vec![e]));
+        let linked = edit(
+            before.configuration_revision,
+            Edit::LinkControl {
+                profile_id: profile.id.clone(),
+                source: src.clone(),
+                target: dst.clone(),
+            },
+        )
+        .unwrap();
+        let mut b = profile.pages[0].bindings["key-1"].clone();
+        b.title = "Edited from second page".into();
+        let update = || Edit::Bindings {
+            profile_id: profile.id.clone(),
+            page_id: dst.page_id.clone(),
+            bindings: BTreeMap::from([("key-1".into(), Some(b.clone()))]),
+        };
+        let saved = edit(linked.configuration_revision, update()).unwrap();
+        assert!(edit(linked.configuration_revision, update()).is_err());
+        assert!(saved.profiles[0]
+            .pages
+            .iter()
+            .all(|p| p.bindings["key-1"].title == b.title));
+        let undone = store
+            .history_action(saved.configuration_revision, "undo")
+            .unwrap();
+        assert_eq!(
+            undone.profiles[0].pages[0].bindings["key-1"].title,
+            profile.pages[0].bindings["key-1"].title
+        );
+        let redo = store
+            .history_action(undone.configuration_revision, "redo")
+            .unwrap();
+        let mut invalid = redo.profiles[0].clone();
+        invalid.pages[0]
+            .bindings
+            .get_mut("key-1")
+            .unwrap()
+            .title
+            .clear();
+        assert!(invalid.validate().is_err());
+        let deleted = edit(
+            redo.configuration_revision,
+            Edit::DeletePage {
+                profile_id: profile.id.clone(),
+                page_id: dst.page_id.clone(),
+            },
+        )
+        .unwrap();
+        assert!(deleted.profiles[0].linked_controls.is_empty());
+        assert_eq!(
+            deleted.profiles[0].pages[0].bindings["key-1"].title,
+            b.title
+        );
+        let restored = store
+            .history_action(deleted.configuration_revision, "undo")
+            .unwrap();
+        assert_eq!(restored.profiles[0].linked_controls.len(), 1);
+        let detached = edit(
+            restored.configuration_revision,
+            Edit::DetachControl {
+                profile_id: profile.id.clone(),
+                member: dst.clone(),
+            },
+        )
+        .unwrap();
+        assert!(detached.profiles[0].linked_controls.is_empty());
+        assert_eq!(
+            detached.profiles[0].pages[1].bindings["key-1"].title,
+            b.title
+        );
+        b.title = "Independent after detach".into();
+        let after = edit(
+            detached.configuration_revision,
+            Edit::Bindings {
+                profile_id: profile.id.clone(),
+                page_id: dst.page_id.clone(),
+                bindings: BTreeMap::from([("key-1".into(), Some(b.clone()))]),
+            },
+        )
+        .unwrap();
+        assert_ne!(after.profiles[0].pages[0].bindings["key-1"].title, b.title);
+        assert_eq!(
+            store.load().unwrap().profiles[0].pages[1].bindings["key-1"].title,
+            b.title
+        );
+    }
+    #[test]
+    fn linked_dial_settings_and_gestures_survive_a_reopen() {
+        let (root, store) = assignment_fixture();
+        let data = store.load().unwrap();
+        let mut profile = data.profiles[0].clone();
+        profile.model_id = "n4-pro".into();
+        let mut binding = profile.pages[0].bindings["key-1"].clone();
+        binding.action = Action::Dial {
+            linked_turns: false,
+            actions: vec![
+                Action::Mute,
+                Action::None,
+                Action::Page {
+                    page_id: profile.pages[1].id.clone(),
+                },
+            ],
+        };
+        for page in &mut profile.pages {
+            page.bindings.clear();
+        }
+        profile.pages[0].bindings.insert("dial-1".into(), binding);
+        let source = LinkMember {
+            page_id: profile.pages[0].id.clone(),
+            control_id: "dial-1".into(),
+        };
+        let target = LinkMember {
+            page_id: profile.pages[1].id.clone(),
+            control_id: "dial-2".into(),
+        };
+        profile.link(source, target).unwrap();
+        store
+            .edit(data.configuration_revision, "Linked dials", |d| {
+                apply_edits(d, vec![Edit::SaveProfile { profile }])
+            })
+            .unwrap();
+        drop(store);
+        let reopened = ProfileStore::open(root.path().into())
+            .unwrap()
+            .load()
+            .unwrap();
+        let p = &reopened.profiles[0];
+        p.validate_links().unwrap();
+        assert!(
+            matches!(&p.pages[1].bindings["dial-2"].action, Action::Dial{actions,..} if actions.len()==3)
+        );
+    }
+
     #[test]
     // Verify that scoped assignment respects page profile and exact model boundaries
     fn scoped_assignment_respects_page_profile_and_exact_model_boundaries() {
@@ -2281,7 +2572,10 @@ mod allocation_regressions {
                     integrity(&serde_json::to_value(&before).unwrap()),
                     original_integrity(&serde_json::to_value(&before).unwrap())
                 );
-                eprintln!("HISTORY_ALLOCATION shape={shape} repetition={repetition} old_count={old_count} new_count={new_count} old_bytes={old_bytes} new_bytes={new_bytes} output_bytes={}", new.len());
+                eprintln!(
+                    "HISTORY_ALLOCATION shape={shape} repetition={repetition} old_count={old_count} new_count={new_count} old_bytes={old_bytes} new_bytes={new_bytes} output_bytes={}",
+                    new.len()
+                );
             }
         }
     }
@@ -2437,6 +2731,48 @@ mod strict_contract_tests {
             assert!(entry.restore(false).unwrap_err().contains(key));
         }
     }
+    #[test]
+    // Retain all selected and unselected event action drafts and reject ambiguous layouts
+    fn saved_event_draft_validates_shape_without_changing_child_data() {
+        use serde_json::json;
+        let active = json!({"action":{"kind":"mute"},"advanced":false,"rawValue":null});
+        let mut lanes = vec![json!({"action":{"kind":"none"}}); crate::actions::EventSlot::COUNT];
+        lanes[0] = json!({"action":{"kind":"volume","delta":13},"rawValue":"{"});
+        lanes[2] = active.clone();
+        let draft = Draft {
+            key: "key".into(),
+            base: None,
+            value: json!({
+                "actionDraft": active,
+                "dialActions": null,
+                "dialActionIndex": 2,
+                "dialLinkedTurns": false,
+                "eventActions": lanes,
+                "eventActionIndex": 2,
+                "eventMultiPressMs": 300,
+                "eventHoldMs": 600
+            }),
+        };
+        let original = draft.value.clone();
+        draft.validate().unwrap();
+        assert_eq!(original, draft.value);
+        for (key, value) in [
+            ("eventActionIndex", json!(14)),
+            ("eventActionIndex", json!(1)),
+            ("eventMultiPressMs", json!("300")),
+            ("eventHoldMs", json!(3000)),
+            ("eventActions", json!(null)),
+            ("dialActions", json!([{"action":{"kind":"none"}}])),
+        ] {
+            let mut invalid = draft.clone();
+            invalid.value[key] = value;
+            assert!(invalid.validate().is_err(), "{key}");
+        }
+        let mut invalid = draft;
+        invalid.value["eventActions"][13]["action"] = json!({"kind":"retired"});
+        assert!(invalid.validate().is_err());
+    }
+
     #[test]
     // Verify that invalid draft reports each unsupported field path
     fn invalid_draft_reports_each_unsupported_field_path() {

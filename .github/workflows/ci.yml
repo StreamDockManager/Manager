@@ -4,38 +4,69 @@ on:
         branches: [test-build]
     workflow_dispatch:
         inputs:
+            runner_service:
+                description: Native runner service (Blacksmith must be enabled for this repository)
+                required: false
+                type: choice
+                default: github
+                options: [github, blacksmith]
             targets:
-                description: 'Native check targets; test-build pushes check all platforms'
+                description: 'Native OS to check; test-build pushes check all platforms'
                 required: false
                 type: choice
                 default: all
-                options: [all, linux-windows, linux, linux-host]
+                options: [all, linux-windows, linux, linux-host, macos, windows]
+            profile:
+                description: 'Quick native unit tests or full validation'
+                required: false
+                type: choice
+                default: quick
+                options: [quick, full]
+            focus:
+                description: 'Optional Quick-only native test focus'
+                required: false
+                type: choice
+                default: workspace
+                options: [workspace, plugin-host]
     workflow_call:
         inputs:
             release_checks: { required: true, type: boolean }
             commit: { required: true, type: string }
+            runner_service: { required: false, type: string, default: 'github' }
 permissions:
     contents: read
 concurrency:
-    group: manager-tests-${{ github.ref }}-${{ inputs.targets || 'all' }}-${{ github.ref == 'refs/heads/main' && github.run_id || 'latest' }}
+    group: manager-tests-${{ github.ref }}-${{ inputs.runner_service || 'github' }}-${{ inputs.targets || 'all' }}-${{ inputs.profile || (github.event_name == 'push' && 'full' || 'quick') }}-${{ inputs.focus || 'workspace' }}-${{ github.ref == 'refs/heads/main' && github.run_id || 'latest' }}
     cancel-in-progress: ${{ github.ref == 'refs/heads/test-build' }}
 jobs:
     quality:
-        if: (github.event_name == 'workflow_dispatch' || (github.event_name == 'push' && !github.event.created)) && (inputs.commit == '' || inputs.commit == github.sha) && (github.ref == 'refs/heads/test-build' || (github.ref == 'refs/heads/main' && github.event_name == 'workflow_dispatch' && github.workflow_ref == 'StreamDockManager/Manager/.github/workflows/prepare-release.yml@refs/heads/main' && inputs.release_checks && inputs.commit == github.sha))
-        runs-on: ${{ vars.LINUX_RUNNER_LABELS != '' && (github.event_name != 'pull_request' || github.event.pull_request.head.repo.full_name == github.repository) && fromJSON(vars.LINUX_RUNNER_LABELS) || 'ubuntu-24.04' }}
-        container: ${{ (github.event_name != 'workflow_dispatch' || inputs.targets != 'linux-host') && 'ubuntu@sha256:78d4744ead1f5b19b04d0df558ab182a5300903900755e515b2ca4d10eb2044d' || '' }}
+        if: (github.event_name == 'workflow_dispatch' || (github.event_name == 'push' && !github.event.created)) && (inputs.commit == '' || inputs.commit == github.sha) && (github.ref == 'refs/heads/test-build' || (github.ref == 'refs/heads/main' && github.event_name == 'workflow_dispatch' && ((github.workflow_ref == 'StreamDockManager/Manager/.github/workflows/prepare-release.yml@refs/heads/main' && inputs.release_checks && inputs.commit == github.sha) || (github.repository_id == '1456092478' && github.workflow_ref == format('{0}/.github/workflows/ci.yml@refs/heads/main', github.repository))))) && (inputs.targets == '' || inputs.targets == 'all' || inputs.targets == 'linux-windows' || inputs.targets == 'linux' || inputs.targets == 'linux-host') && (inputs.runner_service == '' || inputs.runner_service == 'github' || inputs.runner_service == 'blacksmith')
+        runs-on: ${{ (inputs.runner_service == '' || inputs.runner_service == 'github') && (vars.LINUX_RUNNER_LABELS != '' && (github.event_name != 'pull_request' || github.event.pull_request.head.repo.full_name == github.repository) && fromJSON(vars.LINUX_RUNNER_LABELS) || 'ubuntu-24.04') || 'blacksmith-4vcpu-ubuntu-2404' }}
+        container: ${{ (github.event_name != 'workflow_dispatch' || inputs.targets != 'linux-host') && 'ubuntu@sha256:73b999393d07f2bf65a40373778a44dc9a6d54ad7718d29247d8ff9413c4d6a8' || '' }}
         defaults:
             run:
                 shell: bash
         timeout-minutes: 120
         env:
+            STREAM_DOCK_MANAGER_FULL_CHECKS: ${{ inputs.release_checks || github.event_name != 'workflow_dispatch' || inputs.profile == 'full' }}
+            STREAM_DOCK_MANAGER_CHECK_FOCUS: ${{ inputs.focus || 'workspace' }}
             STREAM_DOCK_MANAGER_LINUX_HOST: ${{ github.event_name == 'workflow_dispatch' && inputs.targets == 'linux-host' }}
-            STREAM_DOCK_MANAGER_LINUX_BASELINE_IMAGE: ubuntu@sha256:78d4744ead1f5b19b04d0df558ab182a5300903900755e515b2ca4d10eb2044d
+            STREAM_DOCK_MANAGER_LINUX_BASELINE_IMAGE: ubuntu@sha256:73b999393d07f2bf65a40373778a44dc9a6d54ad7718d29247d8ff9413c4d6a8
             # Keep Rust debug and incremental outputs from exhausting browser-test disk space
             CARGO_PROFILE_DEV_DEBUG: '0'
             CARGO_PROFILE_TEST_DEBUG: '0'
             CARGO_INCREMENTAL: '0'
         steps:
+            - name: Require native Linux
+              run: |
+                  if [[ "$RUNNER_OS" != Linux || "$(uname -s)" != Linux || -n "${CARGO_BUILD_TARGET:-}" ]]; then
+                      echo 'Select a Linux runner and unset CARGO_BUILD_TARGET for native checks.' >&2
+                      exit 1
+                  fi
+                  if [[ "$STREAM_DOCK_MANAGER_FULL_CHECKS" == true && "$STREAM_DOCK_MANAGER_CHECK_FOCUS" != workspace ]]; then
+                      echo 'A test focus is only available with the Quick profile.' >&2
+                      exit 1
+                  fi
             - name: Bootstrap pinned Ubuntu build userspace
               if: env.STREAM_DOCK_MANAGER_LINUX_HOST != 'true'
               shell: bash
@@ -94,7 +125,7 @@ jobs:
               with:
                   node-version: 26
                   cache: npm
-            - run: npm install --global npm@12.2.2
+            - run: npm install --global npm@12.2.3
             - name: Activate isolated workspace npm
               if: runner.os == 'Linux'
               shell: bash
@@ -136,26 +167,60 @@ jobs:
             - run: python scripts/release.py version
             - run: python -m compileall -q scripts
             - run: npm ci
+            - name: Cache checked dependency archives on the Ubuntu baseline
+              if: github.repository_id == '1456092478' && !inputs.release_checks && env.STREAM_DOCK_MANAGER_LINUX_HOST != 'true'
+              uses: actions/cache@v6.1.0
+              with:
+                  path: |
+                      target/.cargo/registry/cache
+                      vendor/.cache/archives
+                  key: manager-dev-archives-v1-${{ runner.os }}-${{ runner.arch }}-${{ env.STREAM_DOCK_MANAGER_LINUX_BASELINE_IMAGE }}-${{ hashFiles('Cargo.lock', 'vendor/dependencies.json') }}
             - name: Prepare verified patched Rust dependencies
               run: python scripts/prepare_patched_deps.py
-            - name: Verify connection contract implementation and conformance
+            - name: Validate connection contract fixtures and browser smoke tests
               run: |
                   python3 scripts/test_connection_contract.py
                   python3 scripts/test_vendor_inventory.py
                   python3 scripts/test_vsd_contract_inventory.py
-                  python3 scripts/check-connection-contract.py
                   node --test tests/browser-registration.test.mjs tests/browser-resource-selection.test.mjs tests/browser-resource-selection-portable.test.mjs tests/dial-actions.test.mjs tests/preview-cadence.test.mjs tests/preview-images.test.mjs tests/health-panel-lifecycle.test.mjs
             - run: npm run format:check
-            - run: cargo run -p xtask -- types --check && cargo run -p xtask -- hardware generate
-            - run: git diff --exit-code -- public/hardware.json packaging/linux/60-stream-dock-manager.rules
-            - run: cargo run -p xtask -- hardware check
-            - run: npm run build:native
-            - run: cargo clippy --workspace --all-targets -- -D warnings
             - run: python scripts/test_prepare_patched_deps.py && python scripts/test_patched_dependency_wiring.py
-            - run: python scripts/test_check_syntax.py
+            - name: Verify syntax and Windows CI contracts
+              run: |
+                  python scripts/test_check_syntax.py
+                  python scripts/test_windows_ci_cache.py
+                  python scripts/test_windows_openssl_perl.py
             - run: python scripts/test_package_metadata.py
-            - run: python scripts/check_syntax.py --rust-only
+            - run: cargo run --locked -p xtask -- types --check && cargo run --locked -p xtask -- hardware generate
+              if: env.STREAM_DOCK_MANAGER_CHECK_FOCUS == 'workspace'
+            - run: git diff --exit-code -- public/hardware.json packaging/linux/60-stream-dock-manager.rules
+              if: env.STREAM_DOCK_MANAGER_CHECK_FOCUS == 'workspace'
+            - run: cargo run --locked -p xtask -- hardware check
+              if: env.STREAM_DOCK_MANAGER_CHECK_FOCUS == 'workspace'
+            - run: npm run build:native
+              if: env.STREAM_DOCK_MANAGER_CHECK_FOCUS == 'workspace'
+            - name: Check strict Clippy and warnings in workspace and locally patched Rust
+              if: env.STREAM_DOCK_MANAGER_FULL_CHECKS == 'true'
+              run: python scripts/check_syntax.py --rust-only --clippy
+            - name: Run native Linux Quick tests with a disposable installation key
+              if: env.STREAM_DOCK_MANAGER_FULL_CHECKS != 'true'
+              run: |
+                  rust_host=$(rustc -Vv | sed -n 's/^host: //p')
+                  test -n "$rust_host"
+                  cargo fetch --locked --target "$rust_host"
+                  args=(--workspace --lib --bins)
+                  if [[ "$STREAM_DOCK_MANAGER_CHECK_FOCUS" == plugin-host ]]; then
+                      args=(-p stream-dock-manager-plugin-host --lib)
+                  fi
+                  env -u STREAM_DOCK_MANAGER_INSTALLATION_KEY_FILE python scripts/with_test_key.py cargo test --offline --locked "${args[@]}"
+            - name: Run native Linux Full tests and verify registry coverage with a disposable installation key
+              if: env.STREAM_DOCK_MANAGER_FULL_CHECKS == 'true' && !inputs.release_checks
+              run: env -u STREAM_DOCK_MANAGER_INSTALLATION_KEY_FILE python scripts/check-connection-contract.py --workspace
+            - name: Run release caller connection contract conformance
+              if: inputs.release_checks
+              run: env -u STREAM_DOCK_MANAGER_INSTALLATION_KEY_FILE python scripts/check-connection-contract.py
             - name: Verify GLib security backport with optimizations
+              if: env.STREAM_DOCK_MANAGER_FULL_CHECKS == 'true'
               run: cargo test --locked --release -p stream-dock-manager --test glib_variant_iter
             - uses: actions/upload-artifact@v7.0.2
               if: always()
@@ -172,17 +237,24 @@ jobs:
                   if [[ ! "$STREAM_DOCK_MANAGER_WORKSPACE_OWNER" =~ ^[0-9]+:[0-9]+$ ]]; then exit 1; fi
                   chown -hR "$STREAM_DOCK_MANAGER_WORKSPACE_OWNER" "$GITHUB_WORKSPACE"
     platform-build:
-        if: (github.event_name == 'workflow_dispatch' || (github.event_name == 'push' && !github.event.created)) && (inputs.commit == '' || inputs.commit == github.sha) && (github.ref == 'refs/heads/test-build' || (github.ref == 'refs/heads/main' && github.event_name == 'workflow_dispatch' && github.workflow_ref == 'StreamDockManager/Manager/.github/workflows/prepare-release.yml@refs/heads/main' && inputs.release_checks && inputs.commit == github.sha)) && inputs.targets != 'linux' && inputs.targets != 'linux-host'
+        if: (github.event_name == 'workflow_dispatch' || (github.event_name == 'push' && !github.event.created)) && (inputs.commit == '' || inputs.commit == github.sha) && (github.ref == 'refs/heads/test-build' || (github.ref == 'refs/heads/main' && github.event_name == 'workflow_dispatch' && ((github.workflow_ref == 'StreamDockManager/Manager/.github/workflows/prepare-release.yml@refs/heads/main' && inputs.release_checks && inputs.commit == github.sha) || (github.repository_id == '1456092478' && github.workflow_ref == format('{0}/.github/workflows/ci.yml@refs/heads/main', github.repository))))) && (inputs.targets == '' || inputs.targets == 'all' || inputs.targets == 'linux-windows' || inputs.targets == 'macos' || inputs.targets == 'windows') && (inputs.runner_service == '' || inputs.runner_service == 'github' || inputs.runner_service == 'blacksmith')
         strategy:
             fail-fast: false
             matrix:
                 include: >-
                     ${{ fromJSON(
-                      github.event_name == 'workflow_dispatch' && inputs.targets == 'linux-windows' && '[{"os":"windows-2022","runner_variable":"WINDOWS_RUNNER_LABELS"}]' ||
-                      '[{"os":"macos-15","runner_variable":"MACOS_RUNNER_LABELS"},{"os":"windows-2022","runner_variable":"WINDOWS_RUNNER_LABELS"}]'
+                      inputs.targets == 'macos' && '[{"os":"macos-15","runner_variable":"MACOS_RUNNER_LABELS","system":"Darwin"}]' ||
+                      (inputs.targets == 'windows' || inputs.targets == 'linux-windows') && '[{"os":"windows-2022","runner_variable":"WINDOWS_RUNNER_LABELS","system":"Windows"}]' ||
+                      '[{"os":"macos-15","runner_variable":"MACOS_RUNNER_LABELS","system":"Darwin"},{"os":"windows-2022","runner_variable":"WINDOWS_RUNNER_LABELS","system":"Windows"}]'
                     ) }}
-        runs-on: ${{ vars[matrix.runner_variable] != '' && (github.event_name != 'pull_request' || github.event.pull_request.head.repo.full_name == github.repository) && fromJSON(vars[matrix.runner_variable]) || matrix.os }}
-        timeout-minutes: 90
+        runs-on: ${{ (inputs.runner_service == '' || inputs.runner_service == 'github') && (vars[matrix.runner_variable] != '' && (github.event_name != 'pull_request' || github.event.pull_request.head.repo.full_name == github.repository) && fromJSON(vars[matrix.runner_variable]) || matrix.os) || fromJSON('{"Darwin":"blacksmith-6vcpu-macos-15","Windows":"blacksmith-4vcpu-windows-2025"}')[matrix.system] }}
+        timeout-minutes: 120
+        env:
+            STREAM_DOCK_MANAGER_FULL_CHECKS: ${{ inputs.release_checks || github.event_name != 'workflow_dispatch' || inputs.profile == 'full' }}
+            STREAM_DOCK_MANAGER_CHECK_FOCUS: ${{ inputs.focus || 'workspace' }}
+            CARGO_PROFILE_DEV_DEBUG: '0'
+            CARGO_PROFILE_TEST_DEBUG: '0'
+            CARGO_INCREMENTAL: '0'
         steps:
             - uses: actions/checkout@v7.0.1
               with:
@@ -206,15 +278,33 @@ jobs:
                   if (!(Test-Path -LiteralPath $gitBash)) { throw 'Git for Windows Bash is required; the WSL bash launcher cannot run native Windows setup actions.' }
                   $bashDirectory = Split-Path (Resolve-Path -LiteralPath $gitBash).Path -Parent
                   $bashDirectory | Out-File -FilePath $env:GITHUB_PATH -Encoding utf8 -Append
+            - name: Verify the selected runner operating system
+              shell: python
+              env:
+                  EXPECTED_NATIVE_TEST_SYSTEM: ${{ matrix.system }}
+              run: |
+                  import os, platform, sys
+                  expected = os.environ["EXPECTED_NATIVE_TEST_SYSTEM"]
+                  actual = platform.system()
+                  if actual != expected:
+                      sys.exit(f"Selected {expected} native checks require a {expected} runner; got {actual}.")
+                  if os.environ.get("CARGO_BUILD_TARGET"):
+                      sys.exit("Unset CARGO_BUILD_TARGET for native checks.")
+                  if (os.environ["STREAM_DOCK_MANAGER_FULL_CHECKS"] == "true"
+                          and os.environ["STREAM_DOCK_MANAGER_CHECK_FOCUS"] != "workspace"):
+                      sys.exit("A test focus is only available with the Quick profile.")
             - name: Configure npm cache
+              if: env.STREAM_DOCK_MANAGER_CHECK_FOCUS == 'workspace'
               shell: bash
               run: echo "NPM_CONFIG_CACHE=$RUNNER_TEMP/npm-cache" >> "$GITHUB_ENV"
             - uses: dtolnay/rust-toolchain@stable
             - uses: actions/setup-node@v7.1.0
+              if: env.STREAM_DOCK_MANAGER_CHECK_FOCUS == 'workspace'
               with:
                   node-version: 26
                   cache: npm
-            - run: npm install --global npm@12.2.2
+            - run: npm install --global npm@12.2.3
+              if: env.STREAM_DOCK_MANAGER_CHECK_FOCUS == 'workspace'
             - name: Verify Windows native toolchain
               if: runner.os == 'Windows'
               shell: powershell
@@ -222,8 +312,10 @@ jobs:
                   python --version
                   rustc -Vv
                   cargo -V
-                  node --version
-                  npm --version
+                  if ($env:STREAM_DOCK_MANAGER_CHECK_FOCUS -eq 'workspace') {
+                      node --version
+                      npm --version
+                  }
                   git --version
                   $vswhere = Join-Path ${env:ProgramFiles(x86)} 'Microsoft Visual Studio\Installer\vswhere.exe'
                   if (!(Test-Path -LiteralPath $vswhere)) { throw 'Install Visual Studio C++ Build Tools and the Windows SDK on this runner.' }
@@ -244,8 +336,66 @@ jobs:
             - run: python scripts/release.py version
             - run: python -m compileall -q scripts
             - run: npm ci
+              if: env.STREAM_DOCK_MANAGER_CHECK_FOCUS == 'workspace'
             - run: npm run build:native
+              if: env.STREAM_DOCK_MANAGER_CHECK_FOCUS == 'workspace'
             - name: Prepare verified patched Rust dependencies
               run: python scripts/prepare_patched_deps.py
+            - name: Identify Windows Rust cache compatibility
+              id: windows-rust-cache
+              if: >-
+                  github.repository_id == '1456092478' && !inputs.release_checks &&
+                  (inputs.runner_service == '' || inputs.runner_service == 'github') &&
+                  runner.os == 'Windows' && runner.environment == 'github-hosted' &&
+                  vars.WINDOWS_RUNNER_LABELS == ''
+              shell: python
+              run: |
+                  import hashlib, os, subprocess
+                  image = [os.environ.get(name) for name in ("ImageOS", "ImageVersion")]
+                  if not all(image) or any(os.environ.get(name) for name in (
+                      "CARGO_TARGET_DIR", "CARGO_BUILD_TARGET_DIR", "CARGO_BUILD_BUILD_DIR",
+                      "CARGO_BUILD_DIR", "RUSTFLAGS", "CARGO_ENCODED_RUSTFLAGS",
+                  )):
+                      print("Skipping compiled Rust cache: runner image or build configuration is not standard.")
+                  else:
+                      rust = subprocess.check_output(["rustc", "-Vv"], text=True).strip()
+                      cargo = subprocess.check_output(["cargo", "-V"], text=True).strip()
+                      material = [*image, rust, cargo,
+                                  os.environ["STREAM_DOCK_MANAGER_FULL_CHECKS"],
+                                  os.environ["STREAM_DOCK_MANAGER_CHECK_FOCUS"]]
+                      with open(os.environ["GITHUB_OUTPUT"], "a", encoding="utf-8") as output:
+                          print("fingerprint=" + hashlib.sha256("\n".join(material).encode()).hexdigest(), file=output)
+            - name: Cache Windows compiled Rust tests
+              if: steps.windows-rust-cache.outputs.fingerprint != ''
+              uses: actions/cache@v6.1.0
+              with:
+                  # Cargo revalidates source inputs on restore; never cache app data or test keys
+                  path: |
+                      target/debug/.fingerprint
+                      target/debug/build
+                      target/debug/deps
+                  key: manager-dev-windows-rust-v1-${{ runner.arch }}-${{ steps.windows-rust-cache.outputs.fingerprint }}-${{ hashFiles('Cargo.lock', '**/Cargo.toml', '.cargo/config.toml', 'vendor/dependencies.json', 'patches/*.patch', '.github/workflows/ci.yml') }}-${{ github.sha }}
+                  restore-keys: |
+                      manager-dev-windows-rust-v1-${{ runner.arch }}-${{ steps.windows-rust-cache.outputs.fingerprint }}-${{ hashFiles('Cargo.lock', '**/Cargo.toml', '.cargo/config.toml', 'vendor/dependencies.json', 'patches/*.patch', '.github/workflows/ci.yml') }}-
             - run: cargo check --workspace --all-targets --locked
-            - run: cargo check -p stream-dock-manager
+              if: env.STREAM_DOCK_MANAGER_FULL_CHECKS == 'true'
+            - run: cargo check --locked -p stream-dock-manager
+              if: env.STREAM_DOCK_MANAGER_FULL_CHECKS == 'true'
+            - name: Run selected native workspace tests with a disposable installation key
+              if: ${{ !inputs.release_checks }}
+              shell: python
+              run: |
+                  import os, subprocess, sys
+                  os.environ.pop("STREAM_DOCK_MANAGER_INSTALLATION_KEY_FILE", None)
+                  args = ["--workspace"]
+                  if os.environ["STREAM_DOCK_MANAGER_FULL_CHECKS"] != "true":
+                      rust = subprocess.check_output(["rustc", "-Vv"], text=True)
+                      host = next(line.removeprefix("host: ") for line in rust.splitlines() if line.startswith("host: "))
+                      subprocess.run(["cargo", "fetch", "--locked", "--target", host], check=True)
+                      if os.environ["STREAM_DOCK_MANAGER_CHECK_FOCUS"] == "plugin-host":
+                          args = ["-p", "stream-dock-manager-plugin-host", "--lib"]
+                      else:
+                          args += ["--lib", "--bins"]
+                  sys.exit(subprocess.run([
+                      sys.executable, "scripts/with_test_key.py", "cargo", "test", "--offline", "--locked", *args
+                  ]).returncode)

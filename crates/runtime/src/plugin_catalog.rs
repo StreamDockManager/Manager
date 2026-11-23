@@ -1,5 +1,7 @@
-//! Plugin schema 1, independent of the application release catalog
+//! Plugin catalog schema 2, independent of the application release catalog
 use super::*;
+pub(super) const PLUGIN_CATALOG_SCHEMA: u32 = 2;
+
 #[derive(Debug, Clone, Serialize, Deserialize, ts_rs::TS, schemars::JsonSchema)]
 pub struct PluginCatalog {
     pub schema_version: u32,
@@ -27,6 +29,8 @@ pub struct CatalogPlugin {
     pub tags: Vec<String>,
     pub dependencies: Vec<PluginDependency>,
     pub downloads: Vec<PluginArtifact>,
+    pub vsd_craft_compatible: bool,
+    pub opendeck_compatible: bool,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub unified_download: Option<UnifiedPluginArtifact>,
     pub capabilities: stream_dock_manager_plugin_host::Capabilities,
@@ -49,20 +53,6 @@ pub struct PluginDocumentationRequest {
     pub dependency: Option<String>,
 }
 #[derive(Debug, Clone, Serialize, Deserialize, ts_rs::TS, schemars::JsonSchema)]
-pub struct QualificationEvidence {
-    pub plugin_version: String,
-    pub os: String,
-    pub sha256: String,
-    pub url: String,
-}
-#[derive(Debug, Clone, Serialize, Deserialize, ts_rs::TS, schemars::JsonSchema)]
-pub struct VsdCompatibility {
-    pub status: String,
-    pub reason: String,
-    #[serde(default)]
-    pub evidence: Option<QualificationEvidence>,
-}
-#[derive(Debug, Clone, Serialize, Deserialize, ts_rs::TS, schemars::JsonSchema)]
 pub struct PluginArtifact {
     pub filename: String,
     pub os: String,
@@ -74,8 +64,6 @@ pub struct PluginArtifact {
     pub size: u64,
     pub sha256: String,
     pub files: BTreeMap<String, String>,
-    pub vsd_craft_compatible: bool,
-    pub compatibility: VsdCompatibility,
 }
 #[derive(Debug, Clone, Serialize, Deserialize, ts_rs::TS, schemars::JsonSchema)]
 #[serde(deny_unknown_fields)]
@@ -97,7 +85,7 @@ pub struct UnifiedPluginArtifact {
     pub targets: Vec<UnifiedPluginTarget>,
 }
 impl UnifiedPluginArtifact {
-    // Describe the unified artifact for a target without claiming native VSD qualification
+    // Describe the unified artifact for its selected target
     fn artifact(&self, os: &str, architectures: Vec<String>) -> PluginArtifact {
         PluginArtifact {
             filename: self.filename.clone(),
@@ -109,12 +97,6 @@ impl UnifiedPluginArtifact {
             files: self.files.clone(),
             os: os.into(),
             architectures,
-            vsd_craft_compatible: false,
-            compatibility: VsdCompatibility {
-                status: "unverified".into(),
-                reason: "Unified package requires separate native qualification".into(),
-                evidence: None,
-            },
         }
     }
     // Select for host
@@ -221,6 +203,20 @@ pub(super) fn effective_catalog_url(preferences: &UpdatePreferences) -> Result<S
         option_env!("STREAM_DOCK_MANAGER_PLUGINS_CATALOG_URL"),
     )
 }
+// Bind the official CDN channels to their exact publishing repositories without changing custom sources
+pub(super) fn catalog_repository<'a>(preferences: &'a UpdatePreferences, channel: &str) -> &'a str {
+    if preferences.catalog_source() == "hosted"
+        && preferences.plugins_repository == "StreamDockManager/Plugins"
+        && effective_catalog_url(preferences).ok().as_deref()
+            == Some("https://cdn.streamdockmanager.app/catalog.json")
+        && channel == "development"
+    {
+        "StreamDockManager/Plugins-dev"
+    } else {
+        &preferences.plugins_repository
+    }
+}
+
 // Require the artifact URL to remain within the catalog origin and directory prefix
 fn bucket_origin(value: &str, source: &str) -> Result<(), String> {
     let url = public_catalog_url(value)?;
@@ -318,8 +314,10 @@ impl PluginCatalog {
     ) -> Result<(), String> {
         let repository_source = format!("https://api.github.com/repos/{repository}/releases");
         let source = source.filter(|url| *url != repository_source);
-        if self.schema_version != 1
-            || self.product != "plugins"
+        if self.schema_version != PLUGIN_CATALOG_SCHEMA {
+            return Err("Unsupported plugin catalog schema; expected version 2".into());
+        }
+        if self.product != "plugins"
             || self.repository != repository
             || !repository_valid(repository)
             || self.channel != channel
@@ -441,23 +439,6 @@ impl PluginCatalog {
                 {
                     return Err("Invalid immutable plugin artifact/inventory".into());
                 }
-                let c = &a.compatibility;
-                if !["verified", "incompatible", "unverified"].contains(&c.status.as_str())
-                    || c.reason.is_empty()
-                    || a.vsd_craft_compatible != (c.status == "verified")
-                {
-                    return Err("Invalid VSD compatibility status".into());
-                }
-                if (c.status == "verified" || c.evidence.is_some())
-                    && c.evidence.as_ref().is_none_or(|e| {
-                        e.plugin_version != p.version
-                            || e.os != a.os
-                            || e.sha256 != a.sha256
-                            || !https(&e.url)
-                    })
-                {
-                    return Err("VSD evidence does not match artifact".into());
-                }
             }
         }
         Ok(())
@@ -470,7 +451,7 @@ impl UpdateService {
         request: &PluginDocumentationRequest,
     ) -> Result<String, String> {
         let store = self.store.lock().unwrap();
-        if request.repository != store.preferences.plugins_repository {
+        if request.repository != catalog_repository(&store.preferences, &request.channel) {
             return Err("Plugin catalog source changed; refresh the catalog".into());
         }
         let catalog = store
@@ -478,7 +459,7 @@ impl UpdateService {
             .get(&request.channel)
             .ok_or("Check plugin catalog first")?;
         catalog.validate_source(
-            &store.preferences.plugins_repository,
+            catalog_repository(&store.preferences, &request.channel),
             &request.channel,
             effective_catalog_url(&store.preferences).ok().as_deref(),
         )?;
@@ -507,6 +488,7 @@ impl UpdateService {
     }
     // Check plugin catalogs
     pub(super) fn check_plugin_catalogs(&self, cancel: &AtomicBool) -> Result<(), String> {
+        let generation = self.store.lock().unwrap().catalog_generation;
         let initial = self.status();
         let prefs = initial.preferences;
         if initial
@@ -519,16 +501,25 @@ impl UpdateService {
         let base = effective_catalog_url(&prefs)?;
         {
             let mut s = self.store.lock().unwrap();
+            if s.catalog_generation != generation {
+                return Err("Plugin source changed during check".into());
+            }
             s.plugins.state = "checking".into();
             s.plugins.error = None;
         }
         let result = (|| {
             let mut catalogs = if prefs.catalog_source() == "repository" {
-                self.repository_plugin_catalogs(&prefs.plugins_repository, cancel)?
+                self.repository_plugin_catalogs(&prefs.plugins_repository, generation, cancel)?
             } else {
                 BTreeMap::new()
             };
-            for channel in ["stable", "development"] {
+            let hosted_client = if prefs.catalog_source() != "repository" {
+                self.repository_catalog_cache.lock().unwrap().clear();
+                Some(client()?)
+            } else {
+                None
+            };
+            for channel in [prefs.plugin_channel.as_str()] {
                 if prefs.catalog_source() == "repository" {
                     continue;
                 }
@@ -544,32 +535,30 @@ impl UpdateService {
                         .map_err(|e| e.to_string())?
                         .to_string()
                 };
-                let response = client()?.get(url).send().map_err(|e| e.to_string())?;
-                if response.status().as_u16() == 429 {
-                    let until = response
-                        .headers()
-                        .get("retry-after")
-                        .and_then(|v| v.to_str().ok())
-                        .and_then(|v| v.parse::<u64>().ok())
-                        .map(|delay| now() + delay)
-                        .unwrap_or(now() + 60);
-                    self.store.lock().unwrap().plugins.retry_after = Some(until);
-                }
-                let response = response.error_for_status().map_err(|e| e.to_string())?;
-                let mut bytes = vec![];
-                response
-                    .take(4 * 1024 * 1024 + 1)
-                    .read_to_end(&mut bytes)
-                    .map_err(|e| e.to_string())?;
-                if bytes.len() > 4 * 1024 * 1024 {
-                    return Err("Plugin catalog exceeds limit".into());
-                }
-                let c: PluginCatalog = serde_json::from_slice(&bytes).map_err(|e| e.to_string())?;
-                c.validate_source(&prefs.plugins_repository, channel, Some(&base))?;
-                catalogs.insert(channel.into(), c);
+                let parsed = self.catalog_fetch(
+                    hosted_client.as_ref().unwrap(),
+                    super::catalog_transport::CatalogRequest {
+                        source: &base,
+                        repository: catalog_repository(&prefs, channel),
+                        channel,
+                        url: &url,
+                        generation,
+                        token: None,
+                        kind: super::catalog_transport::CatalogKind::Hosted,
+                    },
+                    cancel,
+                )?;
+                let super::catalog_transport::ParsedCatalog::Hosted(c) = &*parsed else {
+                    return Err("Catalog type mismatch".into());
+                };
+                catalogs.insert(channel.into(), c.clone());
+            }
+            if cancel.load(Ordering::SeqCst) {
+                return Err("Cancelled".into());
             }
             let mut s = self.store.lock().unwrap();
-            if s.preferences.plugins_repository != prefs.plugins_repository
+            if s.catalog_generation != generation
+                || s.preferences.plugins_repository != prefs.plugins_repository
                 || s.preferences.plugins_catalog_url != prefs.plugins_catalog_url
                 || s.preferences.plugin_channel != prefs.plugin_channel
                 || s.preferences.plugins_catalog_source != prefs.plugins_catalog_source
@@ -582,6 +571,9 @@ impl UpdateService {
         })();
         {
             let mut s = self.store.lock().unwrap();
+            if s.catalog_generation != generation {
+                return Err("Plugin source changed during check".into());
+            }
             s.plugins.state = if result.is_ok() { "current" } else { "error" }.into();
             s.plugins.error = result.as_ref().err().cloned();
             if result.is_ok() {
@@ -615,7 +607,7 @@ impl UpdateService {
             .ok_or("Check plugin catalog first")?;
         let source = effective_catalog_url(&status.preferences).ok();
         c.validate_source(
-            &status.preferences.plugins_repository,
+            catalog_repository(&status.preferences, channel),
             channel,
             source.as_deref(),
         )?;
@@ -640,7 +632,7 @@ impl UpdateService {
     // Reject a reviewed selection if the configured repository or catalog URL changed
     pub(crate) fn selection_current(&self, selection: &CatalogSelection) -> Result<(), String> {
         let store = self.store.lock().unwrap();
-        if store.preferences.plugins_repository != selection.repository
+        if catalog_repository(&store.preferences, &selection.channel) != selection.repository
             || effective_catalog_url(&store.preferences).ok() != selection.catalog_url
         {
             return Err("Plugin catalog source changed; review the current catalog again".into());
@@ -752,15 +744,11 @@ mod tests {
                 .into_iter()
                 .map(|(name, bytes)| (name, hex::encode(Sha256::digest(bytes))))
                 .collect(),
-            vsd_craft_compatible: false,
-            compatibility: VsdCompatibility {
-                status: "unverified".into(),
-                reason: "Pending native qualification".into(),
-                evidence: None,
-            },
         };
         (
             CatalogPlugin {
+                vsd_craft_compatible: true,
+                opendeck_compatible: false,
                 icon: "data:image/svg+xml;base64,PHN2Zy8+".into(),
                 id: id.into(),
                 slug: "fixture".into(),
@@ -782,10 +770,130 @@ mod tests {
             bytes,
         )
     }
+    #[test]
+    // Restrict repository routing to the exact official hosted catalog and its development channel
+    fn official_cdn_repository_mapping_preserves_custom_and_github_sources() {
+        let mut prefs = UpdatePreferences {
+            plugins_catalog_source: Some("hosted".into()),
+            plugins_catalog_url: Some("https://cdn.streamdockmanager.app/catalog.json".into()),
+            plugins_repository: "StreamDockManager/Plugins".into(),
+            ..Default::default()
+        };
+        assert_eq!(
+            catalog_repository(&prefs, "stable"),
+            "StreamDockManager/Plugins"
+        );
+        assert_eq!(
+            catalog_repository(&prefs, "development"),
+            "StreamDockManager/Plugins-dev"
+        );
+        prefs.plugins_catalog_source = Some("repository".into());
+        assert_eq!(
+            catalog_repository(&prefs, "development"),
+            "StreamDockManager/Plugins"
+        );
+        prefs.plugins_catalog_source = Some("hosted".into());
+        for url in [
+            "https://other.example/catalog.json",
+            "https://cdn.streamdockmanager.app/other/catalog.json",
+        ] {
+            prefs.plugins_catalog_url = Some(url.into());
+            assert_eq!(
+                catalog_repository(&prefs, "development"),
+                "StreamDockManager/Plugins"
+            );
+        }
+        prefs.plugins_catalog_url = Some("https://cdn.streamdockmanager.app/catalog.json".into());
+        prefs.plugins_repository = "custom/plugins".into();
+        assert_eq!(catalog_repository(&prefs, "development"), "custom/plugins");
+    }
+
+    #[test]
+    // Keep selected development provenance intact through validation, cached reopen and review
+    fn official_cdn_development_survives_reopen_and_checks_selection_identity() {
+        let root = tempfile::tempdir().unwrap();
+        let service = UpdateService::open(root.path().into()).unwrap();
+        let source = "https://cdn.streamdockmanager.app/catalog.json";
+        let (plugin, _) = fixture("1.0.0");
+        let mut value = catalog(plugin);
+        value.channel = "development".into();
+        value.repository = "StreamDockManager/Plugins-dev".into();
+        for plugin in &mut value.plugins {
+            for asset in &mut plugin.downloads {
+                asset.release_tag = "plugins-development-test".into();
+                asset.url = format!(
+                    "https://cdn.streamdockmanager.app/packages/development/{}/{}/{}/{}",
+                    plugin.id, plugin.version, asset.sha256, asset.filename
+                );
+            }
+        }
+        let mut prefs = service.status().preferences;
+        prefs.plugins_catalog_source = Some("hosted".into());
+        prefs.plugins_catalog_url = Some(source.into());
+        prefs.plugins_repository = "StreamDockManager/Plugins".into();
+        prefs.plugin_channel = "development".into();
+        value
+            .validate_source(
+                catalog_repository(&prefs, "development"),
+                "development",
+                Some(source),
+            )
+            .unwrap();
+        assert!(value
+            .validate_source("StreamDockManager/Plugins", "development", Some(source))
+            .is_err());
+        let selection = CatalogSelection {
+            repository: value.repository.clone(),
+            catalog_url: Some(source.into()),
+            github_asset_url: None,
+            channel: "development".into(),
+            plugin: value.plugins[0].clone(),
+            artifact: value.plugins[0].downloads[0].clone(),
+        };
+        {
+            let mut store = service.store.lock().unwrap();
+            store.preferences = prefs;
+            store.catalog_source_url = Some(source.into());
+            store.catalogs.insert("development".into(), value.clone());
+        }
+        service.selection_current(&selection).unwrap();
+        service.persist().unwrap();
+        let reopened = UpdateService::open_with_storage(
+            root.path().into(),
+            service.downloads.clone(),
+            Arc::new(crate::credentials::OsCredentials),
+            service.storage.clone(),
+        )
+        .unwrap();
+        assert_eq!(reopened.status().available_catalogs.len(), 1);
+        assert_eq!(
+            reopened.status().available_catalogs[0].repository,
+            value.repository
+        );
+        let request = PluginDocumentationRequest {
+            repository: value.repository.clone(),
+            channel: "development".into(),
+            plugin_id: value.plugins[0].id.clone(),
+            plugin_version: "1.0.0".into(),
+            dependency: None,
+        };
+        reopened.plugin_documentation_url(&request).unwrap();
+        let mut wrong = selection.clone();
+        wrong.repository = "StreamDockManager/Plugins".into();
+        assert!(reopened.selection_current(&wrong).is_err());
+        reopened
+            .store
+            .lock()
+            .unwrap()
+            .preferences
+            .plugins_catalog_source = Some("repository".into());
+        assert!(reopened.selection_current(&selection).is_err());
+    }
+
     // Construct a stable-channel catalog containing the test plugin
     fn catalog(plugin: CatalogPlugin) -> PluginCatalog {
         PluginCatalog {
-            schema_version: 1,
+            schema_version: PLUGIN_CATALOG_SCHEMA,
             product: "plugins".into(),
             repository: "StreamDockManager/Plugins".into(),
             channel: "stable".into(),
@@ -837,7 +945,6 @@ mod tests {
         let chosen = select_artifact(&plugin, &host.os, &host.architectures[0], true).unwrap();
         assert!(chosen.filename.ends_with("-unified.zip"));
         assert_eq!(chosen.os, host.os);
-        assert!(!chosen.vsd_craft_compatible);
         assert!(select_artifact(&plugin, "linux", "arm64", true).is_err());
         let mut no_default = plugin.clone();
         no_default.downloads.clear();
@@ -1301,6 +1408,215 @@ mod tests {
             .plugins_catalog_url = Some("https://other.example/catalog.json".into());
         assert!(service.selection_current(&selection).is_err());
     }
+    // Wait for a disposable catalog download job to settle
+    fn wait_for_download(service: &UpdateService, id: &str) -> UpdateJob {
+        let deadline = std::time::Instant::now() + Duration::from_secs(10);
+        loop {
+            let job = service.jobs.lock().unwrap()[id].0.clone();
+            if job.state != "running" {
+                return job;
+            }
+            assert!(
+                std::time::Instant::now() < deadline,
+                "download did not finish"
+            );
+            std::thread::sleep(Duration::from_millis(5));
+        }
+    }
+
+    // Seed the repository catalog with a validated package and publish its test archive
+    fn retained_repository_fixture(service: &UpdateService) -> (String, PathBuf, Vec<u8>) {
+        let (plugin, bytes) = fixture("1.0.0");
+        let mut catalog = catalog(plugin);
+        let plugin = &mut catalog.plugins[0];
+        let artifact = &mut plugin.downloads[0];
+        artifact.url = format!(
+            "https://github.com/{}/releases/download/{}/{}",
+            catalog.repository, artifact.release_tag, artifact.filename
+        );
+        let path = service
+            .root
+            .join("downloads/plugins")
+            .join(&artifact.sha256)
+            .join(&artifact.filename);
+        std::fs::create_dir_all(path.parent().unwrap()).unwrap();
+        std::fs::write(&path, &bytes).unwrap();
+        service.record_cached_download(&path).unwrap();
+        let id = plugin.id.clone();
+        let mut store = service.store.lock().unwrap();
+        store.preferences.plugins_catalog_source = Some("repository".into());
+        store.preferences.plugins_repository = catalog.repository.clone();
+        store.catalogs.insert("stable".into(), catalog);
+        (id, path, bytes)
+    }
+
+    #[test]
+    // Verify that only a matching repository archive avoids the credential and network path
+    fn repository_package_cache_hit_precedes_credentials_but_bad_bytes_fall_back() {
+        use crate::credentials::{CredentialProvider, CredentialState};
+        #[derive(Default)]
+        struct LockedCredentials(std::sync::atomic::AtomicUsize);
+        impl CredentialProvider for LockedCredentials {
+            fn read(&self, _: &str) -> Result<String, CredentialState> {
+                self.0.fetch_add(1, Ordering::SeqCst);
+                Err(CredentialState::Locked)
+            }
+            fn write(&self, _: &str, _: &str) -> Result<(), CredentialState> {
+                Err(CredentialState::Locked)
+            }
+            fn delete(&self, _: &str) -> Result<(), CredentialState> {
+                Err(CredentialState::Locked)
+            }
+        }
+
+        let root = tempfile::tempdir().unwrap();
+        let updates = root.path().join("updates");
+        let downloads = Arc::new(
+            stream_dock_manager_downloads::DownloadCache::open(updates.join("partials")).unwrap(),
+        );
+        let credentials = Arc::new(LockedCredentials::default());
+        let service =
+            UpdateService::open_with_credential_provider(updates, downloads, credentials.clone())
+                .unwrap();
+        let (plugin, path, bytes) = retained_repository_fixture(&service);
+        {
+            let mut store = service.store.lock().unwrap();
+            let repository = store.preferences.plugins_repository.clone();
+            store.github_credential_repositories.insert(repository);
+        }
+        let job = service.download_plugin(&plugin, "stable").unwrap();
+        let job_state = wait_for_download(&service, &job);
+        assert_eq!(job_state.state, "complete", "{:?}", job_state.error);
+        assert_eq!(job_state.download_phase, Some(DownloadPhase::UsingCache));
+        assert_eq!(
+            (job_state.completed, job_state.total),
+            (bytes.len() as u64, bytes.len() as u64)
+        );
+        assert_eq!(service.completed_download(&job).unwrap(), path);
+        assert_eq!(credentials.0.load(Ordering::SeqCst), 0);
+        assert!(service
+            .downloaded_selection(&job)
+            .unwrap()
+            .github_asset_url
+            .is_none());
+
+        // Wrong bytes with the same size must not pass the SHA-256 check
+        let mut bad = bytes;
+        bad[0] ^= 0xff;
+        std::fs::write(&path, &bad).unwrap();
+        let job = service.download_plugin(&plugin, "stable").unwrap();
+        let job_state = wait_for_download(&service, &job);
+        assert_eq!(job_state.state, "failed");
+        assert_eq!(
+            job_state.download_phase,
+            Some(DownloadPhase::ResolvingSource)
+        );
+        assert!(job_state
+            .error
+            .unwrap()
+            .contains("credential store is locked"));
+        assert_eq!(credentials.0.load(Ordering::SeqCst), 1);
+        assert!(service.completed_download(&job).is_err());
+
+        std::fs::remove_file(&path).unwrap();
+        let job = service.download_plugin(&plugin, "stable").unwrap();
+        let job_state = wait_for_download(&service, &job);
+        assert_eq!(job_state.state, "failed");
+        assert_eq!(
+            job_state.download_phase,
+            Some(DownloadPhase::ResolvingSource)
+        );
+        assert!(job_state
+            .error
+            .unwrap()
+            .contains("credential store is locked"));
+        assert_eq!(credentials.0.load(Ordering::SeqCst), 2);
+
+        #[cfg(unix)]
+        {
+            bad[0] ^= 0xff;
+            let external = root.path().join("external.zip");
+            std::fs::write(&external, bad).unwrap();
+            std::os::unix::fs::symlink(external, &path).unwrap();
+            let job = service.download_plugin(&plugin, "stable").unwrap();
+            let job_state = wait_for_download(&service, &job);
+            assert_eq!(job_state.state, "failed");
+            assert_eq!(job_state.download_phase, Some(DownloadPhase::CheckingCache));
+            assert!(job_state.error.unwrap().contains("not a regular file"));
+            assert_eq!(credentials.0.load(Ordering::SeqCst), 2);
+        }
+    }
+
+    #[test]
+    #[ignore = "Requires a disposable loopback host"]
+    // Keep the verified archive through review cancellation and uninstall
+    fn cancel_and_uninstall_retain_verified_catalog_package() {
+        let root = tempfile::tempdir().unwrap();
+        let runtime = crate::Runtime::build(root.path().into(), false).unwrap();
+        let (plugin, path, bytes) = retained_repository_fixture(&runtime.updates);
+        let review_cached = || {
+            let job = runtime.updates.download_plugin(&plugin, "stable").unwrap();
+            let finished = wait_for_download(&runtime.updates, &job);
+            assert_eq!(finished.state, "complete", "{:?}", finished.error);
+            assert_eq!(finished.download_phase, Some(DownloadPhase::UsingCache));
+            assert_eq!(runtime.updates.completed_download(&job).unwrap(), path);
+            assert!(runtime
+                .updates
+                .downloaded_selection(&job)
+                .unwrap()
+                .github_asset_url
+                .is_none());
+            let review = runtime.prepare_catalog_download(&job).unwrap();
+            assert_eq!(review.package.id, plugin);
+            assert!(review.trusted && review.installed_version.is_none());
+            review
+        };
+        let cancelled = review_cached();
+        runtime.cancel_plugin_package(&cancelled.id);
+        assert_eq!(std::fs::read(&path).unwrap(), bytes);
+        assert!(!runtime
+            .plugins
+            .lock()
+            .unwrap()
+            .list()
+            .iter()
+            .any(|entry| entry.id == plugin));
+        assert_eq!(
+            runtime
+                .commit_plugin_package(&cancelled.id, false, false)
+                .err()
+                .as_deref(),
+            Some("Package review expired")
+        );
+        let install = || {
+            let review = review_cached();
+            assert_ne!(review.id, cancelled.id);
+            runtime
+                .commit_plugin_package(&review.id, false, false)
+                .unwrap();
+            assert!(runtime
+                .plugins
+                .lock()
+                .unwrap()
+                .list()
+                .iter()
+                .any(|entry| entry.id == plugin));
+        };
+
+        install();
+        runtime.delete_plugin(&plugin, false).unwrap();
+        assert_eq!(std::fs::read(&path).unwrap(), bytes);
+        assert!(!runtime
+            .plugins
+            .lock()
+            .unwrap()
+            .list()
+            .iter()
+            .any(|entry| entry.id == plugin));
+        install();
+        runtime.shutdown();
+    }
+
     #[test]
     // Verify that repository catalog accepts only exact release assets and ignores opendeck
     fn repository_catalog_accepts_only_exact_release_assets_and_ignores_opendeck() {
@@ -1365,7 +1681,6 @@ mod tests {
         let parsed: PluginCatalog = serde_json::from_value(json).unwrap();
         parsed.validate(&repository, "stable").unwrap();
         assert_eq!(parsed.plugins[0].downloads.len(), 1);
-        assert!(!parsed.plugins[0].downloads[0].vsd_craft_compatible);
         // Catalogs from third-party GitHub repositories use the same contract;
         // accepting one repository must never authorize a different repository
         let mut third_party = valid.clone();
@@ -1385,8 +1700,26 @@ mod tests {
     }
 
     #[test]
-    // Verify that initial contract rejects evidence origin and inventory mismatches
-    fn initial_contract_rejects_evidence_origin_and_inventory_mismatches() {
+    fn host_compatibility_flags_round_trip_without_evidence() {
+        let (plugin, _) = fixture("1.0.0");
+        let mut value = serde_json::to_value(catalog(plugin)).unwrap();
+        let row = &mut value["plugins"][0];
+        assert_eq!(row["vsd_craft_compatible"], true);
+        row["vsd_craft_compatible"] = json!(true);
+        row["opendeck_compatible"] = json!(false);
+        let catalog: PluginCatalog = serde_json::from_value(value.clone()).unwrap();
+        catalog
+            .validate_source(
+                &catalog.repository,
+                "stable",
+                Some("https://catalog.example/catalog.json"),
+            )
+            .unwrap();
+        assert_eq!(serde_json::to_value(catalog).unwrap(), value);
+    }
+
+    #[test]
+    fn catalog_rejects_artifact_origin_and_inventory_mismatches() {
         let (plugin, _) = fixture("1.0.0");
         let valid = catalog(plugin);
         valid
@@ -1419,16 +1752,6 @@ mod tests {
             )
             .is_err());
         let mut wrong = valid.clone();
-        wrong.plugins[0].downloads[0].compatibility.status = "verified".into();
-        wrong.plugins[0].downloads[0].vsd_craft_compatible = true;
-        assert!(wrong
-            .validate_source(
-                &valid.repository,
-                "stable",
-                Some("https://catalog.example/catalog.json")
-            )
-            .is_err());
-        let mut wrong = valid.clone();
         wrong.plugins[0].downloads[0]
             .files
             .insert("../escape".into(), "a".repeat(64));
@@ -1441,54 +1764,72 @@ mod tests {
             .is_err());
     }
     #[test]
-    // Verify that supplied qualification evidence is bound to every status
-    fn supplied_qualification_evidence_is_bound_to_every_status() {
+    fn opening_updates_drops_only_noncurrent_cached_catalog_schemas() {
+        let root = tempfile::tempdir().unwrap();
+        let service = UpdateService::open(root.path().into()).unwrap();
         let (plugin, _) = fixture("1.0.0");
-        let original = catalog(plugin);
-        for status in ["verified", "incompatible", "unverified"] {
-            let mut valid = original.clone();
-            let plugin = &mut valid.plugins[0];
-            let artifact = &mut plugin.downloads[0];
-            artifact.compatibility.status = status.into();
-            artifact.vsd_craft_compatible = status == "verified";
-            artifact.compatibility.evidence = Some(QualificationEvidence {
-                plugin_version: plugin.version.clone(),
-                os: artifact.os.clone(),
-                sha256: artifact.sha256.clone(),
-                url: "https://example.com/qualification".into(),
-            });
-            valid
-                .validate_source(
-                    &valid.repository,
-                    "stable",
-                    Some("https://catalog.example/catalog.json"),
-                )
-                .unwrap();
-            for field in ["version", "platform", "hash", "url"] {
-                let mut wrong = valid.clone();
-                let evidence = wrong.plugins[0].downloads[0]
-                    .compatibility
-                    .evidence
-                    .as_mut()
-                    .unwrap();
-                match field {
-                    "version" => evidence.plugin_version = "2.0.0".into(),
-                    "platform" => evidence.os = "another-platform".into(),
-                    "hash" => evidence.sha256 = "0".repeat(64),
-                    "url" => evidence.url = "https://".into(),
-                    _ => unreachable!(),
-                }
-                assert!(
-                    wrong
-                        .validate_source(
-                            &wrong.repository,
-                            "stable",
-                            Some("https://catalog.example/catalog.json")
-                        )
-                        .is_err(),
-                    "accepted mismatched {field} evidence for {status}"
-                );
-            }
+        let current = catalog(plugin);
+        let mut obsolete = serde_json::to_value(&current).unwrap();
+        obsolete["schema_version"] = json!(1);
+        obsolete["plugins"][0]
+            .as_object_mut()
+            .unwrap()
+            .remove("vsd_craft_compatible");
+        let mut store = serde_json::to_value(&*service.store.lock().unwrap()).unwrap();
+        let source = "https://catalog.example/catalog.json";
+        store["catalog_source_url"] = json!(source);
+        store["preferences"]["plugins_catalog_url"] = json!(source);
+        store["preferences"]["plugins_catalog_source"] = json!("hosted");
+        store["preferences"]["plugin_channel"] = json!("development");
+        store["preferences"]["automatic_checks"] = json!(false);
+        store["plugins"]["state"] = json!("current");
+        store["plugins"]["last_success"] = json!(now());
+        store["catalogs"] = json!({"development": obsolete, "stable": current});
+        crate::profile_database::LocalPreference::Updates
+            .record()
+            .write(&service.storage, &store)
+            .unwrap();
+        let reopened = UpdateService::open_with_storage(
+            root.path().into(),
+            service.downloads.clone(),
+            Arc::new(crate::credentials::OsCredentials),
+            service.storage.clone(),
+        )
+        .unwrap();
+        let status = reopened.status();
+        assert_eq!(status.preferences.plugin_channel, "development");
+        assert_eq!(
+            status.preferences.plugins_catalog_url.as_deref(),
+            Some(source)
+        );
+        assert_eq!(status.preferences.catalog_source(), "hosted");
+        assert!(!status.preferences.automatic_checks);
+        assert_eq!(status.available_catalogs.len(), 1);
+        assert_eq!(status.available_catalogs[0].channel, "stable");
+        assert_eq!(status.plugins.state, "unavailable");
+        assert_eq!(status.plugins.last_success, None);
+        store["catalogs"]["development"]["schema_version"] = json!(PLUGIN_CATALOG_SCHEMA + 1);
+        let parsed = serde_json::from_value::<Store>(store.clone()).unwrap();
+        assert_eq!(parsed.catalogs.keys().collect::<Vec<_>>(), vec!["stable"]);
+        assert_eq!(parsed.preferences.plugin_channel, "development");
+        store["catalogs"]["development"]["schema_version"] = json!(PLUGIN_CATALOG_SCHEMA);
+        assert!(serde_json::from_value::<Store>(store).is_err());
+    }
+
+    #[test]
+    fn plugin_catalog_requires_schema_two_and_both_host_flags() {
+        let (plugin, _) = fixture("1.0.0");
+        let mut document = catalog(plugin);
+        document.schema_version = 1;
+        assert!(document
+            .validate(&document.repository, "stable")
+            .unwrap_err()
+            .contains("schema"));
+        document.schema_version = PLUGIN_CATALOG_SCHEMA;
+        for flag in ["vsd_craft_compatible", "opendeck_compatible"] {
+            let mut json = serde_json::to_value(&document).unwrap();
+            json["plugins"][0].as_object_mut().unwrap().remove(flag);
+            assert!(serde_json::from_value::<PluginCatalog>(json).is_err());
         }
     }
     #[test]
@@ -1630,6 +1971,80 @@ mod tests {
         (plugin, id)
     }
     #[test]
+    #[ignore = "Requires a disposable loopback host"]
+    // Verify that catalog reinstalls and downgrades require explicit confirmation for the reviewed installation
+    fn catalog_force_reinstall_requires_explicit_review() {
+        let root = tempfile::tempdir().unwrap();
+        let runtime = crate::Runtime::build(root.path().into(), false).unwrap();
+        let (plugin, job) = cache_fixture(&runtime, "1.0.0");
+        let first = runtime.prepare_catalog_download(&job).unwrap();
+        assert!(!first.force_reinstall_available);
+        runtime
+            .commit_plugin_package(&first.id, false, false)
+            .unwrap();
+
+        let installed_icon = runtime
+            .plugins
+            .lock()
+            .unwrap()
+            .installation_root()
+            .join(&plugin.id)
+            .join("icon.svg");
+        let original = std::fs::read(&installed_icon).unwrap();
+        std::fs::write(&installed_icon, b"old installed bytes").unwrap();
+        let same = runtime.prepare_catalog_download(&job).unwrap();
+        assert!(same.compatible && same.force_reinstall_available);
+        assert_eq!(same.version_change.as_deref(), Some("same_version"));
+        assert_eq!(
+            runtime
+                .commit_plugin_package(&same.id, false, true)
+                .err()
+                .as_deref(),
+            Some("Already installed or downgrade blocked"),
+        );
+        runtime
+            .commit_reviewed_plugin_package(&same.id, false, false, None, &[], true)
+            .unwrap();
+        assert_eq!(std::fs::read(&installed_icon).unwrap(), original);
+
+        let stale = runtime.prepare_catalog_download(&job).unwrap();
+        let (_, newer_job) = cache_fixture(&runtime, "1.1.0");
+        let newer = runtime.prepare_catalog_download(&newer_job).unwrap();
+        assert!(!newer.force_reinstall_available);
+        runtime
+            .commit_plugin_package(&newer.id, false, false)
+            .unwrap();
+        assert_eq!(
+            runtime
+                .commit_reviewed_plugin_package(&stale.id, false, false, None, &[], true)
+                .err()
+                .as_deref(),
+            Some("Installed package changed; review this package again"),
+        );
+        runtime.cancel_plugin_package(&stale.id);
+
+        let older = runtime.prepare_catalog_download(&job).unwrap();
+        assert!(older.force_reinstall_available);
+        assert_eq!(older.version_change.as_deref(), Some("downgrade"));
+        assert!(runtime
+            .commit_plugin_package(&older.id, false, false)
+            .is_err());
+        let installed = runtime
+            .commit_reviewed_plugin_package(&older.id, false, false, None, &[], true)
+            .unwrap();
+        assert_eq!(
+            installed
+                .plugins
+                .iter()
+                .find(|p| p.id == plugin.id)
+                .unwrap()
+                .version,
+            "1.0.0"
+        );
+        runtime.shutdown();
+    }
+
+    #[test]
     #[ignore = "Requires a disposable loopback host; metadata and local policy only"]
     // Verify that source bound holds and skips suppress suggestions but leave explicit install available
     fn source_bound_holds_and_skips_suppress_suggestions_but_leave_explicit_install_available() {
@@ -1669,13 +2084,17 @@ mod tests {
         let current = runtime.plugin_update_policy(&plugin.id).unwrap();
         assert_ne!(current.installation, policy.installation);
         assert!(!current.held && current.skipped_versions.is_empty());
-        let before =
-            std::fs::read(runtime.profiles.root.join("plugin-update-policies.json")).unwrap();
+        let stored = || {
+            runtime
+                .profiles
+                .read_preference::<serde_json::Value>(
+                    crate::profile_database::LocalPreference::PluginUpdatePolicies,
+                )
+                .unwrap()
+        };
+        let before = stored();
         assert!(runtime.save_plugin_update_policy(policy).is_err());
-        assert_eq!(
-            std::fs::read(runtime.profiles.root.join("plugin-update-policies.json")).unwrap(),
-            before
-        );
+        assert_eq!(stored(), before);
         let (next, _) = cache_fixture(&runtime, "1.2.0");
         runtime
             .updates
@@ -1685,17 +2104,20 @@ mod tests {
             .catalogs
             .insert("stable".into(), catalog(next));
         assert_eq!(runtime.update_status().plugin_updates.len(), 1);
-        std::fs::write(
-            runtime.profiles.root.join("plugin-update-policies.json"),
-            b"corrupt original",
-        )
-        .unwrap();
+        let corrupt = json!("corrupt original");
+        runtime
+            .profiles
+            .storage
+            .write_json(
+                stream_dock_manager_storage::Domain::LocalPreferences,
+                crate::profile_database::LocalPreference::PluginUpdatePolicies.key(),
+                &corrupt,
+                1024,
+            )
+            .unwrap();
         assert!(runtime.update_status().plugin_policy_error.is_some());
         assert!(runtime.save_plugin_update_policy(current).is_err());
-        assert_eq!(
-            std::fs::read(runtime.profiles.root.join("plugin-update-policies.json")).unwrap(),
-            b"corrupt original"
-        );
+        assert_eq!(stored(), Some(corrupt));
         runtime.shutdown();
     }
     #[test]

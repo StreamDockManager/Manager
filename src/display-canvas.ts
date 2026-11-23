@@ -15,6 +15,8 @@ export function layerStyle(id: string, kind = 'text'): ElementStyle {
         rect: [10, 35, 80, 25],
         visible: true,
         font: 'sans',
+        font_weight: 400,
+        font_italic: false,
         size: 18,
         foreground: '#ffffff',
         align: 'center',

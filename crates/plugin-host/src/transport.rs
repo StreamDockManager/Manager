@@ -66,8 +66,21 @@ pub(super) struct Outgoing {
     pub wake: Option<Arc<Waker>>,
     pub theme: Option<Value>,
     pub display_theme: Option<Value>,
+    pub network_demand: bool,
 }
 impl Outgoing {
+    pub(super) fn request_network_sample(&mut self) {
+        if self.network_demand
+            && !self
+                .messages
+                .iter()
+                .any(|m| m.value["event"] == "requestNetworkPayload")
+        {
+            // A full socket queue can retry at the next monitor tick.
+            let _ = self.push_batch(vec![json!({"event":"requestNetworkPayload"})]);
+        }
+    }
+
     // Notify for the current operation
     fn notify(&self) {
         if let Some(wake) = &self.wake {
@@ -255,6 +268,10 @@ pub(super) fn register(hub: &mut Hub, message: &Value, wake: Arc<Waker>) -> Opti
         if !hub.sessions.connected.insert(token.into()) {
             return None;
         }
+        hub.notify_vendor_demand();
+        if let Some(wake) = &hub.wake {
+            wake();
+        }
         if let Some(logs) = &hub.logs {
             logs.record(
                 &owner,
@@ -272,6 +289,11 @@ pub(super) fn register(hub: &mut Hub, message: &Value, wake: Arc<Waker>) -> Opti
         token.into(),
         Arc::new(std::sync::atomic::AtomicBool::new(true)),
     );
+    if !inspector && hub.permission_sessions.contains_key(token) {
+        if let Some(lease) = hub.sessions.storage_sessions.get(token) {
+            hub.workflow.register_socket(lease, &wake);
+        }
+    }
     let key = if inspector {
         format!("pi:{token}")
     } else {
@@ -281,6 +303,7 @@ pub(super) fn register(hub: &mut Hub, message: &Value, wake: Arc<Waker>) -> Opti
     queue.wake = Some(wake);
     queue.theme = None;
     queue.display_theme = None;
+    queue.network_demand = !inspector && message["payload"]["network_demand"] == true;
     if let Some(context) = &context {
         let settings = hub
             .context_state
@@ -311,6 +334,13 @@ pub(super) fn register(hub: &mut Hub, message: &Value, wake: Arc<Waker>) -> Opti
                 .push_front(
                     json!({"event":"didReceiveGlobalSettings","payload":{"settings":settings}}),
                 );
+        }
+        if let Some(event) = hub.configured_actions_event(&owner) {
+            hub.sessions
+                .queues
+                .entry(owner.clone())
+                .or_default()
+                .push_front(event);
         }
         hub.queue_log_preferences(&owner);
     }

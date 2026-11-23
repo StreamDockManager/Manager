@@ -128,7 +128,16 @@ export function registerInstalledPackageExport() {
                 if (this.review !== reviewId) this.release(receipt);
                 else {
                     this.receipt = receipt;
-                    this.$nextTick(() => (this.$refs.save as HTMLButtonElement)?.focus());
+                    // x-show reveals the action on a frame after Alpine flushes its effects.
+                    this.$nextTick(() =>
+                        requestAnimationFrame(() => {
+                            if (
+                                this.receipt === receipt &&
+                                (this.$refs.dialog as HTMLDialogElement).open
+                            )
+                                (this.$refs.save as HTMLButtonElement).focus();
+                        }),
+                    );
                 }
             } catch (error) {
                 this.error = String(error);

@@ -85,6 +85,118 @@ export interface SdActionLibraryElement extends HTMLElement {
     addEventListener<K extends keyof SdActionLibraryElementEventMap>(type: K, listener: (this: SdActionLibraryElement, event: SdActionLibraryElementEventMap[K]) => void, options?: boolean | AddEventListenerOptions): void;
 }
 
+export interface SdBenchmarkProgressElementProps extends ACLProps {
+
+}
+
+export interface SdBenchmarkProgressElementEventMap {
+
+}
+
+export interface SdBenchmarkProgressElement extends HTMLElement {
+    $props: SdBenchmarkProgressElementProps;
+
+    addEventListener<K extends keyof SdBenchmarkProgressElementEventMap>(type: K, listener: (this: SdBenchmarkProgressElement, event: SdBenchmarkProgressElementEventMap[K]) => void, options?: boolean | AddEventListenerOptions): void;
+}
+
+export interface SdPluginProfileSuggestionsElementProps extends ACLProps {
+
+}
+
+export interface SdPluginProfileSuggestionsElementEventMap {
+
+}
+
+export interface SdPluginProfileSuggestionsElement extends HTMLElement {
+    $props: SdPluginProfileSuggestionsElementProps;
+
+    addEventListener<K extends keyof SdPluginProfileSuggestionsElementEventMap>(type: K, listener: (this: SdPluginProfileSuggestionsElement, event: SdPluginProfileSuggestionsElementEventMap[K]) => void, options?: boolean | AddEventListenerOptions): void;
+}
+
+export interface SdProfileArchiveImportElementProps extends ACLProps {
+
+}
+
+export interface SdProfileArchiveImportElementEventMap {
+
+}
+
+export interface SdProfileArchiveImportElement extends HTMLElement {
+    $props: SdProfileArchiveImportElementProps;
+
+    addEventListener<K extends keyof SdProfileArchiveImportElementEventMap>(type: K, listener: (this: SdProfileArchiveImportElement, event: SdProfileArchiveImportElementEventMap[K]) => void, options?: boolean | AddEventListenerOptions): void;
+}
+
+export interface SdSetupDialogElementProps extends ACLProps {
+
+}
+
+export interface SdSetupDialogElementEventMap {
+
+}
+
+export interface SdSetupDialogElement extends HTMLElement {
+    $props: SdSetupDialogElementProps;
+
+    addEventListener<K extends keyof SdSetupDialogElementEventMap>(type: K, listener: (this: SdSetupDialogElement, event: SdSetupDialogElementEventMap[K]) => void, options?: boolean | AddEventListenerOptions): void;
+}
+
+export interface SdFeatureDialogsElementProps extends ACLProps {
+
+}
+
+export interface SdFeatureDialogsElementEventMap {
+
+}
+
+export interface SdFeatureDialogsElement extends HTMLElement {
+    $props: SdFeatureDialogsElementProps;
+
+    addEventListener<K extends keyof SdFeatureDialogsElementEventMap>(type: K, listener: (this: SdFeatureDialogsElement, event: SdFeatureDialogsElementEventMap[K]) => void, options?: boolean | AddEventListenerOptions): void;
+}
+
+export interface SdPluginLogsElementProps extends ACLProps {
+
+}
+
+export interface SdPluginLogsElementEventMap {
+
+}
+
+export interface SdPluginLogsElement extends HTMLElement {
+    $props: SdPluginLogsElementProps;
+
+    addEventListener<K extends keyof SdPluginLogsElementEventMap>(type: K, listener: (this: SdPluginLogsElement, event: SdPluginLogsElementEventMap[K]) => void, options?: boolean | AddEventListenerOptions): void;
+}
+
+export interface SdToastsElementProps extends ACLProps {
+
+}
+
+export interface SdToastsElementEventMap {
+
+}
+
+export interface SdToastsElement extends HTMLElement {
+    $props: SdToastsElementProps;
+
+    addEventListener<K extends keyof SdToastsElementEventMap>(type: K, listener: (this: SdToastsElement, event: SdToastsElementEventMap[K]) => void, options?: boolean | AddEventListenerOptions): void;
+}
+
+export interface SdAppShellElementProps extends ACLProps {
+
+}
+
+export interface SdAppShellElementEventMap {
+
+}
+
+export interface SdAppShellElement extends HTMLElement {
+    $props: SdAppShellElementProps;
+
+    addEventListener<K extends keyof SdAppShellElementEventMap>(type: K, listener: (this: SdAppShellElement, event: SdAppShellElementEventMap[K]) => void, options?: boolean | AddEventListenerOptions): void;
+}
+
 export interface SdApplicationDataElementProps extends ACLProps {
 
 }
@@ -97,6 +209,20 @@ export interface SdApplicationDataElement extends HTMLElement {
     $props: SdApplicationDataElementProps;
 
     addEventListener<K extends keyof SdApplicationDataElementEventMap>(type: K, listener: (this: SdApplicationDataElement, event: SdApplicationDataElementEventMap[K]) => void, options?: boolean | AddEventListenerOptions): void;
+}
+
+export interface SdAutomaticProfilesElementProps extends ACLProps {
+
+}
+
+export interface SdAutomaticProfilesElementEventMap {
+
+}
+
+export interface SdAutomaticProfilesElement extends HTMLElement {
+    $props: SdAutomaticProfilesElementProps;
+
+    addEventListener<K extends keyof SdAutomaticProfilesElementEventMap>(type: K, listener: (this: SdAutomaticProfilesElement, event: SdAutomaticProfilesElementEventMap[K]) => void, options?: boolean | AddEventListenerOptions): void;
 }
 
 export interface SdMediaOptionsElementProps extends ACLProps {
@@ -131,326 +257,18 @@ export interface SdBackgroundEditorElement extends HTMLElement {
     addEventListener<K extends keyof SdBackgroundEditorElementEventMap>(type: K, listener: (this: SdBackgroundEditorElement, event: SdBackgroundEditorElementEventMap[K]) => void, options?: boolean | AddEventListenerOptions): void;
 }
 
-export interface SdBenchmarkProgressElementProps extends ACLProps {
+export interface SdDeviceOutputDialogElementProps extends ACLProps {
 
 }
 
-export interface SdBenchmarkProgressElementEventMap {
+export interface SdDeviceOutputDialogElementEventMap {
 
 }
 
-export interface SdBenchmarkProgressElement extends HTMLElement {
-    $props: SdBenchmarkProgressElementProps;
+export interface SdDeviceOutputDialogElement extends HTMLElement {
+    $props: SdDeviceOutputDialogElementProps;
 
-    addEventListener<K extends keyof SdBenchmarkProgressElementEventMap>(type: K, listener: (this: SdBenchmarkProgressElement, event: SdBenchmarkProgressElementEventMap[K]) => void, options?: boolean | AddEventListenerOptions): void;
-}
-
-export interface SdExportReviewElementProps extends ACLProps {
-
-}
-
-export interface SdExportReviewElementEventMap {
-
-}
-
-export interface SdExportReviewElement extends HTMLElement {
-    $props: SdExportReviewElementProps;
-
-    addEventListener<K extends keyof SdExportReviewElementEventMap>(type: K, listener: (this: SdExportReviewElement, event: SdExportReviewElementEventMap[K]) => void, options?: boolean | AddEventListenerOptions): void;
-}
-
-export interface SdPluginCatalogDialogElementProps extends ACLProps {
-
-}
-
-export interface SdPluginCatalogDialogElementEventMap {
-
-}
-
-export interface SdPluginCatalogDialogElement extends HTMLElement {
-    $props: SdPluginCatalogDialogElementProps;
-
-    addEventListener<K extends keyof SdPluginCatalogDialogElementEventMap>(type: K, listener: (this: SdPluginCatalogDialogElement, event: SdPluginCatalogDialogElementEventMap[K]) => void, options?: boolean | AddEventListenerOptions): void;
-}
-
-export interface SdPluginFolderImportElementProps extends ACLProps {
-
-}
-
-export interface SdPluginFolderImportElementEventMap {
-
-}
-
-export interface SdPluginFolderImportElement extends HTMLElement {
-    $props: SdPluginFolderImportElementProps;
-
-    addEventListener<K extends keyof SdPluginFolderImportElementEventMap>(type: K, listener: (this: SdPluginFolderImportElement, event: SdPluginFolderImportElementEventMap[K]) => void, options?: boolean | AddEventListenerOptions): void;
-}
-
-export interface SdPluginPreflightElementProps extends ACLProps {
-
-}
-
-export interface SdPluginPreflightElementEventMap {
-
-}
-
-export interface SdPluginPreflightElement extends HTMLElement {
-    $props: SdPluginPreflightElementProps;
-
-    addEventListener<K extends keyof SdPluginPreflightElementEventMap>(type: K, listener: (this: SdPluginPreflightElement, event: SdPluginPreflightElementEventMap[K]) => void, options?: boolean | AddEventListenerOptions): void;
-}
-
-export interface SdPluginProfileSuggestionsElementProps extends ACLProps {
-
-}
-
-export interface SdPluginProfileSuggestionsElementEventMap {
-
-}
-
-export interface SdPluginProfileSuggestionsElement extends HTMLElement {
-    $props: SdPluginProfileSuggestionsElementProps;
-
-    addEventListener<K extends keyof SdPluginProfileSuggestionsElementEventMap>(type: K, listener: (this: SdPluginProfileSuggestionsElement, event: SdPluginProfileSuggestionsElementEventMap[K]) => void, options?: boolean | AddEventListenerOptions): void;
-}
-
-export interface SdProfileArchiveImportElementProps extends ACLProps {
-
-}
-
-export interface SdProfileArchiveImportElementEventMap {
-
-}
-
-export interface SdProfileArchiveImportElement extends HTMLElement {
-    $props: SdProfileArchiveImportElementProps;
-
-    addEventListener<K extends keyof SdProfileArchiveImportElementEventMap>(type: K, listener: (this: SdProfileArchiveImportElement, event: SdProfileArchiveImportElementEventMap[K]) => void, options?: boolean | AddEventListenerOptions): void;
-}
-
-export interface SdProfileSharingDialogElementProps extends ACLProps {
-
-}
-
-export interface SdProfileSharingDialogElementEventMap {
-
-}
-
-export interface SdProfileSharingDialogElement extends HTMLElement {
-    $props: SdProfileSharingDialogElementProps;
-
-    addEventListener<K extends keyof SdProfileSharingDialogElementEventMap>(type: K, listener: (this: SdProfileSharingDialogElement, event: SdProfileSharingDialogElementEventMap[K]) => void, options?: boolean | AddEventListenerOptions): void;
-}
-
-export interface SdRuntimeDialogElementProps extends ACLProps {
-
-}
-
-export interface SdRuntimeDialogElementEventMap {
-
-}
-
-export interface SdRuntimeDialogElement extends HTMLElement {
-    $props: SdRuntimeDialogElementProps;
-
-    addEventListener<K extends keyof SdRuntimeDialogElementEventMap>(type: K, listener: (this: SdRuntimeDialogElement, event: SdRuntimeDialogElementEventMap[K]) => void, options?: boolean | AddEventListenerOptions): void;
-}
-
-export interface SdSetupDialogElementProps extends ACLProps {
-
-}
-
-export interface SdSetupDialogElementEventMap {
-
-}
-
-export interface SdSetupDialogElement extends HTMLElement {
-    $props: SdSetupDialogElementProps;
-
-    addEventListener<K extends keyof SdSetupDialogElementEventMap>(type: K, listener: (this: SdSetupDialogElement, event: SdSetupDialogElementEventMap[K]) => void, options?: boolean | AddEventListenerOptions): void;
-}
-
-export interface SdFeatureDialogsElementProps extends ACLProps {
-
-}
-
-export interface SdFeatureDialogsElementEventMap {
-
-}
-
-export interface SdFeatureDialogsElement extends HTMLElement {
-    $props: SdFeatureDialogsElementProps;
-
-    addEventListener<K extends keyof SdFeatureDialogsElementEventMap>(type: K, listener: (this: SdFeatureDialogsElement, event: SdFeatureDialogsElementEventMap[K]) => void, options?: boolean | AddEventListenerOptions): void;
-}
-
-export interface SdKeyboardMacroEditorElementProps extends ACLProps {
-
-}
-
-export interface SdKeyboardMacroEditorElementEventMap {
-
-}
-
-export interface SdKeyboardMacroEditorElement extends HTMLElement {
-    $props: SdKeyboardMacroEditorElementProps;
-
-    addEventListener<K extends keyof SdKeyboardMacroEditorElementEventMap>(type: K, listener: (this: SdKeyboardMacroEditorElement, event: SdKeyboardMacroEditorElementEventMap[K]) => void, options?: boolean | AddEventListenerOptions): void;
-}
-
-export interface SdLibraryOrganizationElementProps extends ACLProps {
-
-}
-
-export interface SdLibraryOrganizationElementEventMap {
-
-}
-
-export interface SdLibraryOrganizationElement extends HTMLElement {
-    $props: SdLibraryOrganizationElementProps;
-
-    addEventListener<K extends keyof SdLibraryOrganizationElementEventMap>(type: K, listener: (this: SdLibraryOrganizationElement, event: SdLibraryOrganizationElementEventMap[K]) => void, options?: boolean | AddEventListenerOptions): void;
-}
-
-export interface SdMacroSharingElementProps extends ACLProps {
-
-}
-
-export interface SdMacroSharingElementEventMap {
-
-}
-
-export interface SdMacroSharingElement extends HTMLElement {
-    $props: SdMacroSharingElementProps;
-
-    addEventListener<K extends keyof SdMacroSharingElementEventMap>(type: K, listener: (this: SdMacroSharingElement, event: SdMacroSharingElementEventMap[K]) => void, options?: boolean | AddEventListenerOptions): void;
-}
-
-export interface SdMediaLibraryElementProps extends ACLProps {
-
-}
-
-export interface SdMediaLibraryElementEventMap {
-
-}
-
-export interface SdMediaLibraryElement extends HTMLElement {
-    $props: SdMediaLibraryElementProps;
-
-    addEventListener<K extends keyof SdMediaLibraryElementEventMap>(type: K, listener: (this: SdMediaLibraryElement, event: SdMediaLibraryElementEventMap[K]) => void, options?: boolean | AddEventListenerOptions): void;
-}
-
-export interface SdPluginLogsElementProps extends ACLProps {
-
-}
-
-export interface SdPluginLogsElementEventMap {
-
-}
-
-export interface SdPluginLogsElement extends HTMLElement {
-    $props: SdPluginLogsElementProps;
-
-    addEventListener<K extends keyof SdPluginLogsElementEventMap>(type: K, listener: (this: SdPluginLogsElement, event: SdPluginLogsElementEventMap[K]) => void, options?: boolean | AddEventListenerOptions): void;
-}
-
-export interface SdPluginManagementElementProps extends ACLProps {
-
-}
-
-export interface SdPluginManagementElementEventMap {
-
-}
-
-export interface SdPluginManagementElement extends HTMLElement {
-    $props: SdPluginManagementElementProps;
-
-    addEventListener<K extends keyof SdPluginManagementElementEventMap>(type: K, listener: (this: SdPluginManagementElement, event: SdPluginManagementElementEventMap[K]) => void, options?: boolean | AddEventListenerOptions): void;
-}
-
-export interface SdProfileConversionElementProps extends ACLProps {
-
-}
-
-export interface SdProfileConversionElementEventMap {
-
-}
-
-export interface SdProfileConversionElement extends HTMLElement {
-    $props: SdProfileConversionElementProps;
-
-    addEventListener<K extends keyof SdProfileConversionElementEventMap>(type: K, listener: (this: SdProfileConversionElement, event: SdProfileConversionElementEventMap[K]) => void, options?: boolean | AddEventListenerOptions): void;
-}
-
-export interface SdProfileVersionsElementProps extends ACLProps {
-
-}
-
-export interface SdProfileVersionsElementEventMap {
-
-}
-
-export interface SdProfileVersionsElement extends HTMLElement {
-    $props: SdProfileVersionsElementProps;
-
-    addEventListener<K extends keyof SdProfileVersionsElementEventMap>(type: K, listener: (this: SdProfileVersionsElement, event: SdProfileVersionsElementEventMap[K]) => void, options?: boolean | AddEventListenerOptions): void;
-}
-
-export interface SdToastsElementProps extends ACLProps {
-
-}
-
-export interface SdToastsElementEventMap {
-
-}
-
-export interface SdToastsElement extends HTMLElement {
-    $props: SdToastsElementProps;
-
-    addEventListener<K extends keyof SdToastsElementEventMap>(type: K, listener: (this: SdToastsElement, event: SdToastsElementEventMap[K]) => void, options?: boolean | AddEventListenerOptions): void;
-}
-
-export interface SdVideoEditorElementProps extends ACLProps {
-
-}
-
-export interface SdVideoEditorElementEventMap {
-
-}
-
-export interface SdVideoEditorElement extends HTMLElement {
-    $props: SdVideoEditorElementProps;
-
-    addEventListener<K extends keyof SdVideoEditorElementEventMap>(type: K, listener: (this: SdVideoEditorElement, event: SdVideoEditorElementEventMap[K]) => void, options?: boolean | AddEventListenerOptions): void;
-}
-
-export interface SdAppShellElementProps extends ACLProps {
-
-}
-
-export interface SdAppShellElementEventMap {
-
-}
-
-export interface SdAppShellElement extends HTMLElement {
-    $props: SdAppShellElementProps;
-
-    addEventListener<K extends keyof SdAppShellElementEventMap>(type: K, listener: (this: SdAppShellElement, event: SdAppShellElementEventMap[K]) => void, options?: boolean | AddEventListenerOptions): void;
-}
-
-export interface SdAutomaticProfilesElementProps extends ACLProps {
-
-}
-
-export interface SdAutomaticProfilesElementEventMap {
-
-}
-
-export interface SdAutomaticProfilesElement extends HTMLElement {
-    $props: SdAutomaticProfilesElementProps;
-
-    addEventListener<K extends keyof SdAutomaticProfilesElementEventMap>(type: K, listener: (this: SdAutomaticProfilesElement, event: SdAutomaticProfilesElementEventMap[K]) => void, options?: boolean | AddEventListenerOptions): void;
+    addEventListener<K extends keyof SdDeviceOutputDialogElementEventMap>(type: K, listener: (this: SdDeviceOutputDialogElement, event: SdDeviceOutputDialogElementEventMap[K]) => void, options?: boolean | AddEventListenerOptions): void;
 }
 
 export interface SdDevicePreviewElementProps extends ACLProps {
@@ -537,6 +355,48 @@ export interface SdEditorElement extends HTMLElement {
     addEventListener<K extends keyof SdEditorElementEventMap>(type: K, listener: (this: SdEditorElement, event: SdEditorElementEventMap[K]) => void, options?: boolean | AddEventListenerOptions): void;
 }
 
+export interface SdExportReviewElementProps extends ACLProps {
+
+}
+
+export interface SdExportReviewElementEventMap {
+
+}
+
+export interface SdExportReviewElement extends HTMLElement {
+    $props: SdExportReviewElementProps;
+
+    addEventListener<K extends keyof SdExportReviewElementEventMap>(type: K, listener: (this: SdExportReviewElement, event: SdExportReviewElementEventMap[K]) => void, options?: boolean | AddEventListenerOptions): void;
+}
+
+export interface SdKeyboardMacroEditorElementProps extends ACLProps {
+
+}
+
+export interface SdKeyboardMacroEditorElementEventMap {
+
+}
+
+export interface SdKeyboardMacroEditorElement extends HTMLElement {
+    $props: SdKeyboardMacroEditorElementProps;
+
+    addEventListener<K extends keyof SdKeyboardMacroEditorElementEventMap>(type: K, listener: (this: SdKeyboardMacroEditorElement, event: SdKeyboardMacroEditorElementEventMap[K]) => void, options?: boolean | AddEventListenerOptions): void;
+}
+
+export interface SdLibraryOrganizationElementProps extends ACLProps {
+
+}
+
+export interface SdLibraryOrganizationElementEventMap {
+
+}
+
+export interface SdLibraryOrganizationElement extends HTMLElement {
+    $props: SdLibraryOrganizationElementProps;
+
+    addEventListener<K extends keyof SdLibraryOrganizationElementEventMap>(type: K, listener: (this: SdLibraryOrganizationElement, event: SdLibraryOrganizationElementEventMap[K]) => void, options?: boolean | AddEventListenerOptions): void;
+}
+
 export interface SdMacroDeleteDialogElementProps extends ACLProps {
 
 }
@@ -549,6 +409,20 @@ export interface SdMacroDeleteDialogElement extends HTMLElement {
     $props: SdMacroDeleteDialogElementProps;
 
     addEventListener<K extends keyof SdMacroDeleteDialogElementEventMap>(type: K, listener: (this: SdMacroDeleteDialogElement, event: SdMacroDeleteDialogElementEventMap[K]) => void, options?: boolean | AddEventListenerOptions): void;
+}
+
+export interface SdMacroSharingElementProps extends ACLProps {
+
+}
+
+export interface SdMacroSharingElementEventMap {
+
+}
+
+export interface SdMacroSharingElement extends HTMLElement {
+    $props: SdMacroSharingElementProps;
+
+    addEventListener<K extends keyof SdMacroSharingElementEventMap>(type: K, listener: (this: SdMacroSharingElement, event: SdMacroSharingElementEventMap[K]) => void, options?: boolean | AddEventListenerOptions): void;
 }
 
 export interface SdMacrosElementProps extends ACLProps {
@@ -565,6 +439,20 @@ export interface SdMacrosElement extends HTMLElement {
     addEventListener<K extends keyof SdMacrosElementEventMap>(type: K, listener: (this: SdMacrosElement, event: SdMacrosElementEventMap[K]) => void, options?: boolean | AddEventListenerOptions): void;
 }
 
+export interface SdMediaLibraryElementProps extends ACLProps {
+
+}
+
+export interface SdMediaLibraryElementEventMap {
+
+}
+
+export interface SdMediaLibraryElement extends HTMLElement {
+    $props: SdMediaLibraryElementProps;
+
+    addEventListener<K extends keyof SdMediaLibraryElementEventMap>(type: K, listener: (this: SdMediaLibraryElement, event: SdMediaLibraryElementEventMap[K]) => void, options?: boolean | AddEventListenerOptions): void;
+}
+
 export interface SdPluginActionGroupElementProps extends ACLProps {
 
 }
@@ -579,18 +467,60 @@ export interface SdPluginActionGroupElement extends HTMLElement {
     addEventListener<K extends keyof SdPluginActionGroupElementEventMap>(type: K, listener: (this: SdPluginActionGroupElement, event: SdPluginActionGroupElementEventMap[K]) => void, options?: boolean | AddEventListenerOptions): void;
 }
 
-export interface SdUpdatesElementProps extends ACLProps {
+export interface SdPluginCatalogDialogElementProps extends ACLProps {
 
 }
 
-export interface SdUpdatesElementEventMap {
+export interface SdPluginCatalogDialogElementEventMap {
 
 }
 
-export interface SdUpdatesElement extends HTMLElement {
-    $props: SdUpdatesElementProps;
+export interface SdPluginCatalogDialogElement extends HTMLElement {
+    $props: SdPluginCatalogDialogElementProps;
 
-    addEventListener<K extends keyof SdUpdatesElementEventMap>(type: K, listener: (this: SdUpdatesElement, event: SdUpdatesElementEventMap[K]) => void, options?: boolean | AddEventListenerOptions): void;
+    addEventListener<K extends keyof SdPluginCatalogDialogElementEventMap>(type: K, listener: (this: SdPluginCatalogDialogElement, event: SdPluginCatalogDialogElementEventMap[K]) => void, options?: boolean | AddEventListenerOptions): void;
+}
+
+export interface SdPluginFolderImportElementProps extends ACLProps {
+
+}
+
+export interface SdPluginFolderImportElementEventMap {
+
+}
+
+export interface SdPluginFolderImportElement extends HTMLElement {
+    $props: SdPluginFolderImportElementProps;
+
+    addEventListener<K extends keyof SdPluginFolderImportElementEventMap>(type: K, listener: (this: SdPluginFolderImportElement, event: SdPluginFolderImportElementEventMap[K]) => void, options?: boolean | AddEventListenerOptions): void;
+}
+
+export interface SdPluginManagementElementProps extends ACLProps {
+
+}
+
+export interface SdPluginManagementElementEventMap {
+
+}
+
+export interface SdPluginManagementElement extends HTMLElement {
+    $props: SdPluginManagementElementProps;
+
+    addEventListener<K extends keyof SdPluginManagementElementEventMap>(type: K, listener: (this: SdPluginManagementElement, event: SdPluginManagementElementEventMap[K]) => void, options?: boolean | AddEventListenerOptions): void;
+}
+
+export interface SdPluginPreflightElementProps extends ACLProps {
+
+}
+
+export interface SdPluginPreflightElementEventMap {
+
+}
+
+export interface SdPluginPreflightElement extends HTMLElement {
+    $props: SdPluginPreflightElementProps;
+
+    addEventListener<K extends keyof SdPluginPreflightElementEventMap>(type: K, listener: (this: SdPluginPreflightElement, event: SdPluginPreflightElementEventMap[K]) => void, options?: boolean | AddEventListenerOptions): void;
 }
 
 export interface SdPluginsElementProps extends ACLProps {
@@ -607,6 +537,76 @@ export interface SdPluginsElement extends HTMLElement {
     addEventListener<K extends keyof SdPluginsElementEventMap>(type: K, listener: (this: SdPluginsElement, event: SdPluginsElementEventMap[K]) => void, options?: boolean | AddEventListenerOptions): void;
 }
 
+export interface SdProfileConversionElementProps extends ACLProps {
+
+}
+
+export interface SdProfileConversionElementEventMap {
+
+}
+
+export interface SdProfileConversionElement extends HTMLElement {
+    $props: SdProfileConversionElementProps;
+
+    addEventListener<K extends keyof SdProfileConversionElementEventMap>(type: K, listener: (this: SdProfileConversionElement, event: SdProfileConversionElementEventMap[K]) => void, options?: boolean | AddEventListenerOptions): void;
+}
+
+export interface SdProfileSharingDialogElementProps extends ACLProps {
+
+}
+
+export interface SdProfileSharingDialogElementEventMap {
+
+}
+
+export interface SdProfileSharingDialogElement extends HTMLElement {
+    $props: SdProfileSharingDialogElementProps;
+
+    addEventListener<K extends keyof SdProfileSharingDialogElementEventMap>(type: K, listener: (this: SdProfileSharingDialogElement, event: SdProfileSharingDialogElementEventMap[K]) => void, options?: boolean | AddEventListenerOptions): void;
+}
+
+export interface SdProfileVersionsElementProps extends ACLProps {
+
+}
+
+export interface SdProfileVersionsElementEventMap {
+
+}
+
+export interface SdProfileVersionsElement extends HTMLElement {
+    $props: SdProfileVersionsElementProps;
+
+    addEventListener<K extends keyof SdProfileVersionsElementEventMap>(type: K, listener: (this: SdProfileVersionsElement, event: SdProfileVersionsElementEventMap[K]) => void, options?: boolean | AddEventListenerOptions): void;
+}
+
+export interface SdRuntimeDialogElementProps extends ACLProps {
+
+}
+
+export interface SdRuntimeDialogElementEventMap {
+
+}
+
+export interface SdRuntimeDialogElement extends HTMLElement {
+    $props: SdRuntimeDialogElementProps;
+
+    addEventListener<K extends keyof SdRuntimeDialogElementEventMap>(type: K, listener: (this: SdRuntimeDialogElement, event: SdRuntimeDialogElementEventMap[K]) => void, options?: boolean | AddEventListenerOptions): void;
+}
+
+export interface SdUpdatesElementProps extends ACLProps {
+
+}
+
+export interface SdUpdatesElementEventMap {
+
+}
+
+export interface SdUpdatesElement extends HTMLElement {
+    $props: SdUpdatesElementProps;
+
+    addEventListener<K extends keyof SdUpdatesElementEventMap>(type: K, listener: (this: SdUpdatesElement, event: SdUpdatesElementEventMap[K]) => void, options?: boolean | AddEventListenerOptions): void;
+}
+
 export interface SdSettingsElementProps extends ACLProps {
 
 }
@@ -621,6 +621,34 @@ export interface SdSettingsElement extends HTMLElement {
     addEventListener<K extends keyof SdSettingsElementEventMap>(type: K, listener: (this: SdSettingsElement, event: SdSettingsElementEventMap[K]) => void, options?: boolean | AddEventListenerOptions): void;
 }
 
+export interface SdVaultElementProps extends ACLProps {
+
+}
+
+export interface SdVaultElementEventMap {
+
+}
+
+export interface SdVaultElement extends HTMLElement {
+    $props: SdVaultElementProps;
+
+    addEventListener<K extends keyof SdVaultElementEventMap>(type: K, listener: (this: SdVaultElement, event: SdVaultElementEventMap[K]) => void, options?: boolean | AddEventListenerOptions): void;
+}
+
+export interface SdVideoEditorElementProps extends ACLProps {
+
+}
+
+export interface SdVideoEditorElementEventMap {
+
+}
+
+export interface SdVideoEditorElement extends HTMLElement {
+    $props: SdVideoEditorElementProps;
+
+    addEventListener<K extends keyof SdVideoEditorElementEventMap>(type: K, listener: (this: SdVideoEditorElement, event: SdVideoEditorElementEventMap[K]) => void, options?: boolean | AddEventListenerOptions): void;
+}
+
 declare global {
     interface HTMLElementTagNameMap {
         "sd-action-fields": SdActionFieldsElement;
@@ -629,44 +657,46 @@ declare global {
         "sd-action-workspace": SdActionWorkspaceElement;
         "sd-action-editor": SdActionEditorElement;
         "sd-action-library": SdActionLibraryElement;
-        "sd-application-data": SdApplicationDataElement;
-        "sd-media-options": SdMediaOptionsElement;
-        "sd-background-editor": SdBackgroundEditorElement;
         "sd-benchmark-progress": SdBenchmarkProgressElement;
-        "sd-export-review": SdExportReviewElement;
-        "sd-plugin-catalog-dialog": SdPluginCatalogDialogElement;
-        "sd-plugin-folder-import": SdPluginFolderImportElement;
-        "sd-plugin-preflight": SdPluginPreflightElement;
         "sd-plugin-profile-suggestions": SdPluginProfileSuggestionsElement;
         "sd-profile-archive-import": SdProfileArchiveImportElement;
-        "sd-profile-sharing-dialog": SdProfileSharingDialogElement;
-        "sd-runtime-dialog": SdRuntimeDialogElement;
         "sd-setup-dialog": SdSetupDialogElement;
         "sd-feature-dialogs": SdFeatureDialogsElement;
-        "sd-keyboard-macro-editor": SdKeyboardMacroEditorElement;
-        "sd-library-organization": SdLibraryOrganizationElement;
-        "sd-macro-sharing": SdMacroSharingElement;
-        "sd-media-library": SdMediaLibraryElement;
         "sd-plugin-logs": SdPluginLogsElement;
-        "sd-plugin-management": SdPluginManagementElement;
-        "sd-profile-conversion": SdProfileConversionElement;
-        "sd-profile-versions": SdProfileVersionsElement;
         "sd-toasts": SdToastsElement;
-        "sd-video-editor": SdVideoEditorElement;
         "sd-app-shell": SdAppShellElement;
+        "sd-application-data": SdApplicationDataElement;
         "sd-automatic-profiles": SdAutomaticProfilesElement;
+        "sd-media-options": SdMediaOptionsElement;
+        "sd-background-editor": SdBackgroundEditorElement;
+        "sd-device-output-dialog": SdDeviceOutputDialogElement;
         "sd-device-preview": SdDevicePreviewElement;
         "sd-device-settings": SdDeviceSettingsElement;
         "sd-diagnostics": SdDiagnosticsElement;
         "sd-macro-editor": SdMacroEditorElement;
         "sd-inspector": SdInspectorElement;
         "sd-editor": SdEditorElement;
+        "sd-export-review": SdExportReviewElement;
+        "sd-keyboard-macro-editor": SdKeyboardMacroEditorElement;
+        "sd-library-organization": SdLibraryOrganizationElement;
         "sd-macro-delete-dialog": SdMacroDeleteDialogElement;
+        "sd-macro-sharing": SdMacroSharingElement;
         "sd-macros": SdMacrosElement;
+        "sd-media-library": SdMediaLibraryElement;
         "sd-plugin-action-group": SdPluginActionGroupElement;
-        "sd-updates": SdUpdatesElement;
+        "sd-plugin-catalog-dialog": SdPluginCatalogDialogElement;
+        "sd-plugin-folder-import": SdPluginFolderImportElement;
+        "sd-plugin-management": SdPluginManagementElement;
+        "sd-plugin-preflight": SdPluginPreflightElement;
         "sd-plugins": SdPluginsElement;
+        "sd-profile-conversion": SdProfileConversionElement;
+        "sd-profile-sharing-dialog": SdProfileSharingDialogElement;
+        "sd-profile-versions": SdProfileVersionsElement;
+        "sd-runtime-dialog": SdRuntimeDialogElement;
+        "sd-updates": SdUpdatesElement;
         "sd-settings": SdSettingsElement;
+        "sd-vault": SdVaultElement;
+        "sd-video-editor": SdVideoEditorElement;
     }
 }
 

@@ -296,10 +296,6 @@ export function createPreviewWorkspaceHandlers(
             else delete drafts[String(args.key)];
             return undefined;
         },
-        // Return a detached snapshot of preview workspace handlers state
-        snapshot: (args) => {
-            return structuredClone(s);
-        },
     } satisfies PreviewHandlers;
     return workspaceHandlers;
 }

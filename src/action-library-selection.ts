@@ -12,6 +12,7 @@ export interface ActionLibraryRequest {
     standalone?: boolean;
     multiAction?: boolean;
     keyLogic?: boolean;
+    independentEvent?: boolean;
     source?: 'all' | 'plugins';
     label: string;
     valid?: () => boolean;
@@ -77,6 +78,13 @@ class ActionLibrarySelection {
             return;
         }
         const dialogs = Array.from(document.querySelectorAll<HTMLDialogElement>('dialog:modal'));
+        const scrollRegions = new Set<Element>(
+            document.querySelectorAll(
+                '#editor-outlet .workspace, #editor-outlet .inspector, dialog:modal .feature-body, dialog:modal .picker-content, dialog:modal .macro-tree, dialog:modal .macro-detail, dialog:modal .macro-debug-events, dialog:modal .macro-debug-output',
+            ),
+        );
+        for (let node: Element | null = request.owner; node; node = node.parentElement)
+            scrollRegions.add(node);
         this.request = {
             ...request,
             id: crypto.randomUUID(),
@@ -85,7 +93,7 @@ class ActionLibrarySelection {
             routeElement: document.querySelector<HTMLElement>('#route-outlet > :not([hidden])'),
             context: context(),
             dialogs,
-            scroll: Array.from(document.querySelectorAll('*'))
+            scroll: Array.from(scrollRegions)
                 .filter((element) => element.scrollTop || element.scrollLeft)
                 .map((element) => ({ element, top: element.scrollTop, left: element.scrollLeft })),
             viewport: { x: scrollX, y: scrollY },

@@ -13,29 +13,38 @@
         </div>
     </header>
     <div class="draft-notice" x-show="hasDraft">
-        <p
-            x-text="draftRecoveryError || 'A saved unfinished draft is available for this control.'"
-        ></p>
-        <button
-            type="button"
-            class="button"
-            @click="restoreDraft"
-            :disabled="hasDraftRecoveryError"
-        >
-            Restore draft
-        </button>
-        <button type="button" class="button" @click="discardDraft">Discard draft</button>
+        <p x-text="draftRecoveryError || 'Unfinished changes are available for this control.'"></p>
+        <div class="button-row draft-actions">
+            <button
+                type="button"
+                class="button"
+                aria-label="Restore draft"
+                @click="restoreDraft"
+                :disabled="hasDraftRecoveryError"
+            >
+                Restore
+            </button>
+            <button type="button" class="button" aria-label="Discard draft" @click="discardDraft">
+                Discard
+            </button>
+        </div>
     </div>
     <div class="draft-notice" x-show="conflict">
-        <p>
-            The saved binding changed after this draft. Replacing it will overwrite the current
-            binding.
-        </p>
+        <p>The saved binding has changed. Replace it with these unfinished changes?</p>
         <pre x-text="currentBindingJSON"></pre>
-        <button type="button" class="button danger" @click="replaceConflict">
-            Replace current with draft
-        </button>
-        <button type="button" class="button" @click="discardDraft">Discard draft</button>
+        <div class="button-row draft-actions">
+            <button
+                type="button"
+                class="button danger"
+                aria-label="Replace current with draft"
+                @click="replaceConflict"
+            >
+                Replace
+            </button>
+            <button type="button" class="button" aria-label="Discard draft" @click="discardDraft">
+                Discard
+            </button>
+        </div>
     </div>
     <p class="field-help" x-show="app.isProtectedControl(app.controlId)">
         Navigation actions are fixed. Customize their appearance below.
@@ -52,7 +61,6 @@
         >
             <fieldset
                 :disabled="app.isProtectedControl(app.controlId)"
-                style="border: 0; margin: 0; min-width: 0"
                 class="inspector-section"
                 aria-labelledby="binding-action-label"
                 x-show="app.controlKind !== 'display'"
@@ -63,12 +71,214 @@
                         type="button"
                         class="text-button browse-plugins"
                         @click="browsePlugins"
-                        :disabled="app.navigationPending"
+                        :disabled="app.navigationPending || !canEditEvent"
                     >
                         Browse plugin actions
                     </button>
                 </div>
-                <div class="dial-action-config" x-show="app.controlKind === 'encoder'">
+                <div
+                    class="control-events"
+                    x-show="canEnableEvents || eventActions"
+                    @keydown.escape.window="escapeEventTest"
+                >
+                    <div class="control-events-heading">
+                        <div>
+                            <h4>Events</h4>
+                        </div>
+                        <template x-if="canEnableEvents">
+                            <button
+                                type="button"
+                                class="button"
+                                :disabled="app.navigationPending"
+                                @click="previewEventsConversion"
+                            >
+                                Use Events
+                            </button>
+                        </template>
+                        <template x-if="eventActions && !swipeStrip">
+                            <button
+                                type="button"
+                                class="button"
+                                :disabled="app.navigationPending"
+                                @click="previewStandardConversion"
+                            >
+                                Use single action
+                            </button>
+                        </template>
+                    </div>
+                    <div class="control-events-review" x-show="eventConversion">
+                        <p
+                            role="status"
+                            :title="eventConversion && eventConversion.summary"
+                            x-text="eventConversion && eventConversion.summary"
+                        ></p>
+                        <p
+                            class="event-conversion-removed"
+                            x-show="eventConversion && eventConversion.details"
+                            :title="eventConversion && eventConversion.details"
+                            x-text="eventConversion && eventConversion.details"
+                        ></p>
+                        <div class="button-row">
+                            <span
+                                class="field-help"
+                                title="The device changes only after you save."
+                            >
+                                Applies on Save
+                            </span>
+                            <button
+                                type="button"
+                                class="button"
+                                aria-label="Keep current mode"
+                                @click="cancelEventsConversion"
+                            >
+                                Cancel
+                            </button>
+                            <button
+                                type="button"
+                                class="button primary"
+                                @click="confirmEventsConversion"
+                                :aria-label="eventConversion && eventConversion.toEvents ? 'Use these events' : 'Switch mode'"
+                            >
+                                Switch
+                            </button>
+                        </div>
+                    </div>
+                    <div
+                        class="control-event-list"
+                        role="region"
+                        aria-label="Control events and timing"
+                        tabindex="0"
+                        x-show="eventActions"
+                    >
+                        <template x-for="group in eventGroups" :key="group.name">
+                            <div class="control-event-group" role="group" :aria-label="group.name">
+                                <h5 x-text="group.name"></h5>
+                                <template x-for="row in group.rows" :key="row.index">
+                                    <div class="control-event-row">
+                                        <button
+                                            type="button"
+                                            class="control-event-row-copy"
+                                            :data-event-index="row.index"
+                                            :aria-label="row.assigned ? 'Select ' + row.name : 'Add action to ' + row.name"
+                                            :aria-pressed="row.selected"
+                                            :disabled="row.reason || app.navigationPending"
+                                            @click="editEventLane"
+                                        >
+                                            <strong x-text="row.name" :title="row.name"></strong>
+                                            <small
+                                                x-text="row.reason || row.summary"
+                                                :title="row.reason || row.summary"
+                                            ></small>
+                                        </button>
+                                        <div class="control-event-row-controls">
+                                            <button
+                                                type="button"
+                                                class="button event-edit-button"
+                                                x-show="row.assigned"
+                                                :data-event-index="row.index"
+                                                :aria-label="'Edit ' + row.name"
+                                                :disabled="row.reason || app.navigationPending"
+                                                @click="editEventLane"
+                                            >
+                                                Edit
+                                            </button>
+                                            <button
+                                                type="button"
+                                                class="button danger-text event-clear-button"
+                                                x-show="row.assigned"
+                                                :disabled="app.navigationPending"
+                                                :data-event-index="row.index"
+                                                :aria-label="'Clear ' + row.name"
+                                                @click="clearEventLane"
+                                            >
+                                                Clear
+                                            </button>
+                                        </div>
+                                    </div>
+                                </template>
+                            </div>
+                        </template>
+                        <div class="field-group control-event-timing" x-show="eventShowsGap">
+                            <label for="event-gap">
+                                Multi-press gap
+                                <span x-text="actionTree.multiPressMs + ' ms'"></span>
+                            </label>
+                            <input
+                                id="event-gap"
+                                type="range"
+                                min="100"
+                                max="750"
+                                step="1"
+                                :value="actionTree.multiPressMs"
+                                @input="setEventGap"
+                            />
+                        </div>
+                        <div class="field-group control-event-timing" x-show="eventShowsHold">
+                            <label for="event-hold">
+                                Hold threshold
+                                <span x-text="actionTree.holdMs + ' ms'"></span>
+                            </label>
+                            <input
+                                id="event-hold"
+                                type="range"
+                                min="250"
+                                max="2500"
+                                step="1"
+                                :value="actionTree.holdMs"
+                                @input="setEventHold"
+                            />
+                        </div>
+                        <p
+                            class="field-help"
+                            x-show="eventDelayWarning"
+                            x-text="eventDelayWarning"
+                        ></p>
+                        <p
+                            class="field-help"
+                            x-show="eventEdgeWarning"
+                            x-text="eventEdgeWarning"
+                        ></p>
+                        <template x-if="!canEditEvent && !swipeStrip">
+                            <p class="field-help">
+                                No event rows are available on this control. Saved actions are
+                                preserved.
+                            </p>
+                        </template>
+                    </div>
+                    <div class="control-event-test" x-show="eventActions">
+                        <select
+                            aria-label="Event to test"
+                            :disabled="eventTestPending || !eventTestRow"
+                            @change="changeEventTest"
+                        >
+                            <template x-for="row in eventTestRows" :key="row.index">
+                                <option
+                                    :value="row.index"
+                                    :selected="row.index === eventTestValue"
+                                    x-text="row.name"
+                                ></option>
+                            </template>
+                        </select>
+                        <button
+                            type="button"
+                            class="button"
+                            :disabled="!eventTestPending && !canTestSelectedEvent"
+                            :title="eventTestHint"
+                            @click="testSelectedEvent"
+                            x-text="eventTestPending ? 'Cancel test' : 'Test event'"
+                        ></button>
+                        <span
+                            class="control-event-test-label"
+                            role="status"
+                            :title="eventTestMessage || eventTestHint"
+                            x-text="eventTestMessage || eventTestHint"
+                        ></span>
+                    </div>
+                </div>
+                <div
+                    class="dial-action-config"
+                    x-show="app.controlKind === 'encoder' && !eventActions"
+                >
                     <div class="dial-turn-mode" x-show="separateDialActions">
                         <span>
                             <strong>Turn actions</strong>
@@ -189,7 +399,7 @@
                                 data-lane="2"
                                 @click="selectDialLane"
                                 :aria-pressed="dialLanePress"
-                                :disabled="!app.control.semantics.includes('press') && !app.control.semantics.includes('pulse')"
+                                :disabled="!supportsDialPress"
                             >
                                 <span class="dial-lane-symbol" aria-hidden="true">↓</span>
                                 <strong>Press</strong>
@@ -202,7 +412,7 @@
                                 @click="clearDialLane"
                                 aria-label="Unset press action"
                                 title="Unset press action"
-                                :disabled="!app.control.semantics.includes('press') && !app.control.semantics.includes('pulse')"
+                                :disabled="!supportsDialPress"
                             >
                                 <svg
                                     viewBox="0 0 24 24"
@@ -227,7 +437,12 @@
                             x-show="dialCanvas.icon"
                             aria-hidden="true"
                         >
-                            <img :src="dialCanvas.icon" x-show="dialCanvas.icon" alt="" />
+                            <img
+                                data-resource-role="binding-icon"
+                                :src="dialCanvas.icon || null"
+                                x-show="dialCanvas.icon"
+                                alt=""
+                            />
                         </span>
                         <h4 x-text="dialLaneName"></h4>
                         <button type="button" class="text-button" @click="editDialMultiAction">
@@ -235,104 +450,147 @@
                         </button>
                     </div>
                 </div>
-                <button
-                    type="button"
-                    id="action-kind"
-                    class="button action-chooser"
-                    aria-label="Choose action"
-                    @click="browseActions"
-                    :disabled="app.navigationPending"
-                >
-                    <span class="inspector-action-name">
+                <div x-show="canEditEvent">
+                    <div class="dial-action-heading" x-show="eventActions">
+                        <h4 x-text="activeEventName"></h4>
+                        <button type="button" class="text-button" @click="editDialMultiAction">
+                            Edit multi-action
+                        </button>
+                    </div>
+                    <button
+                        type="button"
+                        id="action-kind"
+                        class="button action-chooser"
+                        aria-label="Choose action"
+                        @click="browseActions"
+                        :disabled="app.navigationPending"
+                    >
+                        <span class="inspector-action-name">
+                            <img
+                                data-resource-role="binding-icon"
+                                class="plugin-action-icon"
+                                x-show="kind === 'plugin' && pluginActionIcon"
+                                :src="pluginActionIcon || null"
+                                alt=""
+                            />
+                            <span x-text="actionName"></span>
+                        </span>
+                        <svg
+                            viewBox="0 0 24 24"
+                            width="16"
+                            height="16"
+                            fill="none"
+                            stroke="currentColor"
+                            stroke-width="1.6"
+                            aria-hidden="true"
+                        >
+                            <path d="m9 5 7 7-7 7" />
+                        </svg>
+                    </button>
+                    <button
+                        type="button"
+                        class="button inspector-settings-button"
+                        x-show="isPlugin"
+                        @click="openInspector"
+                        aria-haspopup="dialog"
+                    >
                         <img
-                            class="plugin-action-icon"
-                            x-show="kind === 'plugin' && pluginActionIcon"
-                            :src="pluginActionIcon"
+                            data-resource-role="interface-icon"
+                            class="action-icon"
+                            src="/appearance/icons/settings.svg"
                             alt=""
                         />
-                        <span x-text="actionName"></span>
-                    </span>
-                    <svg
-                        viewBox="0 0 24 24"
-                        width="16"
-                        height="16"
-                        fill="none"
-                        stroke="currentColor"
-                        stroke-width="1.6"
-                        aria-hidden="true"
-                    >
-                        <path d="m9 5 7 7-7 7" />
-                    </svg>
-                </button>
-                <button
-                    type="button"
-                    class="button inspector-settings-button"
-                    x-show="isPlugin"
-                    @click="openInspector"
-                    aria-haspopup="dialog"
-                >
-                    <img class="action-icon" src="/appearance/icons/settings.svg" alt="" />
-                    Open plugin settings
-                </button>
-                <div class="field-group" x-show="dialVolume">
-                    <label for="dial-volume-direction">Volume behavior</label>
-                    <select
-                        id="dial-volume-direction"
-                        :value="dialVolumeDirection"
-                        @change="setDialVolumeDirection"
-                    >
-                        <option value="decrease">Decrease</option>
-                        <option value="increase">Increase</option>
-                    </select>
-                    <label for="dial-volume-amount">Step (%)</label>
-                    <input
-                        id="dial-volume-amount"
-                        type="number"
-                        min="1"
-                        max="100"
-                        x-model="dialVolumeAmount"
-                        @input="markDirty"
-                    />
+                        Open plugin settings
+                    </button>
+                    <div class="field-group" x-show="dialVolume">
+                        <label for="dial-volume-direction">Volume behavior</label>
+                        <select
+                            id="dial-volume-direction"
+                            :value="dialVolumeDirection"
+                            @change="setDialVolumeDirection"
+                        >
+                            <option value="decrease">Decrease</option>
+                            <option value="increase">Increase</option>
+                        </select>
+                        <label for="dial-volume-amount">Step (%)</label>
+                        <input
+                            id="dial-volume-amount"
+                            type="number"
+                            min="1"
+                            max="100"
+                            x-model="dialVolumeAmount"
+                            @input="markDirty"
+                        />
+                    </div>
+                    <div class="field-group" x-show="dialNavigation">
+                        <label for="dial-navigation-mode">Navigation behavior</label>
+                        <select
+                            id="dial-navigation-mode"
+                            :value="dialNavigationMode"
+                            @change="setDialNavigationMode"
+                        >
+                            <option value="previous">Previous (left)</option>
+                            <option value="next">Next (right)</option>
+                            <option value="specific">Go to specific target</option>
+                        </select>
+                    </div>
+                    <div class="field-group" x-show="needsValue">
+                        <label for="action-value" x-text="valueLabel"></label>
+                        <input
+                            id="action-value"
+                            x-model="value"
+                            @input="markDirty"
+                            :placeholder="valuePlaceholder"
+                            autocomplete="off"
+                            spellcheck="false"
+                        />
+                    </div>
+                    <sd-macro-editor
+                        :dial-lane="separateDialActions ? dialActionIndex : null"
+                        :event-lane="eventActions ? actionTree.eventLane : null"
+                        x-show="kind === 'macro'"
+                        :content="value"
+                        @macro-change="updateMacro"
+                        @macro-cancel="cancelDialMultiAction"
+                    ></sd-macro-editor>
+                    <template x-if="kind === 'macro' && !dialMultiActionOriginal">
+                        <details class="disclosure inspector-saved-macro">
+                            <summary>Use saved macro</summary>
+                            <div class="disclosure-body">
+                                <label class="settings-field">
+                                    Saved macro
+                                    <select
+                                        @change="useSavedMacro"
+                                        :disabled="!savedMacroChoices.length"
+                                    >
+                                        <option value="">Choose a macro…</option>
+                                        <template
+                                            x-for="macro in savedMacroChoices"
+                                            :key="macro.id"
+                                        >
+                                            <option :value="macro.id" x-text="macro.name"></option>
+                                        </template>
+                                    </select>
+                                </label>
+                                <p class="field-help" x-text="savedMacroHelp"></p>
+                            </div>
+                        </details>
+                    </template>
+                    <sd-action-editor
+                        :dial-lane="separateDialActions ? dialActionIndex : null"
+                        :event-lane="eventActions ? actionTree.eventLane : null"
+                        x-show="['builtin','command','toggle','lighting','profile','page','delay','swipe_navigation'].includes(kind) || (kind === 'navigate' && !dialNavigation)"
+                        :content="structuredValue"
+                        @action-change="updateStructured"
+                    ></sd-action-editor>
                 </div>
-                <div class="field-group" x-show="dialNavigation">
-                    <label for="dial-navigation-mode">Navigation behavior</label>
-                    <select
-                        id="dial-navigation-mode"
-                        :value="dialNavigationMode"
-                        @change="setDialNavigationMode"
-                    >
-                        <option value="previous">Previous (left)</option>
-                        <option value="next">Next (right)</option>
-                        <option value="specific">Go to specific target</option>
-                    </select>
-                </div>
-                <div class="field-group" x-show="needsValue">
-                    <label for="action-value" x-text="valueLabel"></label>
-                    <input
-                        id="action-value"
-                        x-model="value"
-                        @input="markDirty"
-                        :placeholder="valuePlaceholder"
-                        autocomplete="off"
-                        spellcheck="false"
-                    />
-                </div>
-                <sd-macro-editor
-                    :dial-lane="separateDialActions ? dialActionIndex : null"
-                    x-show="kind === 'macro'"
-                    :content="value"
-                    @macro-change="updateMacro"
-                    @macro-cancel="cancelDialMultiAction"
-                ></sd-macro-editor>
-                <sd-action-editor
-                    :dial-lane="separateDialActions ? dialActionIndex : null"
-                    x-show="['builtin','command','toggle','lighting','profile','page','delay','swipe_navigation'].includes(kind) || (kind === 'navigate' && !dialNavigation)"
-                    :content="structuredValue"
-                    @action-change="updateStructured"
-                ></sd-action-editor>
+                <p class="field-help inspector-test-help" x-show="eventActions && dirty">
+                    Save to apply event assignments.
+                </p>
                 <p
                     class="field-help inspector-test-help"
-                    x-text="app.control && app.control.semantics.includes('swipe') ? 'Use the preview arrows to test swipes.' : app.controlKind === 'encoder' ? 'Each dial input can run one action or a multi-action sequence. Save before testing with the preview.' : 'Use Play on the preview to test the saved action.'"
+                    x-show="!eventActions"
+                    x-text="app.control && app.control.semantics.includes('swipe') ? 'Test swipes with the preview arrows.' : 'Preview Play runs the saved action.'"
                 ></p>
                 <details class="disclosure inspector-behavior">
                     <summary>
@@ -340,9 +598,6 @@
                         <small x-show="disabled">Action disabled</small>
                         <small x-show="!disabled && app.controlKind === 'encoder'">
                             Dial &amp; activations
-                        </small>
-                        <small x-show="!disabled && app.controlKind !== 'encoder'">
-                            Activation options
                         </small>
                     </summary>
                     <div class="disclosure-body">
@@ -407,10 +662,21 @@
                                     aria-label="Repeated activations"
                                 >
                                     <option value="queue">Queue</option>
-                                    <option value="ignore_busy">Ignore while busy</option>
-                                    <option value="replace_pending">Replace pending</option>
+                                    <option value="ignore_busy">Ignore</option>
+                                    <option value="replace_pending">Queue one more</option>
+                                    <option value="restart">Restart</option>
+                                    <option value="cancel">Cancel</option>
                                 </select>
                             </label>
+                            <p
+                                class="field-help"
+                                x-show="activationPolicy === 'restart' || activationPolicy === 'cancel'"
+                            >
+                                A second activation requests cancellation. Restart runs the latest
+                                activation after cleanup. Tap, double tap and hold are recognized
+                                separately. External programs and plugin actions may finish
+                                independently.
+                            </p>
                             <p class="field-help" x-show="activationPolicy === 'queue'">
                                 Run each activation in order.
                             </p>
@@ -494,7 +760,12 @@
                             @click="openAppearance"
                             aria-haspopup="dialog"
                         >
-                            <img class="action-icon" src="/appearance/icons/monitor.svg" alt="" />
+                            <img
+                                data-resource-role="interface-icon"
+                                class="action-icon"
+                                src="/appearance/icons/monitor.svg"
+                                alt=""
+                            />
                             Icon, label &amp; live display
                         </button>
                         <section
@@ -594,6 +865,7 @@
                 class="inspector-dialogs"
                 x-data="appearanceEditor"
                 @open-appearance.window="open"
+                @vault-presentation-changed.window="vaultPresentationChanged"
                 @icon-chosen.window="iconChosen"
             >
                 <dialog
@@ -617,7 +889,7 @@
                         </button>
                     </header>
                     <div class="feature-body appearance-body">
-                        <p class="field-help" role="status" x-show="fontsLoading">
+                        <p class="font-loading-status" role="status" x-show="fontsLoading">
                             Loading installed fonts…
                         </p>
                         <p
@@ -640,12 +912,13 @@
                                     <div class="settings-section canvas-left">
                                         <div
                                             class="display-canvas"
-                                            :style="'aspect-ratio:' + canvasAspect"
+                                            :style="{aspectRatio: canvasAspect}"
                                         >
                                             <img
+                                                data-resource-role="background-preview"
                                                 class="appearance-preview"
                                                 :class="{'has-transparent-background': transparentBackground}"
-                                                :src="previewImage"
+                                                :src="previewImage || null"
                                                 x-show="previewImage"
                                                 alt="Rendered binding preview"
                                             />
@@ -753,21 +1026,23 @@
                                                 </template>
                                             </select>
                                         </label>
-                                        <button
-                                            type="button"
-                                            class="button"
-                                            @click="addSourceLayer"
-                                            :disabled="!addSourceId"
-                                        >
-                                            Add source
-                                        </button>
-                                        <button
-                                            type="button"
-                                            class="text-button"
-                                            @click="resetCanvas"
-                                        >
-                                            Reset display canvas
-                                        </button>
+                                        <div class="button-row canvas-source-actions">
+                                            <button
+                                                type="button"
+                                                class="button"
+                                                @click="addSourceLayer"
+                                                :disabled="!addSourceId"
+                                            >
+                                                Add source
+                                            </button>
+                                            <button
+                                                type="button"
+                                                class="text-button"
+                                                @click="resetCanvas"
+                                            >
+                                                Reset display canvas
+                                            </button>
+                                        </div>
                                     </div>
                                     <template x-if="selectedLayer">
                                         <div class="settings-section canvas-properties">
@@ -874,47 +1149,114 @@
                                                 class="settings-section"
                                                 x-show="selectedLayer.style.kind === 'text'"
                                             >
-                                                <label
+                                                <div
+                                                    class="field-group"
+                                                    data-layer-vault
                                                     x-show="selectedLayer.source.kind === 'text'"
                                                 >
-                                                    Label text
-                                                    <textarea
-                                                        aria-label="Layer text"
-                                                        data-field="text"
-                                                        :value="selectedLayer.text"
-                                                        @input="editLayer"
-                                                        maxlength="4096"
-                                                    ></textarea>
-                                                </label>
-                                                <div class="settings-form-grid">
                                                     <label>
-                                                        Font
-                                                        <select
-                                                            aria-label="Layer font"
-                                                            data-field="font"
-                                                            :value="selectedLayer.style.font"
-                                                            @change="editLayer"
+                                                        Label text
+                                                        <textarea
+                                                            aria-label="Layer text"
+                                                            data-field="text"
+                                                            :value="selectedLayer.text"
+                                                            @input="editLayer"
+                                                            maxlength="4096"
+                                                        ></textarea>
+                                                    </label>
+                                                    <div class="button-row">
+                                                        <button
+                                                            type="button"
+                                                            class="button"
+                                                            @click="chooseLayerVault"
+                                                            :disabled="layerVaultBusy"
                                                         >
+                                                            Insert Vault entry
+                                                        </button>
+                                                    </div>
+                                                    <label x-show="layerVaultEntries.length">
+                                                        Vault entry
+                                                        <select @change="insertLayerVault">
+                                                            <option value="">
+                                                                Choose an entry
+                                                            </option>
                                                             <template
-                                                                x-for="font in fontOptions"
-                                                                :key="font.id"
+                                                                x-for="entry in layerVaultEntries"
+                                                                :key="entry.id"
                                                             >
                                                                 <option
-                                                                    :value="font.id"
-                                                                    :selected="font.id === selectedLayer.style.font"
-                                                                    x-text="font.label"
+                                                                    :value="entry.id"
+                                                                    x-text="entry.label"
                                                                 ></option>
                                                             </template>
                                                         </select>
-                                                        <button
-                                                            type="button"
-                                                            class="text-button"
-                                                            data-preview-fonts
-                                                            aria-label="Preview fonts"
-                                                        >
-                                                            Preview fonts…
-                                                        </button>
                                                     </label>
+                                                    <p
+                                                        class="field-help"
+                                                        role="status"
+                                                        x-show="layerVaultMessage"
+                                                        x-text="layerVaultMessage"
+                                                    ></p>
+                                                </div>
+                                                <div class="settings-form-grid">
+                                                    <div class="field-group">
+                                                        <label for="layer-font-trigger">Font</label>
+                                                        <div class="appearance-font-picker">
+                                                            <select
+                                                                hidden
+                                                                tabindex="-1"
+                                                                aria-hidden="true"
+                                                                aria-label="Layer font"
+                                                                @font-style-apply="applyLayerFont"
+                                                                data-field="font"
+                                                                :value="selectedLayer.style.font"
+                                                                @change="editLayer"
+                                                            >
+                                                                <template
+                                                                    x-for="font in fontOptions"
+                                                                    :key="font.id"
+                                                                >
+                                                                    <option
+                                                                        :value="font.id"
+                                                                        :selected="font.id === selectedLayer.style.font"
+                                                                        x-text="font.label"
+                                                                    ></option>
+                                                                </template>
+                                                            </select>
+                                                            <button
+                                                                type="button"
+                                                                id="layer-font-trigger"
+                                                                data-font-style="label"
+                                                                :data-font-weight="selectedLayer.style.font_weight || 400"
+                                                                :data-font-italic="selectedLayer.style.font_italic || false"
+                                                                class="button interface-font-trigger"
+                                                                data-preview-fonts
+                                                                aria-label="Preview fonts"
+                                                                :title="fontLabel(selectedLayer.style.font)"
+                                                                :aria-description="fontLabel(selectedLayer.style.font)"
+                                                                :aria-busy="fontsLoading"
+                                                            >
+                                                                <span
+                                                                    class="interface-font-name"
+                                                                    x-text="fontLabel(selectedLayer.style.font)"
+                                                                ></span>
+                                                                <span
+                                                                    class="interface-font-spinner"
+                                                                    :class="{active: fontsLoading}"
+                                                                    aria-hidden="true"
+                                                                ></span>
+                                                            </button>
+                                                            <button
+                                                                type="button"
+                                                                class="text-button"
+                                                                @click="refreshFonts"
+                                                                :disabled="fontsLoading"
+                                                                aria-label="Refresh layer fonts"
+                                                            >
+                                                                Refresh
+                                                            </button>
+                                                        </div>
+                                                    </div>
                                                     <label>
                                                         Font size (%)
                                                         <input
@@ -1082,7 +1424,7 @@
                                 aria-label="Surface and label"
                             >
                                 <h3>Surface &amp; label</h3>
-                                <div class="appearance-field-grid">
+                                <div class="appearance-surface-fields">
                                     <label>
                                         Background source
                                         <select
@@ -1094,29 +1436,28 @@
                                             <option value="palette">Theme palette</option>
                                         </select>
                                     </label>
-                                    <p class="field-help" x-show="backgroundSource === 'palette'">
-                                        Follows the device palette; keeps your custom color and
-                                        media.
-                                    </p>
-                                    <div class="appearance-surface-fields">
-                                        <label>
-                                            Label
-                                            <input x-model="title" maxlength="160" />
-                                        </label>
-                                        <label x-show="backgroundSource !== 'palette'">
-                                            Key color
-                                            <input
-                                                aria-label="Appearance background color"
-                                                type="color"
-                                                :value="backgroundColor"
-                                                @input="changeBackgroundColor"
-                                            />
-                                        </label>
-                                    </div>
-                                    <div
-                                        class="field-group"
-                                        x-show="backgroundSource !== 'palette'"
-                                    >
+                                    <label>
+                                        Label
+                                        <input x-model="title" maxlength="160" />
+                                    </label>
+                                </div>
+                                <p class="field-help" x-show="backgroundSource === 'palette'">
+                                    Follows the device palette; keeps your custom color and media.
+                                </p>
+                                <div
+                                    class="appearance-surface-custom"
+                                    x-show="backgroundSource !== 'palette'"
+                                >
+                                    <label>
+                                        Key color
+                                        <input
+                                            aria-label="Appearance background color"
+                                            type="color"
+                                            :value="backgroundColor"
+                                            @input="changeBackgroundColor"
+                                        />
+                                    </label>
+                                    <div class="field-group">
                                         <label class="preference-toggle">
                                             <input
                                                 type="checkbox"
@@ -1131,6 +1472,74 @@
                                         </p>
                                     </div>
                                 </div>
+                                <details class="disclosure appearance-live-label">
+                                    <summary>Live label</summary>
+                                    <div class="disclosure-body">
+                                        <ol
+                                            class="appearance-live-label-segments"
+                                            x-show="liveLabel.length"
+                                        >
+                                            <template x-for="(segment, i) in liveLabel" :key="i">
+                                                <li>
+                                                    <span x-text="segmentText(segment)"></span>
+                                                    <button
+                                                        type="button"
+                                                        class="text-button"
+                                                        @click="removeLabelSegment(i)"
+                                                        :aria-label="'Remove segment ' + (i+1)"
+                                                    >
+                                                        Remove
+                                                    </button>
+                                                </li>
+                                            </template>
+                                        </ol>
+                                        <div class="appearance-live-label-controls">
+                                            <label>
+                                                Field
+                                                <select x-model="labelField">
+                                                    <template
+                                                        x-for="f in labelFields"
+                                                        :key="f.value"
+                                                    >
+                                                        <option
+                                                            :value="f.value"
+                                                            x-text="f.label"
+                                                        ></option>
+                                                    </template>
+                                                </select>
+                                            </label>
+                                            <label>
+                                                <span
+                                                    x-text="labelField === 'literal' ? 'Label segment text' : 'Missing value fallback'"
+                                                ></span>
+                                                <input x-model="labelValue" maxlength="160" />
+                                            </label>
+                                            <button
+                                                type="button"
+                                                class="button"
+                                                @click="addLabelSegment"
+                                                :disabled="liveLabel.length >= 16"
+                                            >
+                                                Add segment
+                                            </button>
+                                        </div>
+                                        <div
+                                            class="appearance-live-label-sample"
+                                            x-show="liveLabel.length"
+                                        >
+                                            <label>
+                                                Sample field values
+                                                <select x-model="labelScenario">
+                                                    <option value="missing">Missing</option>
+                                                    <option value="false">False</option>
+                                                    <option value="zero">Zero</option>
+                                                    <option value="populated">Populated</option>
+                                                </select>
+                                            </label>
+                                            <output x-text="labelExample"></output>
+                                        </div>
+                                    </div>
+                                </details>
                             </section>
                             <section
                                 class="settings-section appearance-section plugin-display-editor"
@@ -1233,33 +1642,63 @@
                                             </label>
                                         </div>
                                         <div class="settings-form-grid" x-show="elementIsText">
-                                            <label>
-                                                Font
-                                                <select
-                                                    aria-label="Plugin text font"
-                                                    x-model="editableElement.font"
-                                                    @change="styleElement"
-                                                >
-                                                    <template
-                                                        x-for="font in fontOptions"
-                                                        :key="font.id"
+                                            <div class="field-group">
+                                                <label for="plugin-font-trigger">Font</label>
+                                                <div class="appearance-font-picker">
+                                                    <select
+                                                        hidden
+                                                        tabindex="-1"
+                                                        aria-hidden="true"
+                                                        aria-label="Plugin text font"
+                                                        @font-style-apply="applyPluginFont"
+                                                        x-model="editableElement.font"
+                                                        @change="styleElement"
                                                     >
-                                                        <option
-                                                            :value="font.id"
-                                                            :selected="editableElement && font.id === editableElement.font"
-                                                            x-text="font.label"
-                                                        ></option>
-                                                    </template>
-                                                </select>
-                                                <button
-                                                    type="button"
-                                                    class="text-button"
-                                                    data-preview-fonts
-                                                    aria-label="Preview fonts"
-                                                >
-                                                    Preview fonts…
-                                                </button>
-                                            </label>
+                                                        <template
+                                                            x-for="font in fontOptions"
+                                                            :key="font.id"
+                                                        >
+                                                            <option
+                                                                :value="font.id"
+                                                                :selected="editableElement && font.id === editableElement.font"
+                                                                x-text="font.label"
+                                                            ></option>
+                                                        </template>
+                                                    </select>
+                                                    <button
+                                                        type="button"
+                                                        id="plugin-font-trigger"
+                                                        data-font-style="label"
+                                                        :data-font-weight="editableElement.font_weight || 400"
+                                                        :data-font-italic="editableElement.font_italic || false"
+                                                        class="button interface-font-trigger"
+                                                        data-preview-fonts
+                                                        aria-label="Preview fonts"
+                                                        :title="fontLabel(editableElement.font)"
+                                                        :aria-description="fontLabel(editableElement.font)"
+                                                        :aria-busy="fontsLoading"
+                                                    >
+                                                        <span
+                                                            class="interface-font-name"
+                                                            x-text="fontLabel(editableElement.font)"
+                                                        ></span>
+                                                        <span
+                                                            class="interface-font-spinner"
+                                                            :class="{active: fontsLoading}"
+                                                            aria-hidden="true"
+                                                        ></span>
+                                                    </button>
+                                                    <button
+                                                        type="button"
+                                                        class="text-button"
+                                                        @click="refreshFonts"
+                                                        :disabled="fontsLoading"
+                                                        aria-label="Refresh plugin fonts"
+                                                    >
+                                                        Refresh
+                                                    </button>
+                                                </div>
+                                            </div>
                                             <label>
                                                 Font size (%)
                                                 <input
@@ -1337,8 +1776,9 @@
                                                 </select>
                                             </label>
                                             <img
+                                                data-resource-role="binding-icon"
                                                 class="plugin-action-icon"
-                                                :src="pluginIconImage"
+                                                :src="pluginIconImage || null"
                                                 x-show="pluginIconImage"
                                                 alt="Custom plugin icon"
                                             />
@@ -1423,26 +1863,62 @@
                                     x-show="appearanceEnabled"
                                     class="appearance-field-grid appearance-custom-fields"
                                 >
-                                    <label>
-                                        Font
-                                        <select aria-label="Label font" x-model="appearance.font">
-                                            <template x-for="font in fontOptions" :key="font.id">
-                                                <option
-                                                    :value="font.id"
-                                                    :selected="font.id === appearance.font"
-                                                    x-text="font.label"
-                                                ></option>
-                                            </template>
-                                        </select>
-                                        <button
-                                            type="button"
-                                            class="text-button"
-                                            data-preview-fonts
-                                            aria-label="Preview fonts"
-                                        >
-                                            Preview fonts…
-                                        </button>
-                                    </label>
+                                    <div class="field-group">
+                                        <label for="appearance-label-font-trigger">Font</label>
+                                        <div class="appearance-font-picker">
+                                            <select
+                                                aria-label="Label font"
+                                                @font-style-apply="applyLabelFont"
+                                                x-model="appearance.font"
+                                                hidden
+                                                tabindex="-1"
+                                                aria-hidden="true"
+                                            >
+                                                <template
+                                                    x-for="font in fontOptions"
+                                                    :key="font.id"
+                                                >
+                                                    <option
+                                                        :value="font.id"
+                                                        :selected="font.id === appearance.font"
+                                                        x-text="font.label"
+                                                    ></option>
+                                                </template>
+                                            </select>
+                                            <button
+                                                type="button"
+                                                id="appearance-label-font-trigger"
+                                                data-font-style="label"
+                                                :data-font-weight="appearance.font_weight"
+                                                :data-font-italic="appearance.font_italic"
+                                                class="button interface-font-trigger"
+                                                data-preview-fonts
+                                                aria-label="Preview fonts"
+                                                :title="appearanceFontLabel"
+                                                :aria-description="appearanceFontLabel"
+                                                :aria-busy="fontsLoading"
+                                            >
+                                                <span
+                                                    class="interface-font-name"
+                                                    x-text="appearanceFontLabel"
+                                                ></span>
+                                                <span
+                                                    class="interface-font-spinner"
+                                                    :class="{active: fontsLoading}"
+                                                    aria-hidden="true"
+                                                ></span>
+                                            </button>
+                                            <button
+                                                type="button"
+                                                class="text-button"
+                                                @click="refreshFonts"
+                                                :disabled="fontsLoading"
+                                                aria-label="Refresh fonts"
+                                            >
+                                                Refresh
+                                            </button>
+                                        </div>
+                                    </div>
                                     <label>
                                         Font size (%)
                                         <input
@@ -1490,7 +1966,11 @@
                                     <div class="appearance-icon-selection">
                                         <strong x-show="toggleEnabled">Initial icon</strong>
                                         <div class="selected-icon" x-show="appearance.icon">
-                                            <img :src="selectedIconImage" alt="Selected icon" />
+                                            <img
+                                                data-resource-role="binding-icon"
+                                                :src="selectedIconImage || null"
+                                                alt="Selected icon"
+                                            />
                                             <span x-text="appearance.icon"></span>
                                         </div>
                                         <div class="button-row">
@@ -1537,7 +2017,11 @@
                                     <div class="appearance-icon-selection" x-show="toggleEnabled">
                                         <strong>Toggled icon</strong>
                                         <div class="selected-toggle-icon" x-show="toggledIconName">
-                                            <img :src="toggledIconImage" alt="Toggled icon" />
+                                            <img
+                                                data-resource-role="binding-icon"
+                                                :src="toggledIconImage || null"
+                                                alt="Toggled icon"
+                                            />
                                             <span x-text="toggledIconName"></span>
                                         </div>
                                         <div class="button-row">
@@ -1687,6 +2171,7 @@
                                 type="button"
                                 class="text-button"
                                 @click="refreshFonts"
+                                x-show="!appearanceEnabled"
                                 :disabled="fontsLoading"
                             >
                                 Refresh fonts
@@ -1806,7 +2291,12 @@
                                         :disabled="!choice.asset || saving"
                                         @click="choose"
                                     >
-                                        <img :src="choice.image" x-show="choice.image" alt="" />
+                                        <img
+                                            data-resource-role="binding-icon"
+                                            :src="choice.image || null"
+                                            x-show="choice.image"
+                                            alt=""
+                                        />
                                         <span
                                             class="icon-placeholder"
                                             x-show="!choice.image"
@@ -1867,12 +2357,87 @@
                     <option value="model">Every page in all matching profiles</option>
                 </select>
             </div>
+            <div class="field-group">
+                <p
+                    class="field-help"
+                    x-show="linkedSummary"
+                    x-text="'Editing these linked assignments: ' + linkedSummary"
+                ></p>
+                <div class="button-row">
+                    <button
+                        type="button"
+                        class="button"
+                        aria-haspopup="dialog"
+                        @click="openLink"
+                        :disabled="dirty || saving || !app.binding || !linkPages.length || app.isProtectedControl(app.controlId)"
+                    >
+                        Link across pages
+                    </button>
+                    <button
+                        type="button"
+                        class="button"
+                        x-show="linkedSummary"
+                        @click="detachLink"
+                        :disabled="dirty || saving"
+                    >
+                        Detach
+                    </button>
+                </div>
+                <dialog
+                    x-ref="linkDialog"
+                    class="feature-dialog"
+                    aria-labelledby="link-title"
+                    @cancel.prevent="closeLink"
+                >
+                    <header class="picker-header">
+                        <h2 id="link-title">Link across pages</h2>
+                    </header>
+                    <div class="feature-body feature-fields">
+                        <label>
+                            Destination page
+                            <select x-model="linkPage" @change="linkChoice = ''">
+                                <template x-for="p in linkPages" :key="p.id">
+                                    <option :value="p.id" x-text="p.name"></option>
+                                </template>
+                            </select>
+                        </label>
+                        <label>
+                            Destination control
+                            <select x-model="linkControl" @change="linkChoice = ''">
+                                <template x-for="c in linkControls" :key="c.id">
+                                    <option :value="c.id" x-text="c.label"></option>
+                                </template>
+                            </select>
+                        </label>
+                        <label x-show="linkDestination">
+                            Source assignment
+                            <select x-model="linkChoice">
+                                <option value="">Choose the assignment to keep</option>
+                                <option value="inspector" x-text="inspectorAssignment"></option>
+                                <option value="destination" x-text="destinationAssignment"></option>
+                            </select>
+                        </label>
+                        <p role="status" x-text="replacementSummary"></p>
+                    </div>
+                    <footer class="feature-footer">
+                        <button type="button" class="button" @click="closeLink">Cancel</button>
+                        <button
+                            type="button"
+                            class="button primary"
+                            @click="createLink"
+                            :disabled="!canLink"
+                        >
+                            Apply link
+                        </button>
+                    </footer>
+                </dialog>
+            </div>
             <div x-show="bulkBindingScope">
                 <p class="field-help" x-text="bindingScopeSummary" role="status"></p>
                 <p class="field-help">
-                    Includes appearance and every dial input. Matching profiles use this device
-                    model. Copies are independent; future edits are not linked. Undo restores the
-                    whole save.
+                    Includes appearance and every input. Matching profiles use this device model.
+                    Copies are independent; future edits are not linked. Undo restores the whole
+                    save.
                 </p>
                 <label class="preference-toggle">
                     <input
@@ -1895,18 +2460,26 @@
             <div class="button-row">
                 <button
                     type="button"
-                    class="text-button danger-text clear-button"
+                    class="button danger-text clear-button"
                     :disabled="!app.control || !app.page || app.busy || saving || app.controlPending(app.controlId) || app.isProtectedControl(app.controlId)"
                     @click="clear"
                 >
-                    Clear binding
+                    Clear
+                </button>
+                <button
+                    type="button"
+                    class="button"
+                    :disabled="!app.control || app.busy || saving || app.controlPending(app.controlId)"
+                    @click="discardDraft"
+                >
+                    Cancel
                 </button>
                 <button
                     type="submit"
                     class="button primary save-button"
                     :disabled="!app.control || !app.page || !dirty || app.busy || saving || app.controlPending(app.controlId) || (bulkBindingScope && !bindingScopeReviewed)"
                 >
-                    Save binding
+                    Save
                 </button>
             </div>
         </footer>

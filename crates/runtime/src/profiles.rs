@@ -127,6 +127,9 @@ pub enum BackgroundSource {
 #[derive(Debug, Clone, Serialize, Deserialize, ts_rs::TS, schemars::JsonSchema)]
 #[serde(deny_unknown_fields)]
 pub struct Binding {
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    #[ts(optional, as = "Option<Vec<crate::live_label::LabelSegment>>")]
+    pub live_label: Vec<crate::live_label::LabelSegment>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     #[ts(optional)]
     pub dial_response: Option<crate::dial_response::DialResponse>,
@@ -198,9 +201,29 @@ impl Page {
             .unwrap_or(control_id)
     }
 }
+#[derive(
+    Debug,
+    Clone,
+    PartialEq,
+    Eq,
+    PartialOrd,
+    Ord,
+    Serialize,
+    Deserialize,
+    ts_rs::TS,
+    schemars::JsonSchema,
+)]
+#[serde(deny_unknown_fields)]
+pub struct LinkMember {
+    pub page_id: String,
+    pub control_id: String,
+}
 #[derive(Debug, Clone, Serialize, Deserialize, ts_rs::TS, schemars::JsonSchema)]
 #[serde(deny_unknown_fields)]
 pub struct Profile {
+    #[serde(default, skip_serializing_if = "BTreeMap::is_empty")]
+    #[ts(optional, as = "Option<BTreeMap<String,Vec<LinkMember>>>")]
+    pub linked_controls: BTreeMap<String, Vec<LinkMember>>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     #[ts(optional)]
     pub palette: Option<stream_dock_manager_plugin_host::ProfilePalette>,
@@ -241,6 +264,16 @@ pub(crate) fn parse_data(value: serde_json::Value) -> Result<ProfileData, String
     if !value.is_object() {
         return Err("Workspace data must be a current JSON object".into());
     }
+    // Report the compatibility floor before deserializing fields from a later release.
+    if let Some(v) = value.get("minimum_manager").and_then(|v| v.as_str()) {
+        if semver::Version::parse(v)
+            .is_ok_and(|floor| floor > semver::Version::parse(env!("CARGO_PKG_VERSION")).unwrap())
+        {
+            return Err(format!(
+                "This workspace requires Manager {v} or newer; original file preserved"
+            ));
+        }
+    }
     serde_json::from_value(value).map_err(|e| format!("Unsupported or invalid workspace data: {e}"))
 }
 
@@ -255,29 +288,7 @@ pub struct ProfileExportOptions {
 impl ProfileData {
     // Update requirements
     pub(crate) fn update_requirements(&mut self) {
-        let extended = self.profiles.iter().any(|p| {
-            !p.parameters.is_empty()
-                || p.pages
-                    .iter()
-                    .any(|page| page.bindings.values().any(|b| b.media.encoding != "auto"))
-        });
-        let macro_inputs = self
-            .saved_macros
-            .iter()
-            .any(|m| !m.inputs.is_empty() || crate::macro_inputs::uses_arguments(&m.action))
-            || self
-                .profiles
-                .iter()
-                .flat_map(|p| &p.pages)
-                .flat_map(|p| p.bindings.values())
-                .any(|b| crate::macro_inputs::uses_arguments(&b.action));
-        let activation = self
-            .profiles
-            .iter()
-            .flat_map(|p| &p.pages)
-            .flat_map(|p| p.bindings.values())
-            .any(|b| !b.activation_policy.is_queue());
-        let mut failure_policy = false;
+        let mut control_events = false;
         for action in self.saved_macros.iter().map(|m| &m.action).chain(
             self.profiles
                 .iter()
@@ -285,21 +296,26 @@ impl ProfileData {
                 .flat_map(|p| p.bindings.values())
                 .map(|b| &b.action),
         ) {
-            action.visit(&mut |a| { if matches!(a, Action::Builtin {action} if matches!(**action, crate::builtins::BuiltinAction::FailurePolicy{..})) { failure_policy = true; } });
+            action.visit(&mut |a| {
+                control_events |= matches!(a, Action::Events { .. });
+            });
         }
-        let floor = if extended
-            || macro_inputs
-            || activation
-            || failure_policy
-            || self
-                .profiles
-                .iter()
-                .any(|p| p.parameters.iter().any(|p| p.sensitive))
-        {
-            Some("0.1.0")
-        } else {
-            None
-        };
+        let new_activation = self
+            .profiles
+            .iter()
+            .flat_map(|p| &p.pages)
+            .flat_map(|p| p.bindings.values())
+            .any(|b| b.activation_policy.interrupts());
+        let linked = self.profiles.iter().any(|p| !p.linked_controls.is_empty());
+        let labels = self
+            .profiles
+            .iter()
+            .flat_map(|p| &p.pages)
+            .flat_map(|p| p.bindings.values())
+            .any(|b| !b.live_label.is_empty());
+        let supported_baseline = semver::Version::new(0, 1, 1);
+        let floor = (linked || new_activation || labels || control_events)
+            .then(|| supported_baseline.clone());
         let models = hardware_registry::manifests();
         let hardware_floor = self
             .profiles
@@ -320,13 +336,10 @@ impl ProfileData {
                     .flat_map(|page| page.bindings.keys())
                     .filter_map(|id| model.control(id).ok()?.minimum_manager.as_deref())
                     .chain(
-                        profile.background_asset.as_ref().and(
-                            model
-                                .capabilities
-                                .background_minimum_manager
-                                .as_deref()
-                                .or_else(|| model.capabilities.boot_logo.as_ref().map(|_| "0.1.0")),
-                        ),
+                        profile
+                            .background_asset
+                            .as_ref()
+                            .and(model.capabilities.background_minimum_manager.as_deref()),
                     )
                     .chain(
                         used_lighting
@@ -334,14 +347,11 @@ impl ProfileData {
                             .flatten(),
                     )
                     .filter_map(|v| semver::Version::parse(v).ok())
+                    .filter(|v| v >= &supported_baseline)
                     .max()
             })
             .max();
-        let floor = floor
-            .and_then(|v| semver::Version::parse(v).ok())
-            .into_iter()
-            .chain(hardware_floor)
-            .max();
+        let floor = floor.into_iter().chain(hardware_floor).max();
         if let Some(floor) = floor {
             if self.minimum_manager.as_ref().is_none_or(|current| {
                 semver::Version::parse(current).is_ok_and(|version| version < floor)
@@ -391,6 +401,7 @@ impl ProfileData {
             return Err("Keep at least one page in each profile".into());
         }
         profile.pages.remove(index);
+        profile.prune_links(|m| m.page_id != page_id);
         self.rules.retain(|rule| {
             rule.profile_id != profile_id || rule.page_id.as_deref() != Some(page_id)
         });
@@ -404,6 +415,7 @@ impl Binding {
     // Report whether there is content
     pub fn has_content(&self) -> bool {
         self.background_source == Some(BackgroundSource::Palette)
+            || !self.live_label.is_empty()
             || self.dial_response.is_some()
             || !self.activation_policy.is_queue()
             || !self.title.is_empty()
@@ -462,6 +474,7 @@ impl Binding {
     }
     // Validate with draft
     fn validate_with_draft(&self, draft: bool) -> Result<(), String> {
+        crate::live_label::validate(&self.live_label)?;
         if let Some(response) = self.dial_response {
             response.validate()?;
         }
@@ -499,6 +512,10 @@ impl Binding {
 impl Profile {
     // Validate the supplied profiles value
     pub fn validate(&self) -> Result<(), String> {
+        self.validate_with_unresolved_controls(false)
+    }
+    fn validate_with_unresolved_controls(&self, allow_unresolved: bool) -> Result<(), String> {
+        self.validate_links()?;
         if let Some(palette) = &self.palette {
             palette.validate()?;
         }
@@ -521,13 +538,13 @@ impl Profile {
         }
         let manifests = hardware_registry::manifests();
         self.background_media.validate()?;
-        let manifest = manifests
-            .iter()
-            .find(|m| m.model_id == self.model_id)
-            .ok_or("profile uses an unsupported model")?;
+        let manifest = manifests.iter().find(|m| m.model_id == self.model_id);
+        if manifest.is_none() && !allow_unresolved {
+            return Err("profile uses an unsupported model".into());
+        }
         if let Some(asset) = &self.background_asset {
             validate_asset_id(asset)?;
-            if !manifest.capabilities.background {
+            if manifest.is_some_and(|model| !model.capabilities.background) {
                 return Err("Model has no background display".into());
             }
         }
@@ -538,9 +555,20 @@ impl Profile {
             }
             for (id, binding) in &page.bindings {
                 binding.validate()?;
-                let control = manifest.control(id).map_err(|e| {
-                    format!("Unsupported profile control {}/{}: {e}", self.model_id, id)
-                })?;
+                if binding.live_label.iter().any(|s|matches!(s,crate::live_label::LabelSegment::Parameter{name,..} if self.parameters.iter().any(|p|p.name==*name && p.sensitive))){
+                    return Err("Choose a non-sensitive parameter for the live label.".into());
+                }
+                let Some(manifest) = manifest else { continue };
+                let control = match manifest.control(id) {
+                    Ok(control) => control,
+                    Err(_) if allow_unresolved => continue,
+                    Err(error) => {
+                        return Err(format!(
+                            "Unsupported profile control {}/{}: {error}",
+                            self.model_id, id
+                        ));
+                    }
+                };
                 if binding.background_source == Some(BackgroundSource::Palette) {
                     let surface = manifest
                         .control(control.feedback_surface.as_deref().unwrap_or(id))
@@ -556,10 +584,13 @@ impl Profile {
                     ));
                 }
                 if control.kind == "encoder"
-                    && !matches!(binding.action, Action::None | Action::Dial { .. })
+                    && !matches!(
+                        binding.action,
+                        Action::None | Action::Dial { .. } | Action::Events { .. }
+                    )
                 {
                     return Err(
-                        "Encoder bindings require explicit left, right and press actions".into(),
+                        "Encoder bindings require explicit left, right and press actions or event assignments".into(),
                     );
                 }
                 let mut dial_on_non_encoder = false;
@@ -616,6 +647,7 @@ impl Default for ProfileData {
                 (
                     format!("key-{}", i + 1),
                     Binding {
+                        live_label: Vec::new(),
                         dial_response: None,
                         title: title.into(),
                         color: format!("{color}00"),
@@ -635,6 +667,7 @@ impl Default for ProfileData {
             })
             .collect();
         let profile = Profile {
+            linked_controls: Default::default(),
             palette: None,
             parameters: vec![],
             background_asset: None,
@@ -717,13 +750,53 @@ struct SourceCache {
 }
 type ClipCycleEntry = (u64, Result<Option<Arc<crate::media::Clip>>, String>);
 
+struct DecodedFrame {
+    digest: [u8; 32],
+    pixels: image::DynamicImage,
+    _reservation: crate::media_budget::Reservation,
+}
 /// Immutable validated clip handles live only for one render cycle. Explicit
 /// invalidation still wins; a new cycle rechecks filesystem mutation metadata
 #[derive(Default)]
 pub(crate) struct ClipCycle {
+    decoded: std::cell::RefCell<Option<DecodedFrame>>,
     clips: std::cell::RefCell<std::collections::HashMap<String, ClipCycleEntry>>,
 }
 impl ClipCycle {
+    /// Borrow the decoded source only for this transform so its memory cannot
+    /// escape the reservation. A declined reservation still permits uncached work.
+    pub(crate) fn with_decoded<T>(
+        &self,
+        runtime: &crate::Runtime,
+        clip: &crate::media::Clip,
+        index: usize,
+        edit: impl FnOnce(&image::DynamicImage) -> hardware_core::Result<T>,
+    ) -> Result<T, String> {
+        let digest = clip.frame_digests[index];
+        let mut slot = self.decoded.borrow_mut();
+        if let Some(hit) = slot.as_ref().filter(|entry| entry.digest == digest) {
+            runtime.metrics.record("animation_source_decode_hits", 1.);
+            return edit(&hit.pixels).map_err(|e| e.to_string());
+        }
+        slot.take();
+        let pixels = hardware_core::render::decode_raster_pixels(&clip.frames[index])
+            .map_err(|e| e.to_string())?;
+        runtime.metrics.record("animation_source_decodes", 1.);
+        let bytes = pixels.as_bytes().len();
+        let Ok(reservation) = runtime.profiles.media_budget.reserve(bytes) else {
+            return edit(&pixels).map_err(|e| e.to_string());
+        };
+        runtime
+            .metrics
+            .record("animation_decoded_source_bytes", bytes as f64);
+        let entry = slot.insert(DecodedFrame {
+            digest,
+            pixels,
+            _reservation: reservation,
+        });
+        edit(&entry.pixels).map_err(|e| e.to_string())
+    }
+
     // Return the requested profiles value
     pub(crate) fn get(
         &self,
@@ -763,6 +836,11 @@ pub struct ProfileStore {
 }
 impl ProfileStore {
     // Open the requested profiles resource
+    pub(crate) fn staging(directory: &tempfile::TempDir) -> Result<Self, String> {
+        let storage = stream_dock_manager_storage::Storage::open_staging(directory.path().into())?;
+        storage.add_snapshot_validator(crate::profile_database::validate_snapshot)?;
+        Self::with_validated_storage(directory.path().join("profiles"), storage)
+    }
     pub fn open(root: PathBuf) -> Result<Self, String> {
         let config_root = if root.file_name().is_some_and(|name| name == "profiles") {
             root.parent()
@@ -775,18 +853,18 @@ impl ProfileStore {
             config_root,
             crate::application_data::validate_snapshot,
         )?;
-        Self::with_storage(root, storage)
+        Self::with_validated_storage(root, storage)
     }
     // Borrow the profile store’s managed storage service
     pub fn storage(&self) -> &stream_dock_manager_storage::Storage {
         &self.storage
     }
-    // Construct using storage
-    pub(crate) fn with_storage(
+    /// The caller registered profile snapshot validation, either alone for staging
+    /// or as part of application_data::validate_snapshot for a durable workspace.
+    pub(crate) fn with_validated_storage(
         root: PathBuf,
         storage: stream_dock_manager_storage::Storage,
     ) -> Result<Self, String> {
-        storage.add_snapshot_validator(crate::profile_database::validate_snapshot)?;
         storage.run(|connection| crate::profile_database::validate_snapshot(connection))?;
         std::fs::create_dir_all(root.join("assets")).map_err(|e| e.to_string())?;
         crate::media_cleanup::recover(&root)
@@ -848,9 +926,29 @@ impl ProfileStore {
     }
     // Load the requested profiles state
     pub fn load(&self) -> Result<ProfileData, String> {
-        let stored = self
-            .storage
-            .run(|connection| crate::profile_database::load(connection))?;
+        self.load_for_edit(false).map(|(data, _)| data)
+    }
+    // Read the baseline record versions with the same workspace snapshot used by an edit
+    pub(crate) fn load_for_edit(
+        &self,
+        with_stamp: bool,
+    ) -> Result<(ProfileData, Option<crate::profile_database::WorkspaceStamp>), String> {
+        use crate::profile_database::{load, WorkspaceStamp};
+        let (stored, mut stamp) = self.storage.run(move |connection| {
+            if !with_stamp {
+                return Ok((load(connection)?, None));
+            }
+            let snapshot = connection
+                .unchecked_transaction()
+                .map_err(|e| e.to_string())?;
+            let stored = load(&snapshot)?;
+            let stamp = stored
+                .as_ref()
+                .map(|_| WorkspaceStamp::read(&snapshot))
+                .transpose()?;
+            snapshot.commit().map_err(|e| e.to_string())?;
+            Ok((stored, stamp))
+        })?;
         let mut data = match stored {
             Some(data) => data,
             None => {
@@ -873,13 +971,16 @@ impl ProfileStore {
         if data.schema_version != 1 {
             return Err("unsupported profile version; database preserved".into());
         }
-        crate::keyboard_navigation::normalize(&mut data)?;
-        self.detach_deleted_media(&mut data);
+        let normalized = crate::keyboard_navigation::normalize_for_load(&mut data)?;
+        let detached = self.detach_deleted_media(&mut data);
+        if normalized || detached {
+            stamp = None;
+        }
         if !self.proven(&data)? {
             validate_data(&data)?;
             self.remember_validation(&data)?;
         }
-        Ok(data)
+        Ok((data, stamp))
     }
     #[cfg(test)]
     // Read the requested profiles data
@@ -926,14 +1027,46 @@ impl ProfileStore {
         path: &Path,
         options: &ProfileExportOptions,
     ) -> Result<(), String> {
+        self.export_with_password(path, options, None)
+    }
+
+    pub fn export_with_password(
+        &self,
+        path: &Path,
+        options: &ProfileExportOptions,
+        password: Option<&str>,
+    ) -> Result<(), String> {
+        stream_dock_manager_storage::vault::check_transfer_path(self.storage().root(), path)?;
         let _transaction = self.transaction.lock().unwrap();
-        let mut data = self.load()?;
-        data = select_profile_export(data, options)?;
+        let data = select_profile_export(self.load()?, options)?;
         let _assets = self
             .asset_leases
             .pin(referenced_assets(&data), "Active profile export")?;
         drop(_transaction);
-        self.export_archive(path, data, options.include_plugin_settings)
+        if !options.include_plugin_settings {
+            return self.export_archive(path, data, false);
+        }
+        let password = password
+            .filter(|s| !s.is_empty())
+            .ok_or("Enter an export password to include plugin settings.")?;
+        let stage = tempfile::tempdir().map_err(|e| e.to_string())?;
+        let archive = stage.path().join("archive.zip");
+        self.export_archive(&archive, data, true)?;
+        let mut data = zeroize::Zeroizing::new(Vec::new());
+        std::fs::File::open(archive)
+            .map_err(|e| e.to_string())?
+            .take(256 * 1024 * 1024 + 1)
+            .read_to_end(&mut data)
+            .map_err(|e| e.to_string())?;
+        let parent = path
+            .parent()
+            .filter(|p| !p.as_os_str().is_empty())
+            .unwrap_or(Path::new("."));
+        let mut file = tempfile::NamedTempFile::new_in(parent).map_err(|e| e.to_string())?;
+        use stream_dock_manager_storage::vault::transfer::{self, Kind};
+        transfer::write(Kind::Profiles, file.as_file_mut(), &mut data, password)?;
+        file.as_file().sync_all().map_err(|e| e.to_string())?;
+        atomic_replace(file.path(), path)
     }
     // Export archive
     pub(crate) fn export_archive(
@@ -942,7 +1075,8 @@ impl ProfileStore {
         mut data: ProfileData,
         include_plugin_settings: bool,
     ) -> Result<(), String> {
-        prepare_portable_export(&mut data, include_plugin_settings);
+        stream_dock_manager_storage::vault::check_transfer_path(self.storage().root(), path)?;
+        prepare_portable_export(&mut data, include_plugin_settings)?;
         validate_data(&data)?;
         let document = serde_json::to_value(&data).map_err(|e| e.to_string())?;
         let directory = path
@@ -1061,6 +1195,10 @@ impl ProfileStore {
         } else {
             b"Plugin action settings are excluded. Commands, arguments, text, URLs, paths and profile parameter defaults may still contain keys, tokens, passwords or private information. Review every action and referenced macro before sharing.\n"
         };
+        if let Some(required) = &data.minimum_manager {
+            writeln!(zip, "Requires Stream Dock Manager {required} or newer.")
+                .map_err(|error| error.to_string())?;
+        }
         zip.write_all(notes).map_err(|e| e.to_string())?;
         zip.write_all(b"Keyboard recordings are included. They may contain sensitive keystrokes; exported workspaces and backups are not a password vault. Review recordings before sharing and before playback.\n").map_err(|e| e.to_string())?;
         let mut plugins = std::collections::BTreeSet::new();
@@ -1111,12 +1249,33 @@ impl ProfileStore {
     }
     // Import for repair
     pub(crate) fn import_for_repair(&self, path: &Path) -> Result<ProfileData, String> {
+        self.read_portable_archive(path, false)
+    }
+
+    // Only the disposable review store may receive unresolved model/control
+    // mappings. Live imports are validated again before assets or data transfer.
+    pub(crate) fn read_portable_archive(
+        &self,
+        path: &Path,
+        staged: bool,
+    ) -> Result<ProfileData, String> {
+        self.read_portable_with_report(path, staged)
+            .map(|(data, _)| data)
+    }
+    pub(crate) fn read_portable_with_report(
+        &self,
+        path: &Path,
+        staged: bool,
+    ) -> Result<(ProfileData, bool), String> {
         let _preparation = self.media_gate.lock()?;
         let _reservation = self
             .media_budget
             .reserve(crate::media_budget::PREPARATION_BYTES)?;
-        let (zip, source) = open_archive(path, "profiles.json")?;
-        let mut data = parse_data(serde_json::from_str(&source).map_err(|e| e.to_string())?)?;
+        let (mut zip, source) = open_archive(path, "profiles.json")?;
+        let omitted = settings_omitted(&mut zip)?;
+        let mut document = serde_json::from_str(&source).map_err(|e| e.to_string())?;
+        crate::vault::detach_portable_references(&mut document);
+        let mut data = parse_data(document)?;
         if data.schema_version != 1 {
             return Err("Unsupported archive version".into());
         }
@@ -1124,9 +1283,9 @@ impl ProfileStore {
         data.history = Default::default();
         // Reject unsupported hardware/profile shapes before publishing any assets
         for profile in &data.profiles {
-            profile.validate()?;
+            profile.validate_with_unresolved_controls(staged)?;
         }
-        self.import_archive_assets(data, zip)
+        Ok((self.import_archive_assets(data, zip)?, omitted))
     }
     // Import archive assets
     fn import_archive_assets(
@@ -1615,6 +1774,8 @@ impl ProfileStore {
         &self,
         id: &str,
         uri: &str,
+        artwork: Option<&stream_dock_manager_plugin_host::artwork_cache::ArtworkFiles>,
+        size: [u16; 2],
         cancelled: &dyn Fn() -> bool,
     ) -> Result<Arc<crate::media::Clip>, crate::vendor_animation::PreparationFailure> {
         use crate::vendor_animation::PreparationFailure as Failure;
@@ -1636,16 +1797,33 @@ impl ProfileStore {
         if encoded.len() > 24 * 1024 * 1024 {
             return Err(Failure::permanent("Vendor GIF exceeds source limit"));
         }
-        let bytes = base64::engine::general_purpose::STANDARD
-            .decode(encoded)
-            .map_err(Failure::permanent)?;
+        let bytes = match artwork
+            .map(|files| files.image_bytes(uri))
+            .transpose()
+            .map_err(Failure::transient)?
+            .flatten()
+        {
+            Some(bytes) => bytes,
+            None => base64::engine::general_purpose::STANDARD
+                .decode(encoded)
+                .map_err(Failure::permanent)?,
+        };
         if !(bytes.starts_with(b"GIF87a") || bytes.starts_with(b"GIF89a")) {
             return Err(Failure::permanent("Invalid GIF source"));
         }
+        // Preserve the source aspect for both crop-to-fill and contained rendering.
+        // Scale only until the destination is covered; keep the old detail bound for overscan.
+        let (w, h) =
+            image::ImageReader::with_format(std::io::Cursor::new(&bytes), image::ImageFormat::Gif)
+                .into_dimensions()
+                .map_err(Failure::permanent)?;
+        let scale = (f64::from(size[0]) / f64::from(w)).max(f64::from(size[1]) / f64::from(h));
+        let edge = (f64::from(w.max(h)) * scale).ceil() as u16;
+        let edge = edge.clamp(1, size[0].max(size[1]).clamp(512, 1024));
         let clip = Arc::new(
             crate::media::gif_with_detail_checked(
                 &bytes,
-                512,
+                edge,
                 &Default::default(),
                 cancelled,
                 std::time::Duration::from_millis(500),
@@ -1810,7 +1988,8 @@ impl ProfileStore {
             let index = options.frame_index(&clip, elapsed);
             return Ok(format!(
                 "{}:{}",
-                clip.source_format, clip.frame_digests[index]
+                clip.source_format,
+                hex::encode(clip.frame_digests[index])
             ));
         }
         let (digest, photographic) = match self.static_identity(id)? {
@@ -1954,7 +2133,7 @@ impl ProfileStore {
             let index = options.frame_index(clip, elapsed);
             (
                 std::borrow::Cow::Borrowed(&**clip.frames[index]),
-                clip.frame_digests[index].clone(),
+                hex::encode(clip.frame_digests[index]),
                 None,
             )
         } else {
@@ -2012,7 +2191,10 @@ impl ProfileStore {
     }
 }
 // Prepare portable export
-pub(crate) fn prepare_portable_export(data: &mut ProfileData, include_plugin_settings: bool) {
+pub(crate) fn prepare_portable_export(
+    data: &mut ProfileData,
+    include_plugin_settings: bool,
+) -> Result<(), String> {
     data.update_requirements();
     data.rules.clear();
     data.history = Default::default();
@@ -2068,6 +2250,11 @@ pub(crate) fn prepare_portable_export(data: &mut ProfileData, include_plugin_set
             });
         result.unwrap_or_else(|never| match never {});
     }
+    let mut document = serde_json::to_value(&*data).map_err(|e| e.to_string())?;
+    if crate::vault::detach_portable_references(&mut document) {
+        *data = parse_data(document)?;
+    }
+    Ok(())
 }
 // Select profile export
 pub(crate) fn select_profile_export(
@@ -2144,6 +2331,53 @@ fn write_archive_json(writer: &mut impl Write, document: &impl Serialize) -> Res
     writer.write_all(b"\n").map_err(|e| e.to_string())
 }
 // Open archive
+pub(crate) fn settings_omitted(zip: &mut zip::ZipArchive<std::fs::File>) -> Result<bool, String> {
+    use zip::result::ZipError;
+    let entry = match zip.by_name("export-report.json") {
+        Ok(e) => e,
+        Err(ZipError::FileNotFound) => return Ok(false),
+        Err(e) => return Err(e.to_string()),
+    };
+    // Older archives had no settings-inclusion flag.
+    #[derive(serde::Deserialize)]
+    struct Report {
+        plugin_settings_included: Option<bool>,
+    }
+    let report: Report =
+        serde_json::from_reader(entry.take(16 * 1024 * 1024 + 1)).map_err(|e| e.to_string())?;
+    Ok(report.plugin_settings_included == Some(false))
+}
+
+pub(crate) fn omitted_settings_warnings(
+    profiles: &[Profile],
+    macros: &[crate::builtins::SavedMacro],
+) -> Vec<String> {
+    let mut warnings = std::collections::BTreeSet::new();
+    let mut check = |action: &Action, location: &str| {
+        action.visit(&mut |action| {
+            if let Action::Plugin { plugin_id, action_id, .. } = action {
+                warnings.insert(format!(
+                    "Configure {action_id} ({plugin_id}) in {location}. Its plugin settings were omitted."
+                ));
+            }
+        });
+    };
+    for profile in profiles {
+        for page in &profile.pages {
+            for (control, binding) in &page.bindings {
+                check(
+                    &binding.action,
+                    &format!("{} / {} / {control}", profile.name, page.name),
+                );
+            }
+        }
+    }
+    for m in macros {
+        check(&m.action, &format!("macro {}", m.name));
+    }
+    warnings.into_iter().collect()
+}
+
 pub(crate) fn open_archive(
     path: &Path,
     document: &str,
@@ -2364,7 +2598,7 @@ pub(crate) fn validate_data(data: &ProfileData) -> Result<(), String> {
         if m.id.is_empty() || m.name.trim().is_empty() || !macro_ids.insert(&m.id) {
             return Err("Invalid or duplicate saved macro".into());
         }
-        m.action.validate(0)?;
+        m.action.validate_saved_macro()?;
         crate::macro_inputs::validate_definitions(&m.inputs)?;
         crate::macro_inputs::validate_action_calls(&m.action, &data.saved_macros, &m.inputs)?;
     }
@@ -2386,6 +2620,17 @@ pub(crate) fn validate_data(data: &ProfileData) -> Result<(), String> {
     let mut ids = HashSet::new();
     for profile in &data.profiles {
         profile.validate()?;
+        for group in profile.linked_controls.values() {
+            // Profile validation proved all members have the same effective assignment.
+            let member = &group[0];
+            let binding = &profile
+                .pages
+                .iter()
+                .find(|p| p.id == member.page_id)
+                .unwrap()
+                .bindings[&member.control_id];
+            crate::workspace::validate_assignment_targets(profile, &data.profiles, binding)?;
+        }
         for binding in profile.pages.iter().flat_map(|page| page.bindings.values()) {
             crate::macro_inputs::validate_action_calls(&binding.action, &data.saved_macros, &[])?;
         }
@@ -2983,33 +3228,38 @@ mod tests {
         for include in [false, true] {
             let path = dir.path().join(format!("export-{include}.zip"));
             store
-                .export_with_options(
+                .export_with_password(
                     &path,
                     &ProfileExportOptions {
                         profile_ids: Some(vec![selected.clone()]),
                         include_plugin_settings: include,
                     },
+                    include.then_some("test transfer password"),
                 )
                 .unwrap();
-            let imported = store.import_for_repair(&path).unwrap();
-            assert_eq!(imported.profiles.len(), 1);
-            assert_eq!(imported.saved_macros.len(), 1);
-            assert_eq!(imported.saved_macros[0].id, "used");
-            assert_eq!(
-                serde_json::to_string(&imported)
-                    .unwrap()
-                    .contains("private-key"),
-                include
-            );
-            let mut zip = zip::ZipArchive::new(std::fs::File::open(&path).unwrap()).unwrap();
-            let report: serde_json::Value =
-                serde_json::from_reader(zip.by_name("export-report.json").unwrap()).unwrap();
-            assert_eq!(report["plugin_settings_included"], include);
-            assert_eq!(
-                report["external_profiles_to_resolve"],
-                serde_json::json!(["other"])
-            );
-            assert_eq!(report["plugins_required"], serde_json::json!(["example"]));
+            crate::importing::read_transfer(&path, Some("test transfer password"), |path| {
+                let imported = store.import_for_repair(path)?;
+                assert_eq!(imported.profiles.len(), 1);
+                assert_eq!(imported.saved_macros.len(), 1);
+                assert_eq!(imported.saved_macros[0].id, "used");
+                assert_eq!(
+                    serde_json::to_string(&imported)
+                        .unwrap()
+                        .contains("private-key"),
+                    include
+                );
+                let mut zip = zip::ZipArchive::new(std::fs::File::open(path).unwrap()).unwrap();
+                let report: serde_json::Value =
+                    serde_json::from_reader(zip.by_name("export-report.json").unwrap()).unwrap();
+                assert_eq!(report["plugin_settings_included"], include);
+                assert_eq!(
+                    report["external_profiles_to_resolve"],
+                    serde_json::json!(["other"])
+                );
+                assert_eq!(report["plugins_required"], serde_json::json!(["example"]));
+                Ok(())
+            })
+            .unwrap();
         }
         assert!(store
             .export_with_options(
@@ -3327,6 +3577,7 @@ mod tests {
         page.bindings.insert(
             "touch-1".into(),
             Binding {
+                live_label: Vec::new(),
                 dial_response: None,
                 title: String::new(),
                 color: "#242424".into(),
@@ -3674,8 +3925,63 @@ mod tests {
 mod expansion_hardware_tests {
     use super::*;
     #[test]
-    // Verify that hardware features use unreleased baseline and retired controls are rejected
-    fn hardware_features_use_unreleased_baseline_and_retired_controls_are_rejected() {
+    // Preserve unsupported assignments through profile roundtrip and declare the export floor
+    fn control_event_bindings_keep_their_slots_and_minimum_manager() {
+        use crate::actions::{EventSlot, DEFAULT_HOLD_MS, DEFAULT_MULTI_PRESS_MS};
+        let mut data = ProfileData::default();
+        let profile = &mut data.profiles[0];
+        let mut binding = profile.pages[0].bindings["key-1"].clone();
+        profile.model_id = "mini".into();
+        for page in &mut profile.pages {
+            page.bindings.clear();
+        }
+        let mut slots = vec![Action::None; EventSlot::COUNT];
+        slots[EventSlot::SinglePress.index()] = Action::Mute;
+        slots[EventSlot::HeldTurnLeft.index()] = Action::Volume { delta: -5 };
+        binding.action = Action::Events {
+            actions: slots,
+            multi_press_ms: DEFAULT_MULTI_PRESS_MS,
+            hold_ms: DEFAULT_HOLD_MS,
+        };
+        profile.pages[0].bindings.insert("key-1".into(), binding);
+
+        data.minimum_manager = None;
+        data.update_requirements();
+        assert_eq!(data.minimum_manager.as_deref(), Some("0.1.1"));
+        validate_data(&data).unwrap();
+        let json = serde_json::to_value(data).unwrap();
+        assert_eq!(json["schema_version"], 1);
+        let loaded = parse_data(json.clone()).unwrap();
+        validate_data(&loaded).unwrap();
+        let binding = &loaded.profiles[0].pages[0].bindings["key-1"];
+        assert!(matches!(
+            binding.action.child(EventSlot::HeldTurnLeft.index()),
+            Some(Action::Volume { delta: -5 })
+        ));
+        assert_eq!(serde_json::to_value(&loaded).unwrap(), json);
+        let root = tempfile::tempdir().unwrap();
+        let source = ProfileStore::open(root.path().join("export")).unwrap();
+        let destination = ProfileStore::open(root.path().join("import")).unwrap();
+        let archive = root.path().join("events.zip");
+        source.export_archive(&archive, loaded, false).unwrap();
+        let imported = destination.read_portable_archive(&archive, true).unwrap();
+        assert_eq!(imported.minimum_manager.as_deref(), Some("0.1.1"));
+        let action = &imported.profiles[0].pages[0].bindings["key-1"].action;
+        assert!(matches!(
+            action.child(EventSlot::SinglePress.index()),
+            Some(Action::Mute)
+        ));
+        assert!(matches!(
+            action.child(EventSlot::HeldTurnLeft.index()),
+            Some(Action::Volume { delta: -5 })
+        ));
+        let (_, notes) = open_archive(&archive, "export-notes.txt").unwrap();
+        assert!(notes.contains("Requires Stream Dock Manager 0.1.1 or newer."));
+    }
+
+    #[test]
+    // Verify that baseline hardware features need no hint and retired controls are rejected
+    fn baseline_hardware_features_need_no_hint_and_retired_controls_are_rejected() {
         let mut data = ProfileData::default();
         let mut binding = data.profiles[0].pages[0].bindings["key-1"].clone();
         binding.action = Action::None;
@@ -3693,12 +3999,12 @@ mod expansion_hardware_tests {
             .bindings
             .insert("switch-1-left".into(), binding.clone());
         data.update_requirements();
-        assert_eq!(data.minimum_manager.as_deref(), Some("0.1.0"));
+        assert_eq!(data.minimum_manager, None);
         data.profiles[0].pages[0].bindings.remove("switch-1-left");
         data.minimum_manager = None;
         data.profiles[0].background_asset = Some("a".repeat(64));
         data.update_requirements();
-        assert_eq!(data.minimum_manager.as_deref(), Some("0.1.0"));
+        assert_eq!(data.minimum_manager, None);
         data.profiles[0].background_asset = None;
         data.minimum_manager = None;
         data.profiles[0].pages[0]
@@ -3710,7 +4016,7 @@ mod expansion_hardware_tests {
             colors: vec![[1, 2, 3]; 12],
         };
         data.update_requirements();
-        assert_eq!(data.minimum_manager.as_deref(), Some("0.1.0"));
+        assert_eq!(data.minimum_manager, None);
         data.minimum_manager = Some("9.0.0".into());
         data.update_requirements();
         assert_eq!(data.minimum_manager.as_deref(), Some("9.0.0"));

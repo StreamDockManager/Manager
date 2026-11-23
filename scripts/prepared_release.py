@@ -129,9 +129,11 @@ def extract(archive, destination):
         for entry in entries:
             name = entry.filename
             mode = entry.external_attr >> 16
+            limit = release.MAX_NOTICES if name == release.NOTICES else (
+                MAX_METADATA if name.endswith('.json') or name == 'SHA256SUMS' else MAX_FILE)
             if (not re.fullmatch(r'[A-Za-z0-9][A-Za-z0-9._-]*', name) or entry.orig_filename != name or name in names
                     or entry.is_dir() or entry.flag_bits & 1 or stat.S_IFMT(mode) not in (0, stat.S_IFREG)
-                    or not 0 < entry.file_size <= (MAX_METADATA if name.endswith('.json') or name == 'SHA256SUMS' else MAX_FILE)):
+                    or not 0 < entry.file_size <= limit):
                 raise ValueError('Unsafe or oversized publication entry')
             names.add(name)
         destination.mkdir()

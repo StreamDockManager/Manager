@@ -250,7 +250,7 @@ impl ConfigurationRecovery {
 mod tests {
     use super::*;
     use crate::profiles::ProfileStore;
-    use stream_dock_manager_storage::{Storage, DATABASE_NAME};
+    use stream_dock_manager_storage::Storage;
     #[test]
     // Verify that prior history is real deduplicated nonmutating and load then save restores only profile
     fn prior_history_is_real_deduplicated_nonmutating_and_load_then_save_restores_only_profile() {
@@ -265,7 +265,7 @@ mod tests {
             })
             .unwrap();
         drop(store);
-        let before = std::fs::read(root.path().join(DATABASE_NAME)).unwrap();
+        let before = std::fs::read(database_path(root.path(), DATABASE_NAME)).unwrap();
         let service = ConfigurationRecovery::open(root.path().into(), "test".into()).unwrap();
         let id = format!("profile:{}", original.id);
         let current = service.document(&id).unwrap();
@@ -276,7 +276,7 @@ mod tests {
             && v.timestamp_ms.is_some()));
         assert_eq!(
             before,
-            std::fs::read(root.path().join(DATABASE_NAME)).unwrap()
+            std::fs::read(database_path(root.path(), DATABASE_NAME)).unwrap()
         );
         let version = versions
             .versions
@@ -315,7 +315,7 @@ mod tests {
         let id = format!("profile:{}", data.profiles[0].id);
         store
             .storage()
-            .backup(root.path().join("recovery/previous.sqlite3"))
+            .backup(recovery_directory(root.path()).join("previous.sqlite3"))
             .unwrap();
         drop(store);
         let storage = Storage::open(root.path().into()).unwrap();
@@ -330,7 +330,7 @@ mod tests {
             })
             .unwrap();
         drop(storage);
-        std::fs::create_dir(root.path().join("recovery/not-a-file.sqlite3")).unwrap();
+        std::fs::create_dir(recovery_directory(root.path()).join("not-a-file.sqlite3")).unwrap();
         let service = ConfigurationRecovery::open(root.path().into(), "bad".into()).unwrap();
         let doc = service.document(&id).unwrap();
         let versions = service.versions(&id, &doc.revision).unwrap();
@@ -373,7 +373,7 @@ mod tests {
         let id = format!("profile:{}", data.profiles[0].id);
         store
             .storage()
-            .backup(root.path().join("recovery/sidecar.sqlite3"))
+            .backup(recovery_directory(root.path()).join("sidecar.sqlite3"))
             .unwrap();
         let changed = store
             .edit(data.configuration_revision, "Real edit", |data| {
@@ -399,7 +399,7 @@ mod tests {
             .unwrap();
         drop(storage);
         std::fs::write(
-            root.path().join("recovery/sidecar.sqlite3-wal"),
+            recovery_directory(root.path()).join("sidecar.sqlite3-wal"),
             "not a snapshot",
         )
         .unwrap();
@@ -408,7 +408,7 @@ mod tests {
         store.load().unwrap();
         store
             .storage()
-            .backup(root.path().join("recovery/foreign.sqlite3"))
+            .backup(recovery_directory(root.path()).join("foreign.sqlite3"))
             .unwrap();
         drop(store);
         let service = ConfigurationRecovery::open(root.path().into(), "broken".into()).unwrap();

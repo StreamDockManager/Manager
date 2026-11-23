@@ -94,10 +94,16 @@ enum Commands {
 enum DataCommand {
     Status,
     Backup {
+        /// Include plugin settings in a password-encrypted transfer. Read the password from stdin.
+        #[arg(long, requires = "path")]
+        password_stdin: bool,
         path: Option<PathBuf>,
     },
     /// Replace managed settings from a validated SQLite snapshot. External media and credentials are not restored
     Restore {
+        /// Restore a password-encrypted transfer using one password line from stdin.
+        #[arg(long)]
+        password_stdin: bool,
         path: PathBuf,
     },
     Compact,
@@ -155,15 +161,47 @@ fn run() -> Result<(), String> {
         stream_dock_manager_runtime::Runtime::default_root,
     )?;
     if let Commands::Data { operation } = &cli.command {
+        let encrypted = matches!(
+            operation,
+            DataCommand::Backup {
+                password_stdin: true,
+                ..
+            } | DataCommand::Restore {
+                password_stdin: true,
+                ..
+            }
+        );
         let (operation, path) = match operation {
             DataCommand::Status => ("status", None),
-            DataCommand::Backup { path } => ("backup", path.clone()),
-            DataCommand::Restore { path } => ("restore", Some(path.clone())),
+            DataCommand::Backup { path, .. } => ("backup", path.clone()),
+            DataCommand::Restore { path, .. } => ("restore", Some(path.clone())),
             DataCommand::Compact => ("compact", None),
         };
-        return print(stream_dock_manager_runtime::application_data::maintain(
-            root, operation, path,
-        )?);
+        let mut password = zeroize::Zeroizing::new(String::new());
+        if encrypted {
+            use std::io::{BufRead, IsTerminal, Read};
+            if std::io::stdin().is_terminal() {
+                return Err("Pipe the export password on stdin from a protected source.".into());
+            }
+            std::io::stdin()
+                .lock()
+                .take(1027)
+                .read_line(&mut password)
+                .map_err(|e| e.to_string())?;
+            let len = password.trim_end_matches(['\r', '\n']).len();
+            if len == 0 || len > 1024 {
+                return Err("Invalid transfer password length".into());
+            }
+            password.truncate(len);
+        }
+        return print(
+            stream_dock_manager_runtime::application_data::maintain_transfer(
+                root,
+                operation,
+                path,
+                encrypted.then_some(password.as_str()),
+            )?,
+        );
     }
     if let Commands::InstallPlugins { paths } = &cli.command {
         let installed = stream_dock_manager_runtime::plugin_packages::install_local_packages(

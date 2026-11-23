@@ -6,7 +6,7 @@ export function actionPluginsEnabled(action: Action, plugins: Plugin[]): boolean
         return plugins.some((plugin) => plugin.id === action.plugin_id && plugin.enabled);
     if (action.kind === 'builtin' && 'children' in action.action)
         return action.action.children.every((child) => actionPluginsEnabled(child, plugins));
-    if (action.kind === 'macro' || action.kind === 'dial')
+    if (action.kind === 'macro' || action.kind === 'dial' || action.kind === 'events')
         return action.actions.every((step) => actionPluginsEnabled(step, plugins));
     if (action.kind === 'toggle')
         return (

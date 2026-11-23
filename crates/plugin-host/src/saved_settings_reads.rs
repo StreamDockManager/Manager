@@ -94,6 +94,28 @@ impl Hub {
                     .get(&read.context)
                     .cloned()
                     .unwrap_or(json!({}))
+            } else if let Some(buffered) =
+                self.context_state
+                    .addresses
+                    .get(&read.context)
+                    .and_then(|address| {
+                        self.settings_bursts.pending(
+                            &read.owner,
+                            &read.session,
+                            &read.context,
+                            address,
+                        )
+                    })
+            {
+                let settings = self
+                    .context_state
+                    .configured
+                    .get(&read.context)
+                    .map_or_else(
+                        || buffered.clone(),
+                        |saved| crate::preserve_references(saved, buffered),
+                    );
+                self.project_execution_settings(&read.context, settings)
             } else {
                 self.execution_settings(&read.context, &json!({}))
             };

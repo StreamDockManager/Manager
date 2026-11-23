@@ -1,3 +1,11 @@
+import { native } from './bridge';
+import type { VaultEntry } from '../generated/runtime';
+import {
+    builtinVaultFields,
+    insertBuiltinVaultReference,
+    insertVaultUrlReference,
+    vaultUrlSuffixStart,
+} from './vault-action-fields';
 import { editKeyboardMacro } from './keyboard-macro-editor';
 import { keyboardMacroSummary } from './keyboard-macro-draft';
 import {
@@ -103,7 +111,7 @@ const textComparisons = [
     { value: 'contains', label: 'Contains' },
 ];
 const conditionComparisons: Record<string, { value: string; label: string }[]> = {
-    clipboard: textComparisons,
+    clipboard: [...textComparisons, { value: 'matches_vault_json', label: 'Matches Vault JSON' }],
     application: textComparisons,
     file: [
         { value: 'exists', label: 'Exists' },
@@ -317,6 +325,11 @@ export function registerMacroEditor(Alpine: typeof AlpineType) {
                 macro ? 'sd-macro-editor' : 'sd-action-editor',
             );
         },
+        get eventBindingLane() {
+            if (this.namedMode) return undefined;
+            const attribute = this.host?.getAttribute('event-lane');
+            return attribute?.match(/^(?:[0-9]|1[0-3])$/) ? Number(attribute) : undefined;
+        },
         // Return named mode for the current macro editor view
         get namedMode() {
             return Boolean(this.host?.hasAttribute('named'));
@@ -343,7 +356,7 @@ export function registerMacroEditor(Alpine: typeof AlpineType) {
         },
         // Return editor summary for the current macro editor view
         get editorSummary() {
-            return `${this.rows.length} ${this.rows.length === 1 ? 'step' : 'steps'} · Edit order and branches`;
+            return `${this.rows.length} ${this.rows.length === 1 ? 'step' : 'steps'}`;
         },
         // Return sequence mode for the current macro editor view
         get sequenceMode() {
@@ -676,6 +689,136 @@ export function registerMacroEditor(Alpine: typeof AlpineType) {
                     })),
             ];
         },
+        vaultNode: '',
+        vaultChoiceGeneration: 0,
+        vaultChoices: [] as VaultEntry[],
+        vaultTarget: '',
+        vaultFields(row: Row) {
+            if (!native) return [];
+            if (row.action.kind === 'open_url') return [{ key: 'url', label: 'URL' }];
+            return row.action.kind === 'builtin' ? builtinVaultFields(row.action.action) : [];
+        },
+        vaultFocusedField(row: Row, element: HTMLElement) {
+            const inputs = element
+                .closest('.action-node')
+                ?.querySelectorAll<HTMLInputElement | HTMLTextAreaElement>(
+                    'input[data-vault-input], textarea[data-vault-input]',
+                );
+            return Array.from(inputs || []).find(
+                (input) =>
+                    input.dataset.path === row.path &&
+                    input.dataset.vaultInput === this.vaultTarget,
+            );
+        },
+        rememberVaultField(event: Event) {
+            const field = event.currentTarget as HTMLInputElement | HTMLTextAreaElement;
+            this.vaultLastField = {
+                id: field.closest<HTMLElement>('.action-node')?.dataset.node || '',
+                key: field.dataset.vaultInput || '',
+            };
+        },
+        vaultLastField: null as { id: string; key: string } | null,
+        clearVaultChoices() {
+            this.vaultChoiceGeneration++;
+            this.vaultChoices = [];
+            this.vaultNode = '';
+            this.vaultTarget = '';
+        },
+        async loadVaultChoices(event: Event) {
+            const path = (event.currentTarget as HTMLElement).dataset.path || '';
+            const row = this.rows.find((row) => row.path === path);
+            const fields = row ? this.vaultFields(row) : [];
+            const last = this.vaultLastField;
+            const field =
+                fields.find(({ key }) => last?.id === row?.id && key === last?.key)?.key ||
+                fields[0]?.key;
+            if (!row || !field) return;
+            this.clearVaultChoices();
+            if (field === 'url') {
+                const action = row.action;
+                const url =
+                    action.kind === 'open_url'
+                        ? action.url
+                        : action.kind === 'builtin' && 'url' in action.action
+                          ? action.action.url
+                          : '';
+                if (vaultUrlSuffixStart(url) < 0) {
+                    this.error = 'Enter a fixed HTTP or HTTPS website first.';
+                    return;
+                }
+            }
+            const generation = this.vaultChoiceGeneration;
+            try {
+                const entries = await this.app.bridge.command('vault_builtin_choices', {
+                    pathField: field === 'path' || field === 'condition-path',
+                    jsonField: field === 'json',
+                });
+                if (
+                    generation !== this.vaultChoiceGeneration ||
+                    this.nodeId(this.node(path)) !== row.id
+                )
+                    return;
+                this.vaultNode = row.id;
+                this.vaultTarget = field;
+                this.vaultChoices =
+                    field === 'condition-path'
+                        ? entries.filter((item) => !item.protected)
+                        : entries;
+                this.error = this.vaultChoices.length
+                    ? ''
+                    : 'No compatible user-owned Vault entries.';
+            } catch {
+                if (generation === this.vaultChoiceGeneration)
+                    this.error = 'Unlock Vault to choose an entry.';
+            }
+        },
+        chooseVaultTarget(event: Event) {
+            const select = event.currentTarget as HTMLSelectElement;
+            const node = this.node(select.dataset.path || '');
+            if (
+                node.kind === 'builtin' &&
+                this.nodeId(node) === this.vaultNode &&
+                builtinVaultFields(node.action).some(({ key }) => key === select.value)
+            )
+                this.vaultTarget = select.value;
+        },
+        insertVaultReference(event: Event) {
+            const select = event.currentTarget as HTMLSelectElement;
+            const node = this.node(select.dataset.path || '');
+            const entry = this.vaultChoices.find((entry) => entry.id === select.value);
+            if (!entry || this.nodeId(node) !== this.vaultNode) return;
+            const path = select.dataset.path || '';
+            const row = this.rows.find((item) => item.path === path);
+            const input = row && this.vaultFocusedField(row, select);
+            const selection =
+                input &&
+                input.selectionStart !== null &&
+                input.selectionEnd !== null &&
+                this.vaultLastField?.id === row?.id &&
+                this.vaultLastField.key === this.vaultTarget
+                    ? { value: input.value, start: input.selectionStart, end: input.selectionEnd }
+                    : undefined;
+            const token = '${vault.' + entry.id + '}';
+            if (node.kind === 'open_url') {
+                const url = insertVaultUrlReference(node.url, token, selection);
+                if (url === null) {
+                    this.error = 'Enter a fixed HTTP or HTTPS website first.';
+                    this.clearVaultChoices();
+                    return;
+                }
+                node.url = url;
+            } else if (
+                node.kind !== 'builtin' ||
+                !insertBuiltinVaultReference(node.action, this.vaultTarget, token, selection)
+            ) {
+                if (this.vaultTarget === 'url')
+                    this.error = 'Enter a fixed HTTP or HTTPS website first.';
+                this.clearVaultChoices();
+                return;
+            }
+            this.clearVaultChoices();
+            this.publish();
+        },
         // List reference-capable fields on the selected action
         topLevelReferenceFields(row: Row) {
             if (row.action.kind === 'command') return [{ key: 'args', label: 'Arguments' }];
@@ -735,6 +878,7 @@ export function registerMacroEditor(Alpine: typeof AlpineType) {
         },
         // Read the current editable action draft from its owning context
         readDraft() {
+            this.clearVaultChoices();
             this.pluginSettingDrafts.clear();
             this.pluginJsonDrafts = {};
             this.action = macro
@@ -772,6 +916,7 @@ export function registerMacroEditor(Alpine: typeof AlpineType) {
         },
         // Close editor in the current macro editor draft
         closeEditor() {
+            this.clearVaultChoices();
             if (this.saving) return;
             this.inspectorSession?.abort();
             this.inspectorSession = undefined;
@@ -993,6 +1138,7 @@ export function registerMacroEditor(Alpine: typeof AlpineType) {
         },
         // Remove macro editor listeners and release owned resources
         destroy() {
+            this.clearVaultChoices();
             this.unregisterCloseOwner?.();
             this.inspectorSession?.abort();
             this.closeMacroSettings();
@@ -1254,6 +1400,7 @@ export function registerMacroEditor(Alpine: typeof AlpineType) {
             const original = this.serialized;
             const target = this.nodeId(this.node(path));
             const wasEditing = this.editing;
+            const eventLane = this.eventBindingLane;
             this.recording = '';
             openActionPicker({
                 owner,
@@ -1268,14 +1415,17 @@ export function registerMacroEditor(Alpine: typeof AlpineType) {
                       ? this.editorTitle
                       : 'Device editor',
                 // Check whether the action-picker request still targets the current editor
+                independentEvent: eventLane !== undefined,
                 valid: () =>
                     original === this.serialized &&
                     this.editing === wasEditing &&
+                    this.eventBindingLane === eventLane &&
                     this.rows.some((row) => row.id === target),
                 // Check whether the suspended action-picker request can return to its editor
                 canResume: () =>
                     original === this.serialized &&
                     this.editing === wasEditing &&
+                    this.eventBindingLane === eventLane &&
                     this.editorContextCurrent,
                 // Apply the selected action or media entry to the requesting editor
                 choose: (selection) => {
@@ -2007,6 +2157,7 @@ export function registerMacroEditor(Alpine: typeof AlpineType) {
             const wasEditing = this.editing;
             const original = this.serialized;
             const originalSettings = JSON.stringify(node.settings);
+            const eventLane = this.eventBindingLane;
             const session = new AbortController();
             this.inspectorSession = session;
             // Check that the asynchronous result still belongs to the active editor
@@ -2014,6 +2165,7 @@ export function registerMacroEditor(Alpine: typeof AlpineType) {
                 !session.signal.aborted &&
                 this.editing === wasEditing &&
                 original === this.serialized &&
+                this.eventBindingLane === eventLane &&
                 this.rows.some((row) => row.id === id);
             try {
                 const settings = node.settings;
@@ -2035,9 +2187,11 @@ export function registerMacroEditor(Alpine: typeof AlpineType) {
                               page_id: this.app.page?.id ?? '',
                               control_id: this.app.controlId,
                               path: [
-                                  ...(this.host?.getAttribute('dial-lane')?.match(/^[012]$/)
-                                      ? [Number(this.host.getAttribute('dial-lane'))]
-                                      : []),
+                                  ...(eventLane !== undefined
+                                      ? [eventLane]
+                                      : this.host?.getAttribute('dial-lane')?.match(/^[012]$/)
+                                        ? [Number(this.host.getAttribute('dial-lane'))]
+                                        : []),
                                   ...(path ? path.split('.').map(Number) : []),
                               ],
                           },

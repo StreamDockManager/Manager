@@ -158,6 +158,35 @@ export class BuiltinPreview {
                 effects.push('profile');
                 return;
             }
+            if (action.kind === 'swipe_navigation') {
+                const profile = currentProfile();
+                if (
+                    !profile ||
+                    input.kind !== 'swipe' ||
+                    !['left', 'right'].includes(input.direction)
+                )
+                    return;
+                const isPage = action.target === 'page';
+                const candidates = isPage
+                    ? profile.pages
+                    : snapshot.profiles.filter((item) => item.model_id === profile.model_id);
+                const current = candidates.findIndex(
+                    (item) =>
+                        item.id ===
+                        (isPage ? session()?.page_id || profile.active_page : profile.id),
+                );
+                if (current < 0 || candidates.length < 2) return;
+                const forward = (input.direction === 'left') !== action.reverse;
+                const next = current + (forward ? 1 : -1);
+                const index = action.wrap ? (next + candidates.length) % candidates.length : next;
+                const target = candidates[index];
+                if (target) {
+                    if (isPage) select(profile.id, target.id, false);
+                    else select(target.id, undefined, true);
+                }
+                effects.push(input.direction + ' ' + action.target);
+                return;
+            }
             if (action.kind === 'navigate') {
                 const profile = currentProfile();
                 const delta = action.direction === 'previous' ? -1 : 1;
@@ -170,7 +199,7 @@ export class BuiltinPreview {
                             (Math.max(0, index) + delta + profile.pages.length) %
                                 profile.pages.length
                         ]!;
-                    select(profile.id, page.id);
+                    select(profile.id, page.id, input.kind === 'swipe' ? false : undefined);
                 } else if (profile) {
                     const profiles = snapshot.profiles.filter(
                         (p) => p.model_id === profile.model_id,
@@ -178,7 +207,12 @@ export class BuiltinPreview {
                     const index = profiles.findIndex((p) => p.id === profile.id);
                     const target =
                         profiles[(Math.max(0, index) + delta + profiles.length) % profiles.length];
-                    if (target) select(target.id, target.active_page);
+                    if (target && (input.kind !== 'swipe' || target.id !== profile.id))
+                        select(
+                            target.id,
+                            input.kind === 'swipe' ? undefined : target.active_page,
+                            input.kind === 'swipe' ? true : undefined,
+                        );
                 }
                 effects.push(`${action.direction} ${action.target}`);
                 return;

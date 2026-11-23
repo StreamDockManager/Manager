@@ -3,26 +3,45 @@
 //! Worker closures must only use the supplied connection and owned immutable input
 //! They must not acquire runtime locks, call this service recursively, or do external
 //! I/O. Keep domain validation outside transactions and recheck revisions inside them
+mod backup_schedule;
+mod database_layout;
 mod files;
+mod installation_key;
 mod maintenance;
+pub mod permissions;
+pub mod plugin_health;
+pub mod plugin_installations;
+pub mod plugin_settings;
 mod records;
 mod recovery;
 mod repair;
 mod retention;
+mod settings_backup;
+pub use installation_key::recovery::{PluginKeystoreBackup, PluginKeystoreReview};
 pub use repair::{inspect_recovery_backups, RecoveryEditor};
 mod schema;
 
+pub use database_layout::{
+    database_directory, database_path, has_legacy_database_layout, prepare_database_layout,
+    recovery_directory,
+};
 pub use files::{replace_file, sync_directory};
 pub mod bounded_io;
+pub mod cache_index;
 pub mod json_digest;
-pub use maintenance::{DatabaseStats, Maintenance, Snapshot};
+pub mod timing;
+pub mod vault;
+pub use maintenance::{DatabaseStats, Maintenance, RecoveryFile, Snapshot, StorageSummary};
 pub use records::{
     delete, list_json, read_json, revision, write_json, Domain, EncodedJson, JsonRecord,
     MAX_KEY_BYTES, MAX_RECORD_BYTES,
 };
 pub use recovery::{RecoveryReport, RecoverySource, RestorePreview};
 pub use rusqlite;
-pub use schema::{validate as validate_database, APPLICATION_ID, DATABASE_NAME, SCHEMA_VERSION};
+pub use schema::{
+    persisted_generation, validate as validate_database, APPLICATION_ID, DATABASE_NAME,
+    SCHEMA_VERSION,
+};
 
 use rusqlite::{Connection, Transaction};
 use serde::{de::DeserializeOwned, Serialize};
@@ -34,8 +53,11 @@ use std::{
         Arc, Mutex,
     },
     thread::{self, JoinHandle},
-    time::{Duration, Instant},
+    time::Instant,
 };
+
+#[cfg(test)]
+use std::time::Duration;
 
 pub const MAX_PENDING_OPERATIONS: usize = 64;
 pub const MAX_ADMITTED_BYTES: usize = 64 * 1024 * 1024;
@@ -45,6 +67,7 @@ type Validators = Arc<Mutex<Vec<SnapshotValidator>>>;
 enum Message {
     Job(Job),
     Shutdown,
+    Wake,
 }
 #[derive(Clone, Copy, PartialEq, Eq)]
 enum Mode {
@@ -59,7 +82,17 @@ struct Gate {
     bytes: usize,
     last_backup_error: Option<String>,
 }
+#[cfg(test)]
+#[derive(Default)]
+struct WorkerCounts {
+    timers: std::sync::atomic::AtomicUsize,
+    jobs: std::sync::atomic::AtomicUsize,
+    wakes: std::sync::atomic::AtomicUsize,
+    backups: std::sync::atomic::AtomicUsize,
+}
 struct Inner {
+    #[cfg(test)]
+    counts: Arc<WorkerCounts>,
     root: PathBuf,
     sender: SyncSender<Message>,
     gate: Arc<Mutex<Gate>>,
@@ -104,7 +137,27 @@ impl Storage {
         config_root: PathBuf,
         validator: impl Fn(&Connection) -> Result<(), String> + Send + Sync + 'static,
     ) -> Result<Self, String> {
+        Self::open_mode(config_root, validator, false)
+    }
+    /// A review-owned temporary workspace never creates a persistent credential.
+    pub fn open_staging(config_root: PathBuf) -> Result<Self, String> {
+        Self::open_mode(config_root, |_| Ok(()), true)
+    }
+    fn open_mode(
+        config_root: PathBuf,
+        validator: impl Fn(&Connection) -> Result<(), String> + Send + Sync + 'static,
+        staging: bool,
+    ) -> Result<Self, String> {
         let (root, owner) = own_root(&config_root)?;
+        if staging
+            && (database_path(&root, DATABASE_NAME)
+                .try_exists()
+                .map_err(|e| e.to_string())?
+                || has_legacy_database_layout(&root)?)
+        {
+            return Err("A staging database requires a fresh temporary directory".into());
+        }
+        database_layout::prepare_owned(&root)?;
         let (sender, receiver) = mpsc::sync_channel(MAX_PENDING_OPERATIONS);
         let (ready_tx, ready_rx) = mpsc::sync_channel(1);
         let gate = Arc::new(Mutex::new(Gate {
@@ -119,6 +172,10 @@ impl Storage {
         let validators: Validators = Arc::new(Mutex::new(vec![validator.clone()]));
         let worker_validators = validators.clone();
         let worker_root = root.clone();
+        #[cfg(test)]
+        let counts = Arc::new(WorkerCounts::default());
+        #[cfg(test)]
+        let worker_counts = counts.clone();
         let worker = thread::Builder::new()
             .name("stream-dock-manager-storage".into())
             .spawn(move || {
@@ -126,7 +183,7 @@ impl Storage {
                 // order closes SQLite before unlock on panic/startup failure as
                 // well as the explicit normal-shutdown drop below.
                 let _owner: RootOwner = owner;
-                let opened = schema::open_validated(&worker_root, &*validator);
+                let opened = schema::open_validated(&worker_root, &*validator, staging);
                 let mut connection = match opened {
                     Ok(connection) => {
                         let _ = ready_tx.send(Ok(()));
@@ -137,43 +194,60 @@ impl Storage {
                         return;
                     }
                 };
-                let mut dirty_since: Option<Instant> = None;
-                let mut last_change = Instant::now();
-                let mut next_attempt = Instant::now();
+                let mut schedule = backup_schedule::Schedule::default();
                 loop {
                     let before = connection.as_ref().map(Connection::total_changes);
-                    let shutdown = match receiver.recv_timeout(Duration::from_secs(1)) {
+                    let runnable = connection.is_some()
+                        && worker_gate.lock().is_ok_and(|gate| gate.mode == Mode::Open);
+                    let received = match schedule.deadline(runnable) {
+                        Some(deadline) => receiver
+                            .recv_timeout(deadline.saturating_duration_since(Instant::now())),
+                        None => receiver.recv().map_err(|_| RecvTimeoutError::Disconnected),
+                    };
+                    #[cfg(test)]
+                    {
+                        use std::sync::atomic::Ordering;
+                        match &received {
+                            Ok(Message::Job(_)) => {
+                                worker_counts.jobs.fetch_add(1, Ordering::SeqCst);
+                            }
+                            Ok(Message::Wake) => {
+                                worker_counts.wakes.fetch_add(1, Ordering::SeqCst);
+                            }
+                            Err(RecvTimeoutError::Timeout) => {
+                                worker_counts.timers.fetch_add(1, Ordering::SeqCst);
+                            }
+                            _ => {}
+                        }
+                    }
+                    let shutdown = match received {
                         Ok(Message::Job(job)) => {
                             job(&mut connection);
                             false
                         }
                         Ok(Message::Shutdown) | Err(RecvTimeoutError::Disconnected) => true,
-                        Err(RecvTimeoutError::Timeout) => false,
+                        Ok(Message::Wake) | Err(RecvTimeoutError::Timeout) => false,
                     };
                     if before != connection.as_ref().map(Connection::total_changes) {
-                        let now = Instant::now();
-                        dirty_since.get_or_insert(now);
-                        last_change = now;
+                        schedule.changed(Instant::now());
                     }
                     let allowed = worker_gate.lock().is_ok_and(|gate| gate.mode == Mode::Open);
-                    let due = dirty_since.is_some_and(|first| {
-                        shutdown
-                            || (Instant::now() >= next_attempt
-                                && (last_change.elapsed() >= Duration::from_secs(30)
-                                    || first.elapsed() >= Duration::from_secs(300)))
-                    });
+                    let due =
+                        schedule.due(Instant::now(), allowed && connection.is_some(), shutdown);
                     if allowed && due {
                         if let Some(conn) = connection.as_ref() {
+                            #[cfg(test)]
+                            worker_counts
+                                .backups
+                                .fetch_add(1, std::sync::atomic::Ordering::SeqCst);
                             let result = maintenance::automatic_backup(
                                 conn,
                                 &worker_root,
                                 &worker_validators,
                             );
+                            schedule.attempted(Instant::now(), result.is_ok());
                             let error = match result {
-                                Ok((_, warning)) => {
-                                    dirty_since = None;
-                                    warning
-                                }
+                                Ok((_, warning)) => warning,
                                 Err(error) => Some(error),
                             };
                             if shutdown {
@@ -186,7 +260,6 @@ impl Storage {
                             if let Ok(mut gate) = worker_gate.lock() {
                                 gate.last_backup_error = error;
                             }
-                            next_attempt = Instant::now() + Duration::from_secs(30);
                         }
                     }
                     if shutdown {
@@ -210,6 +283,8 @@ impl Storage {
         }
         Ok(Self {
             inner: Arc::new(Inner {
+                #[cfg(test)]
+                counts,
                 root,
                 sender,
                 gate,
@@ -239,6 +314,11 @@ impl Storage {
             .push(Arc::new(validator));
         Ok(())
     }
+    /// Read the on-disk restore identity on the owning worker.
+    pub fn persisted_generation(&self) -> Result<String, String> {
+        self.run(|db| persisted_generation(db))
+    }
+
     // Return the current generation identifier
     pub fn generation(&self) -> u64 {
         self.inner
@@ -298,7 +378,9 @@ impl Storage {
         admission.operations += 1;
         admission.bytes += retained_bytes;
         let completion_gate = gate.clone();
+        let queued = timing::timestamp();
         let job = Box::new(move |connection: &mut Option<Connection>| {
+            timing::record_since(timing::Phase::QueueWait, queued);
             let permitted = completion_gate
                 .lock()
                 .is_ok_and(|gate| gate.mode == Mode::Open && gate.generation == generation);
@@ -368,12 +450,15 @@ impl Storage {
         F: FnOnce(&Transaction<'_>) -> Result<T, String> + Send + 'static,
     {
         self.run_with_cost(retained_bytes, move |conn| {
+            let work = timing::start(timing::Phase::TransactionWork);
             let tx = conn
                 .transaction_with_behavior(rusqlite::TransactionBehavior::Immediate)
                 .map_err(|e| e.to_string())?;
             let result = operation(&tx)?;
             tx.execute("UPDATE database_metadata SET value=CAST(CAST(value AS INTEGER)+1 AS TEXT) WHERE key='commit_sequence' AND CAST(value AS INTEGER)<9223372036854775807",[]).map_err(|e|e.to_string())?;
             if tx.changes()!=1 {return Err("Storage commit sequence is unavailable or exhausted".into());}
+            drop(work);
+            let _commit = timing::start(timing::Phase::TransactionCommit);
             tx.commit().map_err(|e| e.to_string())?;
             Ok(result)
         })
@@ -474,3 +559,8 @@ pub(crate) fn own_root(config_root: &Path) -> Result<(PathBuf, RootOwner), Strin
 
 #[cfg(test)]
 mod tests;
+
+/// Whether this validated connection includes the encrypted SDK storage tables
+pub fn plugin_storage_attached(db: &rusqlite::Connection) -> Result<bool, String> {
+    Ok(installation_key::attached(db))
+}

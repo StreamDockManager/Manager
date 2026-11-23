@@ -96,6 +96,7 @@ impl Reader {
                     read_hid_input(
                         &device,
                         true,
+                        false,
                         |device, timeout| device.read_timeout(&mut report, timeout),
                         std::thread::sleep,
                     )
@@ -232,7 +233,10 @@ fn physical_key_refresh_probe() {
             let writes = &probe.writes[before..];
             let wait_ms: f64 = writes.iter().map(|w| w.wait_ms).sum();
             let write_ms: f64 = writes.iter().map(|w| w.write_ms).sum();
-            println!("{name} {title}: {elapsed:.2} ms total, {wait_ms:.2} ms lock wait, {write_ms:.2} ms HID writes, {} reports",writes.len());
+            println!(
+                "{name} {title}: {elapsed:.2} ms total, {wait_ms:.2} ms lock wait, {write_ms:.2} ms HID writes, {} reports",
+                writes.len()
+            );
             phases.push(serde_json::json!({"phase":name,"title":title,"elapsed_ms":elapsed,"wait_ms":wait_ms,"write_ms":write_ms,"first_write":before,"end_write":probe.writes.len()}));
             std::thread::sleep(Duration::from_millis(1200));
         }

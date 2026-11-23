@@ -1,0 +1,92 @@
+name: blacksmith-build
+run-name: Blacksmith ${{ inputs.product }} / ${{ inputs.target }}
+on:
+    workflow_dispatch:
+        inputs:
+            product:
+                description: Binary to build (no installers or release)
+                required: true
+                type: choice
+                default: desktop
+                options: [desktop, cli]
+            target:
+                description: Native Blacksmith target (macOS is Apple Silicon only)
+                required: true
+                type: choice
+                default: linux-amd64
+                options: [linux-amd64, linux-arm64, windows-amd64, macos-arm64]
+permissions:
+    contents: read
+jobs:
+    build:
+        if: github.event_name == 'workflow_dispatch' && (inputs.product == 'desktop' || inputs.product == 'cli')
+        # Official labels: https://docs.blacksmith.sh/blacksmith-runners/overview
+        # Requires Blacksmith GitHub App access for this repository. No hosted fallback.
+        runs-on: ${{ fromJSON('{"linux-amd64":"blacksmith-4vcpu-ubuntu-2404","linux-arm64":"blacksmith-4vcpu-ubuntu-2404-arm","windows-amd64":"blacksmith-4vcpu-windows-2025","macos-arm64":"blacksmith-6vcpu-macos-15"}')[inputs.target] }}
+        timeout-minutes: 180
+        defaults:
+            run:
+                shell: bash
+        env:
+            BUILD_PRODUCT: ${{ inputs.product }}
+            BUILD_TARGET: ${{ inputs.target }}
+            BUILD_ONLY: 'true'
+            CARGO_BUILD_JOBS: '4'
+            CARGO_INCREMENTAL: '0'
+        steps:
+            - uses: actions/checkout@v7.0.1
+              with:
+                  ref: ${{ github.sha }}
+                  persist-credentials: false
+            - name: Use Git for Windows Bash
+              if: runner.os == 'Windows'
+              shell: powershell
+              run: |
+                  $gitDirectory = Split-Path (Get-Command git.exe -ErrorAction Stop).Source -Parent
+                  $gitBash = Join-Path $gitDirectory '..\bin\bash.exe'
+                  if (!(Test-Path -LiteralPath $gitBash)) { throw 'Git for Windows Bash is required.' }
+                  (Split-Path (Resolve-Path -LiteralPath $gitBash).Path -Parent) | Out-File -FilePath $env:GITHUB_PATH -Encoding utf8 -Append
+            - uses: actions/setup-python@v7.1.0
+              with:
+                  python-version: '3.12'
+            - uses: dtolnay/rust-toolchain@stable
+            - name: Verify selected native target
+              run: python scripts/blacksmith_build.py --product "$BUILD_PRODUCT" --target "$BUILD_TARGET" --verify-host
+            - name: Install Linux build dependencies
+              if: runner.os == 'Linux'
+              run: |
+                  packages=(build-essential pkg-config libssl-dev libudev-dev libxdo-dev libdbus-1-dev)
+                  if [ "$BUILD_PRODUCT" = desktop ]; then
+                    packages+=(libwebkit2gtk-4.1-dev libappindicator3-dev librsvg2-dev patchelf)
+                  fi
+                  sudo apt-get update
+                  sudo env DEBIAN_FRONTEND=noninteractive apt-get install -y "${packages[@]}"
+            - uses: actions/setup-node@v7.1.0
+              if: inputs.product == 'desktop'
+              with:
+                  node-version: '26'
+            - name: Install desktop frontend dependencies
+              if: inputs.product == 'desktop'
+              run: |
+                  npm install --global npm@12.2.3
+                  npm ci
+            - name: Select native Windows Perl for vendored OpenSSL
+              if: runner.os == 'Windows'
+              run: python scripts/windows_openssl_perl.py
+            - name: Prepare verified patched dependencies
+              if: inputs.product == 'cli'
+              run: python scripts/prepare_patched_deps.py
+            - name: Build selected CLI binary
+              if: inputs.product == 'cli'
+              run: cargo build --release --locked -p stream-dock-manager-cli
+            - name: Build selected desktop binary
+              if: inputs.product == 'desktop'
+              run: node scripts/tauri.mjs build --no-bundle -- --locked
+            - name: Archive selected binary
+              run: python scripts/blacksmith_build.py --product "$BUILD_PRODUCT" --target "$BUILD_TARGET" --archive
+            - uses: actions/upload-artifact@v7.0.2
+              with:
+                  name: blacksmith-${{ inputs.product }}-${{ inputs.target }}-${{ github.sha }}
+                  path: artifacts/blacksmith/*.tar.gz
+                  if-no-files-found: error
+                  retention-days: 14

@@ -1,0 +1,11 @@
+# Automatically generated - DO NOT EDIT!
+
+[[permission]]
+identifier = "allow-audit-media-library"
+description = "Enables the audit_media_library command without any pre-configured scope."
+commands.allow = ["audit_media_library"]
+
+[[permission]]
+identifier = "deny-audit-media-library"
+description = "Denies the audit_media_library command without any pre-configured scope."
+commands.deny = ["audit_media_library"]

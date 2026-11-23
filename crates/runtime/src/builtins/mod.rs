@@ -4,7 +4,10 @@ use std::path::PathBuf;
 mod execution_inputs;
 mod execution_state;
 mod key_logic;
-pub(crate) use key_logic::validate_plugins as validate_key_logic_plugins;
+pub(crate) use key_logic::{
+    validate_plugins as validate_key_logic_plugins,
+    validate_plugins_in_slots as validate_key_logic_event_plugins,
+};
 #[cfg(test)]
 mod key_logic_tests;
 mod persisted_values;
@@ -20,6 +23,8 @@ pub use native::{condition_target_path, condition_targets};
 mod ownership_tests;
 mod simulation;
 mod types;
+mod vault_operands;
+pub(crate) mod web_url;
 use crate::{
     actions::{Action, Request},
     Runtime,
@@ -39,7 +44,7 @@ use std::{
     collections::{BTreeMap, HashMap, VecDeque},
     sync::{
         atomic::{AtomicBool, AtomicU64, AtomicUsize, Ordering},
-        mpsc, Arc, Mutex, Weak,
+        mpsc, Arc, Mutex, OnceLock, Weak,
     },
     time::{Duration, Instant},
 };
@@ -149,6 +154,8 @@ struct Layer {
     controls: Vec<String>,
 }
 type PendingReply = (Value, mpsc::SyncSender<Result<Option<String>, String>>);
+type NotificationBackend = dyn Fn(&str, &str) -> Result<(), String> + Send + Sync;
+
 pub struct State {
     pub(crate) debug_sessions: Mutex<HashMap<String, Arc<crate::macro_debug::Session>>>,
     values: Mutex<BTreeMap<String, StoredValue>>,
@@ -157,7 +164,7 @@ pub struct State {
     indices: Mutex<HashMap<String, usize>>,
     cooldowns: Mutex<HashMap<String, Instant>>,
     taps: key_logic::TapWindows,
-    lanes: Mutex<HashMap<String, Weak<Mutex<VecDeque<String>>>>>,
+    lanes: Mutex<HashMap<String, Weak<Mutex<VecDeque<ActivationTicket>>>>>,
     history: Mutex<HashMap<String, Vec<(String, String)>>>,
     layers: Mutex<HashMap<String, Vec<Layer>>>,
     layer_revision: AtomicU64,
@@ -168,6 +175,7 @@ pub struct State {
     execution_inputs: Mutex<Option<ExecutionInputs>>,
     active: AtomicUsize,
     desktop_host: AtomicBool,
+    notification_backend: OnceLock<Box<NotificationBackend>>,
 }
 impl State {
     #[cfg(test)]
@@ -186,7 +194,9 @@ impl State {
                 .record()
                 .read(&storage)?
                 .unwrap_or_default();
-        values.retain(|name, _| name.starts_with("clipboard:"));
+        values.retain(|name, _| {
+            name.starts_with("clipboard:") || vault_operands::is_clipboard_key(name)
+        });
         Ok(Self {
             debug_sessions: Default::default(),
             values: Mutex::new(values),
@@ -206,6 +216,7 @@ impl State {
             execution_inputs: Default::default(),
             active: AtomicUsize::new(0),
             desktop_host: AtomicBool::new(false),
+            notification_backend: OnceLock::new(),
         })
     }
     // Store the builtins value
@@ -283,6 +294,13 @@ impl State {
     // Attach desktop host
     pub fn attach_desktop_host(&self) {
         self.desktop_host.store(true, Ordering::SeqCst);
+    }
+    // Install the native notification sender without exposing it to webviews or plugins
+    pub fn attach_notification_backend(
+        &self,
+        backend: impl Fn(&str, &str) -> Result<(), String> + Send + Sync + 'static,
+    ) {
+        self.notification_backend.get_or_init(|| Box::new(backend));
     }
     // Complete the pending user-interface request with an error
     pub fn fail_ui(&self, id: &str, error: String) {
@@ -429,7 +447,24 @@ impl State {
     }
 }
 // Report the valid condition condition for builtins
+fn json_reference(c: &Condition) -> Option<&str> {
+    if c.source != "clipboard" || c.operator != "matches_vault_json" {
+        return None;
+    }
+    c.value.as_str().or_else(|| {
+        let object = c.value.as_object()?;
+        (object.len() == 1)
+            .then(|| object.get("vault")?.as_str())
+            .flatten()
+    })
+}
 fn valid_condition(condition: &Condition) -> bool {
+    if condition.operator == "matches_vault_json" {
+        return json_reference(condition).is_some_and(|r| {
+            r == "${vault.unlinked}"
+                || (r.starts_with("${vault.") && crate::vault::is_typed_reference(r))
+        });
+    }
     ["clipboard", "file", "process", "application"].contains(&condition.source.as_str())
         && [
             "equals",
@@ -497,6 +532,12 @@ fn validate_with_draft(action: &BuiltinAction, depth: usize, draft: bool) -> Res
             return Err(format!("Invalid {key}"));
         }
     }
+    if let BuiltinAction::OpenLink { url, .. } | BuiltinAction::SearchSelection { url, .. } = action
+    {
+        if url.contains("${vault.") {
+            web_url::validate_template(url)?;
+        }
+    }
     if action.children().len() > 100 {
         return Err("Action container exceeds 100 children".into());
     }
@@ -541,7 +582,7 @@ fn validate_with_draft(action: &BuiltinAction, depth: usize, draft: bool) -> Res
         }
         BuiltinAction::Conditional { condition, .. }
         | BuiltinAction::WaitCondition { condition, .. }
-            if !valid_condition(condition) =>
+            if !valid_condition(condition) && !(draft && json_reference(condition) == Some("")) =>
         {
             return Err("Unsupported condition".into())
         }
@@ -579,6 +620,7 @@ struct Run {
     device_generation: u64,
     branch_cancellations: Vec<Arc<AtomicBool>>,
     completion_jobs: CompletionJobs,
+    gesture_lane: Arc<Mutex<Option<LaneGuard>>>,
     keyboard_events: Arc<AtomicUsize>,
 }
 impl Run {
@@ -742,35 +784,117 @@ impl Run {
         }
         Ok(())
     }
-    // Expand template expressions against the run’s values when interpolation is enabled
+    // Expand run variables only where the action allows them
     fn text(&self, text: &str, template: bool) -> Result<String, String> {
-        if !template {
+        self.text_with(text, template, false, &|_| {
+            Err("Vault reference unavailable in this field".into())
+        })
+    }
+    // Resolve only Vault tokens written in the same saved field, not in supplied values
+    fn saved_text(&self, source: &str, text: &str, template: bool) -> Result<String, String> {
+        self.saved_text_map(source, text, template, str::to_owned)
+    }
+    fn saved_text_map(
+        &self,
+        source: &str,
+        text: &str,
+        template: bool,
+        map_value: impl Fn(&str) -> String,
+    ) -> Result<String, String> {
+        if !text.contains("${") {
+            return Ok(text.to_owned());
+        }
+        let empty = &|_: &str| Ok(String::new());
+        if text.contains("${vault.")
+            && self.simulation.is_none()
+            && self.debug.is_none()
+            && source.contains("${vault.")
+        {
+            use stream_dock_manager_plugin_host::text_references::{parts, Part};
+            let saved: std::collections::BTreeSet<_> = parts(source)
+                .filter_map(|part| match part {
+                    Part::Reference { name, .. } => name.strip_prefix("vault."),
+                    _ => None,
+                })
+                .filter(|reference| crate::vault::is_typed_reference(reference))
+                .collect();
+            if saved.is_empty() {
+                return self.text_with(text, template, true, empty);
+            }
+            // Keep template errors distinct from a locked or otherwise unavailable Vault
+            if let Ok((lease, result)) =
+                self.runtime
+                    .vault
+                    .with_builtin_references(false, |resolve| {
+                        Ok(self.text_with(text, template, true, &|id| {
+                            Ok(if saved.contains(id) {
+                                map_value(&resolve(id).unwrap_or_default())
+                            } else {
+                                String::new()
+                            })
+                        }))
+                    })
+            {
+                self.check()?;
+                if self.runtime.vault.check_builtin_reference(lease).is_ok() {
+                    return result;
+                }
+            }
+        }
+        self.text_with(text, template, true, empty)
+    }
+    fn saved_website(&self, source: &str, text: &str, template: bool) -> Result<String, String> {
+        if !source.contains("${vault.") {
+            if text.contains("${vault.") {
+                return Err("Use Vault references directly in the saved URL".into());
+            }
+            return self.text(text, template);
+        }
+        web_url::validate_template(source)?;
+        let rendered = self.saved_text_map(source, text, template, web_url::encode_value)?;
+        web_url::validate_resolved(source, &rendered)?;
+        Ok(rendered)
+    }
+
+    fn text_with(
+        &self,
+        text: &str,
+        template: bool,
+        inline_vault: bool,
+        vault: &dyn Fn(&str) -> Result<String, String>,
+    ) -> Result<String, String> {
+        if !text.contains("${") || (!template && (!inline_vault || !text.contains("${vault."))) {
             return Ok(text.into());
         }
-        let mut result = String::new();
-        let mut rest = text;
-        while let Some(index) = rest.find("${") {
-            result.push_str(&rest[..index]);
-            rest = &rest[index + 2..];
-            let end = rest.find('}').ok_or("Unclosed variable reference")?;
-            let name = &rest[..end];
+        use stream_dock_manager_plugin_host::text_references::{expand, parts, Part};
+        let text = match parts(text).last() {
+            Some(Part::Unclosed(rest)) if inline_vault && rest.starts_with("${vault.") => {
+                &text[..text.len() - rest.len()]
+            }
+            Some(Part::Unclosed(_)) if template => {
+                return Err("Unclosed variable reference".into());
+            }
+            _ => text,
+        };
+        expand(text, 256 * 1024, |name| {
+            if let Some(reference) = name.strip_prefix("vault.") {
+                return vault(reference).map(Some);
+            }
+            if !template {
+                return Ok(None);
+            }
             let value = if let Some(n) = name.strip_prefix("run.") {
-                self.locals.get(n).cloned()
+                self.locals.get(n)
             } else if let Some(n) = name.strip_prefix("input.") {
-                self.inputs.get(n).cloned()
+                self.inputs.get(n)
             } else {
                 None
             }
             .ok_or_else(|| format!("Unknown variable {name}"))?;
-            result.push_str(&display(&value));
-            rest = &rest[end + 1..];
-        }
-        result.push_str(rest);
-        if result.len() > 256 * 1024 {
-            return Err("Expanded text exceeds 256 KiB".into());
-        }
-        Ok(result)
+            Ok(Some(display(value)))
+        })
     }
+
     // Request a user-interface response or supply the configured simulated response
     fn ui(&self, kind: &str, data: Value) -> Result<String, String> {
         #[cfg(test)]
@@ -846,8 +970,39 @@ fn display(value: &Value) -> String {
         .map(String::from)
         .unwrap_or_else(|| value.to_string())
 }
+#[derive(Debug)]
+struct ActivationTicket {
+    id: String,
+    scope: String,
+    epoch: Option<u64>,
+    dial: Option<usize>,
+    cancel: Arc<AtomicBool>,
+}
+impl ActivationTicket {
+    fn for_request(request: &Request) -> Self {
+        Self {
+            id: uuid::Uuid::new_v4().to_string(),
+            scope: request.binding_scope.clone(),
+            epoch: request.connection_epoch,
+            dial: matches!(request.action, Action::Dial { .. })
+                .then(|| crate::actions::dial_input(&request.input).map(|p| p.0))
+                .flatten(),
+            cancel: Arc::new(AtomicBool::new(false)),
+        }
+    }
+    fn interrupt_owned(&self, tickets: &mut VecDeque<ActivationTicket>) {
+        let first = tickets.front().map(|t| t.id.clone());
+        if let Some(head) = tickets.front().filter(|t| self.same_owner(t)) {
+            head.cancel.store(true, Ordering::SeqCst);
+        }
+        tickets.retain(|t| Some(&t.id) == first.as_ref() || !self.same_owner(t));
+    }
+    fn same_owner(&self, other: &Self) -> bool {
+        self.scope == other.scope && self.dial == other.dial && self.epoch == other.epoch
+    }
+}
 struct LaneGuard {
-    lane: Arc<Mutex<VecDeque<String>>>,
+    lane: Arc<Mutex<VecDeque<ActivationTicket>>>,
     ticket: String,
 }
 impl Drop for LaneGuard {
@@ -856,7 +1011,7 @@ impl Drop for LaneGuard {
         self.lane
             .lock()
             .unwrap()
-            .retain(|ticket| ticket != &self.ticket);
+            .retain(|ticket| ticket.id != self.ticket);
     }
 }
 // Reconcile input generation
@@ -880,7 +1035,7 @@ pub fn start(runtime: Weak<Runtime>, receiver: mpsc::Receiver<Request>) {
                 break;
             }
             reconcile_input_generation(&runtime, &mut generation);
-            let request = match received {
+            let mut request = match received {
                 Ok(request) => request,
                 Err(mpsc::RecvTimeoutError::Disconnected) => break,
                 Err(mpsc::RecvTimeoutError::Timeout) => continue,
@@ -888,6 +1043,9 @@ pub fn start(runtime: Weak<Runtime>, receiver: mpsc::Receiver<Request>) {
             if runtime.builtin_state.active.fetch_add(1, Ordering::SeqCst) >= 128 {
                 runtime.builtin_state.active.fetch_sub(1, Ordering::SeqCst);
                 crate::feedback::finished(&runtime, &request, "Failed", false);
+                runtime
+                    .input_trace
+                    .record(request.trace.as_deref(), "Action queue is full", true);
                 runtime.emit(
                     "action-error",
                     Some(request.device_id),
@@ -913,6 +1071,21 @@ pub fn start(runtime: Weak<Runtime>, receiver: mpsc::Receiver<Request>) {
                 .pressed
                 .clone()
                 .unwrap_or_else(|| Arc::new(AtomicBool::new(false)));
+            let activation = ActivationTicket::for_request(&request);
+            // Event sides own their builtin direction as legacy Dial lanes do
+            // Plugin callbacks still get signed physical ticks
+            let event_rotation = if request.event_slot.is_some() {
+                match &mut request.input {
+                    Input::Rotate { delta } => {
+                        let actual = Input::Rotate { delta: *delta };
+                        *delta = delta.saturating_abs();
+                        Some(actual)
+                    }
+                    _ => None,
+                }
+            } else {
+                None
+            };
             let run = Run {
                 id: crate::actions::RunId(uuid::Uuid::new_v4().to_string()),
                 _debug_state: None,
@@ -929,7 +1102,7 @@ pub fn start(runtime: Weak<Runtime>, receiver: mpsc::Receiver<Request>) {
                     .map(|value| value.load(Ordering::SeqCst))
                     .unwrap_or(0),
                 runtime: runtime.clone(),
-                dial_plugin_input: None,
+                dial_plugin_input: event_rotation,
                 key_logic: false,
                 debug_macro_root: false,
                 request: Arc::new(request),
@@ -937,8 +1110,9 @@ pub fn start(runtime: Weak<Runtime>, receiver: mpsc::Receiver<Request>) {
                 locals: Default::default(),
                 inputs: Default::default(),
                 calls: vec![],
-                branch_cancellations: vec![],
+                branch_cancellations: vec![activation.cancel.clone()],
                 completion_jobs: Default::default(),
+                gesture_lane: Default::default(),
                 keyboard_events: Default::default(),
                 target: None,
             };
@@ -953,7 +1127,7 @@ pub fn start(runtime: Weak<Runtime>, receiver: mpsc::Receiver<Request>) {
                     continue;
                 }
             };
-            let ticket = uuid::Uuid::new_v4().to_string();
+            let ticket = activation.id.clone();
             if !gesture {
                 let mut tickets = lane.lock().unwrap();
                 let keyboard_macro = crate::keyboard_macro::validation::expanded_event_count(
@@ -967,9 +1141,28 @@ pub fn start(runtime: Weak<Runtime>, receiver: mpsc::Receiver<Request>) {
                 )
                 .unwrap_or(0)
                     > 0;
-                if (keyboard_macro && native::keyboard_macro_busy())
+                let policy = run.request.activation_policy;
+                let owned = tickets.iter().any(|t| activation.same_owner(t));
+                if policy.interrupts() && owned {
+                    activation.interrupt_owned(&mut tickets);
+                    if policy == crate::actions::ActivationPolicy::Cancel {
+                        drop(tickets);
+                        run.finished(crate::actions::RunOutcome::Ignored);
+                        crate::feedback::finished(
+                            &runtime,
+                            &run.request,
+                            "Cancellation requested",
+                            false,
+                        );
+                        runtime.builtin_state.active.fetch_sub(1, Ordering::SeqCst);
+                        continue;
+                    }
+                }
+                if (keyboard_macro
+                    && native::keyboard_macro_busy()
+                    && !(owned && policy.interrupts()))
                     || (!tickets.is_empty()
-                        && (keyboard_macro
+                        && ((keyboard_macro && !(owned && policy.interrupts()))
                             || run.request.activation_policy
                                 == crate::actions::ActivationPolicy::IgnoreBusy))
                 {
@@ -983,7 +1176,7 @@ pub fn start(runtime: Weak<Runtime>, receiver: mpsc::Receiver<Request>) {
                 {
                     tickets.truncate(1);
                 }
-                tickets.push_back(ticket.clone());
+                tickets.push_back(activation);
             }
             std::thread::spawn(move || {
                 let _lane = if gesture {
@@ -1015,8 +1208,8 @@ pub fn start(runtime: Weak<Runtime>, receiver: mpsc::Receiver<Request>) {
                 });
                 let target = if needs_target { native::target() } else { None };
                 if !gesture {
-                    while lane.lock().unwrap().front() != Some(&ticket) {
-                        if !lane.lock().unwrap().contains(&ticket) {
+                    while !lane.lock().unwrap().front().is_some_and(|t| t.id == ticket) {
+                        if !lane.lock().unwrap().iter().any(|t| t.id == ticket) {
                             run.finished(crate::actions::RunOutcome::Superseded);
                             crate::feedback::finished(
                                 &run.runtime,
@@ -1064,18 +1257,31 @@ pub fn start(runtime: Weak<Runtime>, receiver: mpsc::Receiver<Request>) {
                 let status = match &result {
                     Ok(_) => "Completed",
                     Err(e) if e == "Cancelled" => "Cancelled",
-                    Err(e) if e == "Keyboard macro busy" => "Ignored while busy",
+                    Err(e) if e == "Keyboard macro busy" || e == "Cancellation requested" => {
+                        "Ignored while busy"
+                    }
+                    Err(e) if e == "Superseded gesture" => "Replaced pending activation",
                     Err(_) => "Failed",
                 };
                 run.finished(match &result {
                     Ok(_) => crate::actions::RunOutcome::Completed,
                     Err(e) if e == "Cancelled" => crate::actions::RunOutcome::Cancelled,
-                    Err(e) if e == "Keyboard macro busy" => crate::actions::RunOutcome::Ignored,
+                    Err(e) if e == "Keyboard macro busy" || e == "Cancellation requested" => {
+                        crate::actions::RunOutcome::Ignored
+                    }
+                    Err(e) if e == "Superseded gesture" => crate::actions::RunOutcome::Superseded,
                     Err(_) => crate::actions::RunOutcome::Failed,
                 });
                 crate::feedback::finished(&run.runtime, &run.request, status, true);
+                drop(_lane);
+                run.gesture_lane.lock().unwrap().take();
                 if let Err(error) = result {
-                    run.report_execution_error(&error);
+                    if !matches!(
+                        error.as_str(),
+                        "Superseded gesture" | "Cancellation requested"
+                    ) {
+                        run.report_execution_error(&error);
+                    }
                 }
                 run.runtime
                     .builtin_state
@@ -1105,6 +1311,10 @@ impl Drop for DebugWait {
 }
 // Check macro plugins
 fn check_macro_plugins(run: &Run, action: &Action) -> Result<(), String> {
+    // Simulation records plugin steps without acquiring or starting a live plugin.
+    if run.simulation.is_some() {
+        return Ok(());
+    }
     let host = run.runtime.plugins.lock().unwrap();
     require_macro_plugins(
         action,
@@ -1123,6 +1333,18 @@ fn execute(run: &mut Run, action: &Action, depth: usize, path: Vec<usize>) -> Re
     run.check()?;
     if depth == 0 && matches!(action, Action::Macro { .. }) {
         check_macro_plugins(run, action)?;
+    }
+    if let Some(token) = run.request.trace.as_deref() {
+        let kind = match action {
+            Action::Builtin { action } => serde_json::to_value(action),
+            _ => serde_json::to_value(action),
+        }
+        .ok()
+        .and_then(|v| v["kind"].as_str().map(String::from))
+        .unwrap_or_default();
+        run.runtime
+            .input_trace
+            .record(Some(token), &format!("Step {path:?} · {kind}"), false);
     }
     let boundary = if let Some(session) = &run.debug {
         let kind = match action {
@@ -1334,9 +1556,18 @@ fn execute_inner(
             run.runtime.credentials.redactions(),
         );
     }
+    let saved_url = match action {
+        Action::OpenUrl { url } if url.contains("${vault.") => Some(url.as_str()),
+        _ => None,
+    };
+    let saved_builtin = match action {
+        Action::Builtin { action } => Some(action.as_ref()),
+        _ => None,
+    };
     let action = &resolved;
     action.validate(depth)?;
     match action {
+        Action::Events { .. } => Err("Event assignments require a physical control event".into()),
         Action::Dial { actions, .. } => {
             let Some((index, input)) = crate::actions::dial_input(&run.request.input) else {
                 return Ok(());
@@ -1405,35 +1636,50 @@ fn execute_inner(
                     native::spawn_supervised(program, args, Box::new(move || job.check()))
                 },
                 || run.check(),
+                || {
+                    run.branch_cancellations
+                        .first()
+                        .is_some_and(|token| token.load(Ordering::SeqCst))
+                },
             )
         }
         Action::Hotkey { keys } => native::chord(keys),
         Action::Builtin { action } if blocking_builtin(action) => {
             #[cfg(test)]
             if native::testing::enabled() {
-                return builtin(run, action, depth, path);
+                return dispatch_builtin(run, action, depth, path, saved_builtin);
             }
             let mut job = run.clone();
             let action = action.clone();
+            let saved_builtin = saved_builtin.cloned();
             let (result, locals) = crate::native_pool::run(
                 move || {
                     job.check()?;
-                    let result = builtin(&mut job, &action, depth, path);
+                    let result =
+                        dispatch_builtin(&mut job, &action, depth, path, saved_builtin.as_ref());
                     Ok((result, job.locals))
                 },
                 || run.check(),
+                || {
+                    run.branch_cancellations
+                        .first()
+                        .is_some_and(|token| token.load(Ordering::SeqCst))
+                },
             )?;
             run.locals = locals;
             result
         }
-        Action::Builtin { action } => builtin(run, action, depth, path),
+        Action::Builtin { action } => dispatch_builtin(run, action, depth, path, saved_builtin),
         Action::Plugin {
             plugin_id,
             action_id,
             settings,
             user_desired_state,
             ..
-        } if run.request.icon_signature.is_some() || run.debug.is_some() => {
+        } if run.request.icon_signature.is_some()
+            || run.debug.is_some()
+            || run.request.activation_policy.interrupts() =>
+        {
             let scope = run.plugin_scope(&path);
             let input = run.plugin_input(&path);
             let receipt = {
@@ -1442,7 +1688,7 @@ fn execute_inner(
                     key_logic::validate_plugin(plugin_id, action_id, &host.list())?;
                 }
                 run.check()?;
-                host.dispatch_tracked_with_state(
+                host.dispatch_tracked_with_activation(
                     plugin_id,
                     action_id,
                     &run.request.device_id,
@@ -1451,9 +1697,26 @@ fn execute_inner(
                     &input,
                     settings,
                     *user_desired_state,
+                    run.request
+                        .physical_activation
+                        .as_deref()
+                        .filter(|_| path.is_empty()),
                 )?
             };
-            receipt.wait(Duration::from_secs(30), || run.check())
+            if !receipt.completion_supported() {
+                run.runtime.input_trace.record(
+                    run.request.trace.as_deref(),
+                    "Plugin acknowledged dispatch only",
+                    false,
+                );
+            }
+            if run.request.activation_policy.interrupts() {
+                // A plugin may have no cancellation protocol. Retain the lane until its receipt settles.
+                receipt.wait(Duration::from_secs(30), || Ok(()))?;
+                run.check()
+            } else {
+                receipt.wait(Duration::from_secs(30), || run.check())
+            }
         }
         Action::Plugin {
             plugin_id,
@@ -1469,7 +1732,13 @@ fn execute_inner(
                 key_logic::validate_plugin(plugin_id, action_id, &host.list())?;
             }
             run.check()?;
-            host.dispatch_with_state(
+            run.runtime.input_trace.dispatch_plugin(
+                &mut host,
+                run.request.trace.as_deref(),
+                run.request
+                    .physical_activation
+                    .as_deref()
+                    .filter(|_| path.is_empty()),
                 plugin_id,
                 action_id,
                 &run.request.device_id,
@@ -1491,10 +1760,43 @@ fn execute_inner(
             } else {
                 run.request.input.clone()
             };
+            if let Action::OpenUrl { url } = action {
+                // Resolve inside the effect worker, not while it is waiting in the queue.
+                let open = move |job: &Run, source: &str, input: &str| {
+                    job.check()?;
+                    let url = job.saved_website(source, input, false)?;
+                    job.check()?;
+                    crate::actions::execute_leaf(
+                        &job.runtime,
+                        &Action::OpenUrl { url },
+                        &job.request.device_id,
+                        &job.request.control_id,
+                        &scope,
+                        job.request.connection_epoch,
+                        &job.request.input,
+                        job.request.cancellation_generation,
+                    )
+                };
+                #[cfg(test)]
+                if native::testing::enabled() {
+                    return open(run, saved_url.unwrap_or(""), url);
+                }
+                let job = run.clone();
+                let source = saved_url.unwrap_or("").to_owned();
+                let url = url.clone();
+                return crate::native_pool::run(
+                    move || open(&job, &source, &url),
+                    || run.check(),
+                    || {
+                        run.branch_cancellations
+                            .first()
+                            .is_some_and(|token| token.load(Ordering::SeqCst))
+                    },
+                );
+            }
             if matches!(
                 action,
-                Action::OpenUrl { .. }
-                    | Action::OpenPath { .. }
+                Action::OpenPath { .. }
                     | Action::Application { .. }
                     | Action::Media { .. }
                     | Action::Volume { .. }
@@ -1530,6 +1832,11 @@ fn execute_inner(
                         )
                     },
                     || run.check(),
+                    || {
+                        run.branch_cancellations
+                            .first()
+                            .is_some_and(|token| token.load(Ordering::SeqCst))
+                    },
                 );
             }
             crate::actions::execute_leaf(
@@ -1545,6 +1852,54 @@ fn execute_inner(
         }
     }
 }
+// Path and typed comparisons retain their exact, strict saved reference contract
+fn typed_vault_template(action: &BuiltinAction) -> Option<&str> {
+    match action {
+        BuiltinAction::RevealFile { path, .. } => Some(path),
+        BuiltinAction::Conditional { condition, .. }
+        | BuiltinAction::WaitCondition { condition, .. } => json_reference(condition),
+        _ => None,
+    }
+}
+
+fn dispatch_builtin(
+    run: &mut Run,
+    action: &BuiltinAction,
+    depth: usize,
+    path: Vec<usize>,
+    saved: Option<&BuiltinAction>,
+) -> Result<(), String> {
+    let source = saved
+        .and_then(typed_vault_template)
+        .zip(typed_vault_template(action))
+        .filter(|(original, current)| original == current && original.contains("${vault."))
+        .map(|(original, _)| original);
+    let Some(source) = source else {
+        return builtin(run, action, depth, path, false, saved);
+    };
+    if source.contains("${vault.unlinked}") {
+        return Err("Choose a local Vault entry for the imported reference".into());
+    }
+    if run.simulation.is_some() || run.debug.is_some() {
+        return Err("Vault references require a live native action".into());
+    }
+    if !matches!(action, BuiltinAction::RevealFile { .. }) {
+        return builtin(run, action, depth, path, true, saved);
+    }
+    let id = source
+        .strip_prefix("${vault.")
+        .and_then(|rest| rest.strip_suffix('}'))
+        .ok_or("A path field requires one complete Vault reference")?;
+    let (epoch, value) = run
+        .runtime
+        .vault
+        .with_builtin_references(true, |resolve| Ok(zeroize::Zeroizing::new(resolve(id)?)))?;
+    run.check()?;
+    run.runtime.vault.check_builtin_reference(epoch)?;
+    native::reveal(&value)
+        .map_err(|_| "The native action could not use the Vault reference".to_owned())
+}
+
 // Report the blocking builtin condition for builtins
 fn blocking_builtin(action: &BuiltinAction) -> bool {
     matches!(
@@ -1603,31 +1958,92 @@ fn sequence(
     Ok(())
 }
 // Evaluate a condition against simulated or live clipboard, file and application state
-fn condition(run: &Run, c: &Condition) -> Result<bool, String> {
+fn condition(
+    run: &Run,
+    c: &Condition,
+    saved: Option<&Condition>,
+    allow_vault: bool,
+) -> Result<bool, String> {
+    if c.operator == "matches_vault_json" {
+        if !allow_vault {
+            return Err("Vault comparison requires a saved native reference".into());
+        }
+        let reference = json_reference(c).ok_or("Invalid Vault JSON reference")?;
+        let text = zeroize::Zeroizing::new(native::read_clipboard()?);
+        return run.runtime.vault.matches_json(reference, &text);
+    }
+    let saved = saved.filter(|source| source.source == c.source && source.operator == c.operator);
+    let saved_subject = saved.map_or("", |source| source.subject.as_str());
+    let subject = match c.source.as_str() {
+        "file" => run.vault_path_operand(saved_subject, &c.subject)?,
+        "process" => run.vault_text_operand(saved_subject, &c.subject, 4096)?,
+        _ => None,
+    };
+    if c.source == "process"
+        && subject
+            .as_ref()
+            .is_some_and(|name| name.is_empty() || name.chars().any(char::is_control))
+    {
+        return Err("The saved Vault process name is invalid".into());
+    }
+    let resolved_subject = subject.is_some();
+    let subject = subject
+        .as_deref()
+        .map_or(c.subject.as_str(), String::as_str);
     let value = if let Some(simulation) = &run.simulation {
         let simulation = simulation.lock().unwrap();
         match c.source.as_str() {
             "clipboard" => json!(simulation.config.clipboard),
-            "file" => json!(simulation.config.files.contains_key(&c.subject)),
+            "file" => json!(simulation.config.files.contains_key(subject)),
             "application" => json!(simulation.config.application),
-            "process" => json!(simulation.config.processes.contains(&c.subject)),
+            "process" => json!(simulation
+                .config
+                .processes
+                .iter()
+                .any(|process| process == subject)),
             _ => return Err("Unsupported condition source".into()),
         }
     } else {
         match c.source.as_str() {
             "clipboard" => json!(native::read_clipboard()?),
-            "file" => json!(std::path::Path::new(&c.subject).exists()),
+            "file" if resolved_subject => json!(std::path::Path::new(subject)
+                .try_exists()
+                .map_err(|_| "The saved Vault path could not be checked")?),
+            "file" => json!(std::path::Path::new(subject).exists()),
             "application" => json!(native::foreground_app().ok_or(
                 "Foreground application detection is unavailable in this desktop session"
             )?),
-            "process" => json!(native::process_running(&c.subject)?),
+            "process" => json!(native::process_running(subject)?),
             _ => return Err("Unsupported condition source".into()),
         }
     };
+    let comparison = match (c.source.as_str(), c.operator.as_str(), c.value.as_str()) {
+        ("clipboard" | "application", "equals" | "not_equals" | "contains", Some(text)) => {
+            let authored = saved.and_then(|source| source.value.as_str()).unwrap_or("");
+            run.vault_text_operand(authored, text, 256 * 1024)?
+        }
+        _ => None,
+    };
+    if c.operator == "contains" && comparison.as_ref().is_some_and(|text| text.is_empty()) {
+        return Err("Vault comparison text cannot be empty".into());
+    }
     Ok(match c.operator.as_str() {
-        "equals" => value == c.value,
-        "not_equals" => value != c.value,
-        "contains" => display(&value).contains(&display(&c.value)),
+        "equals" | "not_equals" => {
+            let equal = if let Some(expected) = &comparison {
+                value.as_str() == Some(expected.as_str())
+            } else {
+                value == c.value
+            };
+            equal == (c.operator == "equals")
+        }
+        "contains" => {
+            let actual = display(&value);
+            if let Some(expected) = &comparison {
+                actual.contains(expected.as_str())
+            } else {
+                actual.contains(&display(&c.value))
+            }
+        }
         "exists" => value.as_bool().unwrap_or(!value.is_null()),
         "missing" => !value.as_bool().unwrap_or(!value.is_null()),
         "greater" => value
@@ -1642,11 +2058,22 @@ fn condition(run: &Run, c: &Condition) -> Result<bool, String> {
     })
 }
 // Dispatch the built-in action while preserving execution depth and diagnostic ownership
-fn builtin(run: &mut Run, a: &BuiltinAction, depth: usize, path: Vec<usize>) -> Result<(), String> {
+fn builtin(
+    run: &mut Run,
+    a: &BuiltinAction,
+    depth: usize,
+    path: Vec<usize>,
+    allow_vault: bool,
+    saved: Option<&BuiltinAction>,
+) -> Result<(), String> {
     use BuiltinAction::*;
     let state = &run.runtime.builtin_state;
     let key = format!("{}:{path:?}", run.key());
     let device = run.request.device_id.clone();
+    let saved_condition = match saved {
+        Some(Conditional { condition, .. } | WaitCondition { condition, .. }) => Some(condition),
+        _ => None,
+    };
     match a {
         FailurePolicy {
             operation,
@@ -1684,14 +2111,37 @@ fn builtin(run: &mut Run, a: &BuiltinAction, depth: usize, path: Vec<usize>) -> 
             Ok(())
         }
         TypeText { text, template } => {
-            native::type_text(&run.text(text, *template)?, run.target.as_deref())
+            let source = match saved {
+                Some(TypeText { text, .. }) => text,
+                _ => "",
+            };
+            native::type_text(
+                &run.saved_text(source, text, *template)?,
+                run.target.as_deref(),
+            )
         }
         PasteText {
             text,
             template,
             restore,
-        } => native::paste(&run.text(text, *template)?, *restore, run.target.as_deref()),
-        SetClipboard { text, template } => native::set_clipboard(&run.text(text, *template)?),
+        } => {
+            let source = match saved {
+                Some(PasteText { text, .. }) => text,
+                _ => "",
+            };
+            native::paste(
+                &run.saved_text(source, text, *template)?,
+                *restore,
+                run.target.as_deref(),
+            )
+        }
+        SetClipboard { text, template } => {
+            let source = match saved {
+                Some(SetClipboard { text, .. }) => text,
+                _ => "",
+            };
+            native::set_clipboard(&run.saved_text(source, text, *template)?)
+        }
         ClearClipboard => native::set_clipboard(""),
         KeyboardMacro {
             recording,
@@ -1783,7 +2233,18 @@ fn builtin(run: &mut Run, a: &BuiltinAction, depth: usize, path: Vec<usize>) -> 
             let release = native::button(&key, button, false);
             result.and(release)
         }
-        OpenLink { url, template } => native::open_link(&run.text(url, *template)?),
+        OpenLink { url, template } => {
+            let source = match saved {
+                Some(OpenLink { url, .. }) => url,
+                _ => "",
+            };
+            let expanded = run.saved_website(source, url, *template)?;
+            if source.contains("${vault.") {
+                native::open_web(&expanded)
+            } else {
+                native::open_link(&expanded)
+            }
+        }
         RevealFile { path, template } => native::reveal(&run.text(path, *template)?),
         PageStep { direction, wrap } => {
             let snapshot = run.runtime.snapshot();
@@ -1882,7 +2343,11 @@ fn builtin(run: &mut Run, a: &BuiltinAction, depth: usize, path: Vec<usize>) -> 
             condition: c,
             children,
         } => {
-            let i = if condition(run, c)? { 0 } else { 1 };
+            let i = if condition(run, c, saved_condition, allow_vault)? {
+                0
+            } else {
+                1
+            };
             branch(run, children, i, depth, &path)
         }
         WaitCondition {
@@ -1891,7 +2356,7 @@ fn builtin(run: &mut Run, a: &BuiltinAction, depth: usize, path: Vec<usize>) -> 
             poll_ms,
         } => {
             let start = run.clock_ms();
-            while !condition(run, c)? {
+            while !condition(run, c, saved_condition, allow_vault)? {
                 if run.clock_ms().saturating_sub(start) >= *timeout_ms as u64 {
                     return Err("Condition timed out".into());
                 }
@@ -1934,22 +2399,52 @@ fn builtin(run: &mut Run, a: &BuiltinAction, depth: usize, path: Vec<usize>) -> 
             if !state.desktop_host.load(Ordering::SeqCst) {
                 return Err("Notifications require the desktop application".into());
             }
-            let title = run.text(title, *template)?;
-            let text = run.text(text, *template)?;
-            run.runtime.emit(
-                "action-notification",
-                Some(device),
-                None,
-                Some(json!({"title":title,"text":text}).to_string()),
-            );
-            Ok(())
+            let (saved_title, saved_text) = match saved {
+                Some(Notification { title, text, .. }) => (title.as_str(), text.as_str()),
+                _ => ("", ""),
+            };
+            let title = run.saved_text(saved_title, title, *template)?;
+            let text = run.saved_text(saved_text, text, *template)?;
+            if let Some(submit) = state.notification_backend.get() {
+                let title = run.runtime.credentials.redact_text(title);
+                let text = run.runtime.credentials.redact_text(text);
+                return submit(&title, &text);
+            }
+            #[cfg(target_os = "macos")]
+            return Err("Native notifications are unavailable in this application".into());
+            #[cfg(not(target_os = "macos"))]
+            {
+                run.runtime.emit(
+                    "action-notification",
+                    Some(device),
+                    None,
+                    Some(json!({"title":title,"text":text}).to_string()),
+                );
+                Ok(())
+            }
         }
         DateTime { format, utc } => {
-            let text = if *utc {
-                chrono::Utc::now().format(format).to_string()
-            } else {
-                chrono::Local::now().format(format).to_string()
+            use std::fmt::Write as _;
+            let source = match saved {
+                Some(DateTime { format, .. }) => format.as_str(),
+                _ => "",
             };
+            // Only authored chrono syntax remains active; resolved percent signs are literal
+            let format =
+                zeroize::Zeroizing::new(
+                    run.saved_text_map(source, format, false, |value| value.replace('%', "%%"))?,
+                );
+            let mut text = zeroize::Zeroizing::new(String::new());
+            let formatted = if *utc {
+                write!(text, "{}", chrono::Utc::now().format(&format))
+            } else {
+                write!(text, "{}", chrono::Local::now().format(&format))
+            };
+            formatted.map_err(|_| "Invalid date/time format")?;
+            if text.len() > 256 * 1024 {
+                return Err("Formatted date/time exceeds 256 KiB".into());
+            }
+            run.check()?;
             native::type_text(&text, run.target.as_deref())
         }
         TransformText { operation } => {
@@ -1973,7 +2468,15 @@ fn builtin(run: &mut Run, a: &BuiltinAction, depth: usize, path: Vec<usize>) -> 
                     }
                 })
                 .collect();
-            let url = url.replace("{query}", &query);
+            let source = match saved {
+                Some(SearchSelection { url, .. }) => url,
+                _ => "",
+            };
+            let expanded = run.saved_website(source, url, false)?;
+            let url = expanded.replace("{query}", &query);
+            if source.contains("${vault.") {
+                web_url::validate_resolved(source, &url)?;
+            }
             Action::OpenUrl { url: url.clone() }.validate(0)?;
             native::open_web(&url)
         }
@@ -1982,7 +2485,11 @@ fn builtin(run: &mut Run, a: &BuiltinAction, depth: usize, path: Vec<usize>) -> 
             operation,
             persist,
         } => {
-            let name = format!("clipboard:{name}");
+            let source = match saved {
+                Some(ClipboardSlot { name, .. }) => name.as_str(),
+                _ => "",
+            };
+            let name = run.clipboard_slot_key(source, name)?;
             match operation.as_str() {
                 "save" => state.store(name, json!(native::read_clipboard()?), *persist),
                 "restore" => native::set_clipboard(&display(
@@ -1999,6 +2506,12 @@ fn builtin(run: &mut Run, a: &BuiltinAction, depth: usize, path: Vec<usize>) -> 
             text,
             output,
         } => {
+            let (saved_title, saved_text) = match saved {
+                Some(InputPrompt { title, text, .. }) => (title.as_str(), text.as_str()),
+                _ => ("", ""),
+            };
+            let title = run.saved_text(saved_title, title, false)?;
+            let text = run.saved_text(saved_text, text, false)?;
             let result = run.ui("input", json!({"title":title,"text":text}))?;
             run.locals.insert(output.clone(), json!(result));
             Ok(())
@@ -2008,6 +2521,22 @@ fn builtin(run: &mut Run, a: &BuiltinAction, depth: usize, path: Vec<usize>) -> 
             labels,
             children,
         } => {
+            let (saved_title, saved_labels) = match saved {
+                Some(ActionMenu { title, labels, .. }) => (title.as_str(), labels.as_slice()),
+                _ => ("", &[][..]),
+            };
+            let title = run.saved_text(saved_title, title, false)?;
+            let labels = labels
+                .iter()
+                .enumerate()
+                .map(|(index, label)| {
+                    run.saved_text(
+                        saved_labels.get(index).map_or("", String::as_str),
+                        label,
+                        false,
+                    )
+                })
+                .collect::<Result<Vec<_>, _>>()?;
             let selected = run.ui("menu", json!({"title":title,"labels":labels}))?;
             branch(
                 run,
@@ -2372,6 +2901,7 @@ fn builtin(run: &mut Run, a: &BuiltinAction, depth: usize, path: Vec<usize>) -> 
                     run.device_generation = generation;
                 }
                 state.cleanup(Some(&device));
+                run.runtime.event_bindings.cancel(Some(&device));
             } else {
                 paused.remove(&device);
             }
@@ -2438,12 +2968,18 @@ fn builtin(run: &mut Run, a: &BuiltinAction, depth: usize, path: Vec<usize>) -> 
             operation,
             replace,
             template,
-        } => native::write_file(
-            &run.text(path, *template)?,
-            &run.text(text, *template)?,
-            operation,
-            *replace,
-        ),
+        } => {
+            let source = match saved {
+                Some(WriteFile { text, .. }) => text,
+                _ => "",
+            };
+            native::write_file(
+                &run.text(path, *template)?,
+                &run.saved_text(source, text, *template)?,
+                operation,
+                *replace,
+            )
+        }
         ChoosePath { directory, output } => {
             let result = run.ui("path", json!({"directory":directory}))?;
             run.locals.insert(output.clone(), json!(result));
@@ -2454,8 +2990,17 @@ fn builtin(run: &mut Run, a: &BuiltinAction, depth: usize, path: Vec<usize>) -> 
 // Navigate to the requested builtins destination
 fn navigate(run: &Run, profile: &str, page: &str, remember: bool) -> Result<(), String> {
     let old = run.runtime.snapshot().session(&run.request.device_id);
-    run.runtime
-        .select_device_profile(&run.request.device_id, profile, Some(page), false)?;
+    run.runtime.select_device_profile_checked(
+        &run.request.device_id,
+        profile,
+        Some(page),
+        false,
+        None,
+        None,
+        None,
+        None,
+        run.request.trace.as_deref(),
+    )?;
     if remember {
         let mut history = run.runtime.builtin_state.history.lock().unwrap();
         let history = history.entry(run.request.device_id.clone()).or_default();
@@ -2569,6 +3114,9 @@ fn validate_macro_graph_refs(macros: &[&SavedMacro]) -> Result<(), String> {
     }
     let mut checked = std::collections::HashSet::new();
     for m in macros {
+        if matches!(m.action, Action::Events { .. }) {
+            return Err("Saved macros cannot contain control event assignments".into());
+        }
         crate::macro_inputs::validate_definitions(&m.inputs)?;
         check(
             &m.action,
@@ -2631,7 +3179,10 @@ mod tests {
     }
     // Construct an isolated builtins fixture
     pub(super) fn fixture(root: &std::path::Path) -> Run {
-        let runtime = Runtime::build(root.join("app"), false).unwrap();
+        fixture_runtime(Runtime::build(root.join("app"), false).unwrap())
+    }
+
+    fn fixture_runtime(runtime: Arc<Runtime>) -> Run {
         runtime.builtin_state.attach_desktop_host();
         runtime.simulate_device(true, "simulator:builtins").unwrap();
         let epoch = *runtime
@@ -2651,6 +3202,8 @@ mod tests {
             key_logic: false,
             debug_macro_root: false,
             request: Arc::new(Request {
+                event_slot: None,
+                physical_activation: None,
                 manual: false,
                 activation_policy: Default::default(),
                 icon_signature: None,
@@ -2662,6 +3215,7 @@ mod tests {
                 binding_scope: "default:main".into(),
                 connection_epoch: Some(epoch),
                 input: Input::Button { pressed: true },
+                trace: None,
                 cancellation_generation: 0,
             }),
             pressed: Arc::new(AtomicBool::new(false)),
@@ -2673,9 +3227,352 @@ mod tests {
             device_generation: 0,
             branch_cancellations: vec![],
             completion_jobs: Default::default(),
+            gesture_lane: Default::default(),
             keyboard_events: Default::default(),
         }
     }
+    #[test]
+    fn macro_website_vault_reference_is_encoded_and_does_not_escape_the_saved_origin() {
+        use crate::vault::{VaultEntryInput, VaultKind};
+        let root = tempfile::tempdir().unwrap();
+        let keys = crate::credentials::Credentials::with_provider(Arc::new(
+            crate::vault::tests::TestKeys::default(),
+        ));
+        let runtime = Runtime::build_credentials(root.path().join("app"), false, keys).unwrap();
+        let mut run = fixture_runtime(runtime.clone());
+        native::testing::enable();
+        runtime.vault.initialize().unwrap();
+        let entry = runtime
+            .vault
+            .create_entry(VaultEntryInput {
+                label: "Website slug".into(),
+                kind: VaultKind::Text,
+                protected: false,
+                value: json!("a/b &é.desktop"),
+            })
+            .unwrap();
+        let token = format!("${{vault.{}}}", entry.id);
+        let saved = Action::Macro {
+            actions: vec![Action::OpenUrl {
+                url: format!("https://example.org/{token}?missing=${{vault.unlinked}}"),
+            }],
+        };
+        saved.validate(0).unwrap();
+        execute(&mut run, &saved, 0, vec![]).unwrap();
+        native::testing::STATE.with(|state| {
+            assert_eq!(
+                state.borrow().events,
+                ["https://example.org/a%2Fb%20%26%C3%A9.desktop?missing="]
+            );
+        });
+        let host = Action::OpenUrl {
+            url: format!("https://{token}/"),
+        };
+        assert!(host.validate(0).is_err());
+        assert!(run
+            .saved_website("", &format!("https://example.org/{token}"), false)
+            .is_err());
+        runtime.vault.lock();
+        assert_eq!(
+            run.saved_website(
+                &format!("https://example.org/{token}"),
+                &format!("https://example.org/{token}"),
+                false
+            )
+            .unwrap(),
+            "https://example.org/"
+        );
+    }
+
+    #[test]
+    fn saved_builtin_operands_are_literal_private_and_fail_closed() {
+        use crate::vault::{VaultEntryInput, VaultKind};
+        let root = tempfile::tempdir().unwrap();
+        let keys = crate::credentials::Credentials::with_provider(Arc::new(
+            crate::vault::tests::TestKeys::default(),
+        ));
+        let runtime = Runtime::build_credentials(root.path().join("app"), false, keys).unwrap();
+        let mut run = fixture_runtime(runtime.clone());
+        native::testing::enable();
+        runtime.vault.initialize().unwrap();
+        let token = |label, kind, protected, value| {
+            let entry = runtime
+                .vault
+                .create_entry(VaultEntryInput {
+                    label: String::from(label),
+                    kind,
+                    protected,
+                    value,
+                })
+                .unwrap();
+            format!("${{vault.{}}}", entry.id)
+        };
+        let literal = token(
+            "Literal",
+            VaultKind::Text,
+            false,
+            json!("literal %Y ${run.argument}"),
+        );
+        let date = action(
+            "date_time",
+            json!({"format":format!("Year %Y, {literal}"),"utc":true}),
+        );
+        execute(&mut run, &date, 0, vec![]).unwrap();
+        native::testing::STATE.with(|state| {
+            let events = &state.borrow().events;
+            assert!(events.last().unwrap().starts_with("Year "));
+            assert!(events
+                .last()
+                .unwrap()
+                .ends_with(", literal %Y ${run.argument}"));
+        });
+
+        let slot = |name: &str, operation| {
+            action(
+                "clipboard_slot",
+                json!({"name":name,"operation":operation,"persist":true}),
+            )
+        };
+        native::set_clipboard("first").unwrap();
+        execute(&mut run, &slot(&literal, "save"), 0, vec![]).unwrap();
+        let key = run.clipboard_slot_key(&literal, &literal).unwrap();
+        assert!(vault_operands::is_clipboard_key(&key));
+        assert!(!key.contains("literal"));
+        assert_eq!(
+            State::with_storage(runtime.builtin_state.storage.clone())
+                .unwrap()
+                .get(&key),
+            Some(json!("first"))
+        );
+        native::set_clipboard("new").unwrap();
+        execute(&mut run, &slot(&literal, "restore"), 0, vec![]).unwrap();
+        assert_eq!(native::testing::clipboard(), "first");
+        assert!(run.clipboard_slot_key("unchanged", &literal).is_err());
+        assert!(execute(&mut run, &slot("${vault.unlinked}", "clear"), 0, vec![]).is_err());
+
+        let conditional = |source, subject: &str, operator, value| {
+            action(
+                "conditional",
+                json!({
+                    "condition":{"source":source,"subject":subject,"operator":operator,"value":value},
+                    "children":[action("set_clipboard",json!({"text":"matched"})),Action::None],
+                }),
+            )
+        };
+        native::set_clipboard("literal %Y ${run.argument}").unwrap();
+        execute(
+            &mut run,
+            &conditional("clipboard", "", "equals", json!(literal)),
+            0,
+            vec![],
+        )
+        .unwrap();
+        assert_eq!(native::testing::clipboard(), "matched");
+        let target = root.path().join("fixture-file");
+        std::fs::write(&target, []).unwrap();
+        let public_path = token("File", VaultKind::File, false, json!(target));
+        let protected_path = token("Protected", VaultKind::File, true, json!(target));
+        let text_path = token("Text path", VaultKind::Text, false, json!(target));
+        for denied in [&protected_path, &text_path, &format!("{public_path}/child")] {
+            assert!(execute(
+                &mut run,
+                &conditional("file", denied, "exists", json!("")),
+                0,
+                vec![]
+            )
+            .is_err());
+        }
+        native::set_clipboard("unset").unwrap();
+        execute(
+            &mut run,
+            &conditional("file", &public_path, "exists", json!("")),
+            0,
+            vec![],
+        )
+        .unwrap();
+        assert_eq!(native::testing::clipboard(), "matched");
+
+        runtime.vault.lock();
+        assert!(execute(&mut run, &slot(&literal, "restore"), 0, vec![]).is_err());
+        assert!(execute(
+            &mut run,
+            &conditional("file", &public_path, "missing", json!("")),
+            0,
+            vec![]
+        )
+        .is_err());
+        assert!(execute(
+            &mut run,
+            &conditional("clipboard", "", "not_equals", json!(literal)),
+            0,
+            vec![]
+        )
+        .is_err());
+        assert_eq!(native::testing::clipboard(), "matched");
+        runtime.shutdown();
+    }
+
+    #[test]
+    fn native_action_uses_the_selected_or_typed_vault_reference_only_in_its_saved_field() {
+        use crate::vault::{VaultEntryInput, VaultKind};
+        let root = tempfile::tempdir().unwrap();
+        let keys = crate::credentials::Credentials::with_provider(Arc::new(
+            crate::vault::tests::TestKeys::default(),
+        ));
+        let runtime = Runtime::build_credentials(root.path().join("app"), false, keys).unwrap();
+        let mut run = fixture_runtime(runtime.clone());
+        native::testing::enable();
+        runtime.vault.initialize().unwrap();
+        let store = |kind, value: &str| {
+            runtime
+                .vault
+                .create_entry(VaultEntryInput {
+                    label: "Fixture".into(),
+                    kind,
+                    protected: kind == VaultKind::ApiKey,
+                    value: json!(value),
+                })
+                .unwrap()
+        };
+        let scalar = store(VaultKind::Text, "keep ${run.answer} literal");
+        let protected = store(VaultKind::ApiKey, "synthetic protected fixture");
+        let choices = runtime.vault.builtin_choices(false).unwrap();
+        assert_eq!(choices.len(), 1);
+        assert_eq!(choices[0].id, scalar.id);
+        let token = |id: &str| format!("${{vault.{id}}}");
+        let use_text = |run: &mut Run, text: &str| {
+            execute(
+                run,
+                &action("set_clipboard", json!({"text":text,"template":true})),
+                0,
+                vec![],
+            )
+        };
+        run.locals.insert("answer".into(), json!(42));
+        for id in [&scalar.id, &choices[0].id] {
+            use_text(&mut run, &format!("start {} / ${{run.answer}}", token(id))).unwrap();
+            assert_eq!(
+                native::testing::clipboard(),
+                "start keep ${run.answer} literal / 42"
+            );
+        }
+        use_text(
+            &mut run,
+            &format!("a{}b ${{vault.unlinked}}c", token(&protected.id)),
+        )
+        .unwrap();
+        assert_eq!(native::testing::clipboard(), "ab c");
+        run.locals
+            .insert("injected".into(), json!(token(&scalar.id)));
+        use_text(&mut run, "${run.injected}").unwrap();
+        assert_eq!(native::testing::clipboard(), token(&scalar.id));
+        let item = runtime
+            .vault
+            .create_entry(VaultEntryInput {
+                kind: VaultKind::Json,
+                label: "Comparison".into(),
+                protected: false,
+                value: json!({"count":3}),
+            })
+            .unwrap();
+        assert_eq!(runtime.vault.json_choices().unwrap()[0].id, item.id);
+        let place = runtime
+            .vault
+            .create_entry(VaultEntryInput {
+                kind: VaultKind::Location,
+                label: "Unprotected place".into(),
+                protected: false,
+                value: json!({"name":"Fixture place","latitude":1.2345,"longitude":-6.789}),
+            })
+            .unwrap();
+        let messages = Arc::new(Mutex::new(Vec::new()));
+        let received = messages.clone();
+        runtime
+            .builtin_state
+            .attach_notification_backend(move |title, text| {
+                received
+                    .lock()
+                    .unwrap()
+                    .push((title.to_owned(), text.to_owned()));
+                Ok(())
+            });
+        let notification = action(
+            "notification",
+            json!({
+                "title": format!("Location {}", token(&place.id)),
+                "text": format!("Example is open! {} ${{vault.broken}} {}", token(&item.id), token(&protected.id)),
+                "template": false,
+            }),
+        );
+        let macro_action = Action::Macro {
+            actions: vec![notification],
+        };
+        execute(&mut run, &macro_action, 0, vec![]).unwrap();
+        assert_eq!(
+            messages.lock().unwrap().as_slice(),
+            &[(
+                "Location 1.2345,-6.789".to_owned(),
+                r#"Example is open! {"count":3}  "#.to_owned(),
+            )]
+        );
+        assert_eq!(
+            run.saved_text("Saved", &token(&scalar.id), false).unwrap(),
+            ""
+        );
+        for target in [json!(token(&item.id)), json!({"vault":token(&item.id)})] {
+            native::set_clipboard(r#"{"count":3}"#).unwrap();
+            let matched = action(
+                "conditional",
+                json!({"condition":{"source":"clipboard","subject":"","operator":"matches_vault_json","value":target},"children":[action("set_clipboard",json!({"text":"matched"})),Action::None]}),
+            );
+            execute(&mut run, &matched, 0, vec![]).unwrap();
+            assert_eq!(native::testing::clipboard(), "matched");
+            native::set_clipboard(r#"{"count":"3"}"#).unwrap();
+            execute(&mut run, &matched, 0, vec![]).unwrap();
+            assert_eq!(native::testing::clipboard(), r#"{"count":"3"}"#);
+        }
+        let location = runtime
+            .vault
+            .create_entry(VaultEntryInput {
+                kind: VaultKind::Location,
+                label: "Place".into(),
+                protected: true,
+                value: json!({"name":"Place","latitude":1.2345,"longitude":6.789}),
+            })
+            .unwrap();
+        let field = format!("${{vault.{}.latitude}}", location.id);
+        assert!(runtime.vault.matches_json(&field, "1.23").unwrap());
+        assert!(!runtime.vault.matches_json(&field, r#""1.23""#).unwrap());
+        assert!(runtime
+            .vault
+            .matches_json(&format!("${{vault.{}.accuracy_m}}", location.id), "0")
+            .is_err());
+        assert!(runtime
+            .vault
+            .matches_json(&token(&protected.id), r#""synthetic""#)
+            .is_err());
+        let typed_path = action(
+            "reveal_file",
+            json!({"path":{"vault":token(&item.id)},"template":true}),
+        );
+        assert_eq!(
+            serde_json::to_value(typed_path).unwrap()["action"]["path"],
+            token(&item.id)
+        );
+        let mut wrong = token(&item.id);
+        wrong.insert_str(0, "prefix ");
+        assert!(!crate::vault::is_whole_reference(&wrong));
+        assert!(!crate::vault::is_whole_reference(&format!(
+            "${{vault.{}.name}}",
+            item.id
+        )));
+        native::set_clipboard(&token(&scalar.id)).unwrap();
+        runtime.vault.lock();
+        use_text(&mut run, &format!("locked=[{}]", token(&scalar.id))).unwrap();
+        assert_eq!(native::testing::clipboard(), "locked=[]");
+        runtime.shutdown();
+    }
+
     #[test]
     // Verify that retained catalog entries round trip with typed editable defaults
     fn retained_catalog_entries_round_trip_with_typed_editable_defaults() {
@@ -2765,6 +3662,14 @@ mod tests {
         execute(&mut run, &condition, 0, vec![]).unwrap();
         assert_eq!(std::fs::read_to_string(&file).unwrap(), "branch");
         run.locals.insert("answer".into(), json!(42));
+        assert!(run.text("${vault.fixture}", true).is_err());
+        assert_eq!(
+            run.text_with("${vault.fixture}|${run.answer}", true, true, &|_| Ok(
+                "${run.answer}".into()
+            ))
+            .unwrap(),
+            "${run.answer}|42"
+        );
         assert_eq!(run.text("n=${run.answer}", true).unwrap(), "n=42");
         let cycle = action(
             "cycle_actions",
@@ -3085,6 +3990,7 @@ mod integration_tests {
         data.profiles[0].pages[0].bindings.insert(
             "key-1".into(),
             crate::Binding {
+                live_label: Vec::new(),
                 dial_response: None,
                 title: "Macro".into(),
                 color: "#222222".into(),
@@ -3587,6 +4493,49 @@ mod lifecycle_tests {
         run.runtime.shutdown();
     }
     #[test]
+    // Verify that the built-in action respects submission failures and never passes registered secrets
+    fn builtin_notification_propagates_native_result_and_redacts_body() {
+        let root = tempfile::tempdir().unwrap();
+        let mut run = fixture(root.path());
+        run.runtime.credentials.remember("fixture-secret");
+        let submitted = Arc::new(Mutex::new(Vec::new()));
+        let captured = submitted.clone();
+        run.runtime
+            .builtin_state
+            .attach_notification_backend(move |title, text| {
+                captured
+                    .lock()
+                    .unwrap()
+                    .push((title.to_owned(), text.to_owned()));
+                if title == "Denied" {
+                    Err("Notifications are disabled in System Settings".into())
+                } else {
+                    Ok(())
+                }
+            });
+        let accepted = action(
+            "notification",
+            json!({"title":"Accepted","text":"fixture-secret"}),
+        );
+        assert!(execute(&mut run, &accepted, 0, vec![]).is_ok());
+        let denied = action(
+            "notification",
+            json!({"title":"Denied","text":"fixture-secret"}),
+        );
+        assert_eq!(
+            execute(&mut run, &denied, 0, vec![]).unwrap_err(),
+            "Notifications are disabled in System Settings",
+        );
+        let submitted = submitted.lock().unwrap();
+        assert_eq!(submitted.len(), 2);
+        assert_eq!(submitted[0].0, "Accepted");
+        assert_eq!(submitted[1].0, "Denied");
+        assert!(submitted
+            .iter()
+            .all(|(_, text)| !text.contains("fixture-secret")));
+        run.runtime.shutdown();
+    }
+    #[test]
     // Verify that desktop prompts fail clearly without a desktop host
     fn desktop_prompts_fail_clearly_without_a_desktop_host() {
         let root = tempfile::tempdir().unwrap();
@@ -3930,6 +4879,8 @@ pub(crate) fn launch_debug(
         key_logic: false,
         debug_macro_root: request.macro_id.is_some(),
         request: Arc::new(Request {
+            event_slot: None,
+            physical_activation: None,
             manual: false,
             activation_policy: Default::default(),
             icon_signature: None,
@@ -3944,6 +4895,7 @@ pub(crate) fn launch_debug(
             ),
             connection_epoch: epoch,
             input: Input::Pulse,
+            trace: None,
             cancellation_generation: runtime.cancellation.load(Ordering::SeqCst),
         }),
         pressed: Arc::new(AtomicBool::new(false)),
@@ -3962,6 +4914,7 @@ pub(crate) fn launch_debug(
             .unwrap_or(0),
         branch_cancellations: vec![],
         completion_jobs: Default::default(),
+        gesture_lane: Default::default(),
         keyboard_events: Default::default(),
         runtime: runtime.clone(),
     };

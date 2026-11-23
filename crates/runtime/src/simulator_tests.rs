@@ -298,6 +298,8 @@ fn themed_plugin_background_respects_explicit_transparency_and_color() {
     binding.background_source = Some(crate::profiles::BackgroundSource::Custom);
     assert_eq!(corner(&scene, &binding), [16, 64, 128, 255]);
     scene.draft = Some(crate::hardware_preview::HardwareDraft {
+        display_test: None,
+        palette: None,
         bindings: std::collections::BTreeMap::from([("key-1".into(), palette_draft)]),
         background: None,
         scope: None,
@@ -472,6 +474,7 @@ fn manual_macro_starts_and_reuses_a_plugin_with_no_device() {
         "UUID": PLUGIN, "Name": "Manual fixture", "Version": "0.1.0", "CodePath": "runtime.html",
         "Actions": [{"UUID": ACTION, "Name": "Action"}]
     }).to_string()).unwrap();
+    crate::test_plugin::modernize(&package);
     let runtime = Runtime::build(root.path().into(), false).unwrap();
     runtime
         .plugins
@@ -529,7 +532,7 @@ fn manual_macro_starts_and_reuses_a_plugin_with_no_device() {
     }
     socket
         .send(tungstenite::Message::Text(
-            json!({"event":"registerPlugin","uuid":parts[4]})
+            crate::test_plugin::registration(&package, parts[4])
                 .to_string()
                 .into(),
         ))
@@ -814,7 +817,7 @@ fn removing_a_saved_simulator_purges_its_records_and_preserves_other_content() {
         )
         .is_err());
     let restored = runtime.simulate_device(true, "simulator:a").unwrap();
-    assert_eq!(restored.session("simulator:a").output.brightness, 65);
+    assert_eq!(restored.session("simulator:a").output.brightness, 50);
     assert_eq!(runtime.profiles.load().unwrap().rules.len(), 1);
     runtime.shutdown();
 }
@@ -1106,6 +1109,12 @@ fn swipe_navigation_is_directional_device_local_and_restores_profile_pages() {
     let saved = runtime
         .save_profile(second, saved.configuration_revision)
         .unwrap();
+    runtime
+        .select_device_profile(a, &first.id, Some("main"), true)
+        .unwrap();
+    runtime
+        .select_device_profile(b, &first.id, Some("main"), true)
+        .unwrap();
     let send = |input| {
         runtime
             .simulate_input(
@@ -1125,8 +1134,13 @@ fn swipe_navigation_is_directional_device_local_and_restores_profile_pages() {
     send(Input::Swipe {
         direction: "up".into(),
     });
-    std::thread::sleep(Duration::from_millis(80));
+    wait_until(|| runtime.snapshot().session(a).profile_id == "scene-two");
+    assert_eq!(runtime.snapshot().session(b).profile_id, first.id);
     assert_eq!(runtime.snapshot().session(a).page_id, "main");
+    send(Input::Swipe {
+        direction: "down".into(),
+    });
+    wait_until(|| runtime.snapshot().session(a).profile_id == first.id);
     send(Input::Swipe {
         direction: "left".into(),
     });
@@ -1150,6 +1164,78 @@ fn swipe_navigation_is_directional_device_local_and_restores_profile_pages() {
     assert_eq!(runtime.snapshot().session(b).profile_id, "default");
     assert_eq!(runtime.snapshot().configuration_revision, revision);
     assert!(revision >= saved.configuration_revision);
+    runtime.shutdown();
+}
+
+#[test]
+#[ignore = "Requires local loopback sockets; never opens HID"]
+fn saved_strip_events_override_defaults_and_restore_device_local_pages() {
+    use crate::actions::{
+        EventSlot, NavigationDirection as Direction, NavigationTarget as Target, DEFAULT_HOLD_MS,
+        DEFAULT_MULTI_PRESS_MS,
+    };
+
+    let root = tempfile::tempdir().unwrap();
+    let runtime = Runtime::build(root.path().into(), false).unwrap();
+    let device = "simulator:swipe-events";
+    runtime.simulate_device(true, device).unwrap();
+    let snapshot = runtime.snapshot();
+    let mut first = snapshot.profiles[0].clone();
+    let mut strip = first.pages[0].bindings["key-1"].clone();
+    let mut actions = vec![Action::None; EventSlot::COUNT];
+    actions[EventSlot::SwipeRight.index()] = Action::Navigate {
+        target: Target::Page,
+        direction: Direction::Previous,
+    };
+    actions[EventSlot::SwipeUp.index()] = Action::Navigate {
+        target: Target::Profile,
+        direction: Direction::Next,
+    };
+    strip.action = Action::Events {
+        actions,
+        multi_press_ms: DEFAULT_MULTI_PRESS_MS,
+        hold_ms: DEFAULT_HOLD_MS,
+    };
+    first.pages[0].bindings.insert("touch-strip".into(), strip);
+    let mut extra = first.pages[0].clone();
+    extra.id = "extra".into();
+    first.pages.push(extra);
+    let mut second = first.clone();
+    second.id = "second".into();
+    let saved = runtime
+        .save_profile(first.clone(), snapshot.configuration_revision)
+        .unwrap();
+    runtime
+        .save_profile(second.clone(), saved.configuration_revision)
+        .unwrap();
+    runtime
+        .select_device_profile(device, &second.id, Some("extra"), true)
+        .unwrap();
+    runtime
+        .select_device_profile(device, &first.id, Some("main"), true)
+        .unwrap();
+
+    let swipe = |direction: &str| {
+        runtime
+            .simulate_input(
+                device,
+                ControlEvent {
+                    control_id: "touch-strip".into(),
+                    input: Input::Swipe {
+                        direction: direction.into(),
+                    },
+                },
+            )
+            .unwrap();
+    };
+    // Left has no action, even though the implicit default would advance the page.
+    swipe("left");
+    assert_eq!(runtime.snapshot().session(device).page_id, "main");
+    swipe("right");
+    wait_until(|| runtime.snapshot().session(device).page_id == "extra");
+    swipe("up");
+    wait_until(|| runtime.snapshot().session(device).profile_id == second.id);
+    assert_eq!(runtime.snapshot().session(device).page_id, "extra");
     runtime.shutdown();
 }
 

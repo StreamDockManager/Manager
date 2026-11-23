@@ -237,6 +237,10 @@ impl PluginHost {
             }
         }
         let owner = id.to_owned();
+        let family = self
+            .plugins
+            .get(id)
+            .map(|p| (p.info.dialect.clone(), p.info.capabilities.is_some()));
         let result = hub.snapshot().and_then(|snapshot| {
             let cost = snapshot
                 .bytes
@@ -244,6 +248,23 @@ impl PluginHost {
                 .ok_or("Plugin removal exceeds admission limit")?;
             self.runtimes.forget_plugin_with(id, cost, move |tx| {
                 snapshot.write(tx)?;
+                let family_key = format!("retained-family:{owner}");
+                if let Some(family) = family.filter(|_| retain) {
+                    stream_dock_manager_storage::write_json(
+                        tx,
+                        stream_dock_manager_storage::Domain::PluginMetadata,
+                        &family_key,
+                        &family,
+                        1024,
+                    )?;
+                } else {
+                    stream_dock_manager_storage::delete(
+                        tx,
+                        stream_dock_manager_storage::Domain::PluginMetadata,
+                        &family_key,
+                    )?;
+                }
+                stream_dock_manager_storage::permissions::forget(tx, &owner)?;
                 stream_dock_manager_storage::write_json(
                     tx,
                     stream_dock_manager_storage::Domain::PluginMetadata,
@@ -273,11 +294,7 @@ impl PluginHost {
                         }
                     }
                 }
-                stream_dock_manager_storage::delete(
-                    tx,
-                    stream_dock_manager_storage::Domain::PluginHealth,
-                    &owner,
-                )?;
+                stream_dock_manager_storage::plugin_health::delete(tx, &owner)?;
                 if let Some((key, mut journal)) = deletion {
                     journal["committed"] = json!(true);
                     stream_dock_manager_storage::write_json(
@@ -312,6 +329,7 @@ impl PluginHost {
             .binding_contexts
             .retain(|key, _| !key.starts_with(&prefix));
         hub.health.remove(id);
+        hub.health_dirty.remove(id);
         hub.refresh_log_secrets();
         hub.roots.remove(id);
         hub.metadata.remove(id);

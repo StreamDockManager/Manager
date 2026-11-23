@@ -1,0 +1,11 @@
+# Automatically generated - DO NOT EDIT!
+
+[[permission]]
+identifier = "allow-vault-revoke-direct-reads"
+description = "Enables the vault_revoke_direct_reads command without any pre-configured scope."
+commands.allow = ["vault_revoke_direct_reads"]
+
+[[permission]]
+identifier = "deny-vault-revoke-direct-reads"
+description = "Denies the vault_revoke_direct_reads command without any pre-configured scope."
+commands.deny = ["vault_revoke_direct_reads"]

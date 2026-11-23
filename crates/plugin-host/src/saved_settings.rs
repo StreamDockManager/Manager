@@ -19,6 +19,7 @@ impl Hub {
     // Revoke storage session
     pub(super) fn revoke_storage_session(&mut self, token: &str) {
         self.sessions.revoke_storage(token);
+        self.settings_bursts.revoke_session(token);
         self.forget_saved_reads_for_session(token);
         self.pending_settings
             .retain(|_, (session, _)| session != token);
@@ -42,20 +43,6 @@ impl Hub {
         settings: Value,
         resources: Option<Value>,
     ) -> Result<(), String> {
-        if self.pending_settings.len() >= 64
-            || self
-                .pending_settings
-                .values()
-                .filter(|(s, _)| s == session)
-                .count()
-                >= 8
-        {
-            return Err("Settings queue is full".into());
-        }
-        let sender = self
-            .settings_writer
-            .as_ref()
-            .ok_or("Saved settings writer is unavailable")?;
         let action_id = self
             .context_state
             .visible
@@ -91,11 +78,53 @@ impl Hub {
                 .unwrap_or_default(),
             session: session.into(),
         };
+        let burst_eligible = request.resources.is_none()
+            && !request.address.is_null()
+            && self
+                .manifest_dialects
+                .get(owner)
+                .is_some_and(|dialect| dialect == "vsd")
+            && !self.capabilities.contains_key(owner)
+            && self
+                .sessions
+                .files
+                .get(session)
+                .is_none_or(|grant| grant.context.is_none());
+        let request = if burst_eligible {
+            let Some(request) = self
+                .settings_bursts
+                .offer(request, std::time::Instant::now())?
+            else {
+                return Ok(());
+            };
+            request
+        } else {
+            request
+        };
+        let override_target =
+            (!burst_eligible && request.resources.is_none()).then(|| request.address.clone());
+        if self.pending_settings.len() >= 64
+            || self
+                .pending_settings
+                .values()
+                .filter(|(s, _)| s == session)
+                .count()
+                >= 8
+        {
+            return Err("Settings queue is full".into());
+        }
+        let sender = self
+            .settings_writer
+            .as_ref()
+            .ok_or("Saved settings writer is unavailable")?;
         sender
             .try_send(request)
             .map_err(|_| "Saved settings queue is unavailable")?;
         self.pending_settings
             .insert(operation_id, (session.into(), context.into()));
+        if let Some(address) = override_target {
+            self.settings_bursts.discard_target(owner, &address);
+        }
         Ok(())
     }
     // Build the settings event sent to a plugin
@@ -272,6 +301,46 @@ impl Hub {
             }
         }
     }
+    // Publish the committed workspace settings to the live context and its peers
+    fn accept_settings(&mut self, request: &OwnedSettingsWrite) {
+        self.context_state
+            .settings
+            .insert(request.context.clone(), request.settings.clone());
+        self.context_state
+            .configured
+            .insert(request.context.clone(), request.settings.clone());
+        self.publish_settings(
+            &request.plugin_id,
+            &request.context,
+            &request.settings,
+            &request.session,
+        );
+    }
+
+    // Verify that the original session and action still own the exact saved target
+    fn owns_saved_write(&self, request: &OwnedSettingsWrite) -> bool {
+        self.sessions.tokens.get(&request.session) == Some(&request.plugin_id)
+            && self.context_state.contexts.get(&request.context) == Some(&request.plugin_id)
+            && self.context_state.context_actions.get(&request.context) == Some(&request.action_id)
+            && self.context_state.addresses.get(&request.context) == Some(&request.address)
+            && !self.context_state.drafts.contains(&request.context)
+            && !self
+                .context_state
+                .transient_scopes
+                .contains_key(&request.context)
+    }
+
+    // Close out a queued write only if its original session still owns the target
+    fn take_saved_write(&mut self, request: &OwnedSettingsWrite) -> Result<(), String> {
+        let pending = self.pending_settings.remove(&request.operation_id);
+        if pending.as_ref() != Some(&(request.session.clone(), request.context.clone()))
+            || !self.owns_saved_write(request)
+        {
+            self.flush_saved_reads();
+            return Err("Saved settings context or session was retired".into());
+        }
+        Ok(())
+    }
 }
 impl PluginHost {
     // Resolve the current destination of a saved settings write
@@ -292,6 +361,24 @@ impl PluginHost {
             .get(&request.context)
             .cloned()
             .unwrap_or(request.address.clone()))
+    }
+    // Keep inspectors current across settings-only writes without reviving stale panels
+    pub fn advance_inspectors_after_settings_save(&mut self, revision: u64) {
+        let Some(previous) = revision.checked_sub(1) else {
+            return;
+        };
+        for address in self
+            .hub
+            .lock()
+            .unwrap()
+            .context_state
+            .addresses
+            .values_mut()
+        {
+            if address["inspector_revision"].as_u64() == Some(previous) {
+                address["inspector_revision"] = json!(revision);
+            }
+        }
     }
     // Advance the revision used to correlate inspector settings
     pub fn advance_inspector_revision(&mut self, context: &str, revision: u64) {
@@ -321,6 +408,53 @@ impl PluginHost {
         hub.flush_saved_reads();
         // A rejected write releases getters with actual committed state, never an optimistic value
     }
+    // Promote due saves into the ordinary ordered-read fence only during the actual commit
+    pub fn due_burst_settings(&mut self) -> Vec<OwnedSettingsWrite> {
+        let mut hub = self.hub.lock().unwrap();
+        let mut due = hub.settings_bursts.take_due(std::time::Instant::now());
+        due.retain(|request| hub.owns_saved_write(request));
+        for request in &due {
+            hub.pending_settings.insert(
+                request.operation_id.clone(),
+                (request.session.clone(), request.context.clone()),
+            );
+        }
+        due
+    }
+
+    // Commit due settings together, publishing only after the transaction succeeds
+    pub fn commit_burst_settings<T: Send + 'static>(
+        &mut self,
+        requests: &[OwnedSettingsWrite],
+        retained_bytes: usize,
+        commit: impl FnOnce(&Transaction<'_>) -> Result<T, String> + Send + 'static,
+    ) -> Result<T, String> {
+        let mut hub = self.hub.lock().unwrap();
+        for request in requests {
+            hub.take_saved_write(request)?;
+        }
+        let result = self.storage().transaction_with_cost(retained_bytes, commit);
+        if result.is_ok() {
+            for request in requests {
+                hub.accept_settings(request);
+            }
+            hub.refresh_log_secrets();
+        }
+        hub.flush_saved_reads();
+        result
+    }
+
+    // Complete an unchanged settings write and release getters waiting behind it
+    pub fn finish_unchanged_saved_settings(
+        &mut self,
+        request: &OwnedSettingsWrite,
+    ) -> Result<(), String> {
+        let mut hub = self.hub.lock().unwrap();
+        hub.take_saved_write(request)?;
+        hub.flush_saved_reads();
+        Ok(())
+    }
+
     // Commit saved settings
     pub fn commit_saved_settings<T: Send + 'static>(
         &mut self,
@@ -329,21 +463,7 @@ impl PluginHost {
         commit: impl FnOnce(&Transaction<'_>) -> Result<T, String> + Send + 'static,
     ) -> Result<T, String> {
         let mut hub = self.hub.lock().unwrap();
-        let pending = hub.pending_settings.remove(&request.operation_id);
-        if pending.as_ref() != Some(&(request.session.clone(), request.context.clone()))
-            || hub.sessions.tokens.get(&request.session) != Some(&request.plugin_id)
-            || hub.context_state.contexts.get(&request.context) != Some(&request.plugin_id)
-            || hub.context_state.context_actions.get(&request.context) != Some(&request.action_id)
-            || hub.context_state.addresses.get(&request.context) != Some(&request.address)
-            || hub.context_state.drafts.contains(&request.context)
-            || hub
-                .context_state
-                .transient_scopes
-                .contains_key(&request.context)
-        {
-            hub.flush_saved_reads();
-            return Err("Saved settings context or session was retired".into());
-        }
+        hub.take_saved_write(request)?;
         let value = match self.storage().transaction_with_cost(retained_bytes, commit) {
             Ok(value) => value,
             Err(error) => {
@@ -362,18 +482,7 @@ impl PluginHost {
             hub.flush_saved_reads();
             return Ok(value);
         }
-        hub.context_state
-            .settings
-            .insert(request.context.clone(), request.settings.clone());
-        hub.context_state
-            .configured
-            .insert(request.context.clone(), request.settings.clone());
-        hub.publish_settings(
-            &request.plugin_id,
-            &request.context,
-            &request.settings,
-            &request.session,
-        );
+        hub.accept_settings(request);
         hub.refresh_log_secrets();
         hub.flush_saved_reads();
         Ok(value)
@@ -383,6 +492,35 @@ impl PluginHost {
 #[cfg(test)]
 mod tests {
     use super::*;
+    #[test]
+    // Advance independent open inspectors without reviving panels stale before the save
+    fn settings_only_save_advances_current_inspectors() {
+        let root = tempfile::tempdir().unwrap();
+        let mut host = lifecycle_tests::host(root.path());
+        {
+            let mut hub = host.hub.lock().unwrap();
+            for (context, revision) in [("first", 4), ("other", 4), ("stale", 3)] {
+                hub.context_state
+                    .addresses
+                    .insert(context.into(), json!({"inspector_revision":revision}));
+            }
+            hub.context_state
+                .addresses
+                .insert("runtime".into(), json!({"profile_id":"profile"}));
+        }
+        host.advance_inspectors_after_settings_save(5);
+        let hub = host.hub.lock().unwrap();
+        for (context, revision) in [("first", 5), ("other", 5), ("stale", 3)] {
+            assert_eq!(
+                hub.context_state.addresses[context]["inspector_revision"],
+                revision
+            );
+        }
+        assert!(hub.context_state.addresses["runtime"]
+            .get("inspector_revision")
+            .is_none());
+    }
+
     #[test]
     // Verify inspector settings event keeps token and resolves live device metadata
     fn inspector_settings_event_keeps_token_and_resolves_live_device_metadata() {
@@ -480,6 +618,7 @@ mod tests {
             "pi".into(),
             FileGrant {
                 root: root.path().into(),
+                runtime_entry: None,
                 bootstrap: String::new(),
                 context: Some("inspector".into()),
                 setup_runtime: false,
@@ -543,6 +682,7 @@ mod tests {
                 "pi".into(),
                 FileGrant {
                     root: root.path().into(),
+                    runtime_entry: None,
                     bootstrap: String::new(),
                     context: Some("inspector".into()),
                     setup_runtime: false,
@@ -607,6 +747,7 @@ mod tests {
             "pi".into(),
             FileGrant {
                 root: root.path().into(),
+                runtime_entry: None,
                 bootstrap: String::new(),
                 context: Some("inspector".into()),
                 setup_runtime: false,

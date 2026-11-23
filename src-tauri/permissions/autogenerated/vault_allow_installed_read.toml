@@ -1,0 +1,11 @@
+# Automatically generated - DO NOT EDIT!
+
+[[permission]]
+identifier = "allow-vault-allow-installed-read"
+description = "Enables the vault_allow_installed_read command without any pre-configured scope."
+commands.allow = ["vault_allow_installed_read"]
+
+[[permission]]
+identifier = "deny-vault-allow-installed-read"
+description = "Denies the vault_allow_installed_read command without any pre-configured scope."
+commands.deny = ["vault_allow_installed_read"]

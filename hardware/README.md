@@ -1,21 +1,21 @@
 # Hardware support
 
-Choose your device, connect it to Manager, and assign your first action. All adapters are included with the app. The sixteen model modules remain **experimental**, even where a user has tested a physical unit.
+All 16 adapters are built into Manager. Use the model guides to match your USB ID, check what works, and assign your first action. Physical support is **experimental**, even for models tested on real devices.
 
-[Start with Manager](#start-with-manager) · [Find your model](#find-your-model) · [Troubleshooting](#troubleshooting) · [Develop an adapter](#develop-an-adapter)
+[Get started](#start-with-manager) · [Model guides](#find-your-model) · [Troubleshooting](#troubleshooting) · [Firmware](#firmware-checks) · [Contribute](#develop-an-adapter)
 
 ## Start with Manager
 
-1. [Install or build Manager](../README.md).
-2. Close VSD Craft and any other software using the device.
-3. Connect the Stream Dock, open Manager, and select a profile.
-4. Assign an action and save the binding. Use the simulator to explore layouts without hardware.
+1. [Install Manager](../README.md#install) and close other dock software, such as VSD Craft.
+2. Connect your dock. Open Manager and select the device and a profile in **Device editor**.
+3. Select a control, choose an action, and save the binding.
 
-On Linux, follow the [installation guide](../packaging/install-instructions/linux/INSTALL-INSTRUCTIONS.md) to install the generated USB access rules for supported interfaces, then reconnect the device. Run as your normal desktop user. Some source-derived variants deliberately have no automatic permission grant.
+- **No hardware?** Explore device layouts and build profiles in the simulator.
+- **Linux:** Set up [USB access](../packaging/install-instructions/linux/INSTALL-INSTRUCTIONS.md), then reconnect. Run as your normal desktop user. Some experimental variants have no automatic access rule.
 
 ## Hardware-tested devices
 
-These models have been tested on user hardware: **N4 Pro, N1 (VSD variant), N3 (VSD variant), and K1 Pro**. This does not qualify every firmware, USB variant, operating system, or feature. Other entries below are implemented adapters, not hardware-tested claims.
+[N4 Pro](n4-pro/README.md), [N1 (VSD variant)](n1-vsd/README.md), [N3 (VSD variant)](n3-vsd/README.md), and [K1 Pro](k1-pro/README.md) have been tested on user hardware. Those results do not cover every variant, firmware, OS, or feature.
 
 ## Find your model
 
@@ -38,7 +38,7 @@ These models have been tested on user hardware: **N4 Pro, N1 (VSD variant), N3 (
 | [N4 Pro](n4-pro/README.md)                    | `n4-pro`    | Experimental              |
 | [XL](xl/README.md)                            | `xl`        | Experimental              |
 
-Follow the model link for USB identities, setup notes, and limitations. Similar product names can use different protocols. Disabled variants remain available for schematic previews and existing profile data; they are not enabled for physical operation.
+Follow a model link for USB IDs, setup, and limitations. Match the USB ID, not just the product name. Disabled variants remain available for schematic previews and existing profiles but cannot connect to a physical device.
 
 ## Troubleshooting
 
@@ -51,7 +51,11 @@ Follow the model link for USB identities, setup notes, and limitations. Similar 
 
 ## Firmware checks
 
-Device settings → Firmware reads the installed version on connection and on **Check**.
+Go to **Device settings → Firmware** and choose **Check**. An unreadable or unsupported version does not mean your device is up to date. Manager can look for a newer release only when it has a verified catalog mapping for the exact variant. **Instructions** opens the vendor guide; Manager does not download firmware or run an updater.
+
+<details>
+<summary>Read protocols, supported catalog mappings and pinned sources</summary>
+
 All sixteen model modules declare a source-derived read contract; this is not a claim
 that every unit or firmware has been physically qualified. M18 and other disabled
 variants remain unavailable for physical matching.
@@ -79,6 +83,8 @@ selects the model's report ID, and removes report framing before parsing.
 Retail reads follow pinned
 [mirajazz `f0a7fa3`](https://github.com/4ndv/mirajazz/blob/f0a7fa3f9b5eaaa9b699c667312336d9c56f6723/src/device.rs).
 Versions are recognized conservatively; unknown formats remain unknown rather than guessed.
+
+</details>
 
 ## Inspect available models
 
@@ -118,3 +124,34 @@ Compatible variants may declare a `profile_family`. Keep exported authoring comp
 Only reviewed physical results qualify an exact variant, firmware, and platform. Source-derived fixtures, browser previews, replay results, and host transfer rates do not establish physical behavior or displayed FPS.
 
 See the [protocol audit](protocol-audit.md), [protocol provenance](protocol-evidence.md), [source inventory](protocol-sources.v1.json), and [retail variant evidence](retail-protocol-sources.v1.json). Preserve those identities when changing a codec. Large captures belong in ignored artifact folders.
+
+### Firmware instruction links
+
+Every model explicitly declares top-level `firmware_instructions` and
+`firmware_instructions_shared = true` before the first TOML table. Shared guidance
+must remain labeled shared even when its URL is copied into a model manifest.
+A verified model-specific guide may set the flag to false.
+
+Each `[[variants]]` entry in a model's `hardware/<model>/device.toml` may define
+`firmware_instructions = "https://…"`. Put it beside `id` and `name`, before
+`[variants.identity]`. A variant using general brand guidance must also set
+`firmware_instructions_shared = true`; exact verified variant guides default to false. Omission uses the model-level guide, then the canonical shared N4 Pro VSD guide if a future model omits both.
+This is general guidance, not proof of firmware compatibility. Unknown models, unknown
+variants, disabled variants, and simulators receive no fallback. The connected exact variant supplies
+both the Firmware section's availability and the native Instructions action.
+
+Only reviewed tutorial slugs under `https://www.vsdinside.com/blogs/tutorial/` or
+`https://mirabox.net/blogs/tutorial/` are accepted. HTTP, credentials, ports, queries,
+fragments, encoded paths, and firmware artifacts are rejected. Review the destination as
+actual firmware guidance for that variant before editing the field; a generic software
+update page is not a device firmware guide. A new vendor origin requires a code-policy
+review, not merely another manifest URL. Exact links currently cover VSDInside N4 Pro and MiraBox N4 Pro. The explicitly branded MiraBox N4 Pro E uses the shared MiraBox software-interface guide.
+Other variants without verified brand-specific guidance, including every K1 Pro variant,
+use the shared VSD N4 guide. Shared SDK provenance or a USB vendor ID alone does not
+establish a retail brand. That fallback URL
+is read from `hardware/n4-pro/device.toml`, variant `vsdinside`, as a defensive fallback, never from Rust constants. Resolution order is variant, model, then fallback; catalog URLs never participate.
+
+After an edit, run `cargo run -p xtask -- types`, `cargo run -p xtask -- hardware check`,
+and the `firmware_instructions` hardware-core and `instructions_follow_hardware_source`
+runtime tests. The native action opens documentation only, and never performs suggested
+vendor support, updater, or device actions automatically.

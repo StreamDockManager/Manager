@@ -193,7 +193,12 @@ pub fn validate_capabilities(root: &Path, commands: &[Command]) -> Result<(), St
                         | "plugin_log_network_detail"
                         | "export_plugin_log_capture"
                 );
-                let scopes = if popup {
+                let scopes = if matches!(
+                    command.as_str(),
+                    "permission_window_view" | "permission_window_reply"
+                ) {
+                    vec![vec!["permission-popup-*"]]
+                } else if popup {
                     vec![vec!["action-popup-*"]]
                 } else if matches!(
                     command.as_str(),

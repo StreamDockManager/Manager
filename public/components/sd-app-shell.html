@@ -36,7 +36,12 @@
                     :class="{active: app.route === 'editor'}"
                     :aria-current="app.route === 'editor' ? 'page' : null"
                 >
-                    <img class="nav-icon" src="/appearance/icons/monitor.svg" alt="" />
+                    <img
+                        data-resource-role="interface-icon"
+                        class="nav-icon"
+                        src="/appearance/icons/monitor.svg"
+                        alt=""
+                    />
                     <span class="nav-label">Device editor</span>
                 </a>
                 <a
@@ -46,7 +51,12 @@
                     :class="{active: app.route === 'action-library'}"
                     :aria-current="app.route === 'action-library' ? 'page' : null"
                 >
-                    <img class="nav-icon" src="/appearance/icons/keyboard.svg" alt="" />
+                    <img
+                        data-resource-role="interface-icon"
+                        class="nav-icon"
+                        src="/appearance/icons/keyboard.svg"
+                        alt=""
+                    />
                     <span class="nav-label">Action library</span>
                 </a>
                 <a
@@ -56,7 +66,12 @@
                     :class="{active: app.route === 'macros'}"
                     :aria-current="app.route === 'macros' ? 'page' : null"
                 >
-                    <img class="nav-icon" src="/appearance/icons/zap.svg" alt="" />
+                    <img
+                        data-resource-role="interface-icon"
+                        class="nav-icon"
+                        src="/appearance/icons/zap.svg"
+                        alt=""
+                    />
                     <span class="nav-label">Macros</span>
                     <span class="nav-count" x-text="app.snapshot.saved_macros.length"></span>
                 </a>
@@ -67,9 +82,29 @@
                     :class="{active: app.route === 'plugins'}"
                     :aria-current="app.route === 'plugins' ? 'page' : null"
                 >
-                    <img class="nav-icon" src="/appearance/icons/folder.svg" alt="" />
+                    <img
+                        data-resource-role="interface-icon"
+                        class="nav-icon"
+                        src="/appearance/icons/folder.svg"
+                        alt=""
+                    />
                     <span class="nav-label">Plugins</span>
                     <span class="nav-count" x-text="app.snapshot.plugins.length"></span>
+                </a>
+                <a
+                    href="#/vault"
+                    aria-label="Vault"
+                    :data-tooltip="sidebarCollapsed ? 'Vault' : null"
+                    :class="{active: app.route === 'vault'}"
+                    :aria-current="app.route === 'vault' ? 'page' : null"
+                >
+                    <img
+                        data-resource-role="interface-icon"
+                        class="nav-icon"
+                        src="/appearance/icons/vault.svg"
+                        alt=""
+                    />
+                    <span class="nav-label">Vault</span>
                 </a>
                 <a
                     href="#/settings"
@@ -78,7 +113,12 @@
                     :class="{active: app.route === 'settings'}"
                     :aria-current="app.route === 'settings' ? 'page' : null"
                 >
-                    <img class="nav-icon" src="/appearance/icons/settings.svg" alt="" />
+                    <img
+                        data-resource-role="interface-icon"
+                        class="nav-icon"
+                        src="/appearance/icons/settings.svg"
+                        alt=""
+                    />
                     <span class="nav-label">Settings</span>
                 </a>
                 <a
@@ -88,7 +128,12 @@
                     :class="{active: app.route === 'diagnostics'}"
                     :aria-current="app.route === 'diagnostics' ? 'page' : null"
                 >
-                    <img class="nav-icon" src="/appearance/icons/terminal.svg" alt="" />
+                    <img
+                        data-resource-role="interface-icon"
+                        class="nav-icon"
+                        src="/appearance/icons/terminal.svg"
+                        alt=""
+                    />
                     <span class="nav-label">Diagnostics</span>
                 </a>
             </nav>
@@ -122,6 +167,7 @@
             >
                 <span class="benchmark-active-dot" aria-hidden="true"></span>
                 <img
+                    data-resource-role="interface-icon"
                     class="nav-icon sidebar-activity-icon"
                     src="/appearance/icons/clock.svg"
                     alt=""
@@ -145,6 +191,7 @@
                     x-show="$store.pluginLogs.activeCount"
                 ></span>
                 <img
+                    data-resource-role="interface-icon"
                     class="nav-icon sidebar-activity-icon"
                     src="/appearance/icons/terminal.svg"
                     alt=""
@@ -284,11 +331,8 @@
         <sd-plugin-logs></sd-plugin-logs>
         <sd-benchmark-progress></sd-benchmark-progress>
         <sd-toasts></sd-toasts>
+        <div id="optional-dialogs"></div>
         <sd-feature-dialogs></sd-feature-dialogs>
-        <sd-application-data></sd-application-data>
-        <sd-background-editor></sd-background-editor>
-        <sd-video-editor></sd-video-editor>
-        <sd-keyboard-macro-editor></sd-keyboard-macro-editor>
         <div id="action-dialogs-outlet"></div>
         <section aria-label="Media preparation" x-show="$store.mediaJobs.jobs.length" class="card">
             <template x-for="job in $store.mediaJobs.jobs" :key="job.id">
@@ -375,7 +419,12 @@
             </div>
 
             <div class="workspace-wallpaper" x-data="themeWallpaper" aria-hidden="true">
-                <img x-show="image" :src="image || null" alt="" />
+                <img
+                    data-resource-role="media-preview"
+                    x-show="image"
+                    :src="image || null"
+                    alt=""
+                />
             </div>
             <section
                 class="feature-notice settings-card"
@@ -416,13 +465,6 @@
             </button>
         </footer>
     </div>
-    <sd-library-organization></sd-library-organization>
-    <sd-profile-versions></sd-profile-versions>
-    <sd-profile-conversion></sd-profile-conversion>
-    <sd-plugin-management></sd-plugin-management>
-    <sd-export-review></sd-export-review>
-    <sd-macro-sharing></sd-macro-sharing>
-    <sd-media-library></sd-media-library>
     <dialog
         id="recovery-close-dialog"
         class="confirmation-dialog"

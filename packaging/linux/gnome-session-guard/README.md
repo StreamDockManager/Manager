@@ -1,14 +1,11 @@
 # GNOME Session Guard
 
-This optional GNOME Shell extension supplies read-only session state to Stream Dock Manager keyboard macros on **GNOME X11, Shell 45–48**. It does not observe keys, inject input, change permissions, lock the screen, or inhibit locking. Installing it does not enable Wayland macro playback or recording.
+An optional GNOME Shell extension that tells Manager when the GNOME X11 session
+is locked or otherwise protected. It does not observe or inject keys, change permissions,
+or enable Wayland macro recording or playback.
 
-| Requirement     | Supported scope                                                       |
-| --------------- | --------------------------------------------------------------------- |
-| Desktop session | GNOME **X11**, Shell **45–48**                                        |
-| Installed tool  | `gnome-extensions`                                                    |
-| Installation    | Explicit user choice; Manager never installs or enables it            |
-| Wayland macros  | Not enabled by this extension                                         |
-| Qualification   | Source reviewed; native GNOME session/device testing remains deferred |
+**Requires:** GNOME **X11**, Shell **45–48**, and `gnome-extensions`. Manager never
+installs or enables it for you. Native GNOME/device verification is still pending.
 
 ## Install and enable
 

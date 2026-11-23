@@ -368,6 +368,8 @@ fn apply(runtime: &Runtime, changes: Vec<Change>) {
         // a new epoch until cleanup of this exact connection is finished
         if change.entering_sleep {
             runtime.builtin_state.cancel_device(&change.id);
+            runtime.event_bindings.cancel(Some(&change.id));
+            runtime.control_event_test.cancel_for(Some(&change.id));
         }
         if change.output_changed {
             let _ = runtime
@@ -788,6 +790,7 @@ mod tests {
         )
         .unwrap();
         std::fs::write(package.join("manifest.json"),json!({"UUID":"fixture.power","Name":"Power fixture","Version":"0.1.0","CodePath":"runtime.html","Actions":[{"UUID":"fixture.power.action","Name":"Action"}]}).to_string()).unwrap();
+        crate::test_plugin::modernize(&package);
         let runtime = Runtime::build(root.path().into(), false).unwrap();
         let first = "simulator:n4-pro:power-first";
         let second = "simulator:n4-pro:power-second";
@@ -830,7 +833,7 @@ mod tests {
         }
         socket
             .send(tungstenite::Message::Text(
-                json!({"event":"registerPlugin","uuid":parts[4]})
+                crate::test_plugin::registration(&package, parts[4])
                     .to_string()
                     .into(),
             ))
@@ -970,7 +973,7 @@ mod tests {
             assert!(Instant::now() < deadline);
             std::thread::sleep(Duration::from_millis(5));
         }
-        let restored = Runtime::build(root.path().into(), false).unwrap();
+        let restored = crate::test_support::open_disposable(root.path().into());
         restored.simulate_device(true, id).unwrap();
         assert!(restored.device_power_settings(id).unwrap().policy.enabled);
         assert!(restored.snapshot().session(id).output.sleeping);

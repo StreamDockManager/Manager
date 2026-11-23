@@ -16,7 +16,7 @@ import type {
 export const defaultDeviceOutput = (channels = 4): DeviceOutput => ({
     device_configuration: {},
     sleeping: false,
-    brightness: 65,
+    brightness: 50,
     lighting_brightness: 15,
     lighting_colors: Array.from({ length: channels }, () => [198, 30, 50]),
 });
@@ -62,7 +62,7 @@ export const bridge: Bridge = native
           // Subscribe to device surface frames through the native lifetime guard
           subscribeSurfaces: (deviceId, listener) =>
               subscribeNativeSurfaces(deviceId, listener, {
-                  channel: new Channel<ArrayBuffer>(),
+                  channel: new Channel<ArrayBuffer | number[]>(),
                   invoke,
                   // Track surface subscription work in the window lifetime
                   run: (label, work) => windowWork.run(label, work),

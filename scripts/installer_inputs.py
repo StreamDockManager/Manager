@@ -147,7 +147,7 @@ def verify_catalog(root, selected, version=None):
             or (version is not None and catalog.get('version') != version)
             or catalog.get('channel') != 'development' or catalog.get('release_tag') != ''
             or catalog.get('packages') != [] or not isinstance(catalog.get('assets'), list)):
-        raise ValueError('Native catalogue differs from the selected unreleased product')
+        raise ValueError('Native catalogue differs from the selected development build')
     formats = {'.exe'} if selected['os'] == 'windows' else {'.deb', '.rpm'}
     if selected['product'] == 'manager-cli':
         formats.add('.zip')

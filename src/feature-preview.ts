@@ -1,3 +1,4 @@
+import { previewRegexMatches } from './preview-rule-titles';
 import type { PreviewHandlers } from './preview-handlers';
 import { composePreviewHandlers } from './preview-handlers';
 import type { PreviewWorkspace } from './preview-workspace';
@@ -6,7 +7,11 @@ import { previewBindingLookup } from './preview-binding-lookup';
 import { resolvePaletteBinding } from './palette-binding';
 import { previewSources, renderCompositionPreview } from './display-canvas';
 import { version as managerVersion } from '../package.json';
-import { renderPreviewDisplay, type PreviewVisual } from './plugin-display-preview';
+import {
+    previewElements,
+    renderPreviewDisplay,
+    type PreviewVisual,
+} from './plugin-display-preview';
 import type { PluginPackageReview, BootLogoPreview } from '../generated/runtime';
 import { emptyPluginHealth, emptyPluginRuntime } from './plugin-runtime';
 // Deterministic in-memory fixtures. These commands never access files, HID, or host actions
@@ -99,18 +104,25 @@ export async function previewBinding(s: Snapshot, args: Record<string, unknown>)
             icon = `<g transform="translate(${(w - dim) / 2},${iy}) scale(${dim / 24})" fill="none" stroke="${escape(a.foreground)}" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">${content}</g>`;
         }
     }
+    const fontStyle = `font-weight="${a?.font_weight === 700 ? 700 : 400}" font-style="${a?.font_italic ? 'italic' : 'normal'}"`;
     const title =
         a?.show_title === false
             ? ''
-            : `<text x="${x}" y="${y}" text-anchor="${anchor}" font-size="${size}" fill="${escape(a?.foreground || '#ffffff')}">${escape(binding.title)}</text>`;
+            : `<text ${fontStyle} x="${x}" y="${y}" text-anchor="${anchor}" font-size="${size}" fill="${escape(a?.foreground || '#ffffff')}">${escape(binding.title)}</text>`;
     const media = args.mediaImage
         ? `<image width="${w}" height="${h}" preserveAspectRatio="none" href="${escape(String(args.mediaImage))}"/>`
         : '';
-    const svg = `<svg xmlns="http://www.w3.org/2000/svg" width="${w}" height="${h}" font-family="${escape(cssFontFamily(a?.font))}"><rect width="100%" height="100%" fill="${escape(binding.color)}"/>${media}${args.displayBody || ''}${icon}${title}${text ? `${transparentBackground(binding.color) ? '' : `<rect y="${h - size - 8}" width="100%" height="${size + 8}" fill="#000"/>`}<text x="${w / 2}" y="${h - 4}" text-anchor="middle" font-size="${size}" fill="#fff">${text}</text>` : ''}</svg>`;
+    const svg = `<svg xmlns="http://www.w3.org/2000/svg" width="${w}" height="${h}" font-family="${escape(cssFontFamily(a?.font))}"><rect width="100%" height="100%" fill="${escape(binding.color)}"/>${media}${args.displayBody || ''}${icon}${title}${text ? `${transparentBackground(binding.color) ? '' : `<rect y="${h - size - 8}" width="100%" height="${size + 8}" fill="#000"/>`}<text ${fontStyle} x="${w / 2}" y="${h - 4}" text-anchor="middle" font-size="${size}" fill="#fff">${text}</text>` : ''}</svg>`;
     return 'data:image/svg+xml;charset=utf-8,' + encodeURIComponent(svg);
 }
 // Create isolated in-memory feature command handlers for browser preview
-export function createFeaturePreview() {
+export function createFeaturePreview(
+    overrides: () => import('../generated/runtime').ParameterOverrides = () => ({
+        devices: {},
+        installation: {},
+    }),
+) {
+    let firmwareTestCatalog = false;
     const bootLogos = new Map<string, BootLogoPreview>();
     const macroSharing = createMacroSharingPreview();
     const mediaImages = new Map<string, string>();
@@ -221,11 +233,44 @@ export function createFeaturePreview() {
         const bindingDetails: NonNullable<PreviewHandlers['preview_binding_details']> = async (
             args,
         ) => {
-            const binding = resolvePaletteBinding(args.binding as Binding);
+            const binding = { ...resolvePaletteBinding(args.binding as Binding) };
             assertKeyboardMacroAction(binding.action, true);
+            const staticTitle = binding.title;
             const mediaFixture = mediaImages.get(binding.asset || '');
             const device = s.devices.find((d) => d.id === args.deviceId);
             const { session, profile } = previewBindingLookup(s, device, String(args.controlId));
+            const resolveTitle = (visual?: PreviewVisual) => {
+                if (!binding.live_label?.length || !profile) return staticTitle;
+                const params = overrides();
+                const text = binding.live_label
+                    .map((s) => {
+                        if (s.kind === 'literal') return s.text;
+                        if (s.kind === 'macro_state') return 'Idle';
+                        let v: unknown;
+                        if (s.kind === 'parameter') {
+                            const def = profile.parameters?.find(
+                                (p) => p.name === s.name && !p.sensitive,
+                            );
+                            if (def)
+                                v =
+                                    params.devices[device?.id || '']?.[profile.id]?.[s.name] ??
+                                    params.installation[profile.id]?.[s.name] ??
+                                    def.default;
+                        } else if (visual) {
+                            v = previewElements(visual).find(
+                                (e) =>
+                                    e.element.style.key === s.key &&
+                                    ['text', 'bar', 'gbar', 'gauge'].includes(e.element.style.kind),
+                            )?.value;
+                        }
+                        return v !== '' && ['number', 'string', 'boolean'].includes(typeof v)
+                            ? String(v)
+                            : s.fallback;
+                    })
+                    .join('');
+                return Array.from(text).slice(0, 160).join('') || staticTitle;
+            };
+            binding.title = resolveTitle();
             const control = device?.manifest.controls.find((c) => c.id === args.controlId);
             const mediaImage = mediaFixture
                 ? await fixtureMediaFrame(
@@ -273,7 +318,14 @@ export function createFeaturePreview() {
                         ...args,
                         mediaImage,
                         displayBody: rendered.body,
-                        binding: { ...binding, title: binding.appearance ? binding.title : '' },
+                        binding: {
+                            ...binding,
+                            title: binding.live_label?.length
+                                ? resolveTitle(fixture.visual)
+                                : binding.appearance
+                                  ? binding.title
+                                  : '',
+                        },
                     });
                     image = overlay;
                     details = {
@@ -394,6 +446,7 @@ export function createFeaturePreview() {
                     channel: 'local',
                     channel_change: false,
                     compatible: true,
+                    force_reinstall_available: false,
                     reason: null,
                     manifest: {
                         id: sample.id,
@@ -427,17 +480,62 @@ export function createFeaturePreview() {
                 const size = device?.manifest.capabilities.boot_logo?.size;
                 if (!device?.connected || !size)
                     throw new Error('Device does not support startup logos');
-                if (!['contain', 'cover'].includes(String(args.fit)))
-                    throw new Error('Invalid image sizing');
+                if (!['contain', 'cover', 'stretch'].includes(String(args.fit)))
+                    throw Error('Invalid image sizing');
+                const source = document.createElement('canvas');
+                source.width = 960;
+                source.height = 640;
+                const drawing = source.getContext('2d')!;
+                drawing.fillStyle = '#174e66';
+                drawing.fillRect(0, 0, 960, 640);
+                drawing.fillStyle = '#efb85c';
+                drawing.fillRect(70, 70, 260, 200);
+                drawing.fillStyle = '#62b6a7';
+                drawing.fillRect(460, 260, 440, 300);
+                drawing.fillStyle = '#ffffff';
+                drawing.font = '56px sans-serif';
+                drawing.fillText('Startup preview', 100, 370);
+                const crop = args.crop || [0, 0, 1, 1];
+                if (
+                    crop.some((v) => !Number.isFinite(v)) ||
+                    crop[0] < 0 ||
+                    crop[1] < 0 ||
+                    crop[2] <= 0 ||
+                    crop[3] <= 0 ||
+                    crop[0] + crop[2] > 1.000001 ||
+                    crop[1] + crop[3] > 1.000001
+                )
+                    throw Error('Invalid image crop');
+                const sx = Math.floor(crop[0] * 960),
+                    sy = Math.floor(crop[1] * 640),
+                    sw = Math.max(1, Math.min(960 - sx, Math.round(crop[2] * 960))),
+                    sh = Math.max(1, Math.min(640 - sy, Math.round(crop[3] * 640)));
                 const canvas = document.createElement('canvas');
                 [canvas.width, canvas.height] = size;
                 const context = canvas.getContext('2d')!;
-                context.fillStyle = '#111111';
+                context.fillStyle = '#000';
                 context.fillRect(0, 0, ...size);
-                context.fillStyle = '#eeeeee';
-                context.font = `${size[1] / 10}px sans-serif`;
-                context.textAlign = 'center';
-                context.fillText('Startup preview', size[0] / 2, size[1] / 2);
+                const scale =
+                    args.fit === 'contain'
+                        ? Math.min(size[0] / sw, size[1] / sh)
+                        : Math.max(size[0] / sw, size[1] / sh);
+                const w = args.fit === 'stretch' ? size[0] : sw * scale,
+                    h = args.fit === 'stretch' ? size[1] : sh * scale;
+                context.drawImage(
+                    source,
+                    sx,
+                    sy,
+                    sw,
+                    sh,
+                    (size[0] - w) / 2,
+                    (size[1] - h) / 2,
+                    w,
+                    h,
+                );
+                const thumb = document.createElement('canvas');
+                thumb.width = 512;
+                thumb.height = Math.round((512 * 640) / 960);
+                thumb.getContext('2d')!.drawImage(source, 0, 0, thumb.width, thumb.height);
                 const preview: BootLogoPreview = {
                     id: crypto.randomUUID(),
                     device_id: device.id,
@@ -445,6 +543,8 @@ export function createFeaturePreview() {
                     size,
                     fit: String(args.fit),
                     image: canvas.toDataURL('image/png'),
+                    source_size: [960, 640],
+                    source_image: thumb.toDataURL('image/png'),
                     simulated: true,
                 };
                 bootLogos.set(preview.id, preview);
@@ -662,6 +762,32 @@ export function createFeaturePreview() {
             // Render the simulated binding and return its image
             preview_binding: async (args) => (await bindingDetails(args)).image,
             preview_binding_details: bindingDetails,
+            // Firmware discovery is an offline fixture in browser preview, never a vendor request.
+            firmware_catalog_status: async (args) => ({
+                device_id: args.deviceId,
+                connection_generation: 'fixture',
+                installed: null,
+                installed_stale: false,
+                include_test: firmwareTestCatalog,
+                state: 'not_checked',
+                message: 'Browser simulator: no firmware catalogs or device queries are performed.',
+                sources: [],
+                candidates: [],
+            }),
+            refresh_firmware_catalog: async (args) => ({
+                device_id: args.deviceId,
+                connection_generation: 'fixture',
+                installed: null,
+                installed_stale: false,
+                include_test: firmwareTestCatalog,
+                state: 'not_checked',
+                message: 'Browser simulator: no firmware catalogs or device queries are performed.',
+                sources: [],
+                candidates: [],
+            }),
+            set_firmware_catalog_test: async (args) => {
+                firmwareTestCatalog = args.enabled;
+            },
             // Report simulated firmware support for the selected device
             firmware_status: async (args) => {
                 const supported =
@@ -678,9 +804,8 @@ export function createFeaturePreview() {
                     latest_checked: null,
                     latest_stale: false,
                     last_checked: null,
-                    instructions: supported
-                        ? 'https://www.vsdinside.com/blogs/tutorial/vsd-stream-dock-connection-issues'
-                        : null,
+                    instructions: null,
+                    instructions_shared: false,
                     message:
                         'Simulator fixture: firmware is unmeasured; no device or network queries are made.',
                     stale: false,
@@ -702,9 +827,8 @@ export function createFeaturePreview() {
                     latest_checked: null,
                     latest_stale: false,
                     last_checked: null,
-                    instructions: supported
-                        ? 'https://www.vsdinside.com/blogs/tutorial/vsd-stream-dock-connection-issues'
-                        : null,
+                    instructions: null,
+                    instructions_shared: false,
                     message:
                         'Simulator fixture: firmware is unmeasured; no device or network queries are made.',
                     stale: false,
@@ -735,6 +859,79 @@ export function createFeaturePreview() {
                 new Uint8Array(buffer, 4, metadata.length).set(metadata);
                 new Uint8Array(buffer, 4 + metadata.length).set(bytes);
                 return buffer;
+            },
+            test_automation_rules: async ({ request }) => {
+                const device = s.devices.find((d) => d.id === request.device_id);
+                if (!device) throw Error('Test device is unavailable');
+                const session = s.sessions[device.persistence_key];
+                const regex = await previewRegexMatches(request);
+                let found = false;
+                const evaluations = request.rules.map((rule) => {
+                    const reasons: string[] = [];
+                    if (rule.application && rule.application !== request.application)
+                        reasons.push('Application does not match');
+                    if (rule.title) {
+                        const condition = rule.title;
+                        const value = condition.case_sensitive
+                            ? condition.value
+                            : condition.value.toLowerCase();
+                        const title = condition.case_sensitive
+                            ? request.title
+                            : request.title?.toLowerCase();
+                        if (
+                            !(condition.mode === 'regex'
+                                ? regex[rule.id]
+                                : condition.mode === 'exact'
+                                  ? title === value
+                                  : title?.includes(value))
+                        )
+                            reasons.push('Window title does not match');
+                    }
+                    if (rule.schedule) {
+                        const { days, start, end } = rule.schedule;
+                        const { weekday, minute } = request;
+                        const today = days.includes(weekday);
+                        const matches =
+                            start === end
+                                ? today
+                                : start < end
+                                  ? today && start <= minute && minute < end
+                                  : (today && minute >= start) ||
+                                    (days.includes((weekday + 6) % 7) && minute < end);
+                        if (!matches) reasons.push('Outside the scheduled days or hours');
+                    }
+                    const matched = reasons.length === 0,
+                        winner = matched && !found;
+                    if (matched)
+                        reasons.push(
+                            winner ? 'First matching rule' : 'An earlier rule takes priority',
+                        );
+                    found ||= winner;
+                    return { id: rule.id, winner, matched, reasons };
+                });
+                const winner = request.rules[evaluations.findIndex((r) => r.winner)];
+                const profile = s.profiles.find(
+                    (p) =>
+                        p.id ===
+                        (winner?.profile_id ||
+                            (!request.restore_on_exit && session?.manual_profile)),
+                );
+                const remembered = profile && session?.remembered_pages[profile.id];
+                const page =
+                    winner?.page_id ||
+                    (profile?.id === session?.profile_id && session?.page_id) ||
+                    profile?.pages.find((p) => p.id === remembered)?.id ||
+                    profile?.active_page;
+                return {
+                    evaluations,
+                    profile_id: profile?.id || null,
+                    page_id: page || null,
+                    outcome: !request.enabled
+                        ? 'Automatic switching is off'
+                        : request.paused
+                          ? 'Paused after manual selection'
+                          : 'Automatic switching is inactive on simulators',
+                };
             },
             // Deny native accessibility authorization in browser preview
             authorize_accessibility: async (args) => {

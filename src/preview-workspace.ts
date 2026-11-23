@@ -34,7 +34,7 @@ export function createPreviewWorkspace(
     options: {
         description: string;
         history: PreviewHistory;
-        publishWorkspace: (snapshot: Snapshot) => WorkspaceBatch;
+        publishWorkspace: (snapshot: Snapshot, sessionsOnly?: boolean) => WorkspaceBatch;
         notify: (event: RuntimeEvent) => void;
     },
 ) {
@@ -101,6 +101,63 @@ export function createPreviewWorkspace(
         s.active_profile = profileId;
     };
     // Apply the pending preview workspace changes
+    const pruneLinks = (
+        profile: Profile,
+        keep: (member: import('../generated/runtime').LinkMember) => boolean,
+    ) => {
+        for (const [id, group] of Object.entries(profile.linked_controls || {})) {
+            const members = group!.filter(keep);
+            if (members.length < 2) delete profile.linked_controls![id];
+            else profile.linked_controls![id] = members;
+        }
+    };
+    const syncLink = (profile: Profile, page: string, control: string) => {
+        const group = Object.values(profile.linked_controls || {}).find((g) =>
+            g?.some((m) => m.page_id === page && m.control_id === control),
+        );
+        if (!group) return;
+        const binding = profile.pages.find((p) => p.id === page)!.bindings[control];
+        for (const m of group)
+            profile.pages.find((p) => p.id === m.page_id)!.bindings[m.control_id] =
+                structuredClone(binding);
+    };
+    const validateLinks = (profile: Profile) => {
+        const used = new Set<string>();
+        for (const [id, group] of Object.entries(profile.linked_controls || {})) {
+            if (
+                !/^[a-f0-9]{8}-(?:[a-f0-9]{4}-){3}[a-f0-9]{12}$/i.test(id) ||
+                !group ||
+                group.length < 2 ||
+                group.length > 256
+            )
+                throw Error('Invalid linked-control group.');
+            let saved: string | undefined;
+            const model = s.devices.find((d) => d.model_id === profile.model_id)?.manifest;
+            const source = model?.controls.find((c) => c.id === group[0].control_id);
+            for (const m of group) {
+                const key = JSON.stringify([m.page_id, m.control_id]),
+                    binding = profile.pages.find((p) => p.id === m.page_id)?.bindings[m.control_id];
+                const control = model?.controls.find((c) => c.id === m.control_id);
+                if (
+                    used.has(key) ||
+                    !binding ||
+                    (model &&
+                        (!source ||
+                            !control ||
+                            source.kind !== control.kind ||
+                            JSON.stringify(source.semantics) !== JSON.stringify(control.semantics)))
+                )
+                    throw Error('Choose distinct compatible linked controls.');
+                used.add(key);
+                const value = JSON.stringify(binding);
+                if (saved !== undefined && saved !== value)
+                    throw Error(
+                        'Linked assignments differ. Detach the member or apply the source assignment.',
+                    );
+                saved = value;
+            }
+        }
+    };
     const apply = (edits: Edit[]) => {
         for (const change of edits) {
             switch (change.kind) {
@@ -108,11 +165,54 @@ export function createPreviewWorkspace(
                     const i = s.profiles.findIndex((p) => p.id === change.profile.id);
                     assertKeyboardNavigationProfile(s.profiles[i], change.profile);
                     const profile = structuredClone(change.profile);
+                    validateLinks(profile);
                     ensureKeyboardNavigation(profile);
                     if (!change.profile.name.trim()) throw Error('Profile name is required');
                     if (!s.profiles.length) s.active_profile = change.profile.id;
                     if (i < 0) s.profiles.push(profile);
                     else s.profiles[i] = profile;
+                    break;
+                }
+                case 'link_control':
+                case 'detach_control': {
+                    const profile = s.profiles.find((p) => p.id === change.profile_id);
+                    if (!profile) throw Error('Profile missing');
+                    if (change.kind === 'detach_control') {
+                        pruneLinks(
+                            profile,
+                            (m) =>
+                                m.page_id !== change.member.page_id ||
+                                m.control_id !== change.member.control_id,
+                        );
+                        break;
+                    }
+                    const { source, target } = change;
+                    const groups = (profile.linked_controls ||= {});
+                    const groupAt = (m: typeof source) =>
+                        Object.values(groups).find((g) =>
+                            g?.some(
+                                (v) => v.page_id === m.page_id && v.control_id === m.control_id,
+                            ),
+                        );
+                    if (
+                        source.page_id === target.page_id ||
+                        groupAt(target) ||
+                        !profile.pages.some((p) => p.id === target.page_id) ||
+                        !profile.pages.find((p) => p.id === source.page_id)?.bindings[
+                            source.control_id
+                        ]
+                    )
+                        throw Error(
+                            'Choose a saved source and an independent destination on another page.',
+                        );
+                    if (
+                        isKeyboardNavigationControl(profile, source.page_id, source.control_id) ||
+                        isKeyboardNavigationControl(profile, target.page_id, target.control_id)
+                    )
+                        throw Error('Navigation controls are protected.');
+                    const group = groupAt(source) || (groups[crypto.randomUUID()] = [source]);
+                    group.push(target);
+                    syncLink(profile, source.page_id, source.control_id);
                     break;
                 }
                 case 'assign_control': {
@@ -182,6 +282,7 @@ export function createPreviewWorkspace(
                             )
                                 continue;
                             page.bindings[change.control_id] = structuredClone(change.binding);
+                            syncLink(profile, page.id, change.control_id);
                         }
                     break;
                 }
@@ -198,8 +299,17 @@ export function createPreviewWorkspace(
                             change.bindings[id],
                         );
                     for (const [id, b] of Object.entries(change.bindings)) {
-                        if (b) page.bindings[id] = structuredClone(b);
-                        else delete page.bindings[id];
+                        const profile = s.profiles.find((p) => p.id === change.profile_id)!;
+                        if (b) {
+                            page.bindings[id] = structuredClone(b);
+                            syncLink(profile, page.id, id);
+                        } else {
+                            delete page.bindings[id];
+                            pruneLinks(
+                                profile,
+                                (m) => m.page_id !== page.id || m.control_id !== id,
+                            );
+                        }
                     }
                     break;
                 }
@@ -233,7 +343,7 @@ export function createPreviewWorkspace(
     };
 
     // Publish the preview workspace operation
-    const publish = (events: PreviewEvent[] = [], notifyAfter = false) => {
+    const publish = (events: PreviewEvent[] = [], notifyAfter = false, sessionsOnly = false) => {
         // Convert each entry into the representation required by preview workspace
         const notifications = events.map((event) => {
             const notification = { ...event, sequence: ++s.revision, revision: s.revision };
@@ -241,7 +351,7 @@ export function createPreviewWorkspace(
             return notification;
         });
         if (!notifications.length) s.revision++;
-        const batch = options.publishWorkspace(s);
+        const batch = options.publishWorkspace(s, sessionsOnly);
         if (notifyAfter) notifications.forEach(options.notify);
         return batch;
     };
@@ -257,7 +367,12 @@ export function createPreviewWorkspace(
             };
             options.history.set(item.id, { before, after: previewContent(s) });
             s.history.undo.push(item);
-            s.history.undo = s.history.undo.slice(-100);
+            for (const dropped of s.history.undo.splice(
+                0,
+                Math.max(0, s.history.undo.length - 100),
+            ))
+                options.history.delete(dropped.id);
+            for (const dropped of s.history.redo) options.history.delete(dropped.id);
             s.history.redo = [];
             s.configuration_revision++;
         }
@@ -266,6 +381,7 @@ export function createPreviewWorkspace(
             if (!current) continue;
             for (const [index, removed] of old.pages.entries()) {
                 if (current.pages.some((page) => page.id === removed.id)) continue;
+                pruneLinks(current, (m) => m.page_id !== removed.id);
                 const fallback =
                     old.pages
                         .slice(0, index)
@@ -307,7 +423,15 @@ export function createPreviewWorkspace(
             s.sessions[key] = session;
         }
         const batch = publish();
-        return { snapshot: structuredClone(s), batch: structuredClone(batch) };
+        // Each command immediately selects its wire result. Copy only the requested representation.
+        return {
+            get snapshot() {
+                return structuredClone(s);
+            },
+            get batch() {
+                return structuredClone(batch);
+            },
+        };
     };
 
     return {

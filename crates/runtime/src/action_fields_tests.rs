@@ -178,6 +178,13 @@ fn plugin_desired_state_survives_workspace_restart_and_reaches_dispatch() {
         serde_json::to_value(&actions[0]).unwrap(),
         serde_json::to_value(&action).unwrap()
     );
+    if cfg!(target_os = "linux") {
+        // The saved value remains portable, but this Elgato action is not
+        // executable here; real desired-state dispatch is covered on Mac/Windows
+        crate::test_plugin::assert_elgato_platform_blocked(&package);
+        runtime.shutdown();
+        return;
+    }
     {
         let mut host = runtime.plugins.lock().unwrap();
         host.enable("fixture.desired", true).unwrap();

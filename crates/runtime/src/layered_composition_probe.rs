@@ -92,15 +92,45 @@ fn layered_composition_baseline() {
             expected_pixels.dimensions(),
             (u32::from(height), u32::from(width))
         );
-        let baseline_hash = if width == 96 {
-            "c8967e158737e630e5072e94d4ee229a513af04a570bc81ae8202b531bc79819"
-        } else {
-            "fe87ca04f5d46dd5421e6ac44fc066662cffe172b5c9d88be357e9a6e51e5c47"
-        };
+        // Compare the optimized scene against the separate PNG round trips
+        // using today's shipped font metrics and title layout at both sizes.
+        let media = runtime
+            .profiles
+            .render_media_shared(
+                &asset,
+                std::time::Duration::ZERO,
+                width,
+                height,
+                0,
+                "png",
+                &binding.media,
+            )
+            .unwrap();
+        let background = hardware_core::render::over_color(
+            &media,
+            hardware_core::appearance::background_color(&binding.color).unwrap(),
+        )
+        .unwrap();
+        let overlay = runtime.render_visual(&visual, width, height, 0).unwrap();
+        let reference = hardware_core::appearance::compose(
+            &over_image(&background, &overlay).unwrap(),
+            width,
+            height,
+            &binding.title,
+            binding.appearance.as_ref().unwrap(),
+            "",
+            90,
+        )
+        .unwrap();
         assert_eq!(
             hex::encode(Sha256::digest(expected_pixels.as_raw())),
-            baseline_hash,
-            "pre-M6 decoded pixels must remain identical"
+            hex::encode(Sha256::digest(
+                image::load_from_memory(&reference)
+                    .unwrap()
+                    .into_rgba8()
+                    .as_raw()
+            )),
+            "optimized and reference pixels differ at {width}x{height}"
         );
         let source_before = runtime.profiles.source_work_stats();
         let mut results = vec![measurements("warm_surface_cache", 100, |_| {
@@ -285,6 +315,8 @@ fn layered_pixels_match_legacy_round_trips_for_crop_fonts_alpha_and_rotation() {
                                 false,
                                 None,
                                 None,
+                                None,
+                                true,
                             )
                             .unwrap();
                         assert_eq!(

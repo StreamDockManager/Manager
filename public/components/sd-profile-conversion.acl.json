@@ -1,7 +1,9 @@
 {
     "version": 1,
-    "groups": ["shell"],
-    "options": { "shadow": false },
+    "groups": ["profile-conversion"],
+    "options": {
+        "shadow": false
+    },
     "metadata": {
         "description": "Reviewed cross-model profile conversion. Native staging never executes actions."
     }

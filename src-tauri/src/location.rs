@@ -108,20 +108,7 @@ pub async fn request_settings_location(
     // macOS delegate cleanup and Linux portal closure must run after cancellation.
     tauri::async_runtime::spawn(async move {
         let _editor_work = permit;
-        #[cfg(target_os = "macos")]
-        let result = macos::current(app, cancel.clone(), &_editor_work).await;
-        #[cfg(target_os = "windows")]
-        let result = windows::current(app, cancel.clone(), &_editor_work).await;
-        #[cfg(target_os = "linux")]
-        let result = {
-            let _ = app;
-            linux::current(cancel.clone()).await
-        };
-        #[cfg(not(any(target_os = "macos", target_os = "windows", target_os = "linux")))]
-        let result: Result<Fix, String> = {
-            let _ = app;
-            Err("Location services are unavailable on this platform".into())
-        };
+        let result = platform_fix(app, cancel.clone(), &_editor_work).await;
         {
             let mut pending = pending_requests.lock().unwrap();
             if pending
@@ -143,6 +130,175 @@ pub async fn request_settings_location(
     })
     .await
     .map_err(|error| error.to_string())?
+}
+
+// Both first-party callers use the same one-shot platform request and native cleanup.
+async fn platform_fix(
+    app: tauri::AppHandle,
+    cancel: Arc<AtomicBool>,
+    editor: &crate::editor_lifecycle::EditorWork,
+) -> Result<Fix, String> {
+    #[cfg(target_os = "macos")]
+    let result = macos::current(app, cancel, editor).await;
+    #[cfg(target_os = "windows")]
+    let result = windows::current(app, cancel, editor).await;
+    #[cfg(target_os = "linux")]
+    let result = {
+        let _ = (app, editor);
+        linux::current(cancel).await
+    };
+    #[cfg(not(any(target_os = "macos", target_os = "windows", target_os = "linux")))]
+    let result: Result<Fix, String> = {
+        let _ = (app, editor);
+        Err("Location services are unavailable on this platform".into())
+    };
+    result
+}
+
+#[tauri::command]
+pub async fn vault_current_location(
+    work: crate::editor_lifecycle::EditorWork,
+    window: tauri::WebviewWindow,
+    runtime: tauri::State<'_, Arc<Runtime>>,
+    id: String,
+) -> Result<stream_dock_manager_plugin_host::SettingsLocationFix, String> {
+    trusted(&window)?;
+    work.ensure_editable()?;
+    if runtime.recovery_status().active {
+        return Err("vault_unavailable".into());
+    }
+    let id = uuid::Uuid::parse_str(&id).map_err(|_| "invalid_request")?;
+    let cancel = runtime.vault.begin_location(id, work.generation()?)?;
+    let runtime = runtime.inner().clone();
+    let app = window.app_handle().clone();
+    tauri::async_runtime::spawn(async move {
+        let result = platform_fix(app, cancel.clone(), &work).await;
+        runtime.vault.finish_location(&cancel)?;
+        work.ensure_editable()?;
+        validate_fix(result?)
+    })
+    .await
+    .map_err(|_| "Location request unavailable".to_owned())?
+}
+
+#[tauri::command]
+pub fn vault_cancel_location(
+    work: crate::editor_lifecycle::EditorWork,
+    window: tauri::WebviewWindow,
+    runtime: tauri::State<'_, Arc<Runtime>>,
+    id: String,
+) -> Result<(), String> {
+    trusted(&window)?;
+    let id = uuid::Uuid::parse_str(&id).map_err(|_| "invalid_request")?;
+    runtime.vault.cancel_location(id, work.generation()?);
+    Ok(())
+}
+
+/// Search only from an open, authorized location editor. Both the native request
+/// and its result belong to the same Vault lease or settings draft.
+#[expect(
+    clippy::too_many_arguments,
+    reason = "Preserve the existing location search IPC argument names"
+)]
+#[tauri::command]
+pub async fn search_locations(
+    work: crate::editor_lifecycle::EditorWork,
+    window: tauri::WebviewWindow,
+    runtime: tauri::State<'_, Arc<Runtime>>,
+    requests: tauri::State<'_, Requests>,
+    vault_id: Option<String>,
+    token: Option<String>,
+    endpoint: String,
+    query: String,
+    country: String,
+    postal: bool,
+) -> Result<Vec<stream_dock_manager_runtime::location_search::LocationMatch>, String> {
+    trusted(&window)?;
+    work.ensure_editable()?;
+    if runtime.recovery_status().active {
+        return Err("Location search is unavailable in recovery.".into());
+    }
+    let runtime = runtime.inner().clone();
+    // An empty saved preference selects the built-in provider, not an arbitrary destination
+    if runtime.location_provider()? != endpoint {
+        return Err("Save the search provider before searching.".into());
+    }
+    let pending = requests.0.clone();
+    let cancel = match (&vault_id, &token) {
+        (Some(id), None) => runtime.vault.begin_location(
+            uuid::Uuid::parse_str(id).map_err(|_| "Invalid Vault request")?,
+            work.generation()?,
+        )?,
+        (None, Some(token)) => {
+            runtime
+                .plugins
+                .lock()
+                .unwrap()
+                .settings_location_allowed(token)?;
+            let mut requests = pending.lock().unwrap();
+            if requests.contains_key(token) || requests.len() >= 8 {
+                return Err("Another location request is running.".into());
+            }
+            let cancel = Arc::new(AtomicBool::new(false));
+            requests.insert(token.clone(), cancel.clone());
+            cancel
+        }
+        _ => return Err("Choose a location in the active editor.".into()),
+    };
+    let permit = work.worker();
+    crate::editor_lifecycle::blocking_result(&work, move || {
+        let result = runtime
+            .location_search
+            .search(&endpoint, &query, &country, postal, || {
+                cancel.load(Ordering::SeqCst)
+            });
+        if let Some(token) = token {
+            let mut requests = pending.lock().unwrap();
+            if requests
+                .get(&token)
+                .is_some_and(|c| Arc::ptr_eq(c, &cancel))
+            {
+                requests.remove(&token);
+            }
+            drop(requests);
+            runtime
+                .plugins
+                .lock()
+                .unwrap()
+                .settings_location_allowed(&token)?;
+        } else {
+            runtime.vault.finish_location(&cancel)?;
+        }
+        permit.ensure_editable()?;
+        if cancel.load(Ordering::SeqCst) {
+            return Err("Location search cancelled.".into());
+        }
+        result
+    })
+    .await
+}
+
+#[tauri::command]
+pub fn location_provider(
+    work: crate::editor_lifecycle::EditorWork,
+    window: tauri::WebviewWindow,
+    runtime: tauri::State<Arc<Runtime>>,
+) -> Result<String, String> {
+    trusted(&window)?;
+    work.ensure_editable()?;
+    runtime.location_provider()
+}
+
+#[tauri::command]
+pub fn set_location_provider(
+    work: crate::editor_lifecycle::EditorWork,
+    window: tauri::WebviewWindow,
+    runtime: tauri::State<Arc<Runtime>>,
+    endpoint: String,
+) -> Result<(), String> {
+    trusted(&window)?;
+    work.ensure_editable()?;
+    runtime.set_location_provider(&endpoint)
 }
 
 #[cfg(test)]

@@ -1,0 +1,11 @@
+# Automatically generated - DO NOT EDIT!
+
+[[permission]]
+identifier = "allow-vault-builtin-choices"
+description = "Enables the vault_builtin_choices command without any pre-configured scope."
+commands.allow = ["vault_builtin_choices"]
+
+[[permission]]
+identifier = "deny-vault-builtin-choices"
+description = "Denies the vault_builtin_choices command without any pre-configured scope."
+commands.deny = ["vault_builtin_choices"]

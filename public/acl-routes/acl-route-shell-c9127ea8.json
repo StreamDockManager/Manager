@@ -1,0 +1,110 @@
+{
+  "version": 1,
+  "basePath": "..",
+  "components": {
+    "sd-benchmark-progress": {
+      "source": "components/sd-benchmark-progress.html",
+      "dependencies": [],
+      "options": {
+        "shadow": false,
+        "templateRevision": "sha256-lxRamDm6_-2poDqwgkWdwD4ESmsimHCEeMU0KZBLNF4"
+      },
+      "metadata": {
+        "description": "Shared benchmark progress, cancellation and device restoration dialog."
+      }
+    },
+    "sd-plugin-profile-suggestions": {
+      "source": "components/sd-plugin-profile-suggestions.html",
+      "dependencies": [],
+      "options": {
+        "shadow": false,
+        "templateRevision": "sha256-fGFvm7Wgdf3syAKrYds5HhdRrEtPe_d4IR70NF7ggDg"
+      }
+    },
+    "sd-profile-archive-import": {
+      "source": "components/sd-profile-archive-import.html",
+      "dependencies": [],
+      "options": {
+        "shadow": false,
+        "templateRevision": "sha256-_q6KpwLnEzg7s_H9v8FrZgg50QX8eyaL_3WwXhpPXZI"
+      }
+    },
+    "sd-setup-dialog": {
+      "source": "components/sd-setup-dialog.html",
+      "dependencies": [],
+      "options": {
+        "shadow": false,
+        "templateRevision": "sha256-mJKnvtMVOJin3VPsRfQIW4meFx4jtaV1Z3heYVqIc6U"
+      }
+    },
+    "sd-feature-dialogs": {
+      "source": "components/sd-feature-dialogs.html",
+      "dependencies": [
+        "sd-plugin-profile-suggestions",
+        "sd-profile-archive-import",
+        "sd-setup-dialog"
+      ],
+      "options": {
+        "shadow": false,
+        "templateRevision": "sha256-GjUDz0soGGTO14cO_y8UA8PlB-qAqwGB8dJPVRDlIqk"
+      },
+      "metadata": {
+        "description": "Setup, plugin compatibility and staged import dialogs."
+      }
+    },
+    "sd-plugin-logs": {
+      "source": "components/sd-plugin-logs.html",
+      "dependencies": [],
+      "options": {
+        "shadow": false,
+        "templateRevision": "sha256-BUxVTJNbI68CJ1ebVFK2bogFwrLimY6ol1cAnW5p9rA"
+      },
+      "metadata": {
+        "description": "Persistent nonmodal plugin capture reader."
+      }
+    },
+    "sd-toasts": {
+      "source": "components/sd-toasts.html",
+      "dependencies": [],
+      "options": {
+        "shadow": false,
+        "templateRevision": "sha256-MljBN1rdK-2BRuKszVyCp0Dk7TBYy6Gzu9SNp9Ces1A"
+      },
+      "metadata": {
+        "description": "Shared first-party notification stack."
+      }
+    },
+    "sd-app-shell": {
+      "source": "components/sd-app-shell.html",
+      "dependencies": [
+        "sd-benchmark-progress",
+        "sd-feature-dialogs",
+        "sd-plugin-logs",
+        "sd-toasts"
+      ],
+      "options": {
+        "shadow": false,
+        "templateRevision": "sha256-uvMBDNzGnfYGGh23A_BdFp2UyBN8olFTO9-J3kPPfbY"
+      },
+      "metadata": {
+        "description": "First-party sd-app-shell component. Controllers are registered by the trusted application bootstrap."
+      }
+    }
+  },
+  "groups": {
+    "shell": [
+      "sd-app-shell",
+      "sd-benchmark-progress",
+      "sd-feature-dialogs",
+      "sd-plugin-logs",
+      "sd-plugin-profile-suggestions",
+      "sd-profile-archive-import",
+      "sd-setup-dialog",
+      "sd-toasts"
+    ],
+    "plugin-logs": [
+      "sd-plugin-logs",
+      "sd-toasts"
+    ]
+  }
+}

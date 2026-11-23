@@ -1,71 +1,56 @@
 # K1 Pro
 
-Use this device with [Stream Dock Manager](../../README.md). Its adapter is included with the app; **no separate adapter download is needed**.
+This adapter is built into [Stream Dock Manager](../../README.md).
 
-| At a glance                   | Details                                                                           |
-| ----------------------------- | --------------------------------------------------------------------------------- |
-| Model ID                      | `k1-pro`                                                                          |
-| Adapter status                | Experimental                                                                      |
-| Registered controls           | 6 buttons, 3 encoders                                                             |
-| Hardware testing              | Hardware tested on a user unit; full variant/platform qualification remains open. |
-| Exact layout and capabilities | [Device descriptor](device.toml)                                                  |
+| At a glance             | Details                                                               |
+| ----------------------- | --------------------------------------------------------------------- |
+| Model ID                | `k1-pro`                                                              |
+| Adapter status          | Experimental                                                          |
+| Controls                | 6 buttons, 3 encoders                                                 |
+| Hardware testing        | Tested on a user unit; results do not cover every variant or platform |
+| Layout and capabilities | [Device descriptor](device.toml)                                      |
 
-Registered controls describe the Manager model, not a promise that every control or firmware has been physically verified. Dials are called encoders in the descriptor. Match your USB variant below before relying on a retail product name.
+Match the [USB ID](#compatibility), not just the product name. Dials are called encoders in the descriptor.
 
-[Get started](#get-started) · [Keyboard settings](#keyboard-settings) · [Sleep and wake](#sleep-and-wake) · [Compatibility](#compatibility) · [Verification](#verification)
+[Get started](#connect-and-assign-an-action) · [Keyboard settings](#keyboard-settings) · [Sleep and wake](#sleep-and-wake) · [Compatibility](#compatibility) · [Verification](#verification)
 
-## Get started
+## Connect and assign an action
 
-1. [Install or build Manager](../../README.md).
-2. Quit VSD Craft and other software that may be using the device.
-3. Connect the device, open Manager, and select it.
-4. Choose a profile, select a control that supports actions, assign an action, and save the binding.
+1. [Install Manager](../../README.md) and close other dock software, such as VSD Craft.
+2. Connect your dock. Open Manager and select the device and a profile in **Device editor**.
+3. Select a control, choose an action, and save the binding.
 
-You can explore the layout in the simulator without a connected device. On Linux, follow the [installation instructions](../../packaging/install-instructions/linux/INSTALL-INSTRUCTIONS.md) and reconnect after installing applicable USB access rules. Run Manager as your normal desktop user.
+- **No hardware?** Select this model in the simulator.
+- **Linux:** Follow the [USB access setup](../../packaging/install-instructions/linux/INSTALL-INSTRUCTIONS.md), then reconnect. Run as your normal desktop user and do not broaden HID permissions.
 
 ## Navigation page
 
-Every K1 Pro profile starts with a protected **Navigation** page. Its top row is
-**Insert · Home · Page Up** and its bottom row is **Delete · End · Page Down**.
-The six keys start with centered labels and shaded keycap backgrounds generated
-from the selected theme palette. Use **Appearance** to customize their labels,
-fonts, icons, colors or images; **Reset** restores the theme-driven defaults.
-The page and key actions cannot be removed or reassigned. Dials and other pages
-remain editable.
-Existing pages and the selected page are preserved when this page is added.
+Each K1 Pro profile includes a protected **Navigation** page. With no profile loaded, the keyboard shows Navigation. If the current page stays blank for 30 seconds, Manager returns to Navigation.
 
-These are host keyboard shortcuts, so Manager needs the normal keyboard-control
-permissions. On macOS, Insert uses the platform's Help/Insert key; the focused
-application decides whether it supports that key.
+| Row    | Default keys             |
+| ------ | ------------------------ |
+| Top    | Insert · Home · Page Up  |
+| Bottom | Delete · End · Page Down |
+
+Use **Appearance** to change labels, fonts, icons, colors or images. **Reset** restores the theme-driven appearance. The page and its six actions cannot be removed or reassigned; the dials and other pages remain editable.
+
+Manager needs permission to send keyboard shortcuts. macOS maps Insert to Help/Insert; the focused app decides whether to handle it.
 
 ## Keyboard settings
 
-Open **Device settings → Keyboard**. Lighting changes preview on the connected
-keyboard; **Apply** saves them and **Cancel**, Escape or closing restores the saved
-lighting. Opening the modal sends nothing. All 16 vendor effect names are available;
-the second **Ripple (background)** adds a full-brightness hue/saturation background
-picker. Speed supports levels 0–5. **Custom colors** switches between the selected color
-and the effect’s built-in rainbow palette without discarding your chosen colors.
+Open **Device settings → Keyboard**.
 
-Manager requests keyboard settings from supported K1 units on connection and after
-Apply or Factory Default. The Keyboard tab prefers the device's reported values;
-fields absent from that firmware's reply stay unknown. Older binary replies report
-only effect, speed, OS mode and brightness. Saved preferences remain separately
-available through **Reapply saved settings** and are never silently replayed on connect.
+| Control                                  | What it does                                                                                                                                                                           |
+| ---------------------------------------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| **Effect**, **Speed**, **Custom colors** | Choose from 16 effects, set speed from 0–5, or switch between a custom color and the effect’s own palette. **Ripple (background)** also lets you pick a background hue and saturation. |
+| **Apply**                                | Save changes. OS layout and sleep timer changes are applied only here; changing OS layout may reconnect the keyboard.                                                                  |
+| **Cancel**                               | Revert the lighting preview. Escape or closing the editor does the same.                                                                                                               |
+| **Reapply saved settings**               | Send saved preferences again. Manager does not automatically replay them on connect.                                                                                                   |
+| **Factory Default**                      | After confirmation, reset on-device assignments, records and images. Manager profiles and bindings remain intact.                                                                      |
 
-Live preview requires a known effect, speed and color/custom-mode baseline, plus
-brightness/background when previewing those fields, so Cancel can restore it safely.
-If the connected device does not report enough values, use Apply rather than guessing
-a rollback state. Preview expires after five idle minutes; disconnects or conflicting
-changes invalidate it. OS layout and sleep timers are Apply-only. Auto selects Mac on
-macOS and Windows on Linux/Windows; a layout change may re-enumerate the keyboard.
+Lighting previews require a readable device baseline so Manager can restore what was there before. If your firmware does not provide enough settings, use **Apply** instead. Preview expires after five idle minutes and ends on disconnect or a conflicting change.
 
-**Factory Default**, next to Reapply saved settings, asks for confirmation and sends
-the vendor reset immediately. It may clear on-device assignments, records and images;
-Manager's profiles and bindings remain intact. The UI refreshes from the reply, not
-hardcoded factory values. No response means unknown settings, not a failed reset or
-permission to retry automatically. A completed host transfer does not prove firmware
-persistence or visible hardware behavior. Physical reset/readback remains unqualified.
+The Keyboard tab prefers the device’s reported settings. Fields this firmware does not report stay unknown, including after a reset. Manager does not guess a value or retry the reset automatically. Host completion does not qualify device persistence or readback.
 
 ## Sleep and wake
 
@@ -101,9 +86,7 @@ the SDK's `HAN` only rather than creating an override that cannot be restored.
 | K1 Pro (5548:1025) | `5548:1025`        | Enabled           |
 | K1 Pro (6603:1019) | `6603:1019`        | Enabled           |
 
-All variants remain **experimental**. The November 8 correction follows the
-user-selected Python SDK revision, not a physical qualification. Firmware,
-platform and variant behavior must still be verified. Ordinary keyboard key
+All variants remain **experimental**. The adapter follows the pinned Python SDK revision with the differences documented below. Firmware, platform and variant behavior still need physical verification. Ordinary keyboard key
 remapping and background/startup-logo uploads are not exposed. The schematic
 places three dials over two rows of LCD keys; geometry is not a physical measurement.
 

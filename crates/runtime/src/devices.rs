@@ -9,6 +9,25 @@ use std::{
 use stream_dock_manager_plugin_host::{FeedbackKind, HostEffect};
 #[path = "device_blackout.rs"]
 mod blackout;
+#[path = "devices/discovery.rs"]
+mod discovery;
+#[cfg(target_os = "macos")]
+#[path = "devices/hotplug.rs"]
+mod hotplug;
+#[path = "devices/input_readiness.rs"]
+mod input_readiness;
+#[cfg(test)]
+#[path = "devices/n4_capture_tests.rs"]
+mod n4_capture_tests;
+#[cfg(all(test, target_os = "macos"))]
+#[path = "devices/palette_physical_support.rs"]
+mod palette_physical_support;
+#[cfg(all(test, target_os = "macos"))]
+#[path = "devices/palette_profile.rs"]
+pub(crate) mod palette_profile;
+#[cfg(all(test, target_os = "macos"))]
+#[path = "devices/render_qualification.rs"]
+mod render_qualification;
 #[path = "device_transitions.rs"]
 mod transitions;
 
@@ -32,6 +51,11 @@ pub(crate) enum Request {
     },
     Restore,
     RestoreDevice(String, u64),
+    RefreshPluginBindings {
+        device: String,
+        epoch: u64,
+        sources: Vec<String>,
+    },
     Shutdown(mpsc::Sender<()>),
     Lost(String, u64),
     BenchmarkStart {
@@ -123,6 +147,9 @@ struct Connection {
     _mailbox_registration: Option<crate::device_mailbox::Registration>,
     device_id: String,
     sleeping: bool,
+    navigation_fallback: crate::keyboard_navigation::BlankPageTimer,
+    restore_retry: Option<Instant>,
+    boot_logo_restore: Option<Instant>,
     transition: Option<transitions::Transition>,
     worker: OutputWorker,
     boot_logo: Option<crate::boot_logo::PendingUpload>,
@@ -130,6 +157,7 @@ struct Connection {
     blackout: blackout::Blackout,
     session: Arc<Mutex<Box<dyn HardwareSession>>>,
     input_stop: Arc<std::sync::atomic::AtomicBool>,
+    input_wake: Arc<input_readiness::Signal>,
     benchmark_input: Arc<Mutex<bool>>,
     input_thread: Option<std::thread::JoinHandle<()>>,
     epoch: u64,
@@ -146,6 +174,7 @@ struct Connection {
     scene_revision: u64,
     draft_preview: Option<(String, Vec<String>, bool)>,
     draft_sample: Instant,
+    static_palette: StaticPaletteGate,
     content_revision: u64,
     delivery: HashMap<String, Delivery>,
     benchmark: Option<(u64, Instant)>,
@@ -153,7 +182,45 @@ struct Connection {
     force_individual_updates: bool,
     applied_vibration: Option<(bool, BTreeMap<String, bool>)>,
 }
+// Keep static scene reuse proof local to its physical connection
+#[derive(Default)]
+struct StaticPaletteGate {
+    scene: Option<crate::render_scene::RenderSceneContext>,
+    output: Option<(u64, u64, usize)>,
+    visits: u64,
+    captures: u64,
+    skipped: u64,
+}
+// Classify only built-in static palette scenes and preserve timed refresh for unknown content
+fn static_palette_scene(
+    scene: &crate::render_scene::RenderSceneContext,
+    profile: Option<&crate::Profile>,
+) -> bool {
+    scene.draft.as_ref().is_some_and(|draft| {
+        draft.palette.is_some() && draft.bindings.is_empty() && draft.background.is_none()
+    }) && scene.theme_wallpaper.is_none()
+        && profile.is_none_or(|profile| profile.background_asset.is_none())
+        && scene.overrides.is_empty()
+        && scene.visuals.is_empty()
+        && scene.fallbacks.is_empty()
+        && scene.page.as_ref().is_some_and(|page| {
+            page.bindings.values().all(|binding| {
+                matches!(binding.action, crate::actions::Action::None)
+                    && binding.asset.is_none()
+                    && binding.appearance.is_none()
+                    && binding.plugin_appearance.is_none()
+                    && binding.composition.is_none()
+                    && binding
+                        .feedback
+                        .as_deref()
+                        .is_none_or(|feedback| feedback == "off")
+                    && !binding.title.contains(['{', '}'])
+            })
+        })
+}
 struct Delivery {
+    presentation: Option<Instant>,
+    origin: Option<crate::input_trace::InputOrigin>,
     digest: [u8; 32],
     revision: u64,
     pending: bool,
@@ -293,6 +360,7 @@ impl Drop for Connection {
         self.stop_benchmark();
         self.input_stop
             .store(true, std::sync::atomic::Ordering::SeqCst);
+        self.input_wake.stop();
         if let Some(thread) = self.input_thread.take() {
             let _ = thread.join();
         }
@@ -312,20 +380,23 @@ fn guarded_input(gate: &Mutex<bool>, dispatch: impl FnOnce()) -> bool {
 }
 
 /// Shared handles must not hold the output lock while waiting for input. Keep
-/// the same 5 ms idle cadence, but drain queued reports without an extra delay
-/// Windows uses a separate input handle and can wait inside the driver
+/// readiness callbacks park outside either handle lock and drain reports without delay
+/// Unavailable readiness preserves the existing shared or separate handle polling cadence
 fn read_hid_input<T, E>(
     hid: &Mutex<T>,
     shared_handle: bool,
+    readiness: bool,
     read: impl FnOnce(&T, i32) -> std::result::Result<usize, E>,
     idle: impl FnOnce(Duration),
 ) -> std::result::Result<usize, E> {
+    let policy = input_readiness::policy(shared_handle || readiness);
+    debug_assert!(!policy.reason.is_empty());
     let result = {
         let device = hid.lock().unwrap();
-        read(&device, if shared_handle { 0 } else { 5 })
+        read(&device, policy.driver_timeout_ms)
     };
-    if shared_handle && matches!(result, Ok(0)) {
-        idle(Duration::from_millis(5));
+    if let Some(delay) = policy.idle_delay.filter(|_| matches!(result, Ok(0))) {
+        idle(delay);
     }
     result
 }
@@ -348,14 +419,18 @@ fn query_firmware(
 // Start input
 fn start_input(
     runtime: Weak<Runtime>,
-    id: String,
-    epoch: u64,
+    (id, epoch): (String, u64),
     hid: Arc<Mutex<hidapi::HidDevice>>,
     session: Arc<Mutex<Box<dyn HardwareSession>>>,
     stop: Arc<std::sync::atomic::AtomicBool>,
+    input_wake: Arc<input_readiness::Signal>,
     benchmark_input: Arc<Mutex<bool>>,
 ) -> std::thread::JoinHandle<()> {
     let (query, requests) = mpsc::sync_channel::<crate::firmware::QueryReply>(1);
+    let query = crate::firmware::QuerySender::new(query, {
+        let wake = input_wake.clone();
+        Arc::new(move || wake.notify())
+    });
     let firmware_report = runtime.upgrade().and_then(|r| {
         r.snapshot()
             .devices
@@ -383,8 +458,26 @@ fn start_input(
         }
     }
     std::thread::spawn(move || {
+        #[cfg(any(target_os = "macos", target_os = "linux", target_os = "windows"))]
+        let registration =
+            match input_readiness::Registration::install(hid.clone(), input_wake.clone()) {
+                Ok(registration) => Some(registration),
+                Err(error) => {
+                    eprintln!("HID readiness unavailable, retaining polling: {error}");
+                    None
+                }
+            };
+        #[cfg(any(target_os = "macos", target_os = "linux", target_os = "windows"))]
+        let readiness = registration.is_some();
+        #[cfg(not(any(target_os = "macos", target_os = "linux", target_os = "windows")))]
+        let readiness = false;
         let mut initial_query = supported;
         while !stop.load(std::sync::atomic::Ordering::SeqCst) {
+            let observed = if readiness {
+                input_wake.generation()
+            } else {
+                0
+            };
             let replies: Vec<_> = requests.try_iter().take(16).collect();
             if initial_query || !replies.is_empty() {
                 let result =
@@ -398,12 +491,25 @@ fn start_input(
                 initial_query = false;
             }
             let mut report = [0; 1025];
+            let wait_for_hid = Instant::now();
+            let mut hid_lock_wait = Duration::ZERO;
             let read = read_hid_input(
                 &hid,
                 !cfg!(target_os = "windows"),
-                |device, timeout| device.read_timeout(&mut report, timeout),
-                std::thread::sleep,
+                readiness,
+                |device, timeout| {
+                    hid_lock_wait = wait_for_hid.elapsed();
+                    device.read_timeout(&mut report, timeout)
+                },
+                |delay| {
+                    if readiness {
+                        input_wake.wait(observed);
+                    } else {
+                        std::thread::sleep(delay);
+                    }
+                },
             );
+            let received = Instant::now();
             let Some(runtime) = runtime.upgrade() else {
                 break;
             };
@@ -413,11 +519,26 @@ fn start_input(
             match read {
                 Ok(0) => {}
                 Ok(size) => {
-                    match session
-                        .lock()
-                        .unwrap()
-                        .decode_keyboard_settings(&report[..size])
-                    {
+                    let waiting = Instant::now();
+                    let mut decoder = session.lock().unwrap();
+                    let decoding = Instant::now();
+                    let settings = decoder.decode_keyboard_settings(&report[..size]);
+                    let decoded = if matches!(&settings, Ok(None)) {
+                        decoder.decode(&report[..size])
+                    } else {
+                        Ok(Vec::new())
+                    };
+                    let decoded_at = Instant::now();
+                    drop(decoder);
+                    runtime.metrics.record(
+                        "input_hid_lock_wait_ms",
+                        hid_lock_wait.as_secs_f64() * 1000.,
+                    );
+                    runtime.metrics.record(
+                        "input_session_lock_wait_ms",
+                        (decoding - waiting).as_secs_f64() * 1000.,
+                    );
+                    match settings {
                         Ok(Some(settings)) => {
                             runtime.observe_keyboard_settings(&id, epoch, settings);
                             continue;
@@ -433,18 +554,39 @@ fn start_input(
                         }
                         Ok(None) => {}
                     }
-                    let decoded = session.lock().unwrap().decode(&report[..size]);
+                    runtime.metrics.record(
+                        "input_receipt_to_decoded_ms",
+                        (decoded_at - received).as_secs_f64() * 1000.,
+                    );
                     match decoded {
                         Ok(events) => {
                             for event in events {
                                 runtime
                                     .setup_capabilities
                                     .observe_input(&id, epoch, false, &event);
+                                let trace =
+                                    runtime.input_trace.ingress_at(&id, epoch, &event, received);
                                 if guarded_input(&benchmark_input, || {
                                     if !runtime.power_input(&id, epoch, &event) {
-                                        runtime.dispatch(&id, &event);
+                                        runtime.dispatch_input(
+                                            &id,
+                                            &event,
+                                            trace.clone(),
+                                            Some((epoch, &stop)),
+                                        );
+                                    } else {
+                                        runtime.input_trace.record(
+                                            trace.as_deref(),
+                                            "Power gate consumed input",
+                                            true,
+                                        );
                                     }
                                 }) {
+                                    runtime.input_trace.record(
+                                        trace.as_deref(),
+                                        "Benchmark consumed input",
+                                        true,
+                                    );
                                     runtime.metrics.record("benchmark_input_events", 1.0);
                                 }
                                 runtime.emit("input", Some(id.clone()), Some(event), None);
@@ -574,6 +716,8 @@ impl Connection {
             return;
         }
         for outcome in self.worker.drain_outcomes() {
+            #[cfg(test)]
+            playback_benchmark::record_completion(&outcome);
             runtime
                 .metrics
                 .record("output_completed_report_bytes", outcome.report_bytes as f64);
@@ -592,6 +736,30 @@ impl Connection {
             };
             delivery.pending = false;
             delivery.completed = outcome.status == OutputStatus::Completed;
+            if let (Some(presentation), Some((_, finished))) =
+                (delivery.presentation.take(), outcome.write_interval)
+            {
+                runtime.metrics.record(
+                    "animation_presentation_to_final_write_ms",
+                    finished
+                        .saturating_duration_since(presentation)
+                        .as_secs_f64()
+                        * 1000.,
+                );
+            }
+            if let (Some(origin), Some((first, finished))) =
+                (delivery.origin.take(), outcome.write_interval)
+            {
+                let elapsed = (finished - origin.received).as_secs_f64() * 1000.;
+                runtime.metrics.record(
+                    "input_to_first_write_ms",
+                    (first - origin.received).as_secs_f64() * 1000.,
+                );
+                runtime.metrics.record("input_to_final_write_ms", elapsed);
+                runtime
+                    .input_trace
+                    .wrote(&origin, self.epoch, &outcome, elapsed);
+            }
             if let Some(playback) = self.playbacks.get_mut(&outcome.surface_id) {
                 if let Some((index, revision)) = playback.pending_frame {
                     if revision == outcome.content_revision {
@@ -623,13 +791,53 @@ fn send_surfaces(
     if let Some(runtime) = c.runtime.upgrade() {
         refresh_contract(&runtime, c)?;
     }
-    send_surfaces_resolved(c, commands, priority)
+    send_surfaces_resolved(c, commands, priority, false)
+}
+/// Measure image preparation on the producer thread, including frozen scenes and
+/// legacy individual uploads. Release the protocol session before publishing timings.
+fn encode_output<T>(
+    c: &Connection,
+    encode: impl FnOnce(&mut dyn HardwareSession) -> hardware_core::Result<T>,
+) -> std::result::Result<T, String> {
+    let waiting = Instant::now();
+    let mut session = c.session.lock().unwrap();
+    let encoding_started = Instant::now();
+    let before = AdapterWork::current();
+    let result = encode(session.as_mut());
+    let elapsed = encoding_started.elapsed();
+    let after = AdapterWork::current();
+    drop(session);
+    if let Some(runtime) = c.runtime.upgrade() {
+        runtime.metrics.record(
+            "output_session_lock_wait_ms",
+            (encoding_started - waiting).as_secs_f64() * 1000.,
+        );
+        let framing = after.framing - before.framing;
+        runtime.metrics.record(
+            "output_report_construction_ms",
+            framing.as_secs_f64() * 1000.,
+        );
+        runtime.metrics.record(
+            "output_model_encode_ms",
+            elapsed.saturating_sub(framing).as_secs_f64() * 1000.,
+        );
+        runtime.metrics.record(
+            "output_adapter_payload_bytes",
+            after.payload_bytes.wrapping_sub(before.payload_bytes) as f64,
+        );
+        runtime.metrics.record(
+            "output_jpeg_target_attempts",
+            after.jpeg_attempts.wrapping_sub(before.jpeg_attempts) as f64,
+        );
+    }
+    result.map_err(|e| e.to_string())
 }
 // Send surfaces resolved
 fn send_surfaces_resolved(
     c: &mut Connection,
     commands: Vec<DeviceCommand>,
     priority: OutputPriority,
+    rendered_key: bool,
 ) -> std::result::Result<Vec<(String, u64)>, String> {
     let mut selected = Vec::new();
     let mut metadata = Vec::new();
@@ -662,20 +870,29 @@ fn send_surfaces_resolved(
     if selected.is_empty() {
         return Ok(Vec::new());
     }
-    let uploads = c
-        .session
-        .lock()
-        .unwrap()
-        .encode_frame_with_purpose(
-            selected,
-            c.encoding,
-            if priority == OutputPriority::Animation {
-                ImagePurpose::Animated
-            } else {
-                ImagePurpose::Static
-            },
-        )
-        .map_err(|e| e.to_string())?;
+    let uploads = encode_output(c, |session| {
+        if rendered_key && std::env::var_os("STREAM_DOCK_MANAGER_IMAGE_FORMAT").is_none() {
+            let Some(DeviceCommand::Image { control_id, data }) = selected.pop() else {
+                return Err(Error::Protocol("Expected one rendered key".into()));
+            };
+            if !selected.is_empty() {
+                return Err(Error::Protocol("Expected one rendered key".into()));
+            }
+            session
+                .encode_rendered_key(control_id, data, c.encoding)
+                .map(|one| vec![one])
+        } else {
+            session.encode_frame_with_purpose(
+                selected,
+                c.encoding,
+                if priority == OutputPriority::Animation {
+                    ImagePurpose::Animated
+                } else {
+                    ImagePurpose::Static
+                },
+            )
+        }
+    })?;
     if uploads.len() != metadata.len() {
         return Err("Encoder did not preserve surface correspondence".into());
     }
@@ -702,6 +919,8 @@ fn send_surfaces_resolved(
         c.delivery.insert(
             surface.clone(),
             Delivery {
+                presentation: None,
+                origin: None,
                 digest,
                 revision,
                 pending: true,
@@ -721,6 +940,13 @@ fn send(c: &mut Connection, cmd: DeviceCommand) -> std::result::Result<(), Strin
 }
 // Send resolved
 fn send_resolved(c: &mut Connection, cmd: DeviceCommand) -> std::result::Result<(), String> {
+    send_resolved_output(c, cmd, false)
+}
+fn send_resolved_output(
+    c: &mut Connection,
+    cmd: DeviceCommand,
+    ready: bool,
+) -> std::result::Result<(), String> {
     if c.benchmark.is_some() {
         return Ok(());
     }
@@ -728,7 +954,8 @@ fn send_resolved(c: &mut Connection, cmd: DeviceCommand) -> std::result::Result<
         return Ok(());
     }
     if command_surface(&cmd).is_some() && c.policy.mode != OutputMode::IndividualUpdates {
-        return send_surfaces_resolved(c, vec![cmd], OutputPriority::Interaction).map(|_| ());
+        return send_surfaces_resolved(c, vec![cmd], OutputPriority::Interaction, ready)
+            .map(|_| ());
     }
     if c.manifest.model_id == "k1-pro" && matches!(cmd, DeviceCommand::Sleep | DeviceCommand::Wake)
     {
@@ -746,13 +973,24 @@ fn send_resolved(c: &mut Connection, cmd: DeviceCommand) -> std::result::Result<
         return result;
     }
     let is_image = command_surface(&cmd).is_some();
+    if let Some(surface) = command_surface(&cmd) {
+        // Legacy individual writes bypass the tracked frame queue. Retire its previous
+        // signature so a later live label can restore the same pixels after this write.
+        c.delivery.remove(&surface);
+    }
+    if is_image {
+        c.static_palette.scene = None;
+    }
     let cmd = prepare_command(c, cmd)?;
-    let tx = c
-        .session
-        .lock()
-        .unwrap()
-        .encode(cmd)
-        .map_err(|e| e.to_string())?;
+    let tx = if is_image {
+        encode_output(c, |session| session.encode(cmd))?
+    } else {
+        c.session
+            .lock()
+            .unwrap()
+            .encode(cmd)
+            .map_err(|error| error.to_string())?
+    };
     if let Some(admission) = is_image.then(|| c.image_admission()).flatten() {
         c.worker
             .submit_tracked_guarded(c.worker.generation(), tx, Box::new(move || admission()))
@@ -781,12 +1019,20 @@ fn send_current(
     c: &mut Connection,
     command: DeviceCommand,
 ) -> std::result::Result<(), String> {
+    send_current_output(runtime, c, command, false)
+}
+fn send_current_output(
+    runtime: &Runtime,
+    c: &mut Connection,
+    command: DeviceCommand,
+    ready: bool,
+) -> std::result::Result<(), String> {
     refresh_contract(runtime, c)?;
     let gate = runtime.transition_inputs.lock().unwrap();
     if command_surface(&command).is_some() && gate.pending(&c.device_id, c.epoch).is_some() {
         return Ok(());
     }
-    send_resolved(c, command)
+    send_resolved_output(c, command, ready)
 }
 // Send current surfaces
 fn send_current_surfaces(
@@ -800,7 +1046,7 @@ fn send_current_surfaces(
     if gate.pending(&c.device_id, c.epoch).is_some() {
         return Ok(Vec::new());
     }
-    send_surfaces_resolved(c, commands, priority)
+    send_surfaces_resolved(c, commands, priority, false)
 }
 
 // Apply vibration
@@ -1022,26 +1268,31 @@ fn open_connection(
     });
     let session = Arc::new(Mutex::new(session));
     let input_stop = Arc::new(std::sync::atomic::AtomicBool::new(false));
+    let input_wake = Arc::new(input_readiness::Signal::default());
     let benchmark_input = Arc::new(Mutex::new(false));
     runtime.transition_inputs.lock().unwrap().begin(&id, epoch);
     let input_thread = Some(start_input(
         Arc::downgrade(runtime),
-        id.clone(),
-        epoch,
+        (id.clone(), epoch),
         input_hid,
         session.clone(),
         input_stop.clone(),
+        input_wake.clone(),
         benchmark_input.clone(),
     ));
     let mut connection = Connection {
         runtime: Arc::downgrade(runtime),
         _mailbox_registration: Some(registration),
         sleeping: false,
+        navigation_fallback: Default::default(),
+        restore_retry: None,
+        boot_logo_restore: None,
         transition: None,
         device_id: id.clone(),
         worker,
         session,
         input_stop,
+        input_wake,
         benchmark_input,
         input_thread,
         epoch,
@@ -1058,6 +1309,7 @@ fn open_connection(
         scene_revision: 1,
         draft_preview: None,
         draft_sample: Instant::now(),
+        static_palette: StaticPaletteGate::default(),
         content_revision: 0,
         delivery: HashMap::new(),
         benchmark: None,
@@ -1291,6 +1543,8 @@ impl Runtime {
 struct DiscoveryState {
     individual_update_fallbacks: std::collections::HashSet<String>,
     scan: Instant,
+    schedule: discovery::Schedule,
+    changed: Arc<std::sync::atomic::AtomicBool>,
     next_epoch: u64,
 }
 impl Default for DiscoveryState {
@@ -1299,6 +1553,8 @@ impl Default for DiscoveryState {
         Self {
             individual_update_fallbacks: Default::default(),
             scan: Instant::now() - Duration::from_secs(2),
+            schedule: discovery::Schedule::new(Instant::now()),
+            changed: Default::default(),
             next_epoch: 0,
         }
     }
@@ -1311,6 +1567,7 @@ struct Coordinator {
     discovery: DiscoveryState,
     scene_revision: u64,
     display_theme_revision: u64,
+    vault_surface_revision: u64,
     plugins_dirty: bool,
     dirty: DirtyVisuals,
 }
@@ -1329,6 +1586,7 @@ impl Coordinator {
             discovery: DiscoveryState::default(),
             scene_revision: 0,
             display_theme_revision: 0,
+            vault_surface_revision: 0,
             plugins_dirty: false,
             dirty: DirtyVisuals::default(),
         }
@@ -1341,9 +1599,14 @@ impl Coordinator {
             runtime.builtin_state.cleanup(Some(id));
         }
         runtime.connection_epochs.lock().unwrap().remove(id);
+        runtime.event_bindings.cancel(Some(id));
+        runtime.control_event_test.retire_device(id);
         runtime.forget_firmware_connection(id);
         runtime.forget_keyboard_settings(id);
         self.connections.remove(id);
+        if matches!(reason, Retirement::InputLost | Retirement::OutputFailed) {
+            self.discovery.schedule.retry_connection(Instant::now());
+        }
         runtime.transition_inputs.lock().unwrap().forget(id);
         runtime.state.lock().unwrap().devices.retain(|d| d.id != id);
         runtime.emit(
@@ -1463,7 +1726,9 @@ impl Coordinator {
                             }),
                         )
                         .map_err(|e| e.to_string())?;
+                    connection.boot_logo_restore = None;
                     connection.boot_logo = Some(crate::boot_logo::PendingUpload {
+                        completed: false,
                         receipt,
                         reply: Some(reply.clone()),
                         deadline: Instant::now() + Duration::from_secs(30),
@@ -1623,6 +1888,7 @@ impl Coordinator {
                 }
             }
             Request::Restore => {
+                self.discovery.schedule.request(Instant::now());
                 self.plugins_dirty = true;
                 for connection in self.connections.values_mut() {
                     connection.stop_benchmark();
@@ -1638,6 +1904,23 @@ impl Coordinator {
                 {
                     connection.stop_benchmark();
                     restore(runtime, connection);
+                }
+            }
+            Request::RefreshPluginBindings {
+                device,
+                epoch,
+                sources,
+            } => {
+                self.plugins_dirty = true;
+                if self
+                    .connections
+                    .get(&device)
+                    .is_some_and(|c| c.epoch == epoch)
+                {
+                    for source in sources {
+                        // Redraw current binding output without invalidating playback or transport
+                        self.dirty.refresh(&device, &source);
+                    }
                 }
             }
             Request::Command(id, epoch, cmd) => {
@@ -1715,11 +1998,18 @@ impl Coordinator {
     }
     // Discover available devices candidates
     fn discover(&mut self, runtime: &Arc<Runtime>) {
-        if !runtime.device_connections_enabled() {
-            return;
-        }
-        if self.discovery.scan.elapsed() > Duration::from_secs(1) {
-            self.discovery.scan = Instant::now();
+        let now = Instant::now();
+        let changed = self
+            .discovery
+            .changed
+            .swap(false, std::sync::atomic::Ordering::AcqRel);
+        if self
+            .discovery
+            .schedule
+            .update(now, runtime.device_connections_enabled(), changed)
+        {
+            self.discovery.scan = now;
+            let mut failed = false;
             match hidapi::HidApi::new() {
                 Ok(api) => {
                     let mut present = std::collections::HashSet::new();
@@ -1751,12 +2041,15 @@ impl Coordinator {
                                     Some(format!("{name} connected")),
                                 );
                             }
-                            Err(error) => runtime.emit(
-                                "hid-access-error",
-                                Some(id),
-                                None,
-                                Some(error.to_string()),
-                            ),
+                            Err(error) => {
+                                failed = true;
+                                runtime.emit(
+                                    "hid-access-error",
+                                    Some(id),
+                                    None,
+                                    Some(error.to_string()),
+                                );
+                            }
                         }
                     }
                     let removed: Vec<String> = self
@@ -1769,8 +2062,12 @@ impl Coordinator {
                         self.retire(runtime, &id, Retirement::Absent);
                     }
                 }
-                Err(e) => runtime.emit("hid-enumeration-error", None, None, Some(e.to_string())),
+                Err(e) => {
+                    failed = true;
+                    runtime.emit("hid-enumeration-error", None, None, Some(e.to_string()));
+                }
             }
+            self.discovery.schedule.complete(Instant::now(), failed);
             runtime.discovery_readiness.finish();
         }
     }
@@ -1788,14 +2085,21 @@ impl Coordinator {
             (plugins.drain_effects(), changed)
         };
         let theme_revision = runtime.plugins.lock().unwrap().display_theme_revision();
-        if theme_revision != self.display_theme_revision {
+        let vault_revision = runtime
+            .vault_surface_revision
+            .load(std::sync::atomic::Ordering::Acquire);
+        let theme_changed = theme_revision != self.display_theme_revision;
+        if theme_changed || vault_revision != self.vault_surface_revision {
             let mut current = true;
             for connection in self.connections.values_mut() {
-                current &= refresh_display_theme(runtime, connection);
+                current &= refresh_display_theme(runtime, connection, theme_changed);
             }
             if current {
+                if theme_changed {
+                    runtime.emit("display-theme", None, None, None);
+                }
                 self.display_theme_revision = theme_revision;
-                runtime.emit("display-theme", None, None, None);
+                self.vault_surface_revision = vault_revision;
             }
         }
         if plugins_changed {
@@ -1890,6 +2194,7 @@ impl Coordinator {
         runtime.vendor_animations.lock().unwrap().prune();
         let mut failed = vec![];
         for (id, c) in self.connections.iter_mut() {
+            retry_restore(runtime, c, Instant::now());
             c.blackout.poll(runtime, id);
             if let Err(error) = refresh_contract(runtime, c) {
                 runtime.emit("protocol-error", Some(id.clone()), None, Some(error));
@@ -1926,6 +2231,7 @@ impl Coordinator {
                 runtime.metrics.record("output_transfer_ms", transfer_ms);
             }
             transitions::advance(runtime, c);
+            refresh_navigation_fallback(runtime, c, Instant::now());
             refresh_draft_preview(runtime, c);
             synchronize_vendor_playback(runtime, id, c);
             animate(runtime, id, c);
@@ -1955,12 +2261,24 @@ impl Coordinator {
     // Choose the next device-loop deadline from discovery, heartbeat and playback work
     fn timeout(&self, runtime: &Runtime) -> Duration {
         let now = Instant::now();
-        let mut timeout = if runtime.device_connections_enabled() {
-            Duration::from_secs(1).saturating_sub(self.discovery.scan.elapsed())
-        } else {
-            Duration::from_secs(1)
-        };
+        let mut timeout = self
+            .discovery
+            .schedule
+            .remaining(now, runtime.device_connections_enabled());
         for c in self.connections.values() {
+            if let Some(deadline) = c
+                .restore_retry
+                .into_iter()
+                .chain(c.boot_logo_restore)
+                .chain(c.navigation_fallback.deadline())
+                .min()
+            {
+                timeout = timeout.min(deadline.saturating_duration_since(now));
+            }
+            // Receipts have no completion waker, so poll only while a persistent upload is active
+            if c.boot_logo.is_some() {
+                timeout = timeout.min(Duration::from_millis(50));
+            }
             timeout = timeout.min(Duration::from_secs(10).saturating_sub(c.heartbeat.elapsed()));
             if c.transition.as_ref().is_some_and(|t| !t.failed) {
                 timeout = timeout.min(Duration::from_millis(2));
@@ -1996,29 +2314,55 @@ impl Coordinator {
 pub(crate) fn start(runtime: Weak<Runtime>, receiver: crate::device_mailbox::Receiver) {
     std::thread::spawn(move || {
         let mut coordinator = Coordinator::new();
-        let mut media_maintenance = Instant::now();
-        let mut memory = sysinfo::System::new();
+        #[cfg(target_os = "macos")]
+        let _hotplug = {
+            let changed = coordinator.discovery.changed.clone();
+            let owner = runtime.clone();
+            let observer = hotplug::Observer::start(move || {
+                if !changed.swap(true, std::sync::atomic::Ordering::AcqRel) {
+                    if let Some(runtime) = owner.upgrade() {
+                        let _ = runtime.device_commands.send(Request::Wake);
+                    }
+                }
+            });
+            coordinator.discovery.schedule.observe(observer.is_some());
+            observer
+        };
+        let mut media_maintenance = crate::media_budget::Maintenance::default();
+        let mut initialize_maintenance = true;
+        if let Some(owner) = runtime.upgrade() {
+            owner
+                .profiles
+                .media_budget
+                .set_maintenance_waker(receiver.media_waker());
+        }
+        let mut memory = None;
         let mut shutdown_reply = None;
         let mut pending = None;
         loop {
             let Some(runtime) = runtime.upgrade() else {
                 break;
             };
-            if media_maintenance.elapsed() >= Duration::from_secs(5) {
-                if memory.is_err() {
-                    memory = sysinfo::System::new();
+            let media_changed =
+                receiver.take_media_attention() | std::mem::take(&mut initialize_maintenance);
+            let budget = &runtime.profiles.media_budget;
+            media_maintenance.service(budget, Instant::now(), media_changed, || {
+                if memory.is_none() {
+                    memory = sysinfo::System::new().ok();
                 }
-                if let Ok(memory) = &mut memory {
+                if let Some(memory) = &mut memory {
                     memory.refresh_memory();
-                    runtime
-                        .profiles
-                        .media_budget
+                    budget
                         .observe_available_memory(memory.available_memory(), memory.total_memory());
+                    runtime.metrics.record("media_pressure_samples", 1.0);
                 }
-                runtime.profiles.media_budget.maintain();
-                media_maintenance = Instant::now();
-            }
+            });
 
+            #[cfg(target_os = "macos")]
+            coordinator
+                .discovery
+                .schedule
+                .observe(_hotplug.as_ref().is_some_and(hotplug::Observer::is_running));
             coordinator.enforce_permission_gate(&runtime);
             for connection in coordinator.connections.values_mut() {
                 if connection
@@ -2028,13 +2372,7 @@ pub(crate) fn start(runtime: Weak<Runtime>, receiver: crate::device_mailbox::Rec
                 {
                     connection.keyboard = None;
                 }
-                if connection
-                    .boot_logo
-                    .as_mut()
-                    .is_some_and(|upload| upload.poll(connection.worker.failure()))
-                {
-                    connection.boot_logo = None;
-                }
+                poll_boot_logo(connection, Instant::now());
             }
             // Shutdown has a dedicated slot and supersedes previously selected work
             if let Some(shutdown) = receiver.take_shutdown() {
@@ -2060,7 +2398,12 @@ pub(crate) fn start(runtime: Weak<Runtime>, receiver: crate::device_mailbox::Rec
             coordinator.poll_plugins(&runtime);
             coordinator.maintain_connections(&runtime);
             runtime.metrics.record("management_wakeups", 1.0);
-            match receiver.recv_timeout(coordinator.timeout(&runtime)) {
+            // Empty media budgets add no timer to the device coordinator
+            let mut timeout = coordinator.timeout(&runtime);
+            if let Some(deadline) = media_maintenance.deadline() {
+                timeout = timeout.min(deadline.saturating_duration_since(Instant::now()));
+            }
+            match receiver.recv_timeout(timeout) {
                 Ok(request) => pending = Some(request),
                 Err(mpsc::RecvTimeoutError::Disconnected) => break,
                 Err(_) => {}
@@ -2173,8 +2516,133 @@ fn refresh_contract(runtime: &Runtime, c: &mut Connection) -> std::result::Resul
     c.contract_identity = identity;
     Ok(())
 }
+// Repaint only after confirmed upload completion without repeating the persistent logo write
+fn poll_boot_logo(connection: &mut Connection, now: Instant) {
+    if connection
+        .boot_logo
+        .as_mut()
+        .is_some_and(|upload| upload.poll(connection.worker.failure()))
+    {
+        if connection
+            .boot_logo
+            .as_ref()
+            .is_some_and(|upload| upload.completed)
+        {
+            connection.boot_logo_restore = Some(now + Duration::from_secs(2));
+        }
+        connection.boot_logo = None;
+    }
+}
+// Return an uninterrupted blank keyboard page to Navigation through the normal transition gate
+fn refresh_navigation_fallback(runtime: &Runtime, c: &mut Connection, now: Instant) {
+    if !crate::keyboard_navigation::supported(&c.manifest.model_id) {
+        return;
+    }
+    let suspended = c.sleeping
+        || c.transition.is_some()
+        || c.restore_retry.is_some()
+        || transition_pending(runtime, c)
+        || c.benchmark.is_some()
+        || c.boot_logo.is_some()
+        || c.boot_logo_restore.is_some()
+        || runtime.hardware_preview(&c.device_id).is_some();
+    let (target, revision) = {
+        let state = runtime.state.lock().unwrap();
+        let layered = !runtime
+            .builtin_state
+            .device_overrides(&state, &c.device_id)
+            .1
+            .is_empty();
+        (
+            if suspended || layered {
+                None
+            } else {
+                crate::keyboard_navigation::blank_target(&state, &c.device_id)
+            },
+            state.revision,
+        )
+    };
+    if c.navigation_fallback
+        .update(target.as_ref().map(|(p, g)| (p.as_str(), g.as_str())), now)
+    {
+        let (profile, page) = target.unwrap();
+        // Recheck the exact page and connection under the normal navigation lock before committing
+        let result = runtime.select_device_profile_checked(
+            &c.device_id,
+            &profile,
+            Some(crate::keyboard_navigation::PAGE_ID),
+            false,
+            Some(c.epoch),
+            None,
+            None,
+            Some((revision, &profile, &page)),
+            None,
+        );
+        c.navigation_fallback.update(None, now);
+        if let Err(error) = result {
+            runtime.emit(
+                "navigation-error",
+                Some(c.device_id.clone()),
+                None,
+                Some(error),
+            );
+        }
+    }
+}
+// Retry deferred output restoration without blocking the device actor
+fn retry_restore(runtime: &Runtime, c: &mut Connection, now: Instant) {
+    if c.restore_retry.is_some_and(|deadline| now >= deadline)
+        || c.boot_logo_restore.is_some_and(|deadline| now >= deadline)
+    {
+        // Consume the one-shot deadline before workspace admission can defer restoration
+        c.boot_logo_restore = None;
+        restore(runtime, c);
+    }
+}
 // Restore the reviewed devices state
 fn restore(runtime: &Runtime, c: &mut Connection) {
+    // Admit a consistent snapshot and its media pins before changing any output state.
+    // Never park the device actor behind a slow workspace operation while holding state.
+    let (snapshot, assets) = {
+        let state = match runtime.state.try_lock() {
+            Ok(state) => state,
+            Err(std::sync::TryLockError::WouldBlock) => {
+                c.restore_retry = Some(Instant::now() + Duration::from_millis(25));
+                return;
+            }
+            Err(std::sync::TryLockError::Poisoned(error)) => panic!("{error}"),
+        };
+        let _transaction = match runtime.profiles.transaction.try_lock() {
+            Ok(transaction) => transaction,
+            Err(std::sync::TryLockError::WouldBlock) => {
+                c.restore_retry = Some(Instant::now() + Duration::from_millis(25));
+                return;
+            }
+            Err(std::sync::TryLockError::Poisoned(error)) => panic!("{error}"),
+        };
+        let snapshot = state.clone();
+        let session = snapshot.session(&c.device_id);
+        let ids = snapshot
+            .profiles
+            .iter()
+            .filter(|p| p.id == session.profile_id)
+            .flat_map(|p| {
+                p.pages
+                    .iter()
+                    .flat_map(|page| page.bindings.values())
+                    .filter_map(|b| b.asset.clone())
+                    .chain(p.background_asset.clone())
+            });
+        let assets = runtime
+            .profiles
+            .asset_leases
+            .pin(ids, "Active device playback");
+        drop(_transaction);
+        drop(state);
+        (snapshot, assets)
+    };
+    c.restore_retry = None;
+    c.boot_logo_restore = None;
     if let Err(error) = refresh_contract(runtime, c) {
         runtime.emit(
             "protocol-error",
@@ -2201,36 +2669,12 @@ fn restore(runtime: &Runtime, c: &mut Connection) {
     c.invalidate_scene();
     c.sleeping = false;
     c.playbacks.clear();
-    let (snapshot, assets) = {
-        let state = runtime.state.lock().unwrap();
-        let _transaction = runtime.profiles.transaction.lock().unwrap();
-        let snapshot = state.clone();
-        let session = snapshot.session(&c.device_id);
-        let ids = snapshot
-            .profiles
-            .iter()
-            .filter(|p| p.id == session.profile_id)
-            .flat_map(|p| {
-                p.pages
-                    .iter()
-                    .flat_map(|page| page.bindings.values())
-                    .filter_map(|b| b.asset.clone())
-                    .chain(p.background_asset.clone())
-            });
-        let assets = runtime
-            .profiles
-            .asset_leases
-            .pin(ids, "Active device playback");
-        drop(_transaction);
-        drop(state);
-        let assets = match assets {
-            Ok(assets) => assets,
-            Err(error) => {
-                transitions::reject(runtime, c, generation, error);
-                return;
-            }
-        };
-        (snapshot, assets)
+    let assets = match assets {
+        Ok(assets) => assets,
+        Err(error) => {
+            transitions::reject(runtime, c, generation, error);
+            return;
+        }
     };
     sync_plugins(runtime);
     let mut session = snapshot.session(&c.device_id);
@@ -2424,7 +2868,7 @@ fn publish_scene_wallpaper(
 }
 
 // Palette changes don't reset the worker, playback clock, or plugin contexts
-fn refresh_display_theme(runtime: &Runtime, c: &mut Connection) -> bool {
+fn refresh_display_theme(runtime: &Runtime, c: &mut Connection, theme_changed: bool) -> bool {
     if transition_pending(runtime, c) {
         return false;
     }
@@ -2443,7 +2887,7 @@ fn refresh_display_theme(runtime: &Runtime, c: &mut Connection) -> bool {
         .profiles
         .iter()
         .find(|profile| profile.id == session.profile_id);
-    if !publish_scene_wallpaper(runtime, c, &context, profile) {
+    if theme_changed && !publish_scene_wallpaper(runtime, c, &context, profile) {
         return false;
     }
     for control in c.manifest.controls.clone() {
@@ -2455,6 +2899,17 @@ fn refresh_display_theme(runtime: &Runtime, c: &mut Connection) -> bool {
         }
         let source = context.surface_source(&c.manifest, &control.id);
         let binding = page.bindings.get(source);
+        if !theme_changed
+            && !context
+                .draft
+                .as_ref()
+                .and_then(|draft| draft.bindings.get(source))
+                .or_else(|| context.overrides.get(source).map(|value| &value.binding))
+                .or(binding)
+                .is_some_and(crate::live_label::has_vault_text)
+        {
+            continue;
+        }
         if let Ok(data) = runtime.render_bound_surface_in_scene(
             &control,
             binding,
@@ -2481,6 +2936,10 @@ fn refresh_display_theme(runtime: &Runtime, c: &mut Connection) -> bool {
 
 // Refresh draft preview
 fn refresh_draft_preview(runtime: &Runtime, c: &mut Connection) {
+    c.static_palette.visits = c.static_palette.visits.saturating_add(1);
+    if c.sleeping || c.benchmark.is_some() || c.transition.is_some() {
+        c.static_palette.scene = None;
+    }
     if transition_pending(runtime, c) {
         return;
     }
@@ -2490,6 +2949,21 @@ fn refresh_draft_preview(runtime: &Runtime, c: &mut Connection) {
     if !changed && (preview.is_none() || c.draft_sample.elapsed() < Duration::from_millis(50)) {
         return;
     }
+    let output = (c.scene_revision, c.content_revision, c.delivery.len());
+    if !changed
+        && c.static_palette.output == Some(output)
+        && c.delivery
+            .values()
+            .all(|delivery| delivery.pending || delivery.completed)
+        && c.static_palette
+            .scene
+            .as_ref()
+            .is_some_and(|scene| scene.current(runtime))
+    {
+        c.static_palette.skipped = c.static_palette.skipped.saturating_add(1);
+        return;
+    }
+    c.static_palette.scene = None;
     let mut controls = std::collections::BTreeSet::new();
     let mut background = false;
     if let Some((_, ids, bg)) = &c.draft_preview {
@@ -2498,7 +2972,18 @@ fn refresh_draft_preview(runtime: &Runtime, c: &mut Connection) {
     }
     if let Some((_, draft)) = &preview {
         controls.extend(draft.bindings.keys().cloned());
-        background |= draft.background.is_some();
+        background |= draft.background.is_some()
+            || (draft.palette.is_some() || draft.display_test.is_some())
+                && c.manifest.capabilities.background;
+        if draft.palette.is_some() || draft.display_test.is_some() {
+            controls.extend(
+                c.manifest
+                    .controls
+                    .iter()
+                    .filter(|control| control.image_slot.is_some())
+                    .map(|control| control.id.clone()),
+            );
+        }
     }
     if changed {
         let mut surfaces: Vec<_> = controls
@@ -2523,14 +3008,31 @@ fn refresh_draft_preview(runtime: &Runtime, c: &mut Connection) {
     c.draft_preview = preview.as_ref().map(|(id, draft)| {
         (
             id.clone(),
-            draft.bindings.keys().cloned().collect(),
-            draft.background.is_some(),
+            draft
+                .bindings
+                .keys()
+                .cloned()
+                .chain(
+                    c.manifest
+                        .controls
+                        .iter()
+                        .filter(|control| {
+                            (draft.palette.is_some() || draft.display_test.is_some())
+                                && control.image_slot.is_some()
+                        })
+                        .map(|control| control.id.clone()),
+                )
+                .collect(),
+            draft.background.is_some()
+                || (draft.palette.is_some() || draft.display_test.is_some())
+                    && c.manifest.capabilities.background,
         )
     });
     c.draft_sample = Instant::now();
     if c.sleeping || c.benchmark.is_some() || transition_pending(runtime, c) {
         return;
     }
+    c.static_palette.captures = c.static_palette.captures.saturating_add(1);
     let Ok(context) = runtime.render_scene(&c.device_id) else {
         return;
     };
@@ -2543,6 +3045,8 @@ fn refresh_draft_preview(runtime: &Runtime, c: &mut Connection) {
         .profiles
         .iter()
         .find(|p| p.id == session.profile_id);
+    let eligible = static_palette_scene(&context, profile);
+    let mut published = true;
     if background {
         if let Some([width, height]) = c.manifest.capabilities.background_size {
             if let Ok(data) = runtime.render_scene_wallpaper(
@@ -2553,7 +3057,7 @@ fn refresh_draft_preview(runtime: &Runtime, c: &mut Connection) {
                 &c.manifest.capabilities.image_formats,
             ) {
                 if context.current(runtime) {
-                    let _ = send_current_surfaces(
+                    published &= send_current_surfaces(
                         runtime,
                         c,
                         vec![DeviceCommand::Background {
@@ -2564,8 +3068,13 @@ fn refresh_draft_preview(runtime: &Runtime, c: &mut Connection) {
                             height,
                         }],
                         OutputPriority::Interaction,
-                    );
+                    )
+                    .is_ok();
+                } else {
+                    published = false;
                 }
+            } else {
+                published = false;
             }
         }
     }
@@ -2600,7 +3109,7 @@ fn refresh_draft_preview(runtime: &Runtime, c: &mut Connection) {
             if !context.current(runtime) {
                 return;
             }
-            let _ = send_current_surfaces(
+            published &= send_current_surfaces(
                 runtime,
                 c,
                 vec![DeviceCommand::Image {
@@ -2608,8 +3117,15 @@ fn refresh_draft_preview(runtime: &Runtime, c: &mut Connection) {
                     data: runtime.owned_render_bytes(data),
                 }],
                 OutputPriority::Interaction,
-            );
+            )
+            .is_ok();
+        } else {
+            published = false;
         }
+    }
+    if eligible && published && context.current(runtime) {
+        c.static_palette.output = Some((c.scene_revision, c.content_revision, c.delivery.len()));
+        c.static_palette.scene = Some(context);
     }
 }
 
@@ -2638,7 +3154,13 @@ fn refresh_live(runtime: &Runtime, c: &mut Connection) {
             .or_else(|| context.overrides.get(source).map(|value| &value.binding))
             .or(binding);
         if !effective.is_some_and(|b| {
-            b.feedback.as_deref().is_some_and(|f| f != "off")
+            b.live_label.iter().any(|s| {
+                matches!(
+                    s,
+                    crate::live_label::LabelSegment::MacroState { .. }
+                        | crate::live_label::LabelSegment::Parameter { .. }
+                )
+            }) || b.feedback.as_deref().is_some_and(|f| f != "off")
                 || b.appearance
                     .as_ref()
                     .is_some_and(|a| a.toggle_icon.is_some())
@@ -2656,14 +3178,17 @@ fn refresh_live(runtime: &Runtime, c: &mut Connection) {
             if !context.current(runtime) {
                 break;
             }
-            let _ = send_current(
-                runtime,
-                c,
-                DeviceCommand::Image {
-                    control_id: control.id,
-                    data: runtime.owned_render_bytes(data),
-                },
-            );
+            let command = DeviceCommand::Image {
+                control_id: control.id,
+                data: runtime.owned_render_bytes(data),
+            };
+            if effective.is_some_and(|b| !b.live_label.is_empty()) {
+                // Reuse delivery's pending/completed digest check in individual mode too.
+                let _ =
+                    send_current_surfaces(runtime, c, vec![command], OutputPriority::Interaction);
+            } else {
+                let _ = send_current(runtime, c, command);
+            }
         }
     }
 }
@@ -2685,6 +3210,15 @@ struct DirtyVisuals {
     restore_required: bool,
 }
 impl DirtyVisuals {
+    // A settings refresh cannot overwrite a pending transient or escalate into a scene reset
+    fn refresh(&mut self, device: &str, source: &str) {
+        let key = (device.to_owned(), source.to_owned());
+        if self.surfaces.len() < 512 && !self.surfaces.contains_key(&key) {
+            self.order.push_back(key.clone());
+            self.surfaces.insert(key, None);
+        }
+    }
+
     // Insert an entry into devices
     fn insert(&mut self, device: &str, source: &str, transient: Option<TransientVisual>) {
         let key = (device.into(), source.into());
@@ -2802,7 +3336,7 @@ fn flush_plugin_visuals_until(
         // host badge is retained for the existing1500ms host lifetime; ordinary
         // subsequent state messages do not clear it. Transport is still async,
         // so this is not an optical presentation guarantee
-        let data = runtime.render_bound_surface_in_scene(
+        let data = runtime.render_bound_surface_output(
             &control,
             binding,
             connection.manifest.layout.rotation,
@@ -2815,16 +3349,13 @@ fn flush_plugin_visuals_until(
             dirty.insert(&device, &source, None);
             continue;
         }
-        if let Ok(data) = data {
+        if let Ok((data, ready)) = data {
             runtime.metrics.record("plugin_dirty_surfaces", 1.0);
-            let _ = send_current(
-                runtime,
-                connection,
-                DeviceCommand::Image {
-                    control_id: output,
-                    data: runtime.owned_render_bytes(data),
-                },
-            );
+            let command = DeviceCommand::Image {
+                control_id: output,
+                data: runtime.owned_render_bytes(data),
+            };
+            let _ = send_current_output(runtime, connection, command, ready);
         }
     }
 }
@@ -3019,6 +3550,20 @@ fn animate(runtime: &Runtime, device: &str, c: &mut Connection) {
         return;
     };
     context.clips = clips;
+    // A palette supplies only the fallback wallpaper and must not freeze custom backgrounds
+    let palette_owns_background = context
+        .draft
+        .as_ref()
+        .is_some_and(|draft| draft.palette.is_some())
+        && {
+            let snapshot = runtime.snapshot();
+            let session = snapshot.session(device);
+            !snapshot
+                .profiles
+                .iter()
+                .find(|profile| profile.id == session.profile_id)
+                .is_some_and(|profile| profile.background_asset.is_some())
+        };
     let keys: Vec<_> = c.playbacks.keys().cloned().collect();
     let start_cursor = c.playback_cursor;
     let mut due = Vec::new();
@@ -3029,7 +3574,7 @@ fn animate(runtime: &Runtime, device: &str, c: &mut Connection) {
         let position = (start_cursor + offset) % keys.len();
         let key = &keys[position];
         let playback = c.playbacks.get(key).unwrap();
-        let result = (|| -> std::result::Result<Option<(usize, DeviceCommand)>, String> {
+        let result: std::result::Result<_, String> = (|| {
             if context.media_elapsed < playback.next_sample {
                 return Ok(None);
             }
@@ -3066,10 +3611,11 @@ fn animate(runtime: &Runtime, device: &str, c: &mut Connection) {
             };
             if source.is_some_and(|surface| context.draft_owns_surface(&c.manifest, surface))
                 || source.is_none()
-                    && context
-                        .draft
-                        .as_ref()
-                        .is_some_and(|draft| draft.background.is_some())
+                    && context.draft.as_ref().is_some_and(|draft| {
+                        draft.background.is_some()
+                            || draft.display_test.is_some()
+                            || palette_owns_background
+                    })
             {
                 return Ok(None);
             }
@@ -3132,13 +3678,16 @@ fn animate(runtime: &Runtime, device: &str, c: &mut Connection) {
                     )?
                 }
             } else if playback.format == "png" {
-                runtime.render_media_frame_shared(
-                    &playback.asset,
-                    context.media_elapsed,
+                runtime.render_animation_frame_in_cycle(
+                    &clip,
+                    index,
                     size,
                     c.manifest.layout.rotation,
                     &playback.media,
                     &c.manifest.capabilities.image_formats,
+                    None,
+                    context.wallpaper_target,
+                    &context.clips,
                 )?
             } else {
                 // Standalone uploads can request an explicit format. Profile
@@ -3177,7 +3726,12 @@ fn animate(runtime: &Runtime, device: &str, c: &mut Connection) {
                     height: size[1],
                 }
             };
-            Ok(Some((index, command)))
+            let age =
+                playback
+                    .media
+                    .frame_age(&clip, index, playback.elapsed(context.media_elapsed));
+            let presentation = runtime.media_start + context.media_elapsed.saturating_sub(age);
+            Ok(Some((index, presentation, command)))
         })();
         if let Some(playback) = c.playbacks.get_mut(key) {
             let source = playback
@@ -3196,9 +3750,9 @@ fn animate(runtime: &Runtime, device: &str, c: &mut Connection) {
             );
         }
         match result {
-            Ok(Some((index, command))) => {
+            Ok(Some((index, presentation, command))) => {
                 c.playback_cursor = (position + 1) % keys.len();
-                indices.insert(key.clone(), index);
+                indices.insert(key.clone(), (index, presentation));
                 due.push(command);
                 if due.len() >= c.policy.max_batch_surfaces || Instant::now() >= render_deadline {
                     break;
@@ -3218,12 +3772,23 @@ fn animate(runtime: &Runtime, device: &str, c: &mut Connection) {
             return;
         }
         match send_current_surfaces(runtime, c, due, OutputPriority::Animation) {
-            Ok(_) => {
+            Ok(accepted) => {
+                for (surface, revision) in accepted {
+                    if let Some((_, presentation)) = indices.get(&surface) {
+                        if let Some(delivery) = c
+                            .delivery
+                            .get_mut(&surface)
+                            .filter(|d| d.revision == revision)
+                        {
+                            delivery.presentation = Some(*presentation);
+                        }
+                    }
+                }
                 // A new source index may encode to pixels already pending or
                 // completed (including the initial restore). It still represents
                 // this animation frame: don't repeatedly render it waiting for a
                 // submission/outcome that duplicate suppression won't create
-                for (surface, index) in indices {
+                for (surface, (index, _)) in indices {
                     if let (Some(playback), Some(delivery)) =
                         (c.playbacks.get_mut(&surface), c.delivery.get(&surface))
                     {
@@ -3277,7 +3842,9 @@ fn plugin_nodes<'a>(
                     visit(child, p, nodes, macros);
                 }
             }
-            Action::Macro { actions } | Action::Dial { actions, .. } => {
+            Action::Macro { actions }
+            | Action::Dial { actions, .. }
+            | Action::Events { actions, .. } => {
                 for (index, action) in actions.iter().enumerate() {
                     let mut child = path.clone();
                     child.push(index);
@@ -3330,7 +3897,18 @@ pub(crate) fn plugin_demand(
                 if control.kind == "display" {
                     continue;
                 }
-                for (_, node) in plugin_nodes(&binding.action, &snapshot.saved_macros) {
+                let qualified = match &binding.action {
+                    crate::actions::Action::Events { actions, .. } => Some(
+                        crate::event_bindings::active_slots(snapshot, &device.id, id, actions),
+                    ),
+                    _ => None,
+                };
+                for (path, node) in plugin_nodes(&binding.action, &snapshot.saved_macros) {
+                    if qualified
+                        .is_some_and(|mask| path.first().is_none_or(|slot| mask & (1 << slot) == 0))
+                    {
+                        continue;
+                    }
                     let crate::actions::Action::Plugin {
                         plugin_id,
                         action_id,
@@ -3400,10 +3978,40 @@ fn authored_title_parameters(
     }))
 }
 
+// Read only committed profiles, including their nonvisible pages and nested actions.
+pub(crate) fn configured_plugin_actions(
+    profiles: &[crate::profiles::Profile],
+    macros: &[crate::builtins::SavedMacro],
+) -> std::collections::BTreeSet<String> {
+    use stream_dock_manager_plugin_host::CONFIGURED_ACTIONS_OWNER;
+    profiles
+        .iter()
+        .flat_map(|profile| &profile.pages)
+        .flat_map(|page| page.bindings.values())
+        .filter(|binding| !binding.disabled)
+        .flat_map(|binding| plugin_nodes(&binding.action, macros))
+        .filter_map(|(_, action)| match action {
+            crate::actions::Action::Plugin {
+                plugin_id,
+                action_id,
+                ..
+            } if plugin_id == CONFIGURED_ACTIONS_OWNER => Some(action_id.clone()),
+            _ => None,
+        })
+        .collect()
+}
+
 // Reconcile plugin lifecycle, input settings and surface descriptions with connected devices
 pub(crate) fn sync_plugins(runtime: &Runtime) {
     let snapshot = runtime.snapshot();
     let required = plugin_demand(&snapshot);
+    let needs_configured = runtime
+        .plugins
+        .lock()
+        .unwrap()
+        .needs_configured_actions(snapshot.configuration_revision);
+    let configured = needs_configured
+        .then(|| configured_plugin_actions(&snapshot.profiles, &snapshot.saved_macros));
     let mut actions = vec![];
     let mut addresses = vec![];
     let mut execution_settings = vec![];
@@ -3453,13 +4061,24 @@ pub(crate) fn sync_plugins(runtime: &Runtime) {
             }
         }
         for (id, binding) in &effective {
-            if !crate::touch_panel::active_control(&device.manifest, id) {
+            let qualified = match &binding.action {
+                crate::actions::Action::Events { actions, .. } => Some(
+                    crate::event_bindings::active_slots(&snapshot, &device.id, id, actions),
+                ),
+                _ => None,
+            };
+            if qualified.is_none() && !crate::touch_panel::active_control(&device.manifest, id) {
                 continue;
             }
             if binding.disabled {
                 continue;
             }
             for (path, action) in plugin_nodes(&binding.action, &snapshot.saved_macros) {
+                if qualified
+                    .is_some_and(|mask| path.first().is_none_or(|slot| mask & (1 << slot) == 0))
+                {
+                    continue;
+                }
                 let crate::actions::Action::Plugin {
                     plugin_id,
                     action_id,
@@ -3491,15 +4110,27 @@ pub(crate) fn sync_plugins(runtime: &Runtime) {
                     .collect();
                 let xs: std::collections::BTreeSet<_> = group.iter().map(|c| c.x).collect();
                 let ys: std::collections::BTreeSet<_> = group.iter().map(|c| c.y).collect();
-                let scope = crate::actions::node_scope(
-                    snapshot
-                        .binding_overrides
-                        .get(&device.id)
-                        .and_then(|m| m.get(id))
-                        .map(|v| v.scope.as_str())
-                        .unwrap_or(&format!("{}:{}", profile.id, page.id)),
-                    &path,
-                );
+                let base_scope = format!("{}:{}", profile.id, page.id);
+                let scope = snapshot
+                    .binding_overrides
+                    .get(&device.id)
+                    .and_then(|m| m.get(id))
+                    .map(|value| value.scope.as_str())
+                    .unwrap_or(&base_scope);
+                let scope = if qualified.is_some() {
+                    let Some((&index, children)) = path.split_first() else {
+                        continue;
+                    };
+                    let Some(slot) = crate::actions::EventSlot::from_index(index) else {
+                        continue;
+                    };
+                    crate::actions::node_scope(
+                        &crate::event_bindings::event_scope(scope, slot),
+                        children,
+                    )
+                } else {
+                    crate::actions::node_scope(scope, &path)
+                };
                 let override_ = snapshot
                     .binding_overrides
                     .get(&device.id)
@@ -3592,6 +4223,9 @@ pub(crate) fn sync_plugins(runtime: &Runtime) {
     // Publish demand and visible-page priority together, so polling cannot
     // launch a queued off-page plugin before the current page is synchronized
     let mut plugins = runtime.plugins.lock().unwrap();
+    if let Some(configured) = configured {
+        plugins.set_configured_actions(snapshot.configuration_revision, configured);
+    }
     plugins.reconcile_visible_demand(required, &actions);
     for (plugin, scope, device, control, durable, resolved, resources) in execution_settings {
         plugins.set_action_resources(
@@ -3644,6 +4278,43 @@ pub(crate) fn sync_plugins(runtime: &Runtime) {
 
 #[cfg(test)]
 mod tests {
+
+    #[test]
+    fn configured_actions_follow_saved_enabled_bindings_not_appearance() {
+        let owner = stream_dock_manager_plugin_host::CONFIGURED_ACTIONS_OWNER;
+        let counter = format!("{owner}.dice-roll-counter");
+        let total = format!("{owner}.dice-total-counter");
+        let binding = |owner: &str, action: &str, disabled| {
+            serde_json::json!({
+                "title": "", "color": "", "disabled": disabled,
+                "action": {"kind": "plugin", "plugin_id": owner, "action_id": action, "settings": {}}
+            })
+        };
+        let mut profile: crate::profiles::Profile = serde_json::from_value(serde_json::json!({
+            "id": "profile", "name": "Profile", "model_id": "n4-pro", "active_page": "first",
+            "pages": [
+                {"id": "first", "name": "First", "bindings": {
+                    "duplicate": binding(owner, &counter, false),
+                    "disabled": binding(owner, &total, true),
+                    "foreign": binding("other.owner", "other.owner.test", false)
+                }},
+                {"id": "second", "name": "Second", "bindings": {
+                    "counter": binding(owner, &counter, false)
+                }}
+            ]
+        }))
+        .unwrap();
+        let inventory = |profile: &crate::profiles::Profile| {
+            super::configured_plugin_actions(std::slice::from_ref(profile), &[])
+        };
+        assert_eq!(inventory(&profile), [counter.clone()].into());
+        profile.active_page = "second".into();
+        assert_eq!(inventory(&profile), [counter.clone()].into());
+        profile.pages[0].bindings.remove("duplicate");
+        assert_eq!(inventory(&profile), [counter].into());
+        profile.pages[1].bindings.remove("counter");
+        assert!(inventory(&profile).is_empty());
+    }
     #[test]
     // Verify that permission gate blocks discovery without spinning or marking ready
     fn permission_gate_blocks_discovery_without_spinning_or_marking_ready() {
@@ -3735,6 +4406,7 @@ mod tests {
             let result = read_hid_input(
                 &hid,
                 true,
+                false,
                 |input, timeout| {
                     assert_eq!(timeout, 0, "Never wait with the shared output lock");
                     let bytes = input.reports.borrow_mut().pop_front().unwrap()?;
@@ -3770,6 +4442,7 @@ mod tests {
         let result: std::result::Result<usize, ()> = read_hid_input(
             &hid,
             false,
+            false,
             |_, timeout| {
                 assert_eq!(timeout, 5);
                 Ok(0)
@@ -3777,6 +4450,53 @@ mod tests {
             |_| panic!("Separate input handle already waited in the driver"),
         );
         assert_eq!(result, Ok(0));
+    }
+
+    #[test]
+    // Native readiness never blocks under either handle lock or waits after a report
+    fn readiness_parks_outside_shared_and_separate_handles() {
+        for shared in [false, true] {
+            let hid = Mutex::new(());
+            let mut waits = 0;
+            for size in [0, 3] {
+                let result: std::result::Result<usize, ()> = read_hid_input(
+                    &hid,
+                    shared,
+                    true,
+                    |_, timeout| {
+                        assert_eq!(timeout, 0);
+                        Ok(size)
+                    },
+                    |_| {
+                        assert!(hid.try_lock().is_ok());
+                        waits += 1;
+                    },
+                );
+                assert_eq!(result, Ok(size));
+            }
+            assert_eq!(waits, 1);
+        }
+    }
+
+    #[test]
+    // A terminal backend readiness error reaches connection retirement without parking again
+    fn failed_readiness_backend_does_not_reenter_wait() {
+        let hid = Mutex::new(());
+        let wake = input_readiness::Signal::default();
+        let observed = wake.generation();
+        wake.notify();
+        wake.wait(observed);
+        let result = read_hid_input(
+            &hid,
+            false,
+            true,
+            |_, timeout| {
+                assert_eq!(timeout, 0);
+                Err("readiness observer failed")
+            },
+            |_| panic!("Terminal backend failure must not park the runtime"),
+        );
+        assert_eq!(result, Err("readiness observer failed"));
     }
 
     #[test]
@@ -3853,10 +4573,23 @@ mod tests {
     // Finalize transition
     pub(super) fn finish_transition(runtime: &Runtime, c: &mut Connection) {
         let deadline = Instant::now() + Duration::from_secs(10);
-        while c.transition.is_some() {
-            assert!(Instant::now() < deadline, "transition timed out");
-            assert!(!c.transition.as_ref().unwrap().failed, "transition failed");
-            transitions::advance(runtime, c);
+        while c.transition.is_some() || c.restore_retry.is_some() {
+            assert!(
+                Instant::now() < deadline,
+                "restore timed out: retry={:?}, transition={}, sleeping={}, playbacks={}",
+                c.restore_retry,
+                c.transition.is_some(),
+                c.sleeping,
+                c.playbacks.len()
+            );
+            if let Some(retry) = c.restore_retry {
+                // Drive the actor's recorded deadline rather than assuming admission succeeded
+                retry_restore(runtime, c, retry);
+            }
+            if let Some(transition) = &c.transition {
+                assert!(!transition.failed, "transition failed");
+                transitions::advance(runtime, c);
+            }
             std::thread::yield_now();
         }
     }
@@ -3876,6 +4609,9 @@ mod tests {
             runtime: Weak::new(),
             _mailbox_registration: None,
             sleeping: false,
+            navigation_fallback: Default::default(),
+            restore_retry: None,
+            boot_logo_restore: None,
             transition: None,
             device_id: "simulated".into(),
             worker: OutputWorker::spawn_with_policy(
@@ -3886,6 +4622,7 @@ mod tests {
             .unwrap(),
             session: Arc::new(Mutex::new(module.session())),
             input_stop: Arc::new(std::sync::atomic::AtomicBool::new(false)),
+            input_wake: Arc::new(input_readiness::Signal::default()),
             benchmark_input: Arc::new(Mutex::new(false)),
             input_thread: None,
             epoch: 1,
@@ -3902,6 +4639,7 @@ mod tests {
             scene_revision: 1,
             draft_preview: None,
             draft_sample: Instant::now(),
+            static_palette: StaticPaletteGate::default(),
             content_revision: 0,
             delivery: HashMap::new(),
             benchmark: None,
@@ -3972,6 +4710,9 @@ mod tests {
             runtime: Arc::downgrade(&runtime),
             _mailbox_registration: None,
             sleeping: false,
+            navigation_fallback: Default::default(),
+            restore_retry: None,
+            boot_logo_restore: None,
             transition: None,
             device_id: "loopback".into(),
             worker: OutputWorker::spawn_with_policy(
@@ -3982,6 +4723,7 @@ mod tests {
             .unwrap(),
             session: Arc::new(Mutex::new(module.session())),
             input_stop: Arc::new(std::sync::atomic::AtomicBool::new(false)),
+            input_wake: Arc::new(input_readiness::Signal::default()),
             benchmark_input: Arc::new(Mutex::new(false)),
             input_thread: None,
             epoch: 1,
@@ -3998,6 +4740,7 @@ mod tests {
             scene_revision: 1,
             draft_preview: None,
             draft_sample: Instant::now(),
+            static_palette: StaticPaletteGate::default(),
             content_revision: 0,
             delivery: HashMap::new(),
             benchmark: None,
@@ -4042,8 +4785,22 @@ mod tests {
                 ..Default::default()
             },
         );
-        let restored_at = Instant::now();
+        // Busy workspace admission must not clear playback/transition/output state or block
+        // snapshots. The actor's retry path must still deliver the requested restore.
+        let gate = runtime.profiles.transaction.lock().unwrap();
+        let scene_revision = connection.scene_revision;
+        connection.sleeping = true;
         restore(&runtime, &mut connection);
+        assert!(connection.restore_retry.is_some());
+        assert_eq!(connection.scene_revision, scene_revision);
+        assert!(connection.sleeping);
+        assert!(connection.transition.is_none());
+        assert!(runtime.state.try_lock().is_ok());
+        drop(gate);
+        let restored_at = Instant::now();
+        let retry_at = connection.restore_retry.unwrap();
+        retry_restore(&runtime, &mut connection, retry_at);
+        assert!(connection.restore_retry.is_none());
         finish_transition(&runtime, &mut connection);
         assert_eq!(connection.playbacks.len(), 2);
         assert!(connection.next_frame >= restored_at);
@@ -4353,6 +5110,156 @@ mod frame_policy_tests {
     include!("n1_output_tests.rs");
     use super::*;
     #[test]
+    // Keep no-profile keyboard output functional without manufacturing a persisted profile
+    fn keyboard_navigation_without_profile_renders_and_resolves_keys() {
+        let root = tempfile::tempdir().unwrap();
+        let runtime = Runtime::build(root.path().into(), false).unwrap();
+        let (mut c, reports) = connection_for_model(&runtime, "k1-pro");
+        runtime.state.lock().unwrap().profiles.clear();
+        let snapshot = runtime.snapshot();
+        assert!(snapshot.session(&c.device_id).profile_id.is_empty());
+        assert_eq!(
+            snapshot.session(&c.device_id).page_id,
+            crate::keyboard_navigation::PAGE_ID
+        );
+        let scene = runtime.render_scene(&c.device_id).unwrap();
+        assert!(scene.keyboard_navigation);
+        assert_eq!(scene.page.as_ref().unwrap().bindings.len(), 6);
+        assert!(
+            runtime
+                .render_scene_for_target(&c.device_id, true)
+                .unwrap()
+                .keyboard_navigation
+        );
+        restore(&runtime, &mut c);
+        super::tests::finish_transition(&runtime, &mut c);
+        assert!(!reports.lock().unwrap().is_empty());
+        let input = crate::keyboard_navigation::fallback_binding(
+            &runtime.snapshot(),
+            &c.device_id,
+            "key-1",
+        )
+        .unwrap();
+        assert!(
+            matches!(input.binding.action, crate::actions::Action::Hotkey { keys } if keys == vec!["insert"])
+        );
+        assert!(crate::keyboard_navigation::fallback_binding(
+            &runtime.snapshot(),
+            &c.device_id,
+            "unknown"
+        )
+        .is_none());
+        assert!(runtime.snapshot().profiles.is_empty());
+        drop(c);
+        runtime.shutdown();
+    }
+
+    #[test]
+    // Keep populated pages, custom media, other models and stale navigation decisions unchanged
+    fn keyboard_navigation_blank_classification_and_stale_guard() {
+        let root = tempfile::tempdir().unwrap();
+        let runtime = Runtime::build(root.path().into(), false).unwrap();
+        let (c, _) = connection_for_model(&runtime, "k1-pro");
+        {
+            let mut state = runtime.state.lock().unwrap();
+            let profile = &mut state.profiles[0];
+            profile.model_id = "k1-pro".into();
+            profile.pages[0].bindings.clear();
+            crate::keyboard_navigation::normalize_profile(profile).unwrap();
+        }
+        let mut snapshot = runtime.snapshot();
+        assert!(crate::keyboard_navigation::blank_target(&snapshot, &c.device_id).is_some());
+        snapshot.profiles[0].background_asset = Some("custom.png".into());
+        assert!(crate::keyboard_navigation::blank_target(&snapshot, &c.device_id).is_none());
+        snapshot.profiles[0].background_asset = None;
+        let binding = snapshot.profiles[0].pages[0].bindings["key-1"].clone();
+        snapshot.profiles[0].pages[1]
+            .bindings
+            .insert("key-1".into(), binding);
+        assert!(crate::keyboard_navigation::blank_target(&snapshot, &c.device_id).is_none());
+        snapshot.profiles[0].pages[1].bindings.clear();
+        snapshot.devices[0].model_id = "n4-pro".into();
+        assert!(crate::keyboard_navigation::blank_target(&snapshot, &c.device_id).is_none());
+        snapshot.profiles.clear();
+        assert!(crate::keyboard_navigation::fallback_page(&snapshot, &c.device_id).is_none());
+        let before = runtime.snapshot();
+        runtime
+            .select_device_profile_checked(
+                &c.device_id,
+                &before.profiles[0].id,
+                Some(crate::keyboard_navigation::PAGE_ID),
+                false,
+                Some(c.epoch),
+                None,
+                None,
+                Some((before.revision + 1, &before.profiles[0].id, "main")),
+                None,
+            )
+            .unwrap();
+        assert_eq!(runtime.snapshot().session(&c.device_id).page_id, "main");
+        assert!(runtime
+            .select_device_profile_checked(
+                &c.device_id,
+                &before.profiles[0].id,
+                Some(crate::keyboard_navigation::PAGE_ID),
+                false,
+                Some(c.epoch + 1),
+                None,
+                None,
+                Some((before.revision, &before.profiles[0].id, "main")),
+                None
+            )
+            .is_err());
+        assert_eq!(runtime.snapshot().session(&c.device_id).page_id, "main");
+        drop(c);
+        runtime.shutdown();
+    }
+
+    #[test]
+    // Switch only a continuously blank keyboard page and preserve customized Navigation content
+    fn keyboard_navigation_blank_page_deadline_and_cancellation() {
+        let root = tempfile::tempdir().unwrap();
+        let runtime = Runtime::build(root.path().into(), false).unwrap();
+        let (mut c, _) = connection_for_model(&runtime, "k1-pro");
+        {
+            let mut state = runtime.state.lock().unwrap();
+            let profile = &mut state.profiles[0];
+            profile.model_id = "k1-pro".into();
+            profile.pages[0].bindings.clear();
+            crate::keyboard_navigation::normalize_profile(profile).unwrap();
+            profile.pages[0].bindings.get_mut("key-1").unwrap().title = "My insert".into();
+        }
+        let now = Instant::now();
+        refresh_navigation_fallback(&runtime, &mut c, now);
+        assert_eq!(
+            c.navigation_fallback.deadline(),
+            Some(now + Duration::from_secs(30))
+        );
+        refresh_navigation_fallback(&runtime, &mut c, now + Duration::from_millis(29999));
+        assert_eq!(runtime.snapshot().session(&c.device_id).page_id, "main");
+        c.sleeping = true;
+        refresh_navigation_fallback(&runtime, &mut c, now + Duration::from_secs(30));
+        assert!(c.navigation_fallback.deadline().is_none());
+        c.sleeping = false;
+        refresh_navigation_fallback(&runtime, &mut c, now + Duration::from_secs(31));
+        refresh_navigation_fallback(&runtime, &mut c, now + Duration::from_secs(60));
+        assert_eq!(runtime.snapshot().session(&c.device_id).page_id, "main");
+        refresh_navigation_fallback(&runtime, &mut c, now + Duration::from_secs(61));
+        let snapshot = runtime.snapshot();
+        assert_eq!(
+            snapshot.session(&c.device_id).page_id,
+            crate::keyboard_navigation::PAGE_ID
+        );
+        assert_eq!(
+            snapshot.profiles[0].pages[0].bindings["key-1"].title,
+            "My insert"
+        );
+        assert!(c.navigation_fallback.deadline().is_none());
+        drop(c);
+        runtime.shutdown();
+    }
+
+    #[test]
     // Verify that firmware observation change rejects already queued images before transport
     fn firmware_observation_change_rejects_already_queued_images_before_transport() {
         struct Barrier {
@@ -4564,7 +5471,9 @@ mod frame_policy_tests {
             "<!doctype html><title>Harmless fixture</title>",
         )
         .unwrap();
-        std::fs::write(package.join("manifest.json"),serde_json::json!({"UUID":"org.vendor.animation","SDKVersion":2,"Name":"Animation","Version":"1.0.0.0","Author":"Stream Dock Manager contributors","Description":"Disposable native animation fixture","Icon":"state","Software":{"MinimumVersion":"6.9"},"OS":[{"Platform":"mac","MinimumVersion":"12"},{"Platform":"windows","MinimumVersion":"10"}],"CodePath":"runtime.html","Actions":[{"UUID":"org.vendor.animation.action","Name":"Animation","Icon":"state","Controllers":["Keypad"],"States":[{"Image":"state"}]}]}).to_string()).unwrap();
+        let mut manifest = serde_json::json!({"UUID":"org.vendor.animation","SDKVersion":2,"Name":"Animation","Version":"1.0.0.0","Author":"Stream Dock Manager contributors","Description":"Disposable native animation fixture","Icon":"state","Software":{"MinimumVersion":"6.9"},"OS":[{"Platform":"mac","MinimumVersion":"12"},{"Platform":"windows","MinimumVersion":"10"}],"CodePath":"runtime.html","Actions":[{"UUID":"org.vendor.animation.action","Name":"Animation","Icon":"state","Controllers":["Keypad"],"States":[{"Image":"state"}]}]});
+        crate::test_plugin::use_portable_vendor_on_linux(&mut manifest);
+        std::fs::write(package.join("manifest.json"), manifest.to_string()).unwrap();
         let runtime = Runtime::build(root.path().into(), false).unwrap();
         let (mut c, reports) = connection(&runtime);
         {
@@ -4780,11 +5689,15 @@ mod frame_policy_tests {
             _mailbox_registration: None,
             device_id: "frame-fixture".into(),
             sleeping: false,
+            navigation_fallback: Default::default(),
+            restore_retry: None,
+            boot_logo_restore: None,
             transition: None,
             worker: OutputWorker::spawn_with_policy(Box::new(Capture(reports.clone())), 20, policy)
                 .unwrap(),
             session: Arc::new(Mutex::new(module.session_for(&contract).unwrap())),
             input_stop: Arc::new(std::sync::atomic::AtomicBool::new(false)),
+            input_wake: Arc::new(input_readiness::Signal::default()),
             benchmark_input: Arc::new(Mutex::new(false)),
             input_thread: None,
             epoch: 1,
@@ -4801,6 +5714,7 @@ mod frame_policy_tests {
             scene_revision: 1,
             draft_preview: None,
             draft_sample: Instant::now(),
+            static_palette: StaticPaletteGate::default(),
             content_revision: 0,
             delivery: Default::default(),
             benchmark: None,
@@ -4858,9 +5772,25 @@ mod frame_policy_tests {
         );
         assert!(connections[&id].sleeping);
         runtime.set_device_sleep(&id, false).unwrap();
+        let workspace_busy = runtime.profiles.transaction.lock().unwrap();
         dispatch_command(&runtime, &mut connections, &id, epoch, DeviceCommand::Wake).unwrap();
         let c = connections.get_mut(&id).unwrap();
+        let retry = c
+            .restore_retry
+            .expect("Wake must defer while workspace is busy");
+        assert!(c.playbacks.is_empty());
+        assert!(c.transition.is_none());
+        assert!(runtime.state.try_lock().is_ok());
+        // A visit before the deadline must not consume it; repeated due admission stays pending
+        retry_restore(&runtime, c, retry - Duration::from_millis(1));
+        assert_eq!(c.restore_retry, Some(retry));
+        retry_restore(&runtime, c, retry);
+        assert!(c.restore_retry.is_some());
+        assert!(c.playbacks.is_empty());
+        assert!(runtime.state.try_lock().is_ok());
+        drop(workspace_busy);
         super::tests::finish_transition(&runtime, c);
+        assert!(c.restore_retry.is_none());
         assert!(!c.sleeping);
         assert!(c.playbacks.contains_key("key-1"));
         assert!(!transition_pending(&runtime, c));
@@ -4928,6 +5858,7 @@ mod frame_policy_tests {
                         &id,
                         runtime.snapshot().configuration_revision,
                         crate::hardware_preview::HardwareDraft {
+                            display_test: None,
                             bindings: std::collections::BTreeMap::from([(
                                 key.clone(),
                                 binding.clone(),
@@ -4935,6 +5866,7 @@ mod frame_policy_tests {
                             background: None,
                             scope: None,
                             preview_states: Default::default(),
+                            palette: None,
                         },
                     )
                     .unwrap();
@@ -4956,6 +5888,410 @@ mod frame_policy_tests {
             runtime.shutdown();
         }
     }
+    #[test]
+    // Restore current default or newly selected custom media only after the upload receipt and preview interval
+    fn startup_logo_completion_restores_latest_scene() {
+        let root = tempfile::tempdir().unwrap();
+        let runtime = Runtime::build(root.path().join("runtime"), false).unwrap();
+        let (mut connection, reports) = connection_for_model(&runtime, "n4-pro");
+        restore(&runtime, &mut connection);
+        super::tests::finish_transition(&runtime, &mut connection);
+        assert!(connection.worker.wait_idle(Duration::from_secs(5)));
+        reports.lock().unwrap().clear();
+        let now = Instant::now();
+        let (send, receipt) = std::sync::mpsc::channel();
+        connection.boot_logo = Some(crate::boot_logo::PendingUpload {
+            receipt,
+            reply: None,
+            deadline: now + Duration::from_secs(30),
+            completed: false,
+        });
+        poll_boot_logo(&mut connection, now);
+        assert!(connection.boot_logo_restore.is_none());
+        send.send(OutputStatus::Completed).unwrap();
+        poll_boot_logo(&mut connection, now);
+        let deadline = connection.boot_logo_restore.unwrap();
+        assert_eq!(deadline, now + Duration::from_secs(2));
+        retry_restore(
+            &runtime,
+            &mut connection,
+            deadline - Duration::from_millis(1),
+        );
+        assert!(reports.lock().unwrap().is_empty());
+        let workspace_busy = runtime.profiles.transaction.lock().unwrap();
+        retry_restore(&runtime, &mut connection, deadline);
+        assert!(connection.boot_logo_restore.is_none());
+        assert!(connection.restore_retry.is_some());
+        assert!(runtime.state.try_lock().is_ok());
+        drop(workspace_busy);
+        let retry = connection.restore_retry.unwrap();
+        retry_restore(&runtime, &mut connection, retry);
+        super::tests::finish_transition(&runtime, &mut connection);
+        assert!(connection.worker.wait_idle(Duration::from_secs(5)));
+        assert!(connection.boot_logo_restore.is_none());
+        let default_reports = std::mem::take(&mut *reports.lock().unwrap());
+        assert!(!default_reports.is_empty());
+
+        // A later accepted upload replaces the deadline and restoration resolves new media
+        let (send, receipt) = std::sync::mpsc::channel();
+        connection.boot_logo = Some(crate::boot_logo::PendingUpload {
+            receipt,
+            reply: None,
+            deadline: now + Duration::from_secs(30),
+            completed: false,
+        });
+        send.send(OutputStatus::Completed).unwrap();
+        poll_boot_logo(&mut connection, now + Duration::from_secs(1));
+        assert_eq!(
+            connection.boot_logo_restore,
+            Some(now + Duration::from_secs(3))
+        );
+        let path = root.path().join("custom.png");
+        image::RgbaImage::from_pixel(32, 32, image::Rgba([240u8, 12, 99, 255]))
+            .save(&path)
+            .unwrap();
+        let asset = runtime.profiles.import_asset(&path).unwrap();
+        let snapshot = runtime.snapshot();
+        let profile_id = snapshot.session(&connection.device_id).profile_id;
+        let mut profile = snapshot
+            .profiles
+            .iter()
+            .find(|profile| profile.id == profile_id)
+            .unwrap()
+            .clone();
+        profile.background_asset = Some(asset);
+        runtime
+            .save_profile(profile, snapshot.configuration_revision)
+            .unwrap();
+        retry_restore(&runtime, &mut connection, now + Duration::from_secs(2));
+        assert!(reports.lock().unwrap().is_empty());
+        retry_restore(&runtime, &mut connection, now + Duration::from_secs(3));
+        super::tests::finish_transition(&runtime, &mut connection);
+        assert!(connection.worker.wait_idle(Duration::from_secs(5)));
+        let custom_reports = reports.lock().unwrap();
+        assert!(!custom_reports.is_empty());
+        assert_ne!(&default_reports, &*custom_reports);
+        // Restoration produces ordinary output only, never another persistent LOG command
+        assert!(!custom_reports
+            .iter()
+            .any(|report| report.windows(3).any(|part| part == b"LOG")));
+        drop(custom_reports);
+        runtime.shutdown();
+    }
+    #[test]
+    // Exercise palette wallpaper delivery and restoration through encoded hardware reports
+    fn palette_preview_delivers_background_to_transport() {
+        for model in ["n4-pro", "k1-pro"] {
+            let root = tempfile::tempdir().unwrap();
+            let runtime = Runtime::build(root.path().into(), false).unwrap();
+            let (mut c, reports) = connection_for_model(&runtime, model);
+            c.encoding = FrameEncoding::IndividualUpdates;
+            let target = if c.manifest.capabilities.background {
+                "@background"
+            } else {
+                "key-1"
+            };
+            let original = runtime.render_scene(&c.device_id).unwrap();
+            let mut draft = crate::hardware_preview::HardwareDraft {
+                palette: Some(crate::hardware_preview::PaletteDraft {
+                    mode: "light".into(),
+                    id: "default".into(),
+                    custom: None,
+                }),
+                ..Default::default()
+            };
+            if runtime
+                .resolve_preview_palette(draft.palette.as_ref().unwrap())
+                .unwrap()
+                .0["wallpaper"]
+                .as_str()
+                == Some(original.wallpaper.as_str())
+            {
+                draft.palette.as_mut().unwrap().mode = "dark".into();
+            }
+            let token = runtime
+                .preview_on_dock(
+                    &c.device_id,
+                    runtime.snapshot().configuration_revision,
+                    draft,
+                )
+                .unwrap();
+            let candidate = runtime.render_scene(&c.device_id).unwrap();
+            refresh_draft_preview(&runtime, &mut c);
+            assert!(c.worker.wait_idle(Duration::from_secs(5)), "{model}");
+            let outcomes = c.worker.drain_outcomes();
+            assert!(
+                outcomes
+                    .iter()
+                    .any(|o| o.surface_id == target && o.status == OutputStatus::Completed),
+                "{model}: {outcomes:?}"
+            );
+            assert!(!reports.lock().unwrap().is_empty(), "{model}");
+            let candidate_reports = std::mem::take(&mut *reports.lock().unwrap());
+            runtime.cancel_hardware_preview(Some(&token));
+            refresh_draft_preview(&runtime, &mut c);
+            assert!(c.worker.wait_idle(Duration::from_secs(5)), "{model}");
+            let restored = c.worker.drain_outcomes();
+            assert!(
+                restored
+                    .iter()
+                    .any(|o| o.surface_id == target && o.status == OutputStatus::Completed),
+                "{model}: {restored:?}"
+            );
+            assert_ne!(original.wallpaper, candidate.wallpaper, "{model}");
+            assert!(
+                candidate_reports != *reports.lock().unwrap(),
+                "{model} wallpaper bytes must change, including empty per-key LCDs"
+            );
+            if !c.manifest.capabilities.background {
+                assert!(!outcomes
+                    .iter()
+                    .any(|outcome| outcome.surface_id == "@background"));
+            }
+            runtime.shutdown();
+        }
+    }
+    #[test]
+    // One palette owner updates selected and unselected docks and restores their own saved scenes
+    fn global_palette_reaches_multiple_docks_without_renewal_rewrites() {
+        let root = tempfile::tempdir().unwrap();
+        let runtime = Runtime::build(root.path().into(), false).unwrap();
+        let (mut first, first_reports) = connection_for_model(&runtime, "n4-pro");
+        let previous_id = first.device_id.clone();
+        first.device_id = "unselected-n4".into();
+        {
+            let mut state = runtime.state.lock().unwrap();
+            let device = state
+                .devices
+                .iter_mut()
+                .find(|d| d.id == previous_id)
+                .unwrap();
+            device.id = first.device_id.clone();
+            device.persistence_key = first.device_id.clone();
+        }
+        runtime
+            .connection_epochs
+            .lock()
+            .unwrap()
+            .insert(first.device_id.clone(), first.epoch);
+        let (mut second, second_reports) = connection_for_model(&runtime, "k1-pro");
+        {
+            let mut state = runtime.state.lock().unwrap();
+            let mut profile = state.profiles[0].clone();
+            profile.id = "other-active-profile".into();
+            profile.model_id = "k1-pro".into();
+            let mut session = state.session(&second.device_id);
+            session.profile_id = profile.id.clone();
+            session.page_id = profile.active_page.clone();
+            state.profiles.push(profile);
+            state.sessions.insert(second.device_id.clone(), session);
+        }
+        {
+            let mut state = runtime.state.lock().unwrap();
+            for profile in &mut state.profiles {
+                profile.background_asset = None;
+                for page in &mut profile.pages {
+                    page.bindings.clear();
+                }
+            }
+        }
+        assert_eq!(runtime.snapshot().devices.len(), 2);
+        assert_ne!(first.device_id, second.device_id);
+        let assignments = runtime.snapshot().sessions;
+        first.encoding = FrameEncoding::IndividualUpdates;
+        second.encoding = FrameEncoding::IndividualUpdates;
+        let mut candidate = crate::hardware_preview::PaletteDraft {
+            mode: "light".into(),
+            id: "default".into(),
+            custom: None,
+        };
+        if runtime.resolve_preview_palette(&candidate).unwrap().0["wallpaper"].as_str()
+            == Some(
+                runtime
+                    .render_scene(&first.device_id)
+                    .unwrap()
+                    .wallpaper
+                    .as_str(),
+            )
+        {
+            candidate.mode = "dark".into();
+        }
+        second.sleeping = true;
+        let token = runtime.preview_plugin_palette(candidate.clone()).unwrap();
+        for c in [&mut first, &mut second] {
+            refresh_draft_preview(&runtime, c);
+            assert!(c.worker.wait_idle(Duration::from_secs(5)));
+        }
+        assert!(
+            second.sleeping,
+            "Palette browsing must not wake the sleeping dock"
+        );
+        assert!(second_reports.lock().unwrap().is_empty());
+        second.sleeping = false;
+        second.draft_sample = Instant::now() - Duration::from_millis(100);
+        refresh_draft_preview(&runtime, &mut second);
+        assert!(second.worker.wait_idle(Duration::from_secs(5)));
+        let first_candidate = std::mem::take(&mut *first_reports.lock().unwrap());
+        let second_candidate = std::mem::take(&mut *second_reports.lock().unwrap());
+        assert!(!first_candidate.is_empty() && !second_candidate.is_empty());
+        // Media and local inspector drafts deliberately retain their existing timed refresh path
+        let mut unknown = runtime.render_scene(&first.device_id).unwrap();
+        assert!(static_palette_scene(&unknown, None));
+        unknown.theme_wallpaper = Some(("synthetic-animated-asset".into(), Default::default()));
+        assert!(!static_palette_scene(&unknown, None));
+        unknown.theme_wallpaper = None;
+        let mut custom_profile = runtime.snapshot().profiles[0].clone();
+        custom_profile.background_asset = Some("custom-wallpaper".into());
+        assert!(!static_palette_scene(&unknown, Some(&custom_profile)));
+        unknown
+            .visuals
+            .insert("plugin".into(), std::sync::Arc::new(serde_json::json!({})));
+        assert!(!static_palette_scene(&unknown, None));
+        unknown.visuals.clear();
+        unknown
+            .fallbacks
+            .insert("plugin".into(), serde_json::json!({}));
+        assert!(!static_palette_scene(&unknown, None));
+        unknown.fallbacks.clear();
+        unknown.draft.as_mut().unwrap().background =
+            Some(crate::hardware_preview::BackgroundDraft {
+                asset: None,
+                media: Default::default(),
+            });
+        assert!(!static_palette_scene(&unknown, None));
+        // Dynamic label content keeps timed recapture even though static reuse is now the default
+        let dynamic: crate::Binding = serde_json::from_value(serde_json::json!({
+            "title": "{time}", "color": "#223344", "action": {"kind": "none"}
+        }))
+        .unwrap();
+        {
+            let mut state = runtime.state.lock().unwrap();
+            let session = state.session(&first.device_id);
+            let profile = state
+                .profiles
+                .iter_mut()
+                .find(|p| p.id == session.profile_id)
+                .unwrap();
+            profile
+                .pages
+                .iter_mut()
+                .find(|p| p.id == session.page_id)
+                .unwrap()
+                .bindings
+                .insert("key-1".into(), dynamic);
+            state.revision += 1;
+        }
+        let before = first.static_palette.captures;
+        for _ in 0..5 {
+            first.draft_sample = Instant::now() - Duration::from_millis(100);
+            refresh_draft_preview(&runtime, &mut first);
+            assert!(first.worker.wait_idle(Duration::from_secs(5)));
+            assert!(first.static_palette.scene.is_none());
+        }
+        assert_eq!(first.static_palette.captures - before, 5);
+        {
+            let mut state = runtime.state.lock().unwrap();
+            let session = state.session(&first.device_id);
+            let profile = state
+                .profiles
+                .iter_mut()
+                .find(|p| p.id == session.profile_id)
+                .unwrap();
+            profile
+                .pages
+                .iter_mut()
+                .find(|p| p.id == session.page_id)
+                .unwrap()
+                .bindings
+                .clear();
+            state.revision += 1;
+        }
+        for c in [&mut first, &mut second] {
+            c.draft_sample = Instant::now() - Duration::from_millis(100);
+            refresh_draft_preview(&runtime, c);
+            assert!(c.worker.wait_idle(Duration::from_secs(5)));
+        }
+        first_reports.lock().unwrap().clear();
+        second_reports.lock().unwrap().clear();
+        let captures = (
+            first.static_palette.captures,
+            second.static_palette.captures,
+        );
+        assert!(first.static_palette.scene.is_some() && second.static_palette.scene.is_some());
+        // Exercise sixty seconds of eligible 50ms scheduler visits without waiting on wall time
+        for tick in 0..1200 {
+            if tick % 40 == 0 {
+                runtime.preview_plugin_palette(candidate.clone()).unwrap();
+            }
+            for c in [&mut first, &mut second] {
+                c.draft_sample = Instant::now() - Duration::from_millis(100);
+                refresh_draft_preview(&runtime, c);
+            }
+        }
+        assert_eq!(
+            captures,
+            (
+                first.static_palette.captures,
+                second.static_palette.captures
+            )
+        );
+        assert_eq!(first.static_palette.skipped, 1200);
+        assert_eq!(second.static_palette.skipped, 1200);
+        assert!(first_reports.lock().unwrap().is_empty());
+        assert!(second_reports.lock().unwrap().is_empty());
+        // A genuine scene revision and an output invalidation each recapture immediately
+        runtime.state.lock().unwrap().revision += 1;
+        for c in [&mut first, &mut second] {
+            c.draft_sample = Instant::now() - Duration::from_millis(100);
+            refresh_draft_preview(&runtime, c);
+        }
+        assert_eq!(first.static_palette.captures, captures.0 + 1);
+        first.delivery.clear();
+        first.draft_sample = Instant::now() - Duration::from_millis(100);
+        refresh_draft_preview(&runtime, &mut first);
+        assert_eq!(first.static_palette.captures, captures.0 + 2);
+        // A failed delivery cannot be hidden by an otherwise current static scene
+        if let Some(delivery) = first.delivery.values_mut().next() {
+            delivery.pending = false;
+            delivery.completed = false;
+        } else {
+            panic!("The fixture must have a delivery to invalidate");
+        }
+        first.draft_sample = Instant::now() - Duration::from_millis(100);
+        refresh_draft_preview(&runtime, &mut first);
+        assert_eq!(first.static_palette.captures, captures.0 + 3);
+        for c in [&mut first, &mut second] {
+            assert!(c.worker.wait_idle(Duration::from_secs(5)));
+        }
+        first_reports.lock().unwrap().clear();
+        second_reports.lock().unwrap().clear();
+        let visual = runtime.hardware_preview_token(&first.device_id);
+        let renewed = runtime.preview_plugin_palette(candidate).unwrap();
+        assert_eq!(visual, runtime.hardware_preview_token(&first.device_id));
+        runtime.cancel_plugin_palette_preview(Some(&token));
+        assert_eq!(visual, runtime.hardware_preview_token(&first.device_id));
+        for c in [&mut first, &mut second] {
+            refresh_draft_preview(&runtime, c);
+            assert!(c.worker.wait_idle(Duration::from_secs(5)));
+        }
+        assert!(first_reports.lock().unwrap().is_empty());
+        assert!(second_reports.lock().unwrap().is_empty());
+        runtime.cancel_plugin_palette_preview(Some(&renewed));
+        for c in [&mut first, &mut second] {
+            refresh_draft_preview(&runtime, c);
+            assert!(c.worker.wait_idle(Duration::from_secs(5)));
+        }
+        assert_ne!(first_candidate, *first_reports.lock().unwrap());
+        assert_ne!(second_candidate, *second_reports.lock().unwrap());
+        assert!(runtime.hardware_preview_token(&first.device_id).is_none());
+        assert!(runtime.hardware_preview_token(&second.device_id).is_none());
+        assert_eq!(
+            serde_json::to_value(assignments).unwrap(),
+            serde_json::to_value(runtime.snapshot().sessions).unwrap()
+        );
+        runtime.shutdown();
+    }
+
     #[test]
     // Verify that queued command cannot mutate a reconnected device or its benchmark
     fn queued_command_cannot_mutate_a_reconnected_device_or_its_benchmark() {
@@ -5447,6 +6783,61 @@ mod frame_policy_tests {
         runtime.shutdown();
     }
     #[test]
+    // Settings refreshes stay within the connection epoch and retain pending plugin badges
+    fn settings_refresh_never_restarts_scenes_or_replaces_pending_badges() {
+        let root = tempfile::tempdir().unwrap();
+        let runtime = Runtime::build(root.path().into(), false).unwrap();
+        let (n4, n4_reports) = connection(&runtime);
+        let (mut k1, k1_reports) = connection_for_model(&runtime, "k1-pro");
+        k1.device_id = "keyboard".into();
+        let n4_id = n4.device_id.clone();
+        let n4_epoch = n4.epoch;
+        let n4_scene = n4.scene_revision;
+        let k1_scene = k1.scene_revision;
+        let mut coordinator = Coordinator::new();
+        coordinator.connections.insert(n4_id.clone(), n4);
+        coordinator.connections.insert("keyboard".into(), k1);
+        coordinator.dirty.insert(
+            &n4_id,
+            "key-1",
+            Some(TransientVisual {
+                context: "fixture".into(),
+                generation: Some(1),
+                badge: Some("ok".into()),
+            }),
+        );
+        coordinator.dispatch(
+            &runtime,
+            Request::RefreshPluginBindings {
+                device: n4_id.clone(),
+                epoch: n4_epoch + 1,
+                sources: vec!["key-2".into()],
+            },
+        );
+        assert_eq!(coordinator.dirty.surfaces.len(), 1);
+        coordinator.dispatch(
+            &runtime,
+            Request::RefreshPluginBindings {
+                device: n4_id.clone(),
+                epoch: n4_epoch,
+                sources: vec!["key-1".into(), "key-2".into()],
+            },
+        );
+        assert_eq!(coordinator.dirty.surfaces.len(), 2);
+        assert!(coordinator.dirty.surfaces[&(n4_id.clone(), "key-1".into())].is_some());
+        assert!(coordinator
+            .dirty
+            .surfaces
+            .keys()
+            .all(|(id, _)| id == &n4_id));
+        assert_eq!(coordinator.connections[&n4_id].scene_revision, n4_scene);
+        assert_eq!(coordinator.connections["keyboard"].scene_revision, k1_scene);
+        assert!(n4_reports.lock().unwrap().is_empty());
+        assert!(k1_reports.lock().unwrap().is_empty());
+        runtime.shutdown();
+    }
+
+    #[test]
     // Verify that dirty retry storage is bounded and duplicate updates keep fair order
     fn dirty_retry_storage_is_bounded_and_duplicate_updates_keep_fair_order() {
         let mut dirty = DirtyVisuals::default();
@@ -5878,7 +7269,7 @@ mod frame_policy_tests {
         assert!(serde_json::from_str::<crate::workspace::DeviceOutput>("{}").is_err());
         let defaults = crate::workspace::DeviceOutput::default();
         assert_eq!(defaults.lighting_brightness, 15);
-        assert_eq!(defaults.brightness, 65);
+        assert_eq!(defaults.brightness, 50);
         let mut value = serde_json::to_value(defaults).unwrap();
         value["lighting_brightness"] = serde_json::json!(65);
         let saved: crate::workspace::DeviceOutput = serde_json::from_value(value.clone()).unwrap();
@@ -6079,6 +7470,10 @@ mod frame_policy_tests {
         runtime.shutdown();
     }
 }
+
+#[cfg(test)]
+#[path = "playback_benchmark.rs"]
+mod playback_benchmark;
 
 #[cfg(test)]
 #[path = "n4_refresh_probe.rs"]

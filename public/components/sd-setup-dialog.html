@@ -7,279 +7,286 @@
         <button class="button" @click="openSetup">Open setup</button>
         <button class="text-button" @click="dismissSetup">Dismiss</button>
     </div>
-    <dialog
-        class="feature-dialog"
-        x-ref="setupDialog"
-        aria-labelledby="setup-title"
-        @cancel.prevent="dismissSetup"
-    >
-        <header class="picker-header">
-            <div>
-                <small x-text="'Step ' + (setupStep + 1) + ' of 5'"></small>
-                <h2 id="setup-title" x-text="setupHeading"></h2>
-            </div>
-            <button
-                class="icon-button"
-                aria-label="Dismiss setup"
-                @click="dismissSetup"
-                :disabled="working"
-            >
-                ×
-            </button>
-        </header>
-        <div class="feature-body">
-            <section x-show="setupStep === 0" class="settings-section">
-                <p class="field-help">
-                    Optional checks can be completed later. All configuration stays on this
-                    computer.
-                </p>
+    <template x-if="setupMounted">
+        <dialog
+            class="feature-dialog"
+            x-ref="setupDialog"
+            aria-labelledby="setup-title"
+            @cancel.prevent="dismissSetup"
+        >
+            <header class="picker-header">
                 <div>
-                    <template x-for="check in setup ? setup.checks : []" :key="check.id">
-                        <article class="check-row">
-                            <div>
-                                <strong x-text="check.title"></strong>
-                                <span class="chip" x-text="check.status"></span>
-                                <p x-text="check.detail"></p>
-                            </div>
-                            <button
-                                class="button"
-                                x-show="check.action"
-                                :data-action="check.action"
-                                @click="setupAction"
-                                :disabled="working"
-                                x-text="check.action === 'recheck' ? 'Recheck' : check.action === 'simulator' ? 'Try simulator' : 'Authorize'"
-                            ></button>
-                        </article>
-                    </template>
+                    <small x-text="'Step ' + (setupStep + 1) + ' of 5'"></small>
+                    <h2 id="setup-title" x-text="setupHeading"></h2>
                 </div>
-                <section
-                    class="settings-section feature-fields"
-                    aria-labelledby="setup-capabilities-title"
+                <button
+                    class="icon-button"
+                    aria-label="Dismiss setup"
+                    @click="dismissSetup"
+                    :disabled="working"
                 >
-                    <h3 id="setup-capabilities-title">Check selected capabilities</h3>
+                    ×
+                </button>
+            </header>
+            <div class="feature-body">
+                <section x-show="setupStep === 0" class="settings-section">
                     <p class="field-help">
-                        Readiness checks inspect permissions, helpers and selected plugin
-                        dependencies for up to 20 seconds. They do not run plugins, install
-                        dependencies or grant permissions.
+                        Optional checks can be completed later. All configuration stays on this
+                        computer.
                     </p>
-                    <label>
-                        Device to check
-                        <select
-                            x-model="capabilityChecks.deviceId"
-                            :disabled="capabilityChecks.busy"
-                        >
-                            <option value="">General environment only</option>
-                            <template x-for="device in capabilityDevices" :key="device.id">
-                                <option :value="device.id" x-text="device.name"></option>
-                            </template>
-                        </select>
-                    </label>
-                    <details>
-                        <summary>Include installed plugin dependencies (up to four)</summary>
-                        <fieldset class="feature-fields">
-                            <legend>Plugins to check</legend>
-                            <p x-show="!app.snapshot.plugins.length" class="field-help">
-                                No plugins are installed.
-                            </p>
-                            <template x-for="plugin in app.snapshot.plugins" :key="plugin.id">
-                                <label class="preference-toggle">
-                                    <input
-                                        type="checkbox"
-                                        :value="plugin.id"
-                                        x-model="capabilityChecks.pluginIds"
-                                        :disabled="capabilityChecks.busy || (capabilityChecks.pluginIds.length >= 4 && !capabilityChecks.pluginIds.includes(plugin.id))"
-                                    />
-                                    <span x-text="plugin.name"></span>
-                                </label>
-                            </template>
-                        </fieldset>
-                    </details>
-                    <div class="button-row">
-                        <button
-                            type="button"
-                            class="button"
-                            @click="checkCapabilities"
-                            :disabled="capabilityChecks.busy"
-                        >
-                            Check readiness
-                        </button>
-                        <button
-                            type="button"
-                            class="button"
-                            @click="listenForSetupInput"
-                            :disabled="capabilityChecks.busy || !capabilityChecks.deviceId"
-                            aria-describedby="setup-input-notice"
-                        >
-                            Listen for device input
-                        </button>
-                        <button
-                            type="button"
-                            class="button"
-                            @click="cancelCapabilityChecks"
-                            x-show="capabilityChecks.busy"
-                        >
-                            Cancel capability check
-                        </button>
-                    </div>
-                    <p id="setup-input-notice" class="field-help">
-                        Input listening lasts 30 seconds. Press a control on the selected dock or
-                        simulator; its saved action may run. Listening records input only and does
-                        not test desktop input injection.
-                    </p>
-                    <p class="field-help" role="status" x-show="capabilityChecks.pending">
-                        Starting capability check…
-                    </p>
-                    <p
-                        class="field-help"
-                        role="status"
-                        x-show="capabilityChecks.job"
-                        x-text="capabilityChecks.job ? 'Capability check: ' + capabilityChecks.job.state : ''"
-                    ></p>
-                    <p
-                        class="field-help"
-                        x-show="capabilityChecks.job"
-                        x-text="capabilityChecks.job ? capabilityChecks.job.qualification : ''"
-                    ></p>
                     <div>
-                        <template
-                            x-for="check in capabilityChecks.job ? capabilityChecks.job.checks : []"
-                            :key="check.id"
-                        >
+                        <template x-for="check in setup ? setup.checks : []" :key="check.id">
                             <article class="check-row">
                                 <div>
                                     <strong x-text="check.title"></strong>
                                     <span class="chip" x-text="check.status"></span>
                                     <p x-text="check.detail"></p>
                                 </div>
+                                <button
+                                    class="button"
+                                    x-show="check.action"
+                                    :data-action="check.action"
+                                    @click="setupAction"
+                                    :disabled="working"
+                                    x-text="check.action === 'recheck' ? 'Recheck' : check.action === 'simulator' ? 'Try simulator' : 'Authorize'"
+                                ></button>
                             </article>
                         </template>
                     </div>
+                    <section
+                        class="settings-section feature-fields"
+                        aria-labelledby="setup-capabilities-title"
+                    >
+                        <h3 id="setup-capabilities-title">Check selected capabilities</h3>
+                        <p class="field-help">
+                            Readiness checks inspect permissions, helpers and selected plugin
+                            dependencies for up to 20 seconds. They do not run plugins, install
+                            dependencies or grant permissions.
+                        </p>
+                        <label>
+                            Device to check
+                            <select
+                                x-model="capabilityChecks.deviceId"
+                                :disabled="capabilityChecks.busy"
+                            >
+                                <option value="">General environment only</option>
+                                <template x-for="device in capabilityDevices" :key="device.id">
+                                    <option :value="device.id" x-text="device.name"></option>
+                                </template>
+                            </select>
+                        </label>
+                        <details>
+                            <summary>Include installed plugin dependencies (up to four)</summary>
+                            <fieldset class="feature-fields">
+                                <legend>Plugins to check</legend>
+                                <p x-show="!app.snapshot.plugins.length" class="field-help">
+                                    No plugins are installed.
+                                </p>
+                                <template x-for="plugin in app.snapshot.plugins" :key="plugin.id">
+                                    <label class="preference-toggle">
+                                        <input
+                                            type="checkbox"
+                                            :value="plugin.id"
+                                            x-model="capabilityChecks.pluginIds"
+                                            :disabled="capabilityChecks.busy || (capabilityChecks.pluginIds.length >= 4 && !capabilityChecks.pluginIds.includes(plugin.id))"
+                                        />
+                                        <span x-text="plugin.name"></span>
+                                    </label>
+                                </template>
+                            </fieldset>
+                        </details>
+                        <div class="button-row">
+                            <button
+                                type="button"
+                                class="button"
+                                @click="checkCapabilities"
+                                :disabled="capabilityChecks.busy"
+                            >
+                                Check readiness
+                            </button>
+                            <button
+                                type="button"
+                                class="button"
+                                @click="listenForSetupInput"
+                                :disabled="capabilityChecks.busy || !capabilityChecks.deviceId"
+                                aria-describedby="setup-input-notice"
+                            >
+                                Listen for device input
+                            </button>
+                            <button
+                                type="button"
+                                class="button"
+                                @click="cancelCapabilityChecks"
+                                x-show="capabilityChecks.busy"
+                            >
+                                Cancel capability check
+                            </button>
+                        </div>
+                        <p id="setup-input-notice" class="field-help">
+                            Input listening lasts 30 seconds. Press a control on the selected dock
+                            or simulator; its saved action may run. Listening records input only and
+                            does not test desktop input injection.
+                        </p>
+                        <p class="field-help" role="status" x-show="capabilityChecks.pending">
+                            Starting capability check…
+                        </p>
+                        <p
+                            class="field-help"
+                            role="status"
+                            x-show="capabilityChecks.job"
+                            x-text="capabilityChecks.job ? 'Capability check: ' + capabilityChecks.job.state : ''"
+                        ></p>
+                        <p
+                            class="field-help"
+                            x-show="capabilityChecks.job"
+                            x-text="capabilityChecks.job ? capabilityChecks.job.qualification : ''"
+                        ></p>
+                        <div>
+                            <template
+                                x-for="check in capabilityChecks.job ? capabilityChecks.job.checks : []"
+                                :key="check.id"
+                            >
+                                <article class="check-row">
+                                    <div>
+                                        <strong x-text="check.title"></strong>
+                                        <span class="chip" x-text="check.status"></span>
+                                        <p x-text="check.detail"></p>
+                                    </div>
+                                </article>
+                            </template>
+                        </div>
+                        <p
+                            class="danger-text"
+                            role="alert"
+                            x-show="capabilityChecks.error"
+                            x-text="capabilityChecks.error"
+                        ></p>
+                    </section>
+                    <div class="button-row">
+                        <button class="button" @click="$dispatch('open-plugin-import')">
+                            Import VSD Craft / Stream Deck plugins
+                        </button>
+                    </div>
+                </section>
+                <section x-show="setupStep === 1" class="feature-fields">
+                    <label>
+                        Device
+                        <select
+                            aria-label="Setup device"
+                            x-model="setupDevice"
+                            @change="chooseSetupDevice"
+                        >
+                            <option value="">Choose a device</option>
+                            <template x-for="device in app.snapshot.devices" :key="device.id">
+                                <option :value="device.id" x-text="device.name"></option>
+                            </template>
+                        </select>
+                    </label>
+                    <label>
+                        Profile
+                        <select
+                            aria-label="Setup profile"
+                            x-model="setupProfile"
+                            @change="chooseSetupProfile"
+                        >
+                            <template x-for="profile in setupProfiles" :key="profile.id">
+                                <option :value="profile.id" x-text="profile.name"></option>
+                            </template>
+                        </select>
+                    </label>
+                    <p x-show="!app.device">Connect a device, or go back and try the simulator.</p>
+                </section>
+                <section x-show="setupStep === 2" class="feature-fields">
+                    <label>
+                        Key
+                        <select aria-label="Setup key" x-model="setupControl">
+                            <option value="">Choose a key</option>
+                            <template x-for="control in setupControls" :key="control.id">
+                                <option :value="control.id" x-text="control.label"></option>
+                            </template>
+                        </select>
+                    </label>
+                    <p>Saving replaces the selected key’s binding and is undoable.</p>
+                    <label>
+                        Label
+                        <input aria-label="Setup label" x-model="setupTitle" maxlength="160" />
+                    </label>
+                    <label>
+                        Action
+                        <select aria-label="Setup action" x-model="setupKind">
+                            <option value="open_url">Open website</option>
+                            <option value="hotkey">Keyboard shortcut</option>
+                            <option value="volume">Adjust volume</option>
+                            <option value="mute">Mute output</option>
+                        </select>
+                    </label>
+                    <label x-show="setupKind !== 'mute'">
+                        URL, shortcut, or volume change
+                        <input aria-label="Setup action value" x-model="setupValue" />
+                    </label>
+                    <button
+                        class="button primary"
+                        @click="createSetupBinding"
+                        :disabled="working || !setupControl || !app.page"
+                    >
+                        Save first binding
+                    </button>
+                </section>
+                <section x-show="setupStep === 3">
+                    <p>
+                        Press the configured key on your physical device, or use the desktop
+                        simulator to run its saved action on this computer. Browser preview only
+                        verifies input.
+                    </p>
+                    <button
+                        class="button"
+                        x-show="app.simulated"
+                        @click="testSetupSimulator"
+                        :disabled="working || !setupControl"
+                    >
+                        Test simulator input
+                    </button>
                     <p
+                        role="status"
+                        x-text="verifiedInput ? 'Input received from your control.' : 'Waiting for your control…'"
+                    ></p>
+                    <p
+                        x-show="actionResult && actionResult.kind === 'action-error'"
                         class="danger-text"
-                        role="alert"
-                        x-show="capabilityChecks.error"
-                        x-text="capabilityChecks.error"
+                        x-text="actionResult ? actionResult.message : ''"
                     ></p>
                 </section>
-                <div class="button-row">
-                    <button class="button" @click="$dispatch('open-plugin-import')">
-                        Import VSD Craft / Stream Deck plugins
+                <section x-show="setupStep === 4">
+                    <p>
+                        Your profiles and controls are ready to edit. You can revisit setup from
+                        Settings at any time.
+                    </p>
+                    <button class="button primary" @click="finishSetup" :disabled="working">
+                        Finish setup
                     </button>
-                </div>
-            </section>
-            <section x-show="setupStep === 1" class="feature-fields">
-                <label>
-                    Device
-                    <select
-                        aria-label="Setup device"
-                        x-model="setupDevice"
-                        @change="chooseSetupDevice"
-                    >
-                        <option value="">Choose a device</option>
-                        <template x-for="device in app.snapshot.devices" :key="device.id">
-                            <option :value="device.id" x-text="device.name"></option>
-                        </template>
-                    </select>
-                </label>
-                <label>
-                    Profile
-                    <select
-                        aria-label="Setup profile"
-                        x-model="setupProfile"
-                        @change="chooseSetupProfile"
-                    >
-                        <template x-for="profile in setupProfiles" :key="profile.id">
-                            <option :value="profile.id" x-text="profile.name"></option>
-                        </template>
-                    </select>
-                </label>
-                <p x-show="!app.device">Connect a device, or go back and try the simulator.</p>
-            </section>
-            <section x-show="setupStep === 2" class="feature-fields">
-                <label>
-                    Key
-                    <select aria-label="Setup key" x-model="setupControl">
-                        <option value="">Choose a key</option>
-                        <template x-for="control in setupControls" :key="control.id">
-                            <option :value="control.id" x-text="control.label"></option>
-                        </template>
-                    </select>
-                </label>
-                <p>Saving replaces the selected key’s binding and is undoable.</p>
-                <label>
-                    Label
-                    <input aria-label="Setup label" x-model="setupTitle" maxlength="160" />
-                </label>
-                <label>
-                    Action
-                    <select aria-label="Setup action" x-model="setupKind">
-                        <option value="open_url">Open website</option>
-                        <option value="hotkey">Keyboard shortcut</option>
-                        <option value="volume">Adjust volume</option>
-                        <option value="mute">Mute output</option>
-                    </select>
-                </label>
-                <label x-show="setupKind !== 'mute'">
-                    URL, shortcut, or volume change
-                    <input aria-label="Setup action value" x-model="setupValue" />
-                </label>
-                <button
-                    class="button primary"
-                    @click="createSetupBinding"
-                    :disabled="working || !setupControl || !app.page"
-                >
-                    Save first binding
-                </button>
-            </section>
-            <section x-show="setupStep === 3">
-                <p>
-                    Press the configured key on your physical device, or use the desktop simulator
-                    to run its saved action on this computer. Browser preview only verifies input.
-                </p>
+                </section>
+                <p class="danger-text" role="alert" x-show="error" x-text="error"></p>
+            </div>
+            <footer class="feature-footer">
                 <button
                     class="button"
-                    x-show="app.simulated"
-                    @click="testSetupSimulator"
-                    :disabled="working || !setupControl"
+                    @click="previousSetup"
+                    :disabled="working || setupStep === 0"
                 >
-                    Test simulator input
+                    Back
                 </button>
-                <p
-                    role="status"
-                    x-text="verifiedInput ? 'Input received from your control.' : 'Waiting for your control…'"
-                ></p>
-                <p
-                    x-show="actionResult && actionResult.kind === 'action-error'"
-                    class="danger-text"
-                    x-text="actionResult ? actionResult.message : ''"
-                ></p>
-            </section>
-            <section x-show="setupStep === 4">
-                <p>
-                    Your profiles and controls are ready to edit. You can revisit setup from
-                    Settings at any time.
-                </p>
-                <button class="button primary" @click="finishSetup" :disabled="working">
-                    Finish setup
+                <button class="text-button" @click="dismissSetup" :disabled="working">
+                    Continue later
                 </button>
-            </section>
-            <p class="danger-text" role="alert" x-show="error" x-text="error"></p>
-        </div>
-        <footer class="feature-footer">
-            <button class="button" @click="previousSetup" :disabled="working || setupStep === 0">
-                Back
-            </button>
-            <button class="text-button" @click="dismissSetup" :disabled="working">
-                Continue later
-            </button>
-            <button
-                class="button primary"
-                @click="nextSetup"
-                x-show="setupStep < 4 && setupStep !== 2"
-                :disabled="working || (setupStep === 1 && !app.device)"
-            >
-                Continue
-            </button>
-        </footer>
-    </dialog>
+                <button
+                    class="button primary"
+                    @click="nextSetup"
+                    x-show="setupStep < 4 && setupStep !== 2"
+                    :disabled="working || (setupStep === 1 && !app.device)"
+                >
+                    Continue
+                </button>
+            </footer>
+        </dialog>
+    </template>
 </div>

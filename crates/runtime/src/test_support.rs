@@ -58,6 +58,26 @@ pub fn encode_image(
 }
 
 #[cfg(test)]
+// Open disposable
+pub(crate) fn open_disposable(root: PathBuf) -> Arc<Runtime> {
+    let deadline = std::time::Instant::now() + std::time::Duration::from_secs(5);
+    loop {
+        match Runtime::build(root.clone(), false) {
+            Ok(runtime) => return runtime,
+            // Shutdown workers may briefly retain the storage Arc. Only that
+            // known lock may be retried; validation failures remain fatal
+            Err(error)
+                if error.contains("Another Stream Dock Manager process")
+                    && std::time::Instant::now() < deadline =>
+            {
+                std::thread::sleep(std::time::Duration::from_millis(10));
+            }
+            Err(error) => panic!("Cannot reopen disposable workspace: {error}"),
+        }
+    }
+}
+
+#[cfg(test)]
 mod tests {
     #[test]
     // Verify that isolated hosts preserve explicit recovery selection

@@ -1,0 +1,11 @@
+# Automatically generated - DO NOT EDIT!
+
+[[permission]]
+identifier = "allow-vault-revoke-private-writes"
+description = "Enables the vault_revoke_private_writes command without any pre-configured scope."
+commands.allow = ["vault_revoke_private_writes"]
+
+[[permission]]
+identifier = "deny-vault-revoke-private-writes"
+description = "Denies the vault_revoke_private_writes command without any pre-configured scope."
+commands.deny = ["vault_revoke_private_writes"]

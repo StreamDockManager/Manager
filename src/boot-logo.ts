@@ -1,3 +1,4 @@
+import { bootLogoFraming } from './boot-logo-framing';
 import * as fileDialogs from './window-dialogs';
 import { ownWindowMethods } from './window-work';
 import { registerCloseDraft, trackCloseRelease } from './close-releases';
@@ -16,9 +17,50 @@ type BootLogoController = ReturnType<typeof createBootLogoDraft> & {
 
 // Create a boot-logo draft with device-scoped preview ownership
 export function createBootLogoDraft(app: () => AppState) {
+    let timer: ReturnType<typeof setTimeout> | undefined;
+    let activeRequest = 0;
     return {
+        ...bootLogoFraming(),
+        framingPending: false,
+        previewSignature: '',
+        signature() {
+            return JSON.stringify([this.path, this.fit, this.crop]);
+        },
+        get cropStyle(): Record<string, string> {
+            const [x, y, w, h] = this.crop;
+            return {
+                left: `${100 * x}%`,
+                top: `${100 * y}%`,
+                width: `${100 * w}%`,
+                height: `${100 * h}%`,
+            };
+        },
+        get sourceStyle(): Record<string, string> {
+            const size = this.preview?.source_size || [1, 1];
+            return {
+                aspectRatio: `${size[0]}/${size[1]}`,
+                maxWidth: `${(260 * size[0]) / size[1]}px`,
+            };
+        },
+        get deviceStyle(): Record<string, string> {
+            const size = this.preview?.size || [1, 1];
+            return {
+                aspectRatio: `${size[0]}/${size[1]}`,
+                maxWidth: `${(260 * size[0]) / size[1]}px`,
+            };
+        },
+        queueFraming() {
+            if (this.saving || !this.path) return;
+            ++this.generation;
+            this.framingPending = true;
+            clearTimeout(timer);
+            timer = setTimeout(() => {
+                timer = undefined;
+                if (!this.preparing && this.path) void this.prepare(this.path);
+            }, 120);
+        },
         preview: null as BootLogoPreview | null,
-        fit: 'contain',
+        fit: 'cover',
         path: '',
         deviceId: '',
         deviceKey: '',
@@ -36,11 +78,19 @@ export function createBootLogoDraft(app: () => AppState) {
             return app().device?.manifest.capabilities.boot_logo?.size.join(' × ') || '';
         },
         // Check whether the prepared logo can be applied
-        get canApply() {
-            return Boolean(this.preview && this.current() && !this.preparing && !this.saving);
+        get canApply(): boolean {
+            return Boolean(
+                this.preview &&
+                this.current() &&
+                this.previewSignature === this.signature() &&
+                !this.framingPending &&
+                !this.framingDrag &&
+                !this.preparing &&
+                !this.saving,
+            );
         },
         // Check whether the prepared preview still matches the target
-        get previewCurrent() {
+        get previewCurrent(): boolean {
             return !this.preview || this.current();
         },
         // Check the original device identity, hardware contract and connection
@@ -60,6 +110,12 @@ export function createBootLogoDraft(app: () => AppState) {
         // Discard the prepared boot-logo preview
         async discard() {
             if (this.saving) return false;
+            this.cancelFraming();
+            clearTimeout(timer);
+            timer = undefined;
+            ++activeRequest;
+            this.framingPending = false;
+            this.previewSignature = '';
             this.generation++;
             const id = this.preview?.id;
             this.preview = null;
@@ -76,9 +132,18 @@ export function createBootLogoDraft(app: () => AppState) {
         // Prepare a selected image for the current device
         async prepare(path: string) {
             if (!this.supported || this.saving || this.preparing || !app().device) return;
+            clearTimeout(timer);
+            timer = undefined;
             const generation = ++this.generation;
+            const operation = ++activeRequest;
             const oldId = this.preview?.id;
-            this.preview = null;
+            if (path !== this.path) {
+                this.preview = null;
+                this.crop = [0, 0, 1, 1];
+                this.view = 'device';
+            }
+            this.previewSignature = '';
+            this.framingPending = false;
             this.deviceId = app().deviceId;
             this.deviceKey = app().device!.persistence_key;
             this.contractKey = JSON.stringify([
@@ -89,6 +154,9 @@ export function createBootLogoDraft(app: () => AppState) {
             this.path = path;
             this.preparing = true;
             this.error = '';
+            const signature = this.signature();
+            const crop = [...this.crop] as [number, number, number, number];
+            const fit = this.fit;
             try {
                 if (oldId)
                     await trackCloseRelease('boot-logo:' + oldId, () =>
@@ -97,7 +165,8 @@ export function createBootLogoDraft(app: () => AppState) {
                 const preview = await app().bridge.command('prepare_boot_logo', {
                     deviceId: this.deviceId,
                     path,
-                    fit: this.fit,
+                    fit,
+                    crop,
                 });
                 if (generation !== this.generation || !this.current()) {
                     await trackCloseRelease('boot-logo:' + preview.id, () =>
@@ -106,10 +175,17 @@ export function createBootLogoDraft(app: () => AppState) {
                     return;
                 }
                 this.preview = preview;
+                this.previewSignature = signature;
             } catch (error) {
-                if (generation === this.generation) this.error = String(error);
+                if (generation === this.generation) {
+                    this.error = String(error);
+                    this.preview = null;
+                }
             } finally {
-                if (generation === this.generation) this.preparing = false;
+                if (operation === activeRequest) {
+                    this.preparing = false;
+                    if (this.framingPending && this.path) this.queueFraming();
+                }
             }
         },
         // Choose a local image and prepare a logo preview
@@ -135,7 +211,7 @@ export function createBootLogoDraft(app: () => AppState) {
         },
         // Reprepare the preview after the fit mode changes
         async changeFit() {
-            if (this.path) await this.prepare(this.path);
+            if (this.path) this.queueFraming();
         },
         // Commit the prepared boot logo to the selected device
         async applyLogo() {
@@ -213,7 +289,9 @@ export function registerBootLogo(Alpine: typeof AlpineType, app: () => AppState)
             show(this: BootLogoController, event?: Event) {
                 if (!this.supported || this.saving) return;
                 (event?.currentTarget as HTMLElement | null)?.focus();
-                this.fit = 'contain';
+                this.fit = 'cover';
+                this.crop = [0, 0, 1, 1];
+                this.view = 'device';
                 this.error = '';
                 (this.$refs.logo as HTMLDialogElement).showModal();
             },

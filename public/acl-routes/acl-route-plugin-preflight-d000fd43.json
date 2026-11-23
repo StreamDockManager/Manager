@@ -1,0 +1,19 @@
+{
+  "version": 1,
+  "basePath": "..",
+  "components": {
+    "sd-plugin-preflight": {
+      "source": "components/sd-plugin-preflight.html",
+      "dependencies": [],
+      "options": {
+        "shadow": false,
+        "templateRevision": "sha256-a9XUwJ0WeMZ1AoaiPilZn4zAOJ7m-F1nE3S3c8f6_Uc"
+      }
+    }
+  },
+  "groups": {
+    "plugin-preflight": [
+      "sd-plugin-preflight"
+    ]
+  }
+}

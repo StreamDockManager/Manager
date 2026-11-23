@@ -1,27 +1,70 @@
 [
     {
-        "file": "fonts/NotoSans.ttf",
-        "sha256": "bfb7bb691513f12e734dc346c03a03f784912432d7e3fa8e56efcf906fe86b3d",
-        "source": "https://github.com/google/fonts/tree/main/ofl/notosans"
+        "file": "fonts/InterVariable.woff2",
+        "sha256": "693b77d4f32ee9b8bfc995589b5fad5e99adf2832738661f5402f9978429a8e3",
+        "source": "https://github.com/rsms/inter/releases/download/v4.1/Inter-4.1.zip",
+        "version": "4.1",
+        "archive_sha256": "9883fdd4a49d4fb66bd8177ba6625ef9a64aa45899767dde3d36aa425756b11e",
+        "archive_path": "web/InterVariable.woff2",
+        "license": "OFL-1.1"
     },
     {
-        "file": "fonts/NotoSansMono.ttf",
-        "sha256": "2cb2adb378a8f574213e23df697050b83c54c27df465a2015552740b2769a081",
-        "source": "https://github.com/google/fonts/tree/main/ofl/notosansmono"
+        "file": "fonts/InterVariable-Italic.woff2",
+        "sha256": "e564f652916db6c139570fefb9524a77c4d48f30c92928de9db19b6b5c7a262a",
+        "source": "https://github.com/rsms/inter/releases/download/v4.1/Inter-4.1.zip",
+        "version": "4.1",
+        "archive_sha256": "9883fdd4a49d4fb66bd8177ba6625ef9a64aa45899767dde3d36aa425756b11e",
+        "archive_path": "web/InterVariable-Italic.woff2",
+        "license": "OFL-1.1"
     },
     {
-        "file": "fonts/OFL-NotoSans.txt",
-        "sha256": "cee9892f9f0cc8fe882c9e9537ee6a89621d86ee7ceaf70b02e2b2b1c25c061a",
-        "source": ""
+        "file": "fonts/Inter-Regular.ttf",
+        "sha256": "40d692fce188e4471e2b3cba937be967878f631ad3ebbbdcd587687c7ebe0c82",
+        "source": "https://github.com/rsms/inter/releases/download/v4.1/Inter-4.1.zip",
+        "version": "4.1",
+        "archive_sha256": "9883fdd4a49d4fb66bd8177ba6625ef9a64aa45899767dde3d36aa425756b11e",
+        "archive_path": "extras/ttf/Inter-Regular.ttf",
+        "license": "OFL-1.1"
     },
     {
-        "file": "fonts/OFL-NotoSansMono.txt",
-        "sha256": "cee9892f9f0cc8fe882c9e9537ee6a89621d86ee7ceaf70b02e2b2b1c25c061a",
-        "source": ""
+        "file": "fonts/Inter-Bold.ttf",
+        "sha256": "288316099b1e0a47a4716d159098005eef7c0066921f34e3200393dbdb01947f",
+        "source": "https://github.com/rsms/inter/releases/download/v4.1/Inter-4.1.zip",
+        "version": "4.1",
+        "archive_sha256": "9883fdd4a49d4fb66bd8177ba6625ef9a64aa45899767dde3d36aa425756b11e",
+        "archive_path": "extras/ttf/Inter-Bold.ttf",
+        "license": "OFL-1.1"
+    },
+    {
+        "file": "fonts/Inter-Italic.ttf",
+        "sha256": "bbc051dd204b5019a1aa0bc0ae2aa8a05ab13e7a3f979fa357631dc7feb6833a",
+        "source": "https://github.com/rsms/inter/releases/download/v4.1/Inter-4.1.zip",
+        "version": "4.1",
+        "archive_sha256": "9883fdd4a49d4fb66bd8177ba6625ef9a64aa45899767dde3d36aa425756b11e",
+        "archive_path": "extras/ttf/Inter-Italic.ttf",
+        "license": "OFL-1.1"
+    },
+    {
+        "file": "fonts/Inter-BoldItalic.ttf",
+        "sha256": "948405a16cdc62701da5f4005ed068ca5f4d27061d98f7974ccfc37831d9581d",
+        "source": "https://github.com/rsms/inter/releases/download/v4.1/Inter-4.1.zip",
+        "version": "4.1",
+        "archive_sha256": "9883fdd4a49d4fb66bd8177ba6625ef9a64aa45899767dde3d36aa425756b11e",
+        "archive_path": "extras/ttf/Inter-BoldItalic.ttf",
+        "license": "OFL-1.1"
+    },
+    {
+        "file": "fonts/OFL-Inter.txt",
+        "sha256": "262481e844521b326f5ecd053e59b98c8b2da78c8ee1bdbb6e8174305e54935a",
+        "source": "https://github.com/rsms/inter/releases/download/v4.1/Inter-4.1.zip",
+        "version": "4.1",
+        "archive_sha256": "9883fdd4a49d4fb66bd8177ba6625ef9a64aa45899767dde3d36aa425756b11e",
+        "archive_path": "LICENSE.txt",
+        "license": "OFL-1.1"
     },
     {
         "file": "icons/LICENSE",
-        "sha256": "b495047bd93a9b06913511076f504daba17d5bbeb3e0650f3bb53a4220329c57",
+        "sha256": "bfc5728628ec031122ad7aa9fa0bce64abd46bc79fc0e0d5e3570aa831cc7ddd",
         "source": ""
     },
     {
@@ -128,6 +171,11 @@
         "file": "icons/terminal.svg",
         "sha256": "1ec2382658b6fe0642253ba75d3bbd8f48d03c9aa79c9cdb0dbbc269e112b8a1",
         "source": "https://raw.githubusercontent.com/lucide-icons/lucide/0.468.0/icons/terminal.svg"
+    },
+    {
+        "file": "icons/vault.svg",
+        "sha256": "35d1df5f0f68bf22bceccdcf5c9331ad2cfc952938b252b29f7a090bbc20b99f",
+        "source": ""
     },
     {
         "file": "icons/volume-2.svg",

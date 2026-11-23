@@ -1,3 +1,4 @@
+import { readTransfer } from './transfer-password';
 import type AlpineType from '@alpinejs/csp';
 import type { AppState } from './state';
 import { registerCloseDraft } from './close-releases';
@@ -20,6 +21,7 @@ export function registerProfileArchiveImport(
         working: false,
         error: '',
         dialogEpoch: 0,
+        viewMounted: false,
         unregisterCloseOwner: undefined as (() => void) | undefined,
         // Derive app from the current profile archive import state
         get app() {
@@ -31,6 +33,7 @@ export function registerProfileArchiveImport(
         },
         // Show the selected profile archive import content
         show(name: string) {
+            this.viewMounted = true;
             this.importBaseline = this.importCloseValue();
             showFeatureDialog(this, name);
         },
@@ -90,6 +93,37 @@ export function registerProfileArchiveImport(
                         row.source_control === mapping.source_control,
                 ) || { title: mapping.source_control, problem: null, occupied: false, choices: [] }
             );
+        },
+        // Offer replacement only for bindings with an eligible destination control
+        pluginReplacementEligible(mapping: PluginBindingMapping) {
+            return (
+                !!mapping.target_control &&
+                mapping.target_control !== '@omit' &&
+                this.pluginMappingRow(mapping).choices.some(
+                    (choice) => choice.value === mapping.target_control,
+                )
+            );
+        },
+        // Derive the same eligible rows used by individual replacement controls
+        get pluginReplacementMappings() {
+            return (this.imported?.plugin?.placement.bindings || []).filter((mapping) =>
+                this.pluginReplacementEligible(mapping),
+            );
+        },
+        // Reflect all, none and mixed replacement selections without changing the draft
+        syncPluginReplaceAll(input: HTMLInputElement) {
+            const mappings = this.pluginReplacementMappings;
+            const selected = mappings.filter((mapping) => mapping.replace).length;
+            input.checked = mappings.length > 0 && selected === mappings.length;
+            input.indeterminate = selected > 0 && selected < mappings.length;
+            input.disabled = this.working || mappings.length === 0;
+        },
+        // Update eligible replacement choices together and require a fresh placement review
+        changePluginReplaceAll(event: Event) {
+            if (this.working) return;
+            const checked = (event.currentTarget as HTMLInputElement).checked;
+            for (const mapping of this.pluginReplacementMappings) mapping.replace = checked;
+            this.pluginPlacementChanged();
         },
         // Require another review after plugin placement changes
         pluginPlacementChanged() {
@@ -235,7 +269,9 @@ export function registerProfileArchiveImport(
                 if (this.imported)
                     await app().command('cancel_profile_import', { id: this.imported.id });
                 this.imported = null;
-                this.imported = await app().command('prepare_profile_import', { path });
+                this.imported = await readTransfer((password) =>
+                    app().bridge.command('prepare_profile_import', { path: path!, password }),
+                );
                 this.resetRepairs();
                 this.pluginImportReviewed = false;
                 this.importMode = 'merge';

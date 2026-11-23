@@ -1,6 +1,21 @@
 //! Vendor OS events are delivered only from real OS sources, to live opted-in plugins
 use super::*;
+impl Hub {
+    // Notify the demand worker after authoritative enabled or connected state changes
+    pub(super) fn notify_vendor_demand(&self) {
+        if let Some(wake) = &self.vendor_demand_wake {
+            wake();
+        }
+    }
+}
 impl PluginHost {
+    // Install a nonblocking demand notification without exposing host state to the callback
+    pub fn set_vendor_demand_waker(&mut self, wake: Arc<dyn Fn() + Send + Sync>) {
+        let mut hub = self.hub.lock().unwrap();
+        hub.vendor_demand_wake = Some(wake);
+        hub.notify_vendor_demand();
+    }
+
     /// A settings window is opened only by an explicit first-party user request
     pub fn show_settings_interface(&self, id: &str) -> Result<(), String> {
         self.recovery.check()?;
@@ -225,6 +240,31 @@ fn parse_deep_link(url: &str) -> Result<(&str, &str), String> {
 #[cfg(test)]
 mod tests {
     use super::*;
+    #[test]
+    // Registration and revocation wake demand while rejected duplicate registration does not
+    fn vendor_demand_signal_tracks_authoritative_sessions() {
+        let notifications = Arc::new(std::sync::atomic::AtomicUsize::new(0));
+        let changed = notifications.clone();
+        let mut hub = Hub {
+            vendor_demand_wake: Some(Arc::new(move || {
+                changed.fetch_add(1, Ordering::SeqCst);
+            })),
+            ..Hub::default()
+        };
+        hub.sessions
+            .tokens
+            .insert("session".into(), "fixture".into());
+        let poll = mio::Poll::new().unwrap();
+        let wake = Arc::new(mio::Waker::new(poll.registry(), mio::Token(1)).unwrap());
+        let request = json!({"event":"registerPlugin","uuid":"session"});
+        assert!(transport::register(&mut hub, &request, wake.clone()).is_some());
+        assert_eq!(notifications.load(Ordering::SeqCst), 1);
+        assert!(transport::register(&mut hub, &request, wake).is_none());
+        assert_eq!(notifications.load(Ordering::SeqCst), 1);
+        hub.revoke_plugin_sessions("fixture", "session");
+        assert_eq!(notifications.load(Ordering::SeqCst), 2);
+        assert!(!hub.sessions.connected.contains("session"));
+    }
     #[test]
     // Verify deep links have bounded exact owner and opaque message
     fn deep_links_have_bounded_exact_owner_and_opaque_message() {

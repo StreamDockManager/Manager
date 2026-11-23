@@ -79,7 +79,9 @@ export function readMediaPreview(value: ArrayBuffer | number[] | MediaPreview): 
         throw Error('Invalid preview image type');
     return {
         ...metadata,
-        image: URL.createObjectURL(new Blob([buffer.slice(4 + length)], { type: metadata.mime })),
+        image: URL.createObjectURL(
+            new Blob([new Uint8Array(buffer, 4 + length)], { type: metadata.mime }),
+        ),
     };
 }
 // Release the temporary object URL used by a media preview

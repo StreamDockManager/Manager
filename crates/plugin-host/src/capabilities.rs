@@ -59,6 +59,9 @@ impl RefreshPolicy {
 )]
 #[serde(deny_unknown_fields)]
 pub struct Capabilities {
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    #[ts(optional)]
+    pub permissions: Option<Value>,
     #[serde(default, skip_serializing_if = "String::is_empty")]
     #[ts(optional, as = "Option<String>")]
     pub minimum_manager: String,
@@ -177,7 +180,11 @@ pub(super) fn inspect(
         descriptor = Some(value);
     }
     let Some(value) = descriptor else {
-        if manifest["StreamDockManager"].get("Capabilities").is_some() {
+        let extension = &manifest["StreamDockManager"];
+        if ["Capabilities", "SetupSlots", "Permissions"]
+            .iter()
+            .any(|key| extension.get(*key).is_some())
+        {
             return Err("Declared Manager capabilities require an executable descriptor".into());
         }
         // Standard vendor packages implement the vendor protocol, not the
@@ -199,6 +206,9 @@ pub(super) fn inspect(
         && value.settings_protocol != 1
     {
         return Err("Settings entrypoints require managed settings protocol 1".into());
+    }
+    if value.permissions.as_ref() != manifest["StreamDockManager"].get("Permissions") {
+        return Err("Package permission declarations differ from the compiled descriptor".into());
     }
     if value.id != manifest["UUID"]
         || value.plugin_version != manifest["Version"]
@@ -255,6 +265,18 @@ pub(super) fn inspect(
 
 #[cfg(test)]
 mod tests {
+    #[test]
+    fn vendor_baseline_cannot_declare_manager_permission_or_setup_authority() {
+        let root = tempfile::tempdir().unwrap();
+        let executable = root.path().join("fixture");
+        std::fs::write(&executable, b"no embedded descriptor").unwrap();
+        for property in ["Permissions", "SetupSlots"] {
+            let mut manifest = serde_json::json!({"StreamDockManager":{}});
+            manifest["StreamDockManager"][property] = serde_json::json!({"version":1});
+            assert!(inspect(root.path(), &executable, &manifest).is_err());
+        }
+    }
+
     #[test]
     // Verify refresh metadata checks inclusive bounds and off defaults
     fn refresh_metadata_checks_inclusive_bounds_and_off_defaults() {

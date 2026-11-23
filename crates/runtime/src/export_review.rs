@@ -64,6 +64,15 @@ pub struct ExportFieldEdit {
     pub replacement: Value,
     pub name: String,
 }
+#[derive(Debug, Clone, Serialize, Deserialize, ts_rs::TS, schemars::JsonSchema)]
+pub struct RehearsalFinding {
+    pub group: String,
+    pub message: String,
+    pub profile_id: String,
+    pub page_id: String,
+    pub control_id: String,
+}
+
 pub(crate) struct StagedExport {
     store: ProfileStore,
     data: ProfileData,
@@ -541,12 +550,12 @@ fn edit(
 // Hash a bounded regular candidate archive while rejecting symlinks
 fn archive_digest(path: &Path) -> Result<String, String> {
     let meta = path.symlink_metadata().map_err(|e| e.to_string())?;
-    if !meta.is_file() || meta.file_type().is_symlink() || meta.len() > MAX_ARCHIVE {
+    if !meta.is_file() || meta.file_type().is_symlink() || meta.len() > MAX_ARCHIVE + 256 {
         return Err("Candidate archive is not a bounded regular file".into());
     }
     let mut file = std::fs::File::open(path)
         .map_err(|e| e.to_string())?
-        .take(MAX_ARCHIVE + 1);
+        .take(MAX_ARCHIVE + 257);
     let mut buffer = [0; 65536];
     let mut hash = Sha256::new();
     let mut total = 0;
@@ -558,7 +567,7 @@ fn archive_digest(path: &Path) -> Result<String, String> {
         total += n as u64;
         hash.update(&buffer[..n]);
     }
-    if total > MAX_ARCHIVE {
+    if total > MAX_ARCHIVE + 256 {
         return Err("Candidate archive exceeds 80 MiB".into());
     }
     Ok(hex::encode(hash.finalize()))
@@ -580,6 +589,198 @@ fn build_archive(
     ))
 }
 impl Runtime {
+    pub fn rehearse_export(
+        &self,
+        id: &str,
+        revision: u64,
+        digest: &str,
+        model: &str,
+    ) -> Result<Vec<RehearsalFinding>, String> {
+        let models = hardware_registry::manifests();
+        let recipient = models
+            .iter()
+            .find(|m| m.model_id == model)
+            .ok_or("Choose a recipient device model")?;
+        let stages = self.exports.lock().unwrap();
+        let stage = stages.active(id, "Export review expired", "Review the candidate again")?;
+        if stage.report.kind != "profiles"
+            || stage.report.revision != revision
+            || stage.report.archive_sha256 != digest
+            || self.state.lock().unwrap().configuration_revision != stage.report.source_revision
+        {
+            return Err("Workspace or candidate changed. Prepare a new export review.".into());
+        }
+        let path = stage.directory.path().join("candidate.zip");
+        if archive_digest(&path)? != digest {
+            return Err("Candidate integrity check failed".into());
+        }
+        let mut findings = vec![];
+        let mut add = |group: &str, message: &str, profile: &str, page: &str, control: &str| {
+            findings.push(RehearsalFinding {
+                group: group.into(),
+                message: message.into(),
+                profile_id: profile.into(),
+                page_id: page.into(),
+                control_id: control.into(),
+            });
+        };
+        let imported = match crate::importing::stage_portable(&path, 0) {
+            Ok(stage) => stage,
+            Err(_) => {
+                add(
+                    "Blockers",
+                    "The portable importer rejected the archive or an embedded asset.",
+                    "",
+                    "",
+                    "",
+                );
+                return Ok(findings);
+            }
+        };
+        if profiles::validate_data(&imported.data).is_err() {
+            add(
+                "Blockers",
+                "The imported workspace failed Manager validation.",
+                "",
+                "",
+                "",
+            );
+        }
+        let mut local_paths = std::collections::HashSet::new();
+        for issue in crate::importing::inspect_recipient(&imported, &[], &[], false) {
+            let plugin_message;
+            let (group, message) = match issue.kind.as_str() {
+                "plugin"
+                    if issue.value.len() <= 240
+                        && issue
+                            .value
+                            .bytes()
+                            .all(|c| c.is_ascii_alphanumeric() || b"_.:-".contains(&c)) =>
+                {
+                    plugin_message = format!(
+                        "Install the plugin providing {} and its declared runtime.",
+                        issue.value
+                    );
+                    ("Recipient prerequisites", plugin_message.as_str())
+                }
+                "plugin" => (
+                    "Recipient prerequisites",
+                    "Install the required plugin and its declared runtime.",
+                ),
+                "path" => {
+                    if !local_paths.insert((
+                        issue.profile_id.clone(),
+                        issue.page_id.clone(),
+                        issue.control_id.clone(),
+                    )) {
+                        continue;
+                    }
+                    (
+                        "Recipient prerequisites",
+                        "Configure the recipient’s local application, executable or file.",
+                    )
+                }
+                _ => ("Blockers", issue.message.as_str()),
+            };
+            add(
+                group,
+                message,
+                &issue.profile_id,
+                &issue.page_id,
+                &issue.control_id,
+            );
+        }
+        for profile in &imported.data.profiles {
+            if profile.model_id != model {
+                add(
+                    "Blockers",
+                    "Convert this profile to the selected recipient model.",
+                    &profile.id,
+                    "",
+                    "",
+                );
+            }
+            for param in &profile.parameters {
+                if param.required && param.default.is_none() {
+                    add(
+                        "Recipient prerequisites",
+                        &format!("Set required parameter {}.", param.name),
+                        &profile.id,
+                        "",
+                        "",
+                    );
+                }
+            }
+            for page in &profile.pages {
+                for (control, binding) in &page.bindings {
+                    if profile.model_id != model {
+                        add(
+                            "Blockers",
+                            if recipient.control(control).is_err() {
+                                "Control is unavailable on the selected recipient model."
+                            } else {
+                                "Review this assignment when converting between device models."
+                            },
+                            &profile.id,
+                            &page.id,
+                            control,
+                        );
+                    }
+                    let mut local = false;
+                    let mut parameters = std::collections::BTreeSet::new();
+                    for segment in &binding.live_label {
+                        if let crate::live_label::LabelSegment::Parameter { name, .. } = segment {
+                            parameters.insert(name.clone());
+                        }
+                    }
+                    binding.action.try_visit_fields(
+                        &mut |role, value| -> Result<(), String> {
+                            if let Some(name) = crate::parameters::reference(value) {
+                                parameters.insert(name.to_owned());
+                            } else {
+                                local |= role.is_local_path() && !value.is_empty();
+                            }
+                            Ok(())
+                        },
+                        &mut |_, _, _| Ok(()),
+                    )?;
+                    for name in parameters {
+                        if profile
+                            .parameters
+                            .iter()
+                            .any(|p| p.name == name && p.required && p.default.is_none())
+                        {
+                            add(
+                                "Recipient prerequisites",
+                                &format!("This assignment uses required parameter {name}."),
+                                &profile.id,
+                                &page.id,
+                                control,
+                            );
+                        }
+                    }
+                    if local
+                        && !local_paths.contains(&(
+                            profile.id.clone(),
+                            page.id.clone(),
+                            control.clone(),
+                        ))
+                    {
+                        add(
+                            "Recipient prerequisites",
+                            "Review machine-local paths on the recipient installation.",
+                            &profile.id,
+                            &page.id,
+                            control,
+                        );
+                    }
+                }
+            }
+        }
+        add("Verify on a real installation", "Check device output, operating-system permissions and installed actions on the recipient device.", "", "", "");
+        Ok(findings)
+    }
+
     // Prepare export review
     pub fn prepare_export_review(
         &self,
@@ -624,7 +825,7 @@ impl Runtime {
         } else {
             data.saved_macros.iter().map(|m| m.name.clone()).collect()
         };
-        profiles::prepare_portable_export(&mut data, request.include_plugin_settings);
+        profiles::prepare_portable_export(&mut data, request.include_plugin_settings)?;
         profiles::validate_data(&data)?;
         if serde_json::to_vec(&data).map_err(|e| e.to_string())?.len() > 16 * 1024 * 1024 {
             return Err("Candidate exceeds 16 MiB".into());
@@ -637,7 +838,7 @@ impl Runtime {
             .pin(assets.clone(), "Reviewed export candidate")?;
         let media = self.profiles.media_gate.lock()?;
         let directory = tempfile::tempdir().map_err(|e| e.to_string())?;
-        let store = ProfileStore::open(directory.path().join("profiles"))?;
+        let store = ProfileStore::staging(&directory)?;
         let mut total = 0usize;
         for id in assets {
             if let Ok(ext) = self.profiles.asset_extension(&id) {
@@ -748,6 +949,17 @@ impl Runtime {
         sha256: &str,
         path: &Path,
     ) -> Result<(), String> {
+        self.write_export_transfer(id, expected, sha256, path, None)
+            .map(|_| ())
+    }
+    pub fn write_export_transfer(
+        &self,
+        id: &str,
+        expected: u64,
+        sha256: &str,
+        path: &Path,
+        password: Option<&str>,
+    ) -> Result<String, String> {
         let mut stages = self.exports.lock().unwrap();
         let stage = stages.active(
             id,
@@ -762,6 +974,10 @@ impl Runtime {
             .filter(|p| !p.as_os_str().is_empty())
             .unwrap_or(Path::new("."));
         let parent = parent.canonicalize().map_err(|e| e.to_string())?;
+        stream_dock_manager_storage::vault::check_transfer_path(
+            self.profiles.storage().root(),
+            path,
+        )?;
         if parent.starts_with(
             self.profiles
                 .root
@@ -778,33 +994,42 @@ impl Runtime {
             return Err("Frozen candidate integrity failed; start a new review".into());
         }
         let mut temporary = tempfile::NamedTempFile::new_in(&parent).map_err(|e| e.to_string())?;
-        let mut file = std::fs::File::open(source)
+        let mut data = zeroize::Zeroizing::new(Vec::new());
+        std::fs::File::open(source)
             .map_err(|e| e.to_string())?
-            .take(MAX_ARCHIVE + 1);
-        let mut hash = Sha256::new();
-        let mut buffer = [0; 65536];
-        let mut total = 0;
-        loop {
-            let n = file.read(&mut buffer).map_err(|e| e.to_string())?;
-            if n == 0 {
-                break;
-            }
-            total += n as u64;
-            if total > MAX_ARCHIVE {
-                return Err("Candidate archive exceeds its bound".into());
-            }
-            hash.update(&buffer[..n]);
-            temporary
-                .write_all(&buffer[..n])
-                .map_err(|e| e.to_string())?;
-        }
-        if hex::encode(hash.finalize()) != sha256 {
+            .take(MAX_ARCHIVE + 1)
+            .read_to_end(&mut data)
+            .map_err(|e| e.to_string())?;
+        if data.len() as u64 > MAX_ARCHIVE || hex::encode(Sha256::digest(data.as_slice())) != sha256
+        {
             return Err("Frozen candidate changed during write; destination preserved".into());
         }
+        if stage.report.include_plugin_settings {
+            use stream_dock_manager_storage::vault::transfer::{self, Kind};
+            transfer::write(
+                if stage.report.kind == "macros" {
+                    Kind::Macros
+                } else {
+                    Kind::Profiles
+                },
+                temporary.as_file_mut(),
+                &mut data,
+                password
+                    .filter(|s| !s.is_empty())
+                    .ok_or("Enter an export password to include plugin settings.")?,
+            )?;
+        } else {
+            temporary.write_all(&data).map_err(|e| e.to_string())?;
+        }
         temporary.as_file().sync_all().map_err(|e| e.to_string())?;
+        let written = if stage.report.include_plugin_settings {
+            archive_digest(temporary.path())?
+        } else {
+            sha256.to_owned()
+        };
         profiles::atomic_replace(temporary.path(), path)?;
         stages.remove(id);
-        Ok(())
+        Ok(written)
     }
 }
 

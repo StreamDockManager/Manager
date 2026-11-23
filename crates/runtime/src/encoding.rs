@@ -184,6 +184,53 @@ pub fn mime(bytes: &[u8]) -> &'static str {
         "image/png"
     }
 }
+/// Only the qualified full-screen wallpaper path changes chroma sampling.
+#[derive(Clone, Copy, PartialEq, Eq)]
+pub(crate) enum AnimationTarget {
+    Standard,
+    N4Wallpaper,
+}
+impl AnimationTarget {
+    pub(crate) fn for_wallpaper(model: &str, variant: &str) -> Self {
+        if model == "n4-pro" && variant == "vsdinside" {
+            Self::N4Wallpaper
+        } else {
+            Self::Standard
+        }
+    }
+
+    fn subsample(
+        self,
+        options: &crate::media::MediaOptions,
+        size: [u16; 2],
+        frames: usize,
+    ) -> bool {
+        self == Self::N4Wallpaper
+            && size == [800, 480]
+            && frames > 1
+            && options.encoding == "auto"
+            && options.jpeg_quality.is_none()
+    }
+}
+
+/// Encode one interleaved baseline scan. Luma keeps the panel's full resolution.
+pub(crate) fn encode_wallpaper_420(
+    pixels: image::DynamicImage,
+    quality: u8,
+) -> Result<Vec<u8>, String> {
+    let rgb = pixels.into_rgb8();
+    let width = u16::try_from(rgb.width()).map_err(|_| "Wallpaper width exceeds JPEG limits")?;
+    let height = u16::try_from(rgb.height()).map_err(|_| "Wallpaper height exceeds JPEG limits")?;
+    let mut bytes = Vec::new();
+    let mut encoder = jpeg_encoder::Encoder::new(&mut bytes, quality);
+    encoder.set_sampling_factor(jpeg_encoder::SamplingFactor::R_4_2_0);
+    encoder.set_chroma_subsampling_method(jpeg_encoder::ChromaSubsamplingMethod::Average);
+    encoder
+        .encode(rgb.as_raw(), width, height, jpeg_encoder::ColorType::Rgb)
+        .map_err(|e| e.to_string())?;
+    Ok(bytes)
+}
+
 impl crate::Runtime {
     /// Shared internal media output for backgrounds and their previews. Only the
     /// bounded media renderer supplies these PNGs; imported/plugin bytes continue
@@ -197,9 +244,33 @@ impl crate::Runtime {
         options: &crate::media::MediaOptions,
         formats: &[String],
     ) -> Result<crate::media::SharedBytes, String> {
+        self.render_media_frame_in_cycle(
+            asset,
+            elapsed,
+            size,
+            rotation,
+            options,
+            formats,
+            AnimationTarget::Standard,
+            &Default::default(),
+        )
+    }
+
+    #[allow(clippy::too_many_arguments)]
+    pub(crate) fn render_media_frame_in_cycle(
+        &self,
+        asset: &str,
+        elapsed: std::time::Duration,
+        size: [u16; 2],
+        rotation: u16,
+        options: &crate::media::MediaOptions,
+        formats: &[String],
+        target: AnimationTarget,
+        clips: &crate::profiles::ClipCycle,
+    ) -> Result<crate::media::SharedBytes, String> {
         options.validate()?;
-        if let Some(clip) = self.profiles.clip(asset)? {
-            return self.render_animation_frame_shared(
+        if let Some(clip) = clips.get(&self.profiles, asset)? {
+            return self.render_animation_frame_in_cycle(
                 &clip,
                 options.frame_index(&clip, elapsed),
                 size,
@@ -207,11 +278,20 @@ impl crate::Runtime {
                 options,
                 formats,
                 None,
+                target,
+                clips,
             );
         }
-        let png = self
-            .profiles
-            .render_media_shared(asset, elapsed, size[0], size[1], rotation, "png", options)?;
+        let png = self.profiles.render_media_shared_in_cycle(
+            asset,
+            elapsed,
+            size[0],
+            size[1],
+            rotation,
+            "png",
+            options,
+            Some(clips),
+        )?;
         let policy = options.encoding.as_str();
         let supported = formats.iter().any(|format| format == "jpeg");
         let photographic =
@@ -225,7 +305,7 @@ impl crate::Runtime {
             return Ok(png);
         }
         use sha2::{Digest, Sha256};
-        let quality = options.quality(self.profiles.clip(asset)?.is_some());
+        let quality = options.quality(false);
         let key = format!(
             "encoding-v2:{}:{supported}:{policy}:{photographic}:true:{quality}",
             hex::encode(Sha256::digest(&**png))
@@ -254,6 +334,31 @@ impl crate::Runtime {
         formats: &[String],
         background: Option<[u8; 4]>,
     ) -> Result<crate::media::SharedBytes, String> {
+        self.render_animation_frame_in_cycle(
+            clip,
+            index,
+            size,
+            rotation,
+            options,
+            formats,
+            background,
+            AnimationTarget::Standard,
+            &Default::default(),
+        )
+    }
+    #[allow(clippy::too_many_arguments)]
+    pub(crate) fn render_animation_frame_in_cycle(
+        &self,
+        clip: &crate::media::Clip,
+        index: usize,
+        size: [u16; 2],
+        rotation: u16,
+        options: &crate::media::MediaOptions,
+        formats: &[String],
+        background: Option<[u8; 4]>,
+        target: AnimationTarget,
+        cycle: &crate::profiles::ClipCycle,
+    ) -> Result<crate::media::SharedBytes, String> {
         options.validate()?;
         if options.trim_start_ms >= clip.duration_ms
             || options
@@ -263,41 +368,51 @@ impl crate::Runtime {
             return Err("Trim boundaries exceed the clip duration".into());
         }
         let jpeg = options.encoding != "png" && formats.iter().any(|format| format == "jpeg");
+        let subsample = jpeg && target.subsample(options, size, clip.frames.len());
         let background = background.filter(|color| color[3] != 0);
         let key = format!(
-            "animation-output-v3:{}:{size:?}:{rotation}:{}:{}:{jpeg}:{background:?}",
-            clip.frame_digests[index],
+            "animation-output-v3:{}:{size:?}:{rotation}:{}:{}:{jpeg}:{background:?}:{subsample}",
+            hex::encode(clip.frame_digests[index]),
             options.pixel_key(),
             options.quality(true)
         );
         if let Some(bytes) = self.profiles.render_cache.lock().unwrap().get_shared(&key) {
             return Ok(bytes);
         }
-        let pixels = hardware_core::render::edited_pixels(
-            &clip.frames[index],
-            size[0],
-            size[1],
-            rotation,
-            options.crop,
-            options.fit == "fit",
-            Some(options.detail_bounds()),
-        )
-        .map_err(|e| e.to_string())?;
+        let pixels = cycle.with_decoded(self, clip, index, |source| {
+            hardware_core::render::edited_decoded_pixels(
+                source,
+                size[0],
+                size[1],
+                rotation,
+                options.crop,
+                options.fit == "fit",
+                Some(options.detail_bounds()),
+            )
+        })?;
         let pixels = if options.letterbox.as_deref() == Some("black") {
             hardware_core::render::black_matte(pixels)
         } else {
             pixels
         };
-        let pixels = if let Some(color) = background {
-            hardware_core::render::over_color_pixels(pixels, color)
-        } else {
-            pixels
+        // Opaque video and black-matted frames already cover the binding color.
+        let pixels = match background {
+            Some(color) if !jpeg || pixels.color().has_alpha() => {
+                hardware_core::render::over_color_pixels(pixels, color)
+            }
+            _ => pixels,
         };
-        let opaque = !hardware_core::render::has_transparency(&pixels);
-        let format = if jpeg && opaque { "jpeg" } else { "png" };
-        let bytes =
+        let format = if jpeg && !hardware_core::render::has_transparency(&pixels) {
+            "jpeg"
+        } else {
+            "png"
+        };
+        let bytes = if subsample && format == "jpeg" {
+            encode_wallpaper_420(pixels, options.quality(true))?
+        } else {
             hardware_core::render::encode_pixels_quality(pixels, format, options.quality(true))
-                .map_err(|e| e.to_string())?;
+                .map_err(|e| e.to_string())?
+        };
         if format == "jpeg" {
             JPEG_ENCODES.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
         }
@@ -341,6 +456,7 @@ impl crate::Runtime {
         formats: &[String],
     ) -> Result<crate::media::SharedBytes, String> {
         let binding = crate::Binding {
+            live_label: Vec::new(),
             dial_response: None,
             title: String::new(),
             color: "#000000".into(),
@@ -375,17 +491,6 @@ impl crate::Runtime {
         )
         .map(|bytes| self.owned_render_bytes(bytes))
     }
-    /// Trusted boundary: `bytes` must be produced by the bounded internal PNG renderer
-    /// Callers accepting plugin/imported bytes must use `encode_surface` instead
-    pub(crate) fn encode_surface_validated_png(
-        &self,
-        bytes: crate::media::SharedBytes,
-        binding: Option<&crate::Binding>,
-        formats: &[String],
-        has_feedback: bool,
-    ) -> Result<crate::media::SharedBytes, String> {
-        self.encode_surface_shared(bytes, binding, formats, has_feedback, true)
-    }
     // Encode surface shared
     pub(crate) fn encode_surface_shared(
         &self,
@@ -394,6 +499,18 @@ impl crate::Runtime {
         formats: &[String],
         has_feedback: bool,
         validated_png: bool,
+    ) -> Result<crate::media::SharedBytes, String> {
+        self.encode_surface_with_cache(bytes, binding, formats, has_feedback, validated_png, true)
+    }
+
+    pub(crate) fn encode_surface_with_cache(
+        &self,
+        bytes: crate::media::SharedBytes,
+        binding: Option<&crate::Binding>,
+        formats: &[String],
+        has_feedback: bool,
+        validated_png: bool,
+        cache_intermediates: bool,
     ) -> Result<crate::media::SharedBytes, String> {
         let Some(binding) = binding else {
             return choose_recorded(bytes, false, "png", false, validated_png);
@@ -427,11 +544,21 @@ impl crate::Runtime {
             .flatten()
             .is_some();
         let quality = binding.media.quality(video);
+        if !cache_intermediates {
+            return choose_shared_quality(
+                bytes,
+                supported,
+                policy,
+                photographic,
+                validated_png,
+                quality,
+            );
+        }
         let key = format!(
             "encoding-v2:{}:{supported}:{policy}:{photographic}:{validated_png}:{quality}",
             hex::encode(Sha256::digest(&**bytes))
         );
-        self.cached_render(key, || {
+        self.cached_render(crate::media::RenderKey::from_name(&key), || {
             choose_shared_quality(
                 bytes,
                 supported,
@@ -445,6 +572,174 @@ impl crate::Runtime {
 }
 #[cfg(test)]
 mod tests {
+    #[test]
+    fn automatic_n4_wallpaper_preserves_geometry_and_separates_cached_encodings() {
+        use super::AnimationTarget;
+        use crate::media::{Clip, MediaOptions};
+        let root = tempfile::tempdir().unwrap();
+        let runtime = crate::Runtime::build(root.path().into(), false).unwrap();
+        let red = [220, 25, 15];
+        let blue = [20, 30, 211];
+        let pixels =
+            image::RgbImage::from_fn(80, 48, |x, _| image::Rgb(if x < 40 { red } else { blue }));
+        let png = hardware_core::render::encode_pixels(pixels.into(), "png").unwrap();
+        let clip = Clip::new("gif", vec![png.clone(), png], vec![40, 40]).unwrap();
+        let options = MediaOptions::default();
+        let target = AnimationTarget::for_wallpaper("n4-pro", "vsdinside");
+        let render = |target, options: &MediaOptions| {
+            runtime
+                .render_animation_frame_in_cycle(
+                    &clip,
+                    0,
+                    [800, 480],
+                    180,
+                    options,
+                    &["jpeg".into(), "png".into()],
+                    None,
+                    target,
+                    &Default::default(),
+                )
+                .unwrap()
+        };
+        let reference = render(AnimationTarget::Standard, &options);
+        let reduced = render(target, &options);
+        // These are locally generated baseline JPEGs. The first component in SOF0 is luma.
+        let luma_sampling = |bytes: &[u8]| {
+            let sof = bytes
+                .windows(2)
+                .position(|mark| mark == [0xff, 0xc0])
+                .unwrap();
+            bytes[sof + 11]
+        };
+        assert_eq!(luma_sampling(&reference), 0x11);
+        assert_eq!(luma_sampling(&reduced), 0x22);
+        assert!(std::sync::Arc::ptr_eq(&reduced, &render(target, &options)));
+        let decoded = image::load_from_memory(&reduced).unwrap().into_rgb8();
+        assert_eq!(decoded.dimensions(), (800, 480));
+        assert!(decoded.get_pixel(20, 240)[2] > 190 && decoded.get_pixel(780, 240)[0] > 190);
+        assert_eq!(
+            render(
+                target,
+                &MediaOptions {
+                    jpeg_quality: Some(75),
+                    ..options.clone()
+                }
+            ),
+            reference
+        );
+        assert_eq!(
+            render(
+                target,
+                &MediaOptions {
+                    encoding: "jpeg".into(),
+                    ..options.clone()
+                }
+            ),
+            reference
+        );
+        assert!(!target.subsample(&options, [112, 112], 2));
+        assert!(!target.subsample(&options, [800, 480], 1));
+        assert!(
+            !AnimationTarget::for_wallpaper("n4-pro", "mirabox").subsample(&options, [800, 480], 2)
+        );
+        let transparent = image::RgbaImage::from_pixel(80, 48, image::Rgba([8, 16, 32, 128]));
+        let frame = hardware_core::render::encode_pixels(transparent.into(), "png").unwrap();
+        let alpha_clip = Clip::new("gif", vec![frame.clone(), frame], vec![40, 40]).unwrap();
+        let alpha = runtime
+            .render_animation_frame_in_cycle(
+                &alpha_clip,
+                0,
+                [800, 480],
+                0,
+                &options,
+                &["png".into(), "jpeg".into()],
+                None,
+                target,
+                &Default::default(),
+            )
+            .unwrap();
+        assert!(alpha.starts_with(b"\x89PNG"));
+        assert_eq!(
+            image::load_from_memory(&alpha)
+                .unwrap()
+                .to_rgba8()
+                .get_pixel(400, 240)[3],
+            128
+        );
+        runtime.shutdown();
+    }
+
+    #[test]
+    fn decoded_frame_is_shared_across_crops_and_released_with_the_cycle() {
+        let root = tempfile::tempdir().unwrap();
+        let runtime = crate::Runtime::build(root.path().join("app"), false).unwrap();
+        let clip = crate::media::prepare(include_bytes!(
+            "../../../tests/fixtures/media/source-25.gif"
+        ))
+        .unwrap();
+        let reserved = || {
+            runtime.profiles.media_budget.stats()["reserved_preparation_bytes"]
+                .as_u64()
+                .unwrap()
+        };
+        let before = reserved();
+        {
+            let cycle = crate::profiles::ClipCycle::default();
+            let bytes = cycle
+                .with_decoded(
+                    &runtime,
+                    &clip,
+                    0,
+                    |image| Ok(image.as_bytes().len() as u64),
+                )
+                .unwrap();
+            for (crop, rotation, fit) in [
+                ([0., 0., 1., 1.], 0, false),
+                ([0.1, 0.2, 0.8, 0.5], 90, true),
+            ] {
+                let actual = cycle
+                    .with_decoded(&runtime, &clip, 0, |shared| {
+                        hardware_core::render::edited_decoded_pixels(
+                            shared,
+                            90,
+                            64,
+                            rotation,
+                            crop,
+                            fit,
+                            Some([16, 512]),
+                        )
+                    })
+                    .unwrap();
+                let old = hardware_core::render::edited_pixels(
+                    &clip.frames[0],
+                    90,
+                    64,
+                    rotation,
+                    crop,
+                    fit,
+                    Some([16, 512]),
+                )
+                .unwrap();
+                assert_eq!(actual, old);
+            }
+            assert_eq!(reserved() - before, bytes);
+            assert_eq!(
+                runtime
+                    .metrics
+                    .snapshot()
+                    .into_iter()
+                    .find(|m| m.name == "animation_source_decode_hits")
+                    .unwrap()
+                    .count,
+                2
+            );
+            assert_ne!(clip.frame_digests[0], clip.frame_digests[1]);
+            cycle.with_decoded(&runtime, &clip, 1, |_| Ok(())).unwrap();
+        }
+        assert_eq!(reserved(), before);
+        runtime.shutdown();
+    }
+
     use super::*;
     use std::{sync::Arc, time::Duration};
 

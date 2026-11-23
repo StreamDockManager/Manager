@@ -1,13 +1,11 @@
-import { nextTab, tabNavigationKey } from './tab-navigation';
 import Alpine from '@alpinejs/csp';
 import { createCacheSettings } from './cache-settings';
 import { createDesktopSettings } from './desktop-settings';
 import { native } from './bridge';
-import { jumpToSection } from './visibility';
+import { permissionsController } from './plugin-permissions';
+import { pageSections } from './tab-navigation';
 import type { registerTheme } from './theme';
-import { paletteColors, type ThemeMode } from './theme-style';
 import { ownWindowMethods } from './window-work';
-import { windowCloseOwners } from './window-close-owners';
 
 import { registerPaletteEditor } from './palette-editor';
 import { registerParameters } from './parameters-ui';
@@ -20,6 +18,7 @@ type CacheSettingsView = ReturnType<typeof createCacheSettings> & {
 };
 // Register the settings handler with its owner
 export function register() {
+    Alpine.data('pluginPermissions', () => permissionsController(() => app().snapshot.plugins));
     Alpine.data('cacheSettings', () =>
         Object.assign(createCacheSettings(app), {
             // Initialize settings state and its required lifecycle hooks
@@ -50,32 +49,8 @@ export function register() {
     registerParameters(Alpine, app);
     registerProfilePalettes(Alpine, app);
     registerPaletteEditor(Alpine, app);
-    // Resolve the current settings appearance
     const theme = () => Alpine.store('theme') as ReturnType<typeof registerTheme>;
-    Alpine.data('paletteBrowser', () => ({
-        paletteQuery: '',
-        paletteTab: 'light' as ThemeMode,
-        pendingPalette: null as { mode: ThemeMode; id: string } | null,
-        previewOwner: Symbol('Palette browser'),
-        unregisterClose: undefined as (() => void) | undefined,
-        // Initialize settings state and its required lifecycle hooks
-        init() {
-            this.unregisterClose = windowCloseOwners.register({
-                name: 'Palette browser',
-                // Return a snapshot of the current settings state
-                state: () => 'clean',
-                // Discard pending settings edits without saving them
-                discard: () => this.closePaletteBrowser(),
-                // Release resources retained by the settings operation
-                release: () => this.closePaletteBrowser(),
-            });
-        },
-        // Release settings state and associated lifecycle resources
-        destroy() {
-            this.unregisterClose?.();
-            theme().clearPalettePreview(this.previewOwner);
-        },
-        // Derive selected palettes from the current settings state
+    Alpine.data('paletteSummary', () => ({
         get selectedPalettes() {
             return theme().paletteGroups.map(({ name, mode, options }) => ({
                 label: mode === 'light' ? 'Light' : 'Dark',
@@ -84,105 +59,21 @@ export function register() {
                 active: theme().isActivePalette(mode, theme().style[name]),
             }));
         },
-        // Derive matching palettes from the current settings state
-        get matchingPalettes() {
-            const query = this.paletteQuery.trim().toLowerCase();
-            return theme()
-                .paletteGroups.find((group) => group.mode === this.paletteTab)!
-                .options.filter((option) => option.label.toLowerCase().includes(query));
-        },
-        // Derive saved palette id from the current settings state
-        get savedPaletteId() {
-            return this.paletteTab === 'light'
-                ? theme().style.lightPalette
-                : theme().style.darkPalette;
-        },
-        // Derive preview palette from the current settings state
-        get previewPalette() {
-            const mode = this.pendingPalette?.mode ?? this.paletteTab;
-            const group = theme().paletteGroups.find((group) => group.mode === mode)!;
-            const id = this.pendingPalette?.id ?? theme().style[group.name];
-            const option = group.options.find((option) => option.id === id) ?? group.options[0];
-            const colors = {
-                ...paletteColors(mode, option.id),
-                ...theme().customPalettes.find(
-                    (palette) => palette.id === option.id && palette.mode === mode,
-                )?.colors,
-            };
-            return {
-                label: option.label,
-                modeLabel: mode === 'light' ? 'Light preview' : 'Dark preview',
-                style: Object.fromEntries(
-                    ['canvas', 'surface', 'ink', 'muted', 'accent', 'border'].map((key) => [
-                        '--preview-' + key,
-                        colors[key],
-                    ]),
-                ),
-            };
-        },
-        // Derive can confirm palette from the current settings state
-        get canConfirmPalette() {
-            const pending = this.pendingPalette;
-            if (!pending) return false;
-            const { mode, id } = pending;
-            const themeState = theme();
-            const key = mode === 'light' ? 'lightPalette' : 'darkPalette';
-            return (
-                id !== themeState.style[key] ||
-                (!themeState.followsSystem && mode !== themeState.resolved)
+        openPaletteBrowser(event: Event) {
+            window.dispatchEvent(
+                new CustomEvent('open-palette-browser', { detail: event.currentTarget }),
             );
-        },
-        // Open the palette browser
-        openPaletteBrowser() {
-            this.paletteQuery = '';
-            this.paletteTab = theme().resolved;
-            this.pendingPalette = null;
-            (this.$refs.paletteBrowser as HTMLDialogElement).showModal();
-            this.resetPaletteResults();
-        },
-        // Reset the palette results
-        resetPaletteResults() {
-            (this.$refs.paletteResults as HTMLElement).scrollTop = 0;
-        },
-        // Show the palette tab
-        showPaletteTab(mode: ThemeMode) {
-            this.paletteTab = mode;
-            this.resetPaletteResults();
-        },
-        // Navigate light and dark palette tabs with supported keyboard shortcuts
-        navigatePaletteTabs(event: KeyboardEvent) {
-            if (!tabNavigationKey(event.key)) return;
-            event.preventDefault();
-            this.showPaletteTab(nextTab(['light', 'dark'] as const, this.paletteTab, event.key)!);
-            const tab =
-                this.paletteTab === 'light'
-                    ? this.$refs.lightPaletteTab
-                    : this.$refs.darkPaletteTab;
-            (tab as HTMLButtonElement).focus();
-        },
-        // Close the palette browser
-        closePaletteBrowser() {
-            this.pendingPalette = null;
-            theme().clearPalettePreview(this.previewOwner);
-            const dialog = this.$refs.paletteBrowser as HTMLDialogElement;
-            if (!dialog?.open) return;
-            dialog.close();
-            (this.$refs.browsePalettes as HTMLButtonElement).focus({ preventScroll: true });
-        },
-        // Stage the selected palette and publish its owner-scoped theme preview
-        previewChoice(mode: ThemeMode, id: string) {
-            this.pendingPalette = { mode, id };
-            theme().showPalettePreview(this.previewOwner, mode, id);
-        },
-        // Confirm the palette
-        confirmPalette() {
-            if (!this.pendingPalette || !this.canConfirmPalette) return;
-            theme().selectPalette(this.pendingPalette.mode, this.pendingPalette.id);
-            this.closePaletteBrowser();
         },
     }));
     Alpine.data('settings', () => ({
-        jumpToSection,
+        ...pageSections('settings', [
+            { id: 'appearance', label: 'Appearance' },
+            { id: 'profiles', label: 'Profiles' },
+            { id: 'devices', label: 'Devices & startup' },
+            { id: 'plugins', label: 'Plugins' },
+            { id: 'permissions', label: 'Permissions' },
+            { id: 'storage', label: 'Storage & updates' },
+        ]),
         // Choose the background
         chooseBackground() {
             window.dispatchEvent(

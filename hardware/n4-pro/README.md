@@ -1,27 +1,27 @@
 # N4 Pro
 
-Use this device with [Stream Dock Manager](../../README.md). Its adapter is included with the app; **no separate adapter download is needed**.
+This adapter is built into [Stream Dock Manager](../../README.md).
 
-| At a glance                   | Details                                                                           |
-| ----------------------------- | --------------------------------------------------------------------------------- |
-| Model ID                      | `n4-pro`                                                                          |
-| Adapter status                | Experimental                                                                      |
-| Registered controls           | 10 buttons, 4 encoders, 4 touch zones and 1 touch strip                           |
-| Hardware testing              | Hardware tested on a user unit; full variant/platform qualification remains open. |
-| Exact layout and capabilities | [Device descriptor](device.toml)                                                  |
+| At a glance             | Details                                                               |
+| ----------------------- | --------------------------------------------------------------------- |
+| Model ID                | `n4-pro`                                                              |
+| Adapter status          | Experimental                                                          |
+| Controls                | 10 buttons, 4 encoders, 4 touch zones and 1 touch strip               |
+| Hardware testing        | Tested on a user unit; results do not cover every variant or platform |
+| Layout and capabilities | [Device descriptor](device.toml)                                      |
 
-Registered controls describe the Manager model, not a promise that every control or firmware has been physically verified. Dials are called encoders in the descriptor. Match your USB variant below before relying on a retail product name.
+Match the [USB ID](#compatibility), not just the product name. Dials are called encoders in the descriptor.
 
-[Get started](#get-started) · [Compatibility](#compatibility) · [Troubleshooting](#if-it-does-not-work) · [Contributor checks](#for-contributors)
+[Get started](#connect-and-assign-an-action) · [Compatibility](#compatibility) · [Troubleshooting](#troubleshooting) · [Contributor checks](#for-contributors)
 
-## Get started
+## Connect and assign an action
 
-1. [Install or build Manager](../../README.md).
-2. Quit VSD Craft and other software that may be using the device.
-3. Connect the device, open Manager, and select it.
-4. Choose a profile, select a control that supports actions, assign an action, and save the binding.
+1. [Install Manager](../../README.md) and close other dock software, such as VSD Craft.
+2. Connect your dock. Open Manager and select the device and a profile in **Device editor**.
+3. Select a control, choose an action, and save the binding.
 
-You can explore the layout in the simulator without a connected device. On Linux, follow the [installation instructions](../../packaging/install-instructions/linux/INSTALL-INSTRUCTIONS.md) and reconnect after installing applicable USB access rules. Run Manager as your normal desktop user.
+- **No hardware?** Select this model in the simulator.
+- **Linux:** Follow the [USB access setup](../../packaging/install-instructions/linux/INSTALL-INSTRUCTIONS.md), then reconnect. Run as your normal desktop user and do not broaden HID permissions.
 
 ## Compatibility
 
@@ -31,18 +31,16 @@ You can explore the layout in the simulator without a connected device. On Linux
 | MiraBox N4 Pro   | `5548:1008`        | Enabled experimentally |
 | MiraBox N4 Pro E | `5548:1021`        | Enabled experimentally |
 
-All variants remain **experimental**. Enabled matching is not a claim of full firmware, platform, or hardware qualification. Exact interface/usage selectors and capabilities are defined in [device.toml](device.toml).
+A matching USB ID lets Manager attempt a connection; it does not guarantee every feature on every firmware or OS. See the [device descriptor](device.toml) for exact interface selectors.
 
-Some source-derived interfaces intentionally have no automatic Linux permission grant. Do not work around this by making HID devices world-writable.
+## Troubleshooting
 
-## If it does not work
-
-| Symptom                                | What to check                                                                                                    |
-| -------------------------------------- | ---------------------------------------------------------------------------------------------------------------- |
-| Device is not listed                   | Quit competing device software, reconnect USB, and compare the USB identity with the table above.                |
-| Access is denied on Linux              | Check the package's USB rules and reconnect. Some interfaces deliberately remain unqualified.                    |
-| A control or image behaves differently | Confirm the exact model/variant and consult the protocol notes below; similar names can use different protocols. |
-| Firmware version is unavailable        | See [firmware-read limitations](../README.md#firmware-checks). An unknown version is not treated as current.     |
+| Problem                  | Check                                                                                                         |
+| ------------------------ | ------------------------------------------------------------------------------------------------------------- |
+| Device missing           | Close other dock apps, reconnect USB and match the USB ID above.                                              |
+| Linux access denied      | Use the linked USB setup. Some experimental interfaces have no automatic permission rule.                     |
+| Layout or image differs  | Confirm the exact variant in [device.toml](device.toml); similarly named devices can use different protocols. |
+| Unknown firmware version | See [firmware checks](../README.md#firmware-checks). An unknown version is not an up-to-date result.          |
 
 ## For contributors
 
@@ -54,7 +52,7 @@ cargo test -p stream-dock-manager-hardware-n4-pro
 cargo run -p xtask -- hardware check --model n4-pro
 ```
 
-These checks validate source behavior and fixtures. For physical qualification, follow [verification/plan.toml](verification/plan.toml) on the exact unit, firmware, and platform. Simulated or replayed tests are not physical measurements.
+These checks validate the adapter and its fixtures. For a physical test, follow the [verification plan](verification/plan.toml) and record the exact variant, firmware, and OS. A simulator or replay does not qualify hardware.
 
 <details>
 <summary>Protocol notes and verification details</summary>
@@ -78,7 +76,7 @@ Close VSD Craft and other device managers before opening this application. On Li
 
 USB identities `5548:1023`, `5548:1008` and `5548:1021` are candidates, with separate variant records. Firmware identity and USB release number are recorded separately; a USB release number is not a firmware version.
 
-The physical top-row slots are 11–15, bottom-row slots 6–10 and touch-zone slots 1–4. Images rotate 180 degrees. PNG is the initial device format; JPEG encoding is tested in software. Encoder presses are pulses; no encoder hold/push-to-talk is advertised. The supplied unit produced identical `0x39` terminal packets after both left and right motion, so neither vendor code names nor a simple swap reliably identify direction. The decoder now tracks a touch start and the latest valid coordinates, and emits a swipe only when `0x38` or `0x39` explicitly ends the gesture. Increasing x means right and decreasing x means left; the host maps left to next page and right to previous page. Missing, expired or zero-displacement trajectories produce no swipe rather than guessing from the code. A coordinate-only gesture without a terminal also produces no swipe.
+The physical top-row slots are 11–15, bottom-row slots 6–10 and touch-zone slots 1–4. Manager rotates images 180 degrees before upload, including numbered Diagnostics benchmark frames. PNG is the initial device format. On the physically tested VSDInside unit (firmware `V4.VSD N4 Pro.02.010`), automatic opaque animated wallpaper uses full-resolution luma and 4:2:0 JPEG color sampling to shorten each uninterrupted full-screen transfer. Selecting JPEG explicitly or setting the quality retains 4:4:4 color sampling. Encoder presses are pulses; no encoder hold/push-to-talk is advertised. The supplied unit produced identical `0x39` terminal packets after both left and right motion, so neither vendor code names nor a simple swap reliably identify direction. The decoder now tracks a touch start and the latest valid coordinates, and emits a swipe only when `0x38` or `0x39` explicitly ends the gesture. Increasing x means right and decreasing x means left; the host maps left to next page and right to previous page. Missing, expired or zero-displacement trajectories produce no swipe rather than guessing from the code. A coordinate-only gesture without a terminal also produces no swipe.
 
 The host reserves horizontal swipes for wrapping page navigation and vertical swipes for wrapping profile navigation. Captured vertical completions are `0xB1` for up (next profile) and `0xB2` for down (previous profile), with state zero. Quick flicks can supply only one coordinate sample, so these verified completions supply direction after a fresh start and at least one valid coordinate; clear horizontal or contrary sampled motion is rejected. Horizontal trajectories retain a 24-pixel dead zone and 1.5:1 dominant-axis threshold. Touch-zone completion and gesture terminals consume the trajectory once. The descriptor enables all four directions.
 

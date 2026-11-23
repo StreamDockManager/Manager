@@ -8,11 +8,22 @@ pub(crate) fn validate_plugins<'a>(
     lookup: impl Fn(&str) -> Option<&'a Action>,
     plugins: &[stream_dock_manager_plugin_host::PluginInfo],
 ) -> Result<(), String> {
+    validate_plugins_in_slots(action, lookup, plugins, None)
+}
+
+// Check eligibility only for assigned events supported by this model
+pub(crate) fn validate_plugins_in_slots<'a>(
+    action: &Action,
+    lookup: impl Fn(&str) -> Option<&'a Action>,
+    plugins: &[stream_dock_manager_plugin_host::PluginInfo],
+    event_slots: Option<u16>,
+) -> Result<(), String> {
     #[derive(Default)]
     struct Budget {
         checked: std::collections::HashSet<(String, bool, usize)>,
         active: std::collections::HashSet<String>,
         visits: usize,
+        event_slots: Option<u16>,
     }
     // Visit the current key logic value
     fn visit<'a>(
@@ -62,13 +73,31 @@ pub(crate) fn validate_plugins<'a>(
             visit(on, lookup, plugins, inside, depth + 1, budget)?;
             visit(off, lookup, plugins, inside, depth + 1, budget)?;
         } else {
-            for child in action.children() {
-                visit(child, lookup, plugins, inside, depth + 1, budget)?;
+            let slots = (depth == 0 && matches!(action, Action::Events { .. }))
+                .then_some(budget.event_slots)
+                .flatten();
+            for (index, child) in action.children().iter().enumerate() {
+                if slots.is_none_or(|mask| {
+                    crate::actions::EventSlot::from_index(index)
+                        .is_some_and(|slot| mask & slot.bit() != 0)
+                }) {
+                    visit(child, lookup, plugins, inside, depth + 1, budget)?;
+                }
             }
         }
         Ok(())
     }
-    visit(action, &lookup, plugins, false, 0, &mut Budget::default())
+    visit(
+        action,
+        &lookup,
+        plugins,
+        false,
+        0,
+        &mut Budget {
+            event_slots,
+            ..Default::default()
+        },
+    )
 }
 
 // Check for gesture
@@ -334,6 +363,57 @@ pub(super) fn execute_gesture(
     result
 }
 // Match input transitions to the configured gesture
+// Recognize taps before applying the policy, so a double tap is still one activation.
+// The guard belongs to the root run and survives asynchronous branch cleanup.
+fn admit_gesture(run: &Run, index: usize, path: &[usize]) -> Result<(), String> {
+    let policy = run.request.activation_policy;
+    if !policy.interrupts() || run.debug.is_some() || run.simulation.is_some() {
+        return Ok(());
+    }
+    let mut guard = run.gesture_lane.lock().unwrap();
+    if guard.is_some() {
+        return Ok(());
+    }
+    let lane = run
+        .runtime
+        .builtin_state
+        .lane(format!("{}|gesture:{path:?}:{index}", run.key()));
+    let mut activation = ActivationTicket::for_request(&run.request);
+    activation.cancel = run
+        .branch_cancellations
+        .first()
+        .ok_or("Gesture ownership unavailable")?
+        .clone();
+    let ticket = activation.id.clone();
+    {
+        let mut tickets = lane.lock().unwrap();
+        if tickets.iter().any(|t| activation.same_owner(t)) {
+            activation.interrupt_owned(&mut tickets);
+            if policy == crate::actions::ActivationPolicy::Cancel {
+                return Err("Cancellation requested".into());
+            }
+        }
+        tickets.push_back(activation);
+    }
+    *guard = Some(LaneGuard {
+        lane: lane.clone(),
+        ticket: ticket.clone(),
+    });
+    drop(guard);
+    loop {
+        {
+            let tickets = lane.lock().unwrap();
+            if tickets.front().is_some_and(|t| t.id == ticket) {
+                return run.check();
+            }
+            if !tickets.iter().any(|t| t.id == ticket) {
+                return Err("Superseded gesture".into());
+            }
+        }
+        run.sleep(10)?;
+    }
+}
+
 fn recognize_gesture(
     run: &mut Run,
     action: &BuiltinAction,
@@ -373,6 +453,7 @@ fn recognize_gesture(
     run.check()?;
     if run.pressed.load(Ordering::SeqCst) {
         check_plugins(run)?;
+        admit_gesture(run, 2, path)?;
         branch(run, children, 2, depth, path)?;
         return run.release(0);
     }
@@ -418,12 +499,38 @@ fn recognize_gesture(
     };
     run.check()?;
     check_plugins(run)?;
+    admit_gesture(run, branch_index, path)?;
     branch(run, children, branch_index, depth, path)
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
+    #[test]
+    fn cancelling_a_recognized_tap_preserves_the_hold_owner() {
+        let root = tempfile::tempdir().unwrap();
+        let mut tap = crate::builtins::tests::fixture(root.path());
+        Arc::get_mut(&mut tap.request).unwrap().activation_policy =
+            crate::actions::ActivationPolicy::Cancel;
+        let mut hold = tap.clone();
+        let mut second = tap.clone();
+        for run in [&mut tap, &mut hold, &mut second] {
+            run.gesture_lane = Default::default();
+            run.branch_cancellations = vec![Arc::new(AtomicBool::new(false))];
+        }
+        admit_gesture(&tap, 0, &[]).unwrap();
+        admit_gesture(&hold, 2, &[]).unwrap();
+        assert_eq!(
+            admit_gesture(&second, 0, &[]).unwrap_err(),
+            "Cancellation requested"
+        );
+        assert!(tap.branch_cancellations[0].load(Ordering::SeqCst));
+        assert!(!hold.branch_cancellations[0].load(Ordering::SeqCst));
+        drop(hold);
+        drop(second);
+        tap.runtime.shutdown();
+    }
+
     #[test]
     // Verify that tap pairs are exact and expired or cancelled owners cannot remove replacements
     fn tap_pairs_are_exact_and_expired_or_cancelled_owners_cannot_remove_replacements() {

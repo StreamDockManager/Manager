@@ -3,7 +3,10 @@
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
 use std::{path::PathBuf, sync::Mutex};
-use stream_dock_manager_storage::{rusqlite::Connection, Domain, RecoveryEditor};
+use stream_dock_manager_storage::{
+    database_path, has_legacy_database_layout, prepare_database_layout, recovery_directory,
+    rusqlite::Connection, Domain, RecoveryEditor, DATABASE_NAME,
+};
 const LIMIT: usize = 16 * 1024 * 1024;
 mod full_restore;
 pub use full_restore::ConfigurationRecoveryRestorePreview;
@@ -13,6 +16,11 @@ mod settings;
 pub use backups::{
     has_recoverable_backups, ConfigurationRecoveryBackup, ConfigurationRecoveryBackupProfile,
     ConfigurationRecoveryBackupProfiles, ConfigurationRecoveryBackups,
+};
+mod keystore;
+pub use keystore::{
+    ConfigurationRecoveryKeystoreBackup, ConfigurationRecoveryKeystoreReview,
+    ConfigurationRecoveryKeystoreStatus,
 };
 mod versions;
 pub use versions::{ConfigurationRecoveryVersion, ConfigurationRecoveryVersions};
@@ -28,6 +36,10 @@ pub struct ConfigurationRecoveryItem {
 }
 #[derive(Clone, Debug, Serialize, Deserialize, ts_rs::TS)]
 pub struct ConfigurationRecoveryReport {
+    /// Only present for a recognized incompatible Manager file format.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    #[ts(optional)]
+    pub incompatible_data_folder: Option<String>,
     pub primary_readable: bool,
     pub startup_error: String,
     pub issues: Vec<String>,
@@ -70,6 +82,7 @@ pub struct ConfigurationRecovery {
     root: PathBuf,
     backups: Mutex<backups::BackupCache>,
     restore_review: Mutex<Option<full_restore::RestoreReview>>,
+    keystore_review: Mutex<Option<keystore::Review>>,
     startup_error: String,
     last_backup: Mutex<Option<String>>,
     versions: Mutex<versions::VersionCache>,
@@ -80,13 +93,15 @@ struct Record {
     kind: &'static str,
     value: Value,
 }
-/// Read-only startup routing. A missing primary offers recoverable backups before
-/// starting normal initialization. A persisted explicit normal restart overrides a
-/// command-line recovery flag; Continue bypasses the editor for one admitted run
+/// Choose startup before initializing a missing primary
+///
+/// An old on-disk layout is relocated under the instance lock before deciding
+/// whether the primary is missing. New roots remain untouched until initialization
 pub fn startup_landing(root: &std::path::Path, cli_recovery: bool) -> Result<bool, String> {
-    if !root
-        .join(stream_dock_manager_storage::DATABASE_NAME)
-        .exists()
+    prepare_existing_database_layout(root)?;
+    if !database_path(root, DATABASE_NAME)
+        .try_exists()
+        .map_err(|e| e.to_string())?
     {
         return Ok(cli_recovery || backups::has_recoverable_backups(root)?);
     }
@@ -106,13 +121,22 @@ pub fn startup_landing(root: &std::path::Path, cli_recovery: bool) -> Result<boo
     })
 }
 
+// Do not turn a not-found test or a backup preview into fresh database creation
+fn prepare_existing_database_layout(root: &std::path::Path) -> Result<(), String> {
+    if has_legacy_database_layout(root)? {
+        prepare_database_layout(root)?;
+    }
+    Ok(())
+}
+
 impl ConfigurationRecovery {
     /// Initialize a missing primary without importing or replacing preserved evidence
     /// Backup transfer is a separate explicit operation in this recovery session
     pub fn open_requested(root: PathBuf, message: String) -> Result<Self, String> {
-        if !root
-            .join(stream_dock_manager_storage::DATABASE_NAME)
-            .exists()
+        prepare_existing_database_layout(&root)?;
+        if !database_path(&root, DATABASE_NAME)
+            .try_exists()
+            .map_err(|e| e.to_string())?
         {
             let offer_backups = backups::has_recoverable_backups(&root)?;
             let storage = stream_dock_manager_storage::Storage::open(root.clone())?;
@@ -173,6 +197,7 @@ impl ConfigurationRecovery {
             root,
             backups: Mutex::new(Default::default()),
             restore_review: Mutex::new(None),
+            keystore_review: Mutex::new(None),
             startup_error,
             last_backup: Mutex::new(None),
             versions: Mutex::new(Default::default()),
@@ -183,6 +208,15 @@ impl ConfigurationRecovery {
         self.editor.refresh()?;
         if let Some(reason) = self.editor.unavailable_reason()? {
             return Ok(ConfigurationRecoveryReport {
+                incompatible_data_folder: reason
+                    .starts_with("Unsupported configuration database schema ")
+                    .then(|| {
+                        self.root
+                            .canonicalize()
+                            .unwrap_or_else(|_| self.root.clone())
+                            .display()
+                            .to_string()
+                    }),
                 primary_readable: false,
                 startup_error: self.startup_error.clone(),
                 issues: vec![reason],
@@ -229,6 +263,7 @@ impl ConfigurationRecovery {
             issues.sort();
             issues.dedup();
             Ok(ConfigurationRecoveryReport {
+                incompatible_data_folder: None,
                 primary_readable: true,
                 startup_error: self.startup_error.clone(),
                 ready: issues.is_empty(),
@@ -251,7 +286,7 @@ impl ConfigurationRecovery {
             if issues.is_empty() && record.kind == "profile" {
                 issues.extend(context_issues(conn, &record));
             }
-            let diagnostics = Some(diagnostics(&record.kind, &json, &issues));
+            let diagnostics = Some(diagnostics(record.kind, &json, &issues));
             Ok(ConfigurationRecoveryDocument {
                 id: id.into(),
                 revision: revision.into(),
@@ -275,7 +310,7 @@ impl ConfigurationRecovery {
                     valid: false,
                     diagnostics: Some(diagnostics("json", json, std::slice::from_ref(&e))),
                     issues: vec![e],
-                })
+                });
             }
         };
         self.editor.preview(revision, |conn| {
@@ -635,7 +670,9 @@ fn context_issues(conn: &Connection, record: &Record) -> Vec<String> {
                         .as_ref()
                         .is_some_and(|id| deleted.assets.contains(id))
                     {
-                        return Err(format!("$.pages[{index}].bindings[{key:?}].asset: this media was permanently deleted; choose an available asset"));
+                        return Err(format!(
+                            "$.pages[{index}].bindings[{key:?}].asset: this media was permanently deleted; choose an available asset"
+                        ));
                     }
                 }
             }
@@ -799,7 +836,7 @@ fn delete_profile(conn: &Connection, id: &str) -> Result<(), String> {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use stream_dock_manager_storage::{Storage, DATABASE_NAME};
+    use stream_dock_manager_storage::Storage;
     // Construct an isolated configuration recovery fixture
     fn fixture() -> tempfile::TempDir {
         let root = tempfile::tempdir().unwrap();
@@ -810,6 +847,40 @@ mod tests {
             })
             .unwrap();
         root
+    }
+    #[test]
+    fn incompatible_local_format_preserves_custom_folder_and_keeps_missing_keys_in_recovery() {
+        let dir = tempfile::tempdir().unwrap();
+        let root = dir.path().join("custom manager");
+        let create = || Storage::open(root.clone()).unwrap();
+        let storage = create();
+        storage
+            .run(|db| {
+                db.execute_batch("PRAGMA user_version=1")
+                    .map_err(|e| e.to_string())
+            })
+            .unwrap();
+        drop(storage);
+        let file = database_path(&root, DATABASE_NAME);
+        let before = std::fs::read(&file).unwrap();
+        let recovery = ConfigurationRecovery::open(root.clone(), String::new()).unwrap();
+        assert_eq!(
+            recovery.report().unwrap().incompatible_data_folder,
+            Some(root.canonicalize().unwrap().display().to_string())
+        );
+        assert_eq!(std::fs::read(&file).unwrap(), before);
+        drop(recovery);
+        std::fs::rename(&root, dir.path().join("old")).unwrap();
+        drop(create());
+        std::fs::rename(
+            database_path(&root, "datastore.sqlite3"),
+            dir.path().join("missing-keystore"),
+        )
+        .unwrap();
+        let recovery = ConfigurationRecovery::open(root.clone(), String::new()).unwrap();
+        let report = recovery.report().unwrap();
+        assert!(report.incompatible_data_folder.is_none());
+        assert!(report.issues.iter().any(|s| s.contains("installation key")));
     }
     // Store the selected configuration recovery value
     fn put(root: &std::path::Path, domain: Domain, key: &str, value: Value) {
@@ -827,7 +898,7 @@ mod tests {
             "drafts",
             serde_json::json!({"a":bad,"b":bad,"c":bad}),
         );
-        let before = std::fs::read(root.path().join(DATABASE_NAME)).unwrap();
+        let before = std::fs::read(database_path(root.path(), DATABASE_NAME)).unwrap();
         let recovery = ConfigurationRecovery::open(root.path().into(), "fixture".into()).unwrap();
         assert!(!recovery.report().unwrap().ready);
         let doc = recovery.document("draft:a").unwrap();
@@ -846,7 +917,7 @@ mod tests {
         );
         assert_eq!(
             before,
-            std::fs::read(root.path().join(DATABASE_NAME)).unwrap()
+            std::fs::read(database_path(root.path(), DATABASE_NAME)).unwrap()
         );
         let report = recovery.save(&doc.id, &doc.revision, good).unwrap();
         assert!(!report.ready);
@@ -893,7 +964,7 @@ mod tests {
                 bad,
             );
         }
-        let before = std::fs::read(root.path().join(DATABASE_NAME)).unwrap();
+        let before = std::fs::read(database_path(root.path(), DATABASE_NAME)).unwrap();
         let recovery =
             ConfigurationRecovery::open(root.path().into(), "bad profile".into()).unwrap();
         for original in &originals {
@@ -910,7 +981,7 @@ mod tests {
             if original == &originals[0] {
                 assert_eq!(
                     before,
-                    std::fs::read(root.path().join(DATABASE_NAME)).unwrap()
+                    std::fs::read(database_path(root.path(), DATABASE_NAME)).unwrap()
                 );
             }
             recovery
@@ -935,14 +1006,14 @@ mod tests {
             "drafts",
             serde_json::json!({"bad":{"value":{}}}),
         );
-        let before = std::fs::read(root.path().join(DATABASE_NAME)).unwrap();
+        let before = std::fs::read(database_path(root.path(), DATABASE_NAME)).unwrap();
         let recovery = ConfigurationRecovery::open(root.path().into(), "fixture".into()).unwrap();
         let doc = recovery.document("draft:bad").unwrap();
         assert!(doc.issues.iter().any(|e| e.contains("key")));
         assert!(recovery.save(&doc.id, &doc.revision, &doc.json).is_err());
         assert_eq!(
             before,
-            std::fs::read(root.path().join(DATABASE_NAME)).unwrap()
+            std::fs::read(database_path(root.path(), DATABASE_NAME)).unwrap()
         );
     }
     #[test]
@@ -1116,12 +1187,12 @@ mod tests {
             "restart-recovery-once",
             Value::Bool(true),
         );
-        let before = std::fs::read(root.path().join(DATABASE_NAME)).unwrap();
+        let before = std::fs::read(database_path(root.path(), DATABASE_NAME)).unwrap();
         assert!(startup_landing(root.path(), false).unwrap());
         assert!(startup_landing(root.path(), false).unwrap());
         assert_eq!(
             before,
-            std::fs::read(root.path().join(DATABASE_NAME)).unwrap()
+            std::fs::read(database_path(root.path(), DATABASE_NAME)).unwrap()
         );
         let recovery = ConfigurationRecovery::open(root.path().into(), "explicit".into()).unwrap();
         recovery.request_restart(true).unwrap();
@@ -1161,16 +1232,47 @@ mod tests {
             "restart-recovery-once",
             Value::Bool(true),
         );
-        let before = std::fs::read(root.path().join(DATABASE_NAME)).unwrap();
+        let before = std::fs::read(database_path(root.path(), DATABASE_NAME)).unwrap();
         assert!(startup_landing(root.path(), false).unwrap());
         let recovery = ConfigurationRecovery::open(root.path().into(), "bad".into()).unwrap();
         assert!(recovery.request_restart(true).is_err());
         assert!(recovery.request_restart(false).is_err());
         assert_eq!(
             before,
-            std::fs::read(root.path().join(DATABASE_NAME)).unwrap()
+            std::fs::read(database_path(root.path(), DATABASE_NAME)).unwrap()
         );
     }
+    #[test]
+    fn startup_relocates_old_live_family_before_choosing_missing_primary_recovery() {
+        let root = fixture();
+        let storage = Storage::open(root.path().into()).unwrap();
+        let backup = storage.backup_recovery().unwrap();
+        drop(storage);
+        assert_eq!(
+            backup.path.parent(),
+            Some(
+                recovery_directory(root.path())
+                    .canonicalize()
+                    .unwrap()
+                    .as_path()
+            )
+        );
+        let backup_before = std::fs::read(&backup.path).unwrap();
+        let db_dir = stream_dock_manager_storage::database_directory(root.path());
+        for entry in std::fs::read_dir(&db_dir).unwrap() {
+            let entry = entry.unwrap();
+            std::fs::rename(entry.path(), root.path().join(entry.file_name())).unwrap();
+        }
+        std::fs::remove_dir(&db_dir).unwrap();
+        assert!(root.path().join(DATABASE_NAME).is_file());
+        assert!(root.path().join("recovery").is_dir());
+        assert!(!startup_landing(root.path(), false).unwrap());
+        assert!(database_path(root.path(), DATABASE_NAME).is_file());
+        assert!(!root.path().join(DATABASE_NAME).exists());
+        assert!(!root.path().join("recovery").exists());
+        assert_eq!(std::fs::read(&backup.path).unwrap(), backup_before);
+    }
+
     #[test]
     // Verify that fresh explicit recovery initializes schema and recreates missing primary
     fn fresh_explicit_recovery_initializes_schema_and_recreates_missing_primary() {
@@ -1184,12 +1286,12 @@ mod tests {
         assert!(recovery.report().unwrap().ready);
         assert!(recovery.report().unwrap().items.is_empty());
         drop(recovery);
-        std::fs::remove_file(root.join(DATABASE_NAME)).unwrap();
+        std::fs::remove_file(database_path(&root, DATABASE_NAME)).unwrap();
         assert!(!startup_landing(&root, false).unwrap());
         let recovery =
             ConfigurationRecovery::open_requested(root.clone(), "requested".into()).unwrap();
         assert!(recovery.report().unwrap().ready);
-        assert!(root.join(DATABASE_NAME).exists());
+        assert!(database_path(&root, DATABASE_NAME).exists());
     }
     #[test]
     // Verify that missing primary without backups starts normally and preserves legacy evidence
@@ -1198,14 +1300,9 @@ mod tests {
         std::fs::create_dir_all(root.path().join("profiles")).unwrap();
         let legacy = root.path().join("profiles/profiles.json");
         std::fs::write(&legacy, b"legacy evidence, not a migration source").unwrap();
-        std::fs::write(
-            root.path().join(".stream-dock-manager-sqlite-initialized"),
-            b"previous install",
-        )
-        .unwrap();
         assert!(!startup_landing(root.path(), false).unwrap());
         let runtime = crate::Runtime::build(root.path().into(), false).unwrap();
-        assert!(root.path().join(DATABASE_NAME).exists());
+        assert!(database_path(root.path(), DATABASE_NAME).exists());
         assert_eq!(
             std::fs::read(&legacy).unwrap(),
             b"legacy evidence, not a migration source"
@@ -1221,7 +1318,7 @@ mod tests {
         let backup = storage.backup_recovery().unwrap();
         drop(storage);
         let before = std::fs::read(&backup.path).unwrap();
-        std::fs::remove_file(root.path().join(DATABASE_NAME)).unwrap();
+        std::fs::remove_file(database_path(root.path(), DATABASE_NAME)).unwrap();
         assert!(startup_landing(root.path(), false).unwrap());
         let recovery =
             ConfigurationRecovery::open_requested(root.path().into(), String::new()).unwrap();

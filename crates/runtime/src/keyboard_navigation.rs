@@ -18,6 +18,90 @@ pub(crate) fn supported(model: &str) -> bool {
     // This layout is explicitly a two-row, three-column keyboard navigation block
     model == "k1-pro"
 }
+// Supply navigation without creating or restoring a deleted profile
+pub(crate) fn fallback_page(state: &crate::Snapshot, device: &str) -> Option<Page> {
+    (state.session(device).profile_id.is_empty()
+        && state
+            .devices
+            .iter()
+            .any(|d| d.id == device && supported(&d.model_id)))
+    .then(page)
+}
+
+// Resolve the same no-profile keys for input dispatch without a synthetic saved profile
+pub(crate) fn fallback_binding(
+    state: &crate::Snapshot,
+    device: &str,
+    control: &str,
+) -> Option<crate::builtins::EffectiveBinding> {
+    let binding = fallback_page(state, device)?.bindings.remove(control)?;
+    let session = state.session(device);
+    Some(crate::builtins::EffectiveBinding {
+        profile_id: session.profile_id.clone(),
+        page_id: session.page_id.clone(),
+        scope: format!("{}:{}", session.profile_id, session.page_id),
+        binding,
+    })
+}
+
+// Track uninterrupted blank-page residence without polling or counting suspended time
+#[derive(Default)]
+pub(crate) struct BlankPageTimer {
+    pending: Option<(String, String, std::time::Instant)>,
+}
+impl BlankPageTimer {
+    // Reset on content, suspension or page changes and report only an expired matching page
+    pub(crate) fn update(&mut self, target: Option<(&str, &str)>, now: std::time::Instant) -> bool {
+        let Some((profile, page)) = target else {
+            self.pending = None;
+            return false;
+        };
+        if !self
+            .pending
+            .as_ref()
+            .is_some_and(|(p, g, _)| p == profile && g == page)
+        {
+            self.pending = Some((
+                profile.into(),
+                page.into(),
+                now + std::time::Duration::from_secs(30),
+            ));
+        }
+        self.deadline().is_some_and(|deadline| now >= deadline)
+    }
+    // Expose the one-shot deadline to the existing device scheduler
+    pub(crate) fn deadline(&self) -> Option<std::time::Instant> {
+        self.pending.as_ref().map(|(_, _, deadline)| *deadline)
+    }
+}
+
+// Treat only unassigned pages as blank, never custom media or temporary binding layers
+pub(crate) fn blank_target(state: &crate::Snapshot, device: &str) -> Option<(String, String)> {
+    let model = state
+        .devices
+        .iter()
+        .find(|d| d.id == device && d.connected)?;
+    if !supported(&model.model_id)
+        || state
+            .binding_overrides
+            .get(device)
+            .is_some_and(|b| !b.is_empty())
+    {
+        return None;
+    }
+    let session = state.session(device);
+    let profile = state.profiles.iter().find(|p| p.id == session.profile_id)?;
+    let page = profile.pages.iter().find(|p| p.id == session.page_id)?;
+    (page.id != PAGE_ID
+        && page.bindings.is_empty()
+        && profile.background_asset.is_none()
+        && profile
+            .pages
+            .iter()
+            .any(|p| p.id == PAGE_ID && canonical(p)))
+    .then(|| (profile.id.clone(), page.id.clone()))
+}
+
 // Report the protected control condition for keyboard navigation
 pub(crate) fn protected_control(model: &str, page: &str, control: &str) -> bool {
     supported(model) && page == PAGE_ID && (1..=6).any(|i| control == format!("key-{i}"))
@@ -31,6 +115,7 @@ fn binding(title: &str, key: &str) -> Binding {
         action: Action::Hotkey {
             keys: vec![key.into()],
         },
+        live_label: Vec::new(),
         dial_response: None,
         activation_policy: Default::default(),
         custom_background: false,
@@ -104,10 +189,17 @@ pub(crate) fn normalize_profile(profile: &mut Profile) -> Result<(), String> {
 }
 // Normalize the keyboard navigation representation
 pub(crate) fn normalize(data: &mut ProfileData) -> Result<(), String> {
+    normalize_for_load(data).map(|_| ())
+}
+// Report whether the saved workspace needed structural normalization
+pub(crate) fn normalize_for_load(data: &mut ProfileData) -> Result<bool, String> {
+    let mut changed = false;
     for profile in &mut data.profiles {
+        changed |= supported(&profile.model_id)
+            && profile.pages.first().is_none_or(|page| page.id != PAGE_ID);
         normalize_profile(profile)?;
     }
-    Ok(())
+    Ok(changed)
 }
 /// Edit transactions must not remove, move, rename or change this page's key behavior
 /// Whole-profile removal/conversion is still permitted
@@ -140,6 +232,23 @@ pub(crate) fn validate_edit(before: &ProfileData, after: &ProfileData) -> Result
 #[cfg(test)]
 mod tests {
     use super::*;
+    #[test]
+    // Reset the deadline on page changes, content and reconnect rather than accumulating idle time
+    fn blank_page_timer_requires_one_continuous_page() {
+        use std::time::{Duration, Instant};
+        let now = Instant::now();
+        let mut timer = BlankPageTimer::default();
+        assert!(!timer.update(Some(("profile", "one")), now));
+        assert!(!timer.update(Some(("profile", "two")), now + Duration::from_secs(29)));
+        assert!(!timer.update(Some(("profile", "two")), now + Duration::from_secs(30)));
+        assert!(!timer.update(None, now + Duration::from_secs(58)));
+        assert!(timer.deadline().is_none());
+        assert!(!timer.update(Some(("profile", "two")), now + Duration::from_secs(59)));
+        assert!(timer.update(Some(("profile", "two")), now + Duration::from_secs(89)));
+        let mut reconnected = BlankPageTimer::default();
+        assert!(!reconnected.update(Some(("profile", "two")), now + Duration::from_secs(90)));
+    }
+
     // Construct an isolated keyboard navigation fixture
     fn fixture() -> ProfileData {
         let mut data = ProfileData::default();
@@ -252,8 +361,8 @@ mod tests {
         use crate::workspace::{AssignmentScope, Edit};
         let root = tempfile::tempdir().unwrap();
         let store = crate::ProfileStore::open(root.path().into()).unwrap();
-        let mut data = fixture();
-        store.save(&mut data).unwrap();
+        let data = fixture();
+        store.save(&data).unwrap();
         let data = store.load().unwrap();
         let original = data.profiles[0].pages[0].bindings["key-1"].clone();
         let mut custom = original.clone();

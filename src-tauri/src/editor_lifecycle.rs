@@ -1,5 +1,5 @@
 //! Main-window lifetime. Runtime, device output and auxiliary windows are independent
-use std::sync::{atomic::Ordering, Arc, Mutex};
+use std::sync::{atomic::Ordering, Arc, Mutex, MutexGuard};
 use std::time::Duration;
 use stream_dock_manager_runtime::desktop::EditorRestoreState;
 use stream_dock_manager_runtime::Runtime;
@@ -126,6 +126,7 @@ struct Owner {
     fullscreen: bool,
     pending_quit: bool,
     restart_recovery: Option<bool>,
+    restart_native_watch: bool,
     pending_close: bool,
     next_action: u64,
     pending_action: Option<(u64, bool)>,
@@ -154,6 +155,7 @@ impl Default for Owner {
             fullscreen: false,
             pending_quit: false,
             restart_recovery: None,
+            restart_native_watch: false,
             pending_close: false,
             next_action: 0,
             pending_action: None,
@@ -188,6 +190,7 @@ impl Owner {
         self.pending_quit = false;
         self.pending_close = false;
         self.restart_recovery = None;
+        self.restart_native_watch = false;
         true
     }
     // Check whether this operation can quit without flush
@@ -309,6 +312,7 @@ impl Owner {
         self.pending_quit = false;
         self.pending_close = false;
         self.restart_recovery = None;
+        self.restart_native_watch = false;
         self.fenced = false;
         true
     }
@@ -325,6 +329,7 @@ impl Owner {
         self.pending_close = false;
         self.pending_reveal = false;
         self.restart_recovery = None;
+        self.restart_native_watch = false;
         self.draining = false;
         self.fenced = false;
         Ok(was_confirmed)
@@ -383,6 +388,8 @@ fn cleanup(command: &str) -> bool {
             | "finish_keyboard_preview"
             | "release_archive_export"
             | "discard_media_drop"
+            | "discard_archive_drop"
+            | "vault_cancel_entry_import"
             | "save_draft"
             | "unsubscribe_workspace"
             | "unsubscribe_surfaces"
@@ -410,6 +417,18 @@ pub struct EditorLifecycle {
     #[cfg(target_os = "macos")]
     dock: dock::Controller,
 }
+
+// Do not route an alert into a closing or not-yet-subscribed editor
+pub fn accepts_plugin_alerts(app: &tauri::AppHandle) -> bool {
+    app.try_state::<Arc<EditorLifecycle>>()
+        .and_then(|core| {
+            core.owner
+                .lock()
+                .ok()
+                .map(|state| state.ready && state.present && !state.fenced && !state.destroying)
+        })
+        .unwrap_or(false)
+}
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 enum QuitDrainOutcome {
     Ready,
@@ -429,6 +448,7 @@ impl EditorLifecycle {
         // Admission is fenced first; signal every native reader without dropping its
         // worker permit or treating cancellation as an acknowledgement of retirement.
         runtime.retire_editor_readers();
+        runtime.vault.cancel_editor_entry_import(generation);
         Ok(())
     }
 
@@ -507,6 +527,12 @@ impl EditorLifecycle {
 /// Injected by Tauri, never deserialized from frontend arguments. The permit stays in the
 /// command future or is moved into its detached/native worker until that worker retires.
 pub struct EditorWork(Option<Arc<EditorLifecycle>>);
+
+/// Keep the editor fence stable through a reviewed native commit
+pub(crate) struct EditorCommit<'a> {
+    _owner: MutexGuard<'a, Owner>,
+}
+
 impl EditorWork {
     // Ensure editable
     pub(crate) fn ensure_editable(&self) -> Result<(), String> {
@@ -526,6 +552,24 @@ impl EditorWork {
             .as_ref()
             .map(|core| core.owner.lock().unwrap().generation)
             .ok_or_else(|| "This command belongs to the Manager editor".into())
+    }
+
+    // Recheck only editor state here; native commit already holds its storage lock
+    pub(crate) fn commit_for_generation(
+        &self,
+        generation: u64,
+    ) -> Result<EditorCommit<'_>, String> {
+        let owner = self
+            .0
+            .as_ref()
+            .ok_or("vault_import_expired")?
+            .owner
+            .lock()
+            .unwrap();
+        if owner.generation != generation || !owner.present || owner.fenced {
+            return Err("vault_import_expired".into());
+        }
+        Ok(EditorCommit { _owner: owner })
     }
 
     // Run the editor lifecycle worker
@@ -639,14 +683,18 @@ where
 pub fn editor_restore_state(app: tauri::AppHandle, _editor_work: EditorWork) -> EditorRestoreState {
     // Called once per JS document, before that document can subscribe. Pagehide IPC
     // is best-effort, so a reload must also retire the previous document's readers.
-    app.state::<Arc<Runtime>>().retire_editor_readers();
+    let generation = app
+        .state::<Arc<EditorLifecycle>>()
+        .owner
+        .lock()
+        .unwrap()
+        .generation;
+    let runtime = app.state::<Arc<Runtime>>();
+    runtime.retire_editor_readers();
+    runtime.vault.cancel_editor_entry_import(generation);
+    crate::archive_import::discard_upload(&app);
     EditorRestoreState {
-        generation: app
-            .state::<Arc<EditorLifecycle>>()
-            .owner
-            .lock()
-            .unwrap()
-            .generation,
+        generation,
         restore: None,
     }
 }
@@ -877,21 +925,30 @@ fn fail_quit_drain(app: &tauri::AppHandle, token: u64, error: String) {
 
 /// Called only on the UI thread after this exact quit ticket has drained
 fn complete_drained_quit(app: &tauri::AppHandle, token: u64) {
-    let restart = app
-        .state::<Arc<EditorLifecycle>>()
-        .owner
-        .lock()
-        .unwrap()
-        .restart_recovery
-        .take();
+    let (restart, restart_native_watch) = {
+        let core = app.state::<Arc<EditorLifecycle>>();
+        let mut state = core.owner.lock().unwrap();
+        (
+            state.restart_recovery.take(),
+            std::mem::take(&mut state.restart_native_watch),
+        )
+    };
     if let Some(recovery) = restart {
         if let Err(error) = app.state::<Arc<Runtime>>().request_restart(recovery) {
             fail_quit_drain(app, token, format!("Could not request restart: {error}"));
             return;
         }
     }
-    let launcher_restart = if restart.is_some() {
+    let launcher_restart = if restart.is_some() || restart_native_watch {
         match crate::dev_restart::request() {
+            Ok(false) if restart_native_watch => {
+                fail_quit_drain(
+                    app,
+                    token,
+                    "The native development launcher is unavailable".into(),
+                );
+                return;
+            }
             Ok(requested) => requested,
             Err(error) => {
                 fail_quit_drain(
@@ -1057,6 +1114,9 @@ fn reveal_inner(app: &tauri::AppHandle, token: Option<String>, external: bool) {
                     .and_then(|builder| builder.build()).map_err(|error| error.to_string()));
             match outcome {
                 Ok(window) => {
+                    if let Some(runtime) = app.try_state::<Arc<Runtime>>() {
+                        runtime.invalidate_resource_attribution();
+                    }
                     #[cfg(target_os = "macos")]
                     if maximized && !fullscreen { let _ = window.maximize(); }
                     #[cfg(not(target_os = "macos"))]
@@ -1105,17 +1165,23 @@ pub fn destroyed(app: &tauri::AppHandle) {
     crate::manager_log::stage(crate::manager_log::Stage::EditorClosed);
     app.state::<Arc<Runtime>>().cancel_locate(None);
     app.state::<Arc<Runtime>>().cancel_hardware_preview(None);
+    app.state::<Arc<Runtime>>()
+        .cancel_plugin_palette_preview(None);
     let runtime = app.state::<Arc<Runtime>>().inner().clone();
     tauri::async_runtime::spawn_blocking(move || runtime.cancel_all_keyboard_previews());
     crate::archive_import::discard_upload(app);
     crate::media_drop::discard_uploads(app);
-    {
+    let generation = {
         let core = app.state::<Arc<EditorLifecycle>>();
         let mut state = core.owner.lock().unwrap();
         state.present = false;
         state.destroying = true;
         state.ready = false;
-    }
+        state.generation
+    };
+    app.state::<Arc<Runtime>>()
+        .vault
+        .cancel_editor_entry_import(generation);
     app.state::<crate::commands::EditorReadiness>()
         .0
         .store(false, Ordering::SeqCst);
@@ -1223,6 +1289,7 @@ pub fn request_close(app: &tauri::AppHandle) {
         let mut state = core.owner.lock().unwrap();
         if !state.accepts_close_request() { return; }
         state.pending_quit = false;
+        state.restart_native_watch = false;
         if state.ready {
             let generation = state.generation;
             let action = state.begin_action(false);
@@ -1274,6 +1341,7 @@ pub fn request_restart(app: &tauri::AppHandle, recovery: bool) {
             previous
         });
         state.restart_recovery = Some(recovery);
+        state.restart_native_watch = false;
         previous
     };
     if let Some((generation, action, ready)) = superseded {
@@ -1290,11 +1358,24 @@ pub fn request_restart(app: &tauri::AppHandle, recovery: bool) {
 
 // Request an orderly application shutdown
 pub fn request_quit(app: &tauri::AppHandle) {
+    request_quit_with_native_watch(app, false);
+}
+
+#[cfg(all(debug_assertions, target_os = "macos"))]
+pub(crate) fn request_native_watch_restart(app: &tauri::AppHandle) {
+    request_quit_with_native_watch(app, true);
+}
+
+fn request_quit_with_native_watch(app: &tauri::AppHandle, native_watch: bool) {
     let app = app.clone();
     let dispatch = app.clone();
     let _ = dispatch.run_on_main_thread(move || {
         let core = app.state::<Arc<EditorLifecycle>>();
         let mut state = core.owner.lock().unwrap();
+        // Do not convert a manual quit or an explicit recovery restart into a watch reload
+        if native_watch && !state.pending_quit && state.restart_recovery.is_none() {
+            state.restart_native_watch = true;
+        }
         state.pending_quit = true;
         if state.confirmed_close.is_some() || state.destroying || state.quit_drain.is_some() {
             return;
@@ -1337,6 +1418,7 @@ async fn recover_close(app: &tauri::AppHandle, generation: u64, action: u64) {
         state.fenced = false;
         state.pending_reveal = false;
         state.pending_quit = false;
+        state.restart_native_watch = false;
         drop(state);
         core.idle.notify_one();
         #[cfg(target_os = "macos")]
@@ -1440,6 +1522,7 @@ mod tests {
         let token = {
             let mut state = core.owner.lock().unwrap();
             state.restart_recovery = Some(true);
+            state.restart_native_watch = true;
             state.begin_quit_drain().unwrap().unwrap()
         };
         assert_eq!(
@@ -1468,6 +1551,7 @@ mod tests {
         assert!(state.admit(1, "apply_edits").is_ok());
         assert!(!state.pending_quit);
         assert_eq!(state.restart_recovery, None);
+        assert!(!state.restart_native_watch);
     }
 
     #[test]

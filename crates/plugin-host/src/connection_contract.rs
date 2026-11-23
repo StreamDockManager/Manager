@@ -37,7 +37,7 @@ pub(super) fn manager_registration(run_id: &str, debug_network: bool) -> Value {
     json!({"version":env!("CARGO_PKG_VERSION"), "compatibility":STREAMDECK.compatibility_label,
         "vsd_compatibility":VSD.compatibility_label, "openaction_compatibility":OPENACTION.compatibility_label, "contract_version":MANAGER_CONTRACT_VERSION,
         "capabilities":CAPABILITIES,"theme_rpc":supports_capability("plugin-theme-v1"),
-        "run_id":run_id,"debug_network":debug_network})
+        "run_id":run_id,"debug_network":debug_network,"inspector_lifecycle":true})
 }
 // Choose the default surface for this connection contract
 pub(super) fn default_surface(control_id: &str) -> Value {

@@ -62,15 +62,16 @@
                     Use default background
                 </button>
             </div>
-            <p class="field-help">
-                Choose or drop a PNG, JPEG, SVG, GIF or MP4 file. Crop and scale changes keep the
-                original image. Changes take effect when you save.
-            </p>
-            <fieldset :disabled="saving || importing" x-show="asset">
+            <fieldset
+                aria-label="Background media settings"
+                :disabled="saving || importing"
+                x-show="asset"
+            >
                 <sd-media-options
                     :asset="asset"
                     :content="mediaContent"
                     @media-change="updateMedia"
+                    @media-clip-editor="clipEditor = $event.detail"
                 ></sd-media-options>
             </fieldset>
             <div class="background-editor-empty" x-show="!asset">
@@ -81,12 +82,7 @@
                     background.
                 </p>
             </div>
-            <p class="field-help">
-                Backgrounds belong to this profile. Animated backgrounds continue when the editor is
-                closed. FFmpeg is an optional fallback for MP4 imports; clips can be up to 16 MiB
-                for direct imports. Use the video editor to select clips from longer recordings.
-            </p>
-            <div class="settings-section">
+            <div class="background-dock-preview">
                 <button
                     type="button"
                     class="button"
@@ -98,20 +94,30 @@
                 </button>
                 <p
                     class="field-help"
-                    x-text="dockPreviewReason || 'Preview the background for five seconds. Saved actions remain live.'"
+                    x-text="dockPreviewReason || 'Shows the draft for five seconds.'"
                 ></p>
             </div>
             <p class="danger-text" role="alert" x-show="error" x-text="error"></p>
         </div>
         <footer class="button-row feature-footer">
             <button type="button" class="button" @click="cancel" :disabled="saving">Cancel</button>
-            <button
-                type="button"
-                class="button primary"
-                @click="save"
-                :disabled="!canSave"
-                x-text="saving ? 'Saving…' : 'Save background'"
-            ></button>
+            <div class="button-row">
+                <button
+                    type="button"
+                    class="button"
+                    x-show="clipEditLabel"
+                    x-text="clipEditLabel"
+                    @click="editClip"
+                    :disabled="importing || saving"
+                ></button>
+                <button
+                    type="button"
+                    class="button primary"
+                    @click="save"
+                    :disabled="!canSave"
+                    x-text="saving ? 'Saving…' : 'Save background'"
+                ></button>
+            </div>
         </footer>
     </dialog>
 </div>

@@ -150,8 +150,8 @@ fn definition_and_forwarding_contracts_reject_undeclared_or_incompatible_inputs(
 }
 
 #[test]
-// Verify that requirements use unreleased baseline and preserve stricter floors
-fn requirements_use_unreleased_baseline_and_preserve_stricter_floors() {
+// Verify that macro inputs do not infer a baseline hint and preserve explicit floors
+fn macro_inputs_need_no_baseline_hint_and_preserve_explicit_floors() {
     let mut data = crate::ProfileData {
         minimum_manager: Some("0.1.0".into()),
         ..Default::default()
@@ -166,7 +166,7 @@ fn requirements_use_unreleased_baseline_and_preserve_stricter_floors() {
         action: Action::None,
     });
     data.update_requirements();
-    assert_eq!(data.minimum_manager.as_deref(), Some("0.1.0"));
+    assert_eq!(data.minimum_manager, None);
     data.minimum_manager = Some("9.0.0".into());
     data.update_requirements();
     assert_eq!(data.minimum_manager.as_deref(), Some("9.0.0"));

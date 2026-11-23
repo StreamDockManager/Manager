@@ -1,4 +1,4 @@
-; Derived from the NSIS template embedded in @tauri-apps/cli 2.12.4.
+; Derived from the NSIS template embedded in @tauri-apps/cli 2.12.6.
 ; Copyright (c) 2017 - Present Tauri Apps Contributors, MIT license.
 ; See TAURI-LICENSE-MIT, template-source.json and README.md in this directory.
 ; Project changes: mark replacement uninstalls, gate optional cleanup and use its

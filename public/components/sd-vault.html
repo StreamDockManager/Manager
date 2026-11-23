@@ -1,0 +1,2178 @@
+<section
+    class="secondary-screen vault-screen"
+    x-data="vaultPage"
+    @vault-session-ended.window="sessionEnded"
+    @vault-personal-transfer-applied="refresh"
+    @visibilitychange.document="constrainValueView"
+    @pagehide.window="closeValueView"
+    x-effect="constrainValueView"
+>
+    <div class="page-heading">
+        <div>
+            <h1>Variables &amp; Secrets</h1>
+            <p x-text="statusMessage" role="status"></p>
+        </div>
+        <div class="button-row">
+            <button
+                type="button"
+                class="button"
+                :disabled="working"
+                x-show="status"
+                @click="refresh"
+            >
+                Refresh
+            </button>
+            <button
+                type="button"
+                class="button"
+                :disabled="working"
+                x-show="unlocked"
+                @click="lock"
+                title="Lock the Vault"
+            >
+                Lock
+            </button>
+            <button
+                class="button"
+                type="button"
+                x-show="supportsPassword && unlocked && status && status.mode === 'password'"
+                :disabled="working"
+                @click="changePassword"
+                title="Change the Vault master password"
+            >
+                Change password
+            </button>
+            <button
+                class="button"
+                type="button"
+                x-show="supportsPassword && unlocked"
+                :disabled="working"
+                @click="switchMode"
+                :title="status && status.mode === 'password'
+                    ? 'Unlock with the operating system credential store'
+                    : 'Set a Vault master password'"
+                x-text="status && status.mode === 'password' ? 'Use OS unlock' : 'Set password'"
+            ></button>
+            <button
+                class="button danger"
+                type="button"
+                x-show="canReset && status && status.state !== 'uninitialized'"
+                :disabled="working"
+                @click="openReset"
+                title="Clear all personal Vault entries and access grants"
+            >
+                Reset Vault
+            </button>
+        </div>
+    </div>
+    <p role="alert" x-show="error && !editor" x-text="error"></p>
+    <section
+        class="vault-availability-actions button-row"
+        x-show="status && !unlocked"
+        aria-label="Vault availability"
+    >
+        <button
+            type="button"
+            class="button primary"
+            x-show="canUnlock"
+            :disabled="working"
+            @click="unlock"
+            title="Unlock the Vault"
+        >
+            Unlock
+        </button>
+        <button
+            type="button"
+            class="button primary"
+            x-show="status && status.state === 'uninitialized'"
+            :disabled="working"
+            @click="initialize"
+            title="Create a Vault using the operating system credential store"
+        >
+            Create Vault
+        </button>
+        <button
+            type="button"
+            class="button"
+            x-show="supportsPassword && status && status.state === 'uninitialized'"
+            :disabled="working"
+            @click="createPasswordVault"
+            title="Create a Vault protected by a master password"
+        >
+            Create with password
+        </button>
+        <button
+            class="button"
+            type="button"
+            @click="openPermissions"
+            title="Manage plugin permissions"
+        >
+            Permissions
+        </button>
+    </section>
+    <div class="vault-workspace">
+        <div
+            class="navigation-tabs route-tabs"
+            role="tablist"
+            aria-label="Vault sections"
+            @keydown="tabKey"
+        >
+            <template x-for="item in visibleTabs" :key="item.id">
+                <button
+                    type="button"
+                    role="tab"
+                    :id="'vault-tab-' + item.id"
+                    :aria-controls="'vault-panel-' + item.id"
+                    :data-vault-tab="item.id"
+                    :aria-selected="displayedTab === item.id"
+                    :tabindex="displayedTab === item.id ? 0 : -1"
+                    @click="selectTab"
+                    x-text="item.label"
+                ></button>
+            </template>
+        </div>
+        <section
+            id="vault-panel-entries"
+            class="card settings-card vault-panel"
+            x-show="unlocked && displayedTab === 'entries'"
+            role="tabpanel"
+            aria-labelledby="vault-tab-entries"
+            tabindex="0"
+        >
+            <div class="vault-panel-heading">
+                <div>
+                    <div class="vault-entries-heading">
+                        <h2>Entries</h2>
+                        <span
+                            class="vault-entries-loading vault-entries-refresh"
+                            role="status"
+                            x-show="personalEntriesLoading && personalPage.total"
+                        >
+                            <span class="review-spinner" aria-hidden="true"></span>
+                            Refreshing…
+                        </span>
+                    </div>
+                    <p>Variables and secrets for your workflows.</p>
+                </div>
+                <div class="button-row vault-personal-entry-actions">
+                    <button
+                        type="button"
+                        class="button"
+                        x-show="canTransferEntries"
+                        :disabled="working || !entriesByOwner.own.length"
+                        @click="$dispatch('open-vault-transfer', {mode: 'export', entries: entriesByOwner.own, passwordMode: status.mode === 'password'})"
+                    >
+                        Export entries
+                    </button>
+                    <button
+                        type="button"
+                        class="button"
+                        x-show="canTransferEntries"
+                        :disabled="working"
+                        data-vault-entry-drop-trigger
+                        @click="$dispatch('open-vault-transfer', {mode: 'import'})"
+                    >
+                        Import entries
+                    </button>
+                    <button
+                        type="button"
+                        class="button primary"
+                        data-mode="create"
+                        :disabled="working"
+                        @click="openEntry"
+                    >
+                        Add entry
+                    </button>
+                </div>
+            </div>
+            <div
+                class="vault-entries-loading"
+                role="status"
+                x-show="personalEntriesLoading && !personalPage.total"
+            >
+                <span class="review-spinner" aria-hidden="true"></span>
+                Loading entries…
+            </div>
+            <p class="vault-empty" x-show="personalEntriesEmpty">No entries yet.</p>
+            <nav
+                class="pagination vault-entry-pagination"
+                aria-label="Vault entry pages"
+                x-show="personalPage.pages > 1"
+            >
+                <span
+                    aria-live="polite"
+                    aria-atomic="true"
+                    x-text="personalPage.start + '–' + personalPage.end + ' of ' + personalPage.total + ' entries · Page ' + personalPage.page + ' of ' + personalPage.pages"
+                ></span>
+                <div class="button-row">
+                    <button
+                        class="button"
+                        type="button"
+                        aria-label="Previous Vault entry page"
+                        data-direction="-1"
+                        :disabled="working || personalPage.page === 1"
+                        @click="changePersonalPage"
+                    >
+                        Previous
+                    </button>
+                    <button
+                        class="button"
+                        type="button"
+                        aria-label="Next Vault entry page"
+                        data-direction="1"
+                        :disabled="working || personalPage.page === personalPage.pages"
+                        @click="changePersonalPage"
+                    >
+                        Next
+                    </button>
+                </div>
+            </nav>
+            <div
+                class="runtime-table-scroll vault-table-scroll"
+                x-show="personalPage.total"
+                tabindex="0"
+                role="region"
+                aria-label="Personal entries"
+                :aria-busy="personalEntriesLoading"
+                data-personal-entry-scroll
+            >
+                <table
+                    class="runtime-table vault-table vault-entry-table"
+                    :class="{'has-protection-action': canChangeProtection}"
+                    aria-label="Personal entries"
+                >
+                    <thead>
+                        <tr>
+                            <th scope="col">Name</th>
+                            <th scope="col">Type</th>
+                            <th scope="col">Actions</th>
+                        </tr>
+                    </thead>
+                    <tbody>
+                        <template x-for="entry in personalPage.items" :key="entry.id">
+                            <tr>
+                                <th scope="row">
+                                    <span x-text="entry.label"></span>
+                                    <details class="vault-inline-detail" name="vault-entry-ids">
+                                        <summary>Entry ID</summary>
+                                        <code x-text="entry.id"></code>
+                                    </details>
+                                </th>
+                                <td>
+                                    <span x-text="kindLabel(entry.kind)"></span>
+                                    <small
+                                        class="vault-table-note vault-entry-protection"
+                                        x-text="entry.protected ? 'Protected' : 'Unprotected'"
+                                    ></small>
+                                </td>
+                                <td>
+                                    <div class="button-row vault-table-actions">
+                                        <button
+                                            type="button"
+                                            class="icon-button vault-row-icon"
+                                            aria-label="View value"
+                                            title="View value"
+                                            :data-entry-id="entry.id"
+                                            x-show="canViewValues"
+                                            :disabled="working"
+                                            @click="openValueView"
+                                        >
+                                            <svg
+                                                class="workspace-icon"
+                                                viewBox="0 0 24 24"
+                                                fill="none"
+                                                stroke="currentColor"
+                                                stroke-width="1.8"
+                                                stroke-linecap="round"
+                                                stroke-linejoin="round"
+                                                aria-hidden="true"
+                                            >
+                                                <path
+                                                    d="M2.5 12s3.5-7 9.5-7 9.5 7 9.5 7-3.5 7-9.5 7S2.5 12 2.5 12Z"
+                                                />
+                                                <circle cx="12" cy="12" r="3" />
+                                            </svg>
+                                        </button>
+                                        <button
+                                            type="button"
+                                            class="icon-button vault-row-icon"
+                                            aria-label="Copy reference"
+                                            title="Copy reference"
+                                            :data-entry-id="entry.id"
+                                            x-show="canCopyEntryReference(entry)"
+                                            :disabled="working"
+                                            @click="copyEntryReference"
+                                        >
+                                            <svg
+                                                class="workspace-icon"
+                                                viewBox="0 0 24 24"
+                                                fill="none"
+                                                stroke="currentColor"
+                                                stroke-width="1.8"
+                                                stroke-linecap="round"
+                                                stroke-linejoin="round"
+                                                aria-hidden="true"
+                                            >
+                                                <rect x="8" y="8" width="12" height="12" rx="2" />
+                                                <path
+                                                    d="M16 8V6a2 2 0 0 0-2-2H6a2 2 0 0 0-2 2v8a2 2 0 0 0 2 2h2"
+                                                />
+                                            </svg>
+                                        </button>
+                                        <button
+                                            type="button"
+                                            class="icon-button vault-row-icon"
+                                            aria-label="Rename"
+                                            title="Rename"
+                                            :data-entry-id="entry.id"
+                                            data-mode="rename"
+                                            :disabled="working"
+                                            @click="openEntry"
+                                        >
+                                            <svg
+                                                class="workspace-icon"
+                                                viewBox="0 0 24 24"
+                                                fill="none"
+                                                stroke="currentColor"
+                                                stroke-width="1.8"
+                                                stroke-linecap="round"
+                                                stroke-linejoin="round"
+                                                aria-hidden="true"
+                                            >
+                                                <path
+                                                    d="m3 21 1-4 12-12 4 4L8 21H3ZM14 7l4 4m-2-6 2-2 4 4-2 2"
+                                                />
+                                            </svg>
+                                        </button>
+                                        <button
+                                            type="button"
+                                            class="icon-button vault-row-icon"
+                                            aria-label="Replace value"
+                                            title="Replace value"
+                                            :data-entry-id="entry.id"
+                                            data-mode="replace"
+                                            :disabled="working"
+                                            @click="openEntry"
+                                        >
+                                            <svg
+                                                class="workspace-icon"
+                                                viewBox="0 0 24 24"
+                                                fill="none"
+                                                stroke="currentColor"
+                                                stroke-width="1.8"
+                                                stroke-linecap="round"
+                                                stroke-linejoin="round"
+                                                aria-hidden="true"
+                                            >
+                                                <path
+                                                    d="M4 7h16m-4-4 4 4-4 4M20 17H4m4-4-4 4 4 4"
+                                                />
+                                            </svg>
+                                        </button>
+                                        <button
+                                            type="button"
+                                            class="icon-button vault-row-icon"
+                                            :aria-label="entry.protected ? 'Change protection (Protected)' : 'Change protection (Unprotected)'"
+                                            title="Change protection"
+                                            data-mode="protection"
+                                            :data-entry-id="entry.id"
+                                            x-show="canChangeProtection"
+                                            :disabled="working"
+                                            @click="openEntry"
+                                        >
+                                            <svg
+                                                class="workspace-icon"
+                                                viewBox="0 0 24 24"
+                                                fill="none"
+                                                stroke="currentColor"
+                                                stroke-width="1.8"
+                                                stroke-linecap="round"
+                                                stroke-linejoin="round"
+                                                aria-hidden="true"
+                                            >
+                                                <rect x="5" y="11" width="14" height="10" rx="2" />
+                                                <path
+                                                    d="M8 11V7a4 4 0 0 1 8 0v4"
+                                                    x-show="entry.protected"
+                                                />
+                                                <path
+                                                    d="M8 11V7a4 4 0 0 1 7-2.6"
+                                                    x-show="!entry.protected"
+                                                />
+                                            </svg>
+                                        </button>
+                                        <button
+                                            type="button"
+                                            class="icon-button vault-row-icon danger-text"
+                                            aria-label="Delete"
+                                            title="Delete"
+                                            :data-entry-id="entry.id"
+                                            data-mode="delete"
+                                            :disabled="working"
+                                            @click="openEntry"
+                                        >
+                                            <svg
+                                                class="workspace-icon"
+                                                viewBox="0 0 24 24"
+                                                fill="none"
+                                                stroke="currentColor"
+                                                stroke-width="1.8"
+                                                stroke-linecap="round"
+                                                stroke-linejoin="round"
+                                                aria-hidden="true"
+                                            >
+                                                <path
+                                                    d="M4 7h16m-14 0 1 14h10l1-14M9 7V4h6v3m-5 4v6m4-6v6"
+                                                />
+                                            </svg>
+                                        </button>
+                                    </div>
+                                </td>
+                            </tr>
+                        </template>
+                    </tbody>
+                </table>
+            </div>
+        </section>
+        <section
+            id="vault-panel-access"
+            class="card settings-card vault-panel"
+            x-show="unlocked && displayedTab === 'access'"
+            role="tabpanel"
+            aria-labelledby="vault-tab-access"
+            tabindex="0"
+        >
+            <div class="vault-panel-heading">
+                <div>
+                    <h2>Access</h2>
+                    <p>Revoke access to stop future use of an entry.</p>
+                </div>
+                <button type="button" class="button" @click="openPermissions">
+                    Plugin Permissions
+                </button>
+            </div>
+            <p
+                class="vault-empty"
+                role="status"
+                x-show="supplementalTabState === 'idle' || supplementalTabState === 'loading'"
+            >
+                Loading entry access…
+            </p>
+            <div class="button-row" x-show="supplementalTabState === 'failed'">
+                <p class="vault-empty" role="alert">Could not load entry access.</p>
+                <button type="button" class="secondary" @click="retrySelectedTab">Retry</button>
+            </div>
+            <p
+                class="vault-empty"
+                x-show="supplementalTabState === 'ready' && !accessGroups.length"
+            >
+                No entry grants yet.
+            </p>
+            <template x-for="pager in [accessGroupPage]" :key="'accessGroupPage'">
+                <div class="vault-subsection">
+                    <nav
+                        class="pagination vault-entry-pagination vault-supplemental-pagination"
+                        aria-label="Vault access pages"
+                        x-show="pager.pages > 1"
+                    >
+                        <span
+                            aria-live="polite"
+                            aria-atomic="true"
+                            x-text="pager.start + '–' + pager.end + ' of ' + pager.total + ' plugins · Page ' + pager.page + ' of ' + pager.pages"
+                        ></span>
+                        <div class="button-row">
+                            <button
+                                class="button"
+                                type="button"
+                                aria-label="Previous Vault access page"
+                                data-direction="-1"
+                                data-tab="access"
+                                :data-key="'access'"
+                                :data-page="pager.page"
+                                :data-pages="pager.pages"
+                                :disabled="working || pager.page === 1"
+                                @click="changeSupplementalPage"
+                            >
+                                Previous
+                            </button>
+                            <button
+                                class="button"
+                                type="button"
+                                aria-label="Next Vault access page"
+                                data-direction="1"
+                                data-tab="access"
+                                :data-key="'access'"
+                                :data-page="pager.page"
+                                :data-pages="pager.pages"
+                                :disabled="working || pager.page === pager.pages"
+                                @click="changeSupplementalPage"
+                            >
+                                Next
+                            </button>
+                        </div>
+                    </nav>
+                    <div class="vault-accordion-list">
+                        <template x-for="group in pager.items" :key="group.id">
+                            <section class="vault-accordion">
+                                <h3>
+                                    <button
+                                        type="button"
+                                        class="vault-accordion-toggle"
+                                        data-accordion="access"
+                                        :data-section="group.key"
+                                        :aria-controls="sectionId('access', group.key)"
+                                        :aria-expanded="expandedAccess === group.key"
+                                        @click="toggleSection"
+                                    >
+                                        <span x-text="group.label"></span>
+                                        <small
+                                            x-text="itemCount(group.grants.length, 'grant')"
+                                        ></small>
+                                    </button>
+                                </h3>
+                                <div
+                                    :id="sectionId('access', group.key)"
+                                    x-show="expandedAccess === group.key"
+                                >
+                                    <template x-if="expandedAccess === group.key">
+                                        <template
+                                            x-for="pager in [supplementalPage(group.key, group.grants)]"
+                                            :key="group.key"
+                                        >
+                                            <div class="vault-subsection">
+                                                <nav
+                                                    class="pagination vault-entry-pagination vault-supplemental-pagination"
+                                                    :aria-label="group.label + ' grant pages'"
+                                                    x-show="pager.pages > 1"
+                                                >
+                                                    <span
+                                                        aria-live="polite"
+                                                        aria-atomic="true"
+                                                        x-text="pager.start + '–' + pager.end + ' of ' + pager.total + ' grants · Page ' + pager.page + ' of ' + pager.pages"
+                                                    ></span>
+                                                    <div class="button-row">
+                                                        <button
+                                                            class="button"
+                                                            type="button"
+                                                            aria-label="Previous grant page"
+                                                            data-direction="-1"
+                                                            data-tab="access"
+                                                            :data-key="group.key"
+                                                            :data-page="pager.page"
+                                                            :data-pages="pager.pages"
+                                                            :disabled="working || pager.page === 1"
+                                                            @click="changeSupplementalPage"
+                                                        >
+                                                            Previous
+                                                        </button>
+                                                        <button
+                                                            class="button"
+                                                            type="button"
+                                                            aria-label="Next grant page"
+                                                            data-direction="1"
+                                                            data-tab="access"
+                                                            :data-key="group.key"
+                                                            :data-page="pager.page"
+                                                            :data-pages="pager.pages"
+                                                            :disabled="working || pager.page === pager.pages"
+                                                            @click="changeSupplementalPage"
+                                                        >
+                                                            Next
+                                                        </button>
+                                                    </div>
+                                                </nav>
+                                                <div
+                                                    class="runtime-table-scroll vault-table-scroll"
+                                                    role="region"
+                                                    tabindex="0"
+                                                    :aria-label="group.label + ' Vault access'"
+                                                >
+                                                    <table
+                                                        class="runtime-table vault-table vault-access-table"
+                                                        :aria-label="group.label + ' Vault access'"
+                                                    >
+                                                        <thead>
+                                                            <tr>
+                                                                <th scope="col">Entry</th>
+                                                                <th scope="col">Access</th>
+                                                                <th scope="col">Actions</th>
+                                                            </tr>
+                                                        </thead>
+                                                        <tbody>
+                                                            <template
+                                                                x-for="grant in pager.items"
+                                                                :key="grantKey(grant)"
+                                                            >
+                                                                <tr>
+                                                                    <th
+                                                                        scope="row"
+                                                                        x-text="grant.entry.label"
+                                                                    ></th>
+                                                                    <td>
+                                                                        <span
+                                                                            x-text="grant.description || (grant.entry.kind === 'location' ? 'Read saved coordinates' : grant.direct_secret ? 'Direct secret read' : 'Scoped value access')"
+                                                                        ></span>
+                                                                        <small
+                                                                            class="vault-table-note"
+                                                                            x-show="grant.last_read"
+                                                                            x-text="lastReadLabel(grant)"
+                                                                        ></small>
+                                                                        <details
+                                                                            class="vault-inline-detail"
+                                                                            name="vault-access-purpose"
+                                                                            x-show="grant.purpose"
+                                                                        >
+                                                                            <summary>
+                                                                                Purpose
+                                                                            </summary>
+                                                                            <p
+                                                                                x-text="'Purpose stated by the plugin: ' + grant.purpose"
+                                                                            ></p>
+                                                                        </details>
+                                                                    </td>
+                                                                    <td>
+                                                                        <button
+                                                                            type="button"
+                                                                            class="button danger-text"
+                                                                            :disabled="working"
+                                                                            :data-grant-key="grantKey(grant)"
+                                                                            @click="revokeGrant"
+                                                                        >
+                                                                            Revoke access
+                                                                        </button>
+                                                                    </td>
+                                                                </tr>
+                                                            </template>
+                                                        </tbody>
+                                                    </table>
+                                                </div>
+                                            </div>
+                                        </template>
+                                    </template>
+                                </div>
+                            </section>
+                        </template>
+                        <section class="vault-accordion" x-show="builtinUses.rows.length">
+                            <h3>
+                                <button
+                                    type="button"
+                                    class="vault-accordion-toggle"
+                                    data-accordion="access"
+                                    data-section="builtins"
+                                    aria-controls="vault-access-builtins"
+                                    :aria-expanded="expandedAccess === 'builtins'"
+                                    @click="toggleSection"
+                                >
+                                    <span>Configured built-in actions</span>
+                                    <small
+                                        x-text="itemCount(builtinUses.rows.length, 'reference')"
+                                    ></small>
+                                </button>
+                            </h3>
+                            <div id="vault-access-builtins" x-show="expandedAccess === 'builtins'">
+                                <template
+                                    x-if="expandedAccess === 'builtins' && builtinUses.rows.length"
+                                >
+                                    <div class="vault-subsection">
+                                        <template
+                                            x-for="builtinPager in [supplementalPage('builtins', builtinUses.rows)]"
+                                            :key="'builtins'"
+                                        >
+                                            <div class="vault-subsection">
+                                                <nav
+                                                    class="pagination vault-entry-pagination vault-supplemental-pagination"
+                                                    aria-label="Built-in reference pages"
+                                                    x-show="builtinPager.pages > 1"
+                                                >
+                                                    <span
+                                                        aria-live="polite"
+                                                        aria-atomic="true"
+                                                        x-text="builtinPager.start + '–' + builtinPager.end + ' of ' + builtinPager.total + ' references · Page ' + builtinPager.page + ' of ' + builtinPager.pages"
+                                                    ></span>
+                                                    <div class="button-row">
+                                                        <button
+                                                            class="button"
+                                                            type="button"
+                                                            aria-label="Previous reference page"
+                                                            data-direction="-1"
+                                                            data-tab="access"
+                                                            :data-key="'builtins'"
+                                                            :data-page="builtinPager.page"
+                                                            :data-pages="builtinPager.pages"
+                                                            :disabled="working || builtinPager.page === 1"
+                                                            @click="changeSupplementalPage"
+                                                        >
+                                                            Previous
+                                                        </button>
+                                                        <button
+                                                            class="button"
+                                                            type="button"
+                                                            aria-label="Next reference page"
+                                                            data-direction="1"
+                                                            data-tab="access"
+                                                            :data-key="'builtins'"
+                                                            :data-page="builtinPager.page"
+                                                            :data-pages="builtinPager.pages"
+                                                            :disabled="working || builtinPager.page === builtinPager.pages"
+                                                            @click="changeSupplementalPage"
+                                                        >
+                                                            Next
+                                                        </button>
+                                                    </div>
+                                                </nav>
+                                                <div
+                                                    class="runtime-table-scroll vault-table-scroll"
+                                                    role="region"
+                                                    tabindex="0"
+                                                    aria-label="Configured built-in actions"
+                                                >
+                                                    <table
+                                                        class="runtime-table vault-table"
+                                                        aria-label="Configured built-in actions"
+                                                    >
+                                                        <thead>
+                                                            <tr>
+                                                                <th scope="col">Action</th>
+                                                                <th scope="col">Entry</th>
+                                                                <th scope="col">Status</th>
+                                                            </tr>
+                                                        </thead>
+                                                        <tbody>
+                                                            <template
+                                                                x-for="(use, index) in builtinPager.items"
+                                                                :key="index"
+                                                            >
+                                                                <tr>
+                                                                    <th scope="row">
+                                                                        <span
+                                                                            x-text="use.action"
+                                                                        ></span>
+                                                                        <small
+                                                                            class="vault-table-note"
+                                                                            x-text="use.source"
+                                                                        ></small>
+                                                                    </th>
+                                                                    <td
+                                                                        x-text="use.entry || 'Not selected'"
+                                                                    ></td>
+                                                                    <td x-text="use.status"></td>
+                                                                </tr>
+                                                            </template>
+                                                        </tbody>
+                                                    </table>
+                                                </div>
+                                            </div>
+                                        </template>
+                                        <small x-show="builtinUses.truncated">
+                                            Showing the first 250 references.
+                                        </small>
+                                    </div>
+                                </template>
+                            </div>
+                        </section>
+                    </div>
+                </div>
+            </template>
+        </section>
+        <section
+            id="vault-panel-plugins"
+            class="card settings-card vault-panel"
+            x-show="unlocked && displayedTab === 'plugins'"
+            role="tabpanel"
+            aria-labelledby="vault-tab-plugins"
+            tabindex="0"
+        >
+            <div class="vault-panel-heading">
+                <div>
+                    <h2>Plugins</h2>
+                    <p>Saved plugin settings and private entries. Secret values are hidden.</p>
+                </div>
+            </div>
+            <p
+                class="vault-empty"
+                role="status"
+                x-show="supplementalTabState === 'idle' || supplementalTabState === 'loading'"
+            >
+                Loading plugin settings…
+            </p>
+            <div class="button-row" x-show="supplementalTabState === 'failed'">
+                <p class="vault-empty" role="alert">Could not load plugin settings.</p>
+                <button type="button" class="secondary" @click="retrySelectedTab">Retry</button>
+            </div>
+            <p
+                class="vault-empty"
+                x-show="supplementalTabState === 'ready' && !pluginPanels.length"
+            >
+                No plugin settings or entries yet.
+            </p>
+            <template x-for="pager in [pluginPanelPage]" :key="'pluginPanelPage'">
+                <div class="vault-subsection">
+                    <nav
+                        class="pagination vault-entry-pagination vault-supplemental-pagination"
+                        aria-label="Vault plugin pages"
+                        x-show="pager.pages > 1"
+                    >
+                        <span
+                            aria-live="polite"
+                            aria-atomic="true"
+                            x-text="pager.start + '–' + pager.end + ' of ' + pager.total + ' plugins · Page ' + pager.page + ' of ' + pager.pages"
+                        ></span>
+                        <div class="button-row">
+                            <button
+                                class="button"
+                                type="button"
+                                aria-label="Previous Vault plugin page"
+                                data-direction="-1"
+                                data-tab="plugins"
+                                :data-key="'plugins'"
+                                :data-page="pager.page"
+                                :data-pages="pager.pages"
+                                :disabled="working || pager.page === 1"
+                                @click="changeSupplementalPage"
+                            >
+                                Previous
+                            </button>
+                            <button
+                                class="button"
+                                type="button"
+                                aria-label="Next Vault plugin page"
+                                data-direction="1"
+                                data-tab="plugins"
+                                :data-key="'plugins'"
+                                :data-page="pager.page"
+                                :data-pages="pager.pages"
+                                :disabled="working || pager.page === pager.pages"
+                                @click="changeSupplementalPage"
+                            >
+                                Next
+                            </button>
+                        </div>
+                    </nav>
+                    <div class="vault-accordion-list vault-plugin-list">
+                        <template x-for="plugin in pager.items" :key="plugin.key">
+                            <section class="vault-accordion">
+                                <header class="vault-plugin-heading">
+                                    <h3>
+                                        <button
+                                            type="button"
+                                            class="vault-accordion-toggle"
+                                            data-accordion="plugin"
+                                            :data-section="plugin.key"
+                                            :aria-controls="sectionId('plugin', plugin.key)"
+                                            :aria-expanded="expandedPlugin === plugin.key"
+                                            @click="toggleSection"
+                                        >
+                                            <span>
+                                                <span x-text="plugin.name"></span>
+                                                <small
+                                                    class="vault-table-note"
+                                                    x-text="plugin.identity"
+                                                ></small>
+                                            </span>
+                                            <small x-text="plugin.summary"></small>
+                                        </button>
+                                    </h3>
+                                    <button
+                                        type="button"
+                                        class="icon-button vault-row-icon danger-text"
+                                        x-show="canDeleteSettings && plugin.settingsId"
+                                        :disabled="working"
+                                        :data-plugin-id="plugin.settingsId"
+                                        :aria-label="'Delete all saved settings and data for ' + plugin.name"
+                                        title="Delete all saved settings and data"
+                                        @click="reviewSettingsDelete"
+                                    >
+                                        <svg
+                                            class="workspace-icon"
+                                            viewBox="0 0 24 24"
+                                            fill="none"
+                                            stroke="currentColor"
+                                            stroke-width="1.8"
+                                            stroke-linecap="round"
+                                            stroke-linejoin="round"
+                                            aria-hidden="true"
+                                        >
+                                            <path
+                                                d="M4 7h16m-14 0 1 14h10l1-14M9 7V4h6v3m-5 4v6m4-6v6"
+                                            />
+                                        </svg>
+                                    </button>
+                                </header>
+                                <div
+                                    :id="sectionId('plugin', plugin.key)"
+                                    x-show="expandedPlugin === plugin.key"
+                                >
+                                    <template x-if="expandedPlugin === plugin.key">
+                                        <div class="vault-subsection vault-accordion-list">
+                                            <p
+                                                class="vault-empty"
+                                                x-show="!plugin.groups.length && !plugin.entries.length"
+                                            >
+                                                No saved plugin settings.
+                                            </p>
+                                            <template
+                                                x-for="group in plugin.groups"
+                                                :key="group.name"
+                                            >
+                                                <section class="vault-accordion vault-subaccordion">
+                                                    <h4>
+                                                        <button
+                                                            type="button"
+                                                            class="vault-accordion-toggle"
+                                                            data-accordion="settings"
+                                                            :data-section="group.name"
+                                                            :aria-controls="sectionId('settings', plugin.key + ':' + group.name)"
+                                                            :aria-expanded="expandedSettings === group.name"
+                                                            @click="toggleSection"
+                                                        >
+                                                            <span x-text="group.name"></span>
+                                                            <small
+                                                                x-text="itemCount(group.rows.length, 'record')"
+                                                            ></small>
+                                                        </button>
+                                                    </h4>
+                                                    <div
+                                                        :id="sectionId('settings', plugin.key + ':' + group.name)"
+                                                        x-show="expandedSettings === group.name"
+                                                    >
+                                                        <template
+                                                            x-if="expandedSettings === group.name"
+                                                        >
+                                                            <template
+                                                                x-for="pager in [supplementalPage(sectionId('settings', plugin.key + ':' + group.name), group.rows)]"
+                                                                :key="sectionId('settings', plugin.key + ':' + group.name)"
+                                                            >
+                                                                <div class="vault-subsection">
+                                                                    <nav
+                                                                        class="pagination vault-entry-pagination vault-supplemental-pagination"
+                                                                        :aria-label="group.name + ' record pages'"
+                                                                        x-show="pager.pages > 1"
+                                                                    >
+                                                                        <span
+                                                                            aria-live="polite"
+                                                                            aria-atomic="true"
+                                                                            x-text="pager.start + '–' + pager.end + ' of ' + pager.total + ' records · Page ' + pager.page + ' of ' + pager.pages"
+                                                                        ></span>
+                                                                        <div class="button-row">
+                                                                            <button
+                                                                                class="button"
+                                                                                type="button"
+                                                                                aria-label="Previous record page"
+                                                                                data-direction="-1"
+                                                                                data-tab="plugins"
+                                                                                :data-key="sectionId('settings', plugin.key + ':' + group.name)"
+                                                                                :data-page="pager.page"
+                                                                                :data-pages="pager.pages"
+                                                                                :disabled="working || pager.page === 1"
+                                                                                @click="changeSupplementalPage"
+                                                                            >
+                                                                                Previous
+                                                                            </button>
+                                                                            <button
+                                                                                class="button"
+                                                                                type="button"
+                                                                                aria-label="Next record page"
+                                                                                data-direction="1"
+                                                                                data-tab="plugins"
+                                                                                :data-key="sectionId('settings', plugin.key + ':' + group.name)"
+                                                                                :data-page="pager.page"
+                                                                                :data-pages="pager.pages"
+                                                                                :disabled="working || pager.page === pager.pages"
+                                                                                @click="changeSupplementalPage"
+                                                                            >
+                                                                                Next
+                                                                            </button>
+                                                                        </div>
+                                                                    </nav>
+                                                                    <div
+                                                                        class="runtime-table-scroll vault-table-scroll"
+                                                                        role="region"
+                                                                        tabindex="0"
+                                                                        :aria-label="group.name"
+                                                                    >
+                                                                        <table
+                                                                            class="runtime-table vault-table vault-settings-table"
+                                                                            :aria-label="group.name"
+                                                                        >
+                                                                            <thead>
+                                                                                <tr>
+                                                                                    <th scope="col">
+                                                                                        Action
+                                                                                    </th>
+                                                                                    <th scope="col">
+                                                                                        Location
+                                                                                    </th>
+                                                                                    <th scope="col">
+                                                                                        Actions
+                                                                                    </th>
+                                                                                </tr>
+                                                                            </thead>
+                                                                            <tbody>
+                                                                                <template
+                                                                                    x-for="row in pager.items"
+                                                                                    :key="row.revision"
+                                                                                >
+                                                                                    <tr>
+                                                                                        <th
+                                                                                            scope="row"
+                                                                                            x-text="row.action || plugin.name"
+                                                                                        ></th>
+                                                                                        <td
+                                                                                            x-text="row.location || '—'"
+                                                                                        ></td>
+                                                                                        <td>
+                                                                                            <div
+                                                                                                class="button-row vault-table-actions"
+                                                                                            >
+                                                                                                <button
+                                                                                                    class="button"
+                                                                                                    type="button"
+                                                                                                    :disabled="working"
+                                                                                                    :data-revision="row.revision"
+                                                                                                    :aria-label="'Inspect ' + (row.action || plugin.name) + ' ' + group.name + ' ' + row.location"
+                                                                                                    @click="inspectSettings"
+                                                                                                >
+                                                                                                    Inspect
+                                                                                                    settings
+                                                                                                </button>
+                                                                                                <button
+                                                                                                    class="icon-button vault-row-icon danger-text"
+                                                                                                    type="button"
+                                                                                                    x-show="canDeleteSettingsRow"
+                                                                                                    :disabled="working"
+                                                                                                    :data-revision="row.revision"
+                                                                                                    :data-label="(row.action || plugin.name) + ' · ' + group.name + (row.location ? ' · ' + row.location : '')"
+                                                                                                    :aria-label="'Delete saved setting for ' + (row.action || plugin.name) + ' ' + group.name + ' ' + row.location"
+                                                                                                    title="Delete saved setting"
+                                                                                                    @click="reviewSettingsDelete"
+                                                                                                >
+                                                                                                    <svg
+                                                                                                        class="workspace-icon"
+                                                                                                        viewBox="0 0 24 24"
+                                                                                                        fill="none"
+                                                                                                        stroke="currentColor"
+                                                                                                        stroke-width="1.8"
+                                                                                                        stroke-linecap="round"
+                                                                                                        stroke-linejoin="round"
+                                                                                                        aria-hidden="true"
+                                                                                                    >
+                                                                                                        <path
+                                                                                                            d="M4 7h16m-14 0 1 14h10l1-14M9 7V4h6v3m-5 4v6m4-6v6"
+                                                                                                        />
+                                                                                                    </svg>
+                                                                                                </button>
+                                                                                            </div>
+                                                                                        </td>
+                                                                                    </tr>
+                                                                                </template>
+                                                                            </tbody>
+                                                                        </table>
+                                                                    </div>
+                                                                </div>
+                                                            </template>
+                                                        </template>
+                                                    </div>
+                                                </section>
+                                            </template>
+                                            <section
+                                                class="vault-accordion vault-subaccordion"
+                                                x-show="plugin.entries.length"
+                                            >
+                                                <h4>
+                                                    <button
+                                                        type="button"
+                                                        class="vault-accordion-toggle"
+                                                        data-accordion="settings"
+                                                        data-section="private"
+                                                        :aria-controls="sectionId('private', plugin.key)"
+                                                        :aria-expanded="expandedSettings === 'private'"
+                                                        @click="toggleSection"
+                                                    >
+                                                        <span>Private entries</span>
+                                                        <small
+                                                            x-text="itemCount(plugin.entries.length, 'entry')"
+                                                        ></small>
+                                                    </button>
+                                                </h4>
+                                                <div
+                                                    :id="sectionId('private', plugin.key)"
+                                                    x-show="expandedSettings === 'private'"
+                                                >
+                                                    <template x-if="expandedSettings === 'private'">
+                                                        <template
+                                                            x-for="pager in [supplementalPage(sectionId('private', plugin.key), plugin.entries)]"
+                                                            :key="sectionId('private', plugin.key)"
+                                                        >
+                                                            <div class="vault-subsection">
+                                                                <nav
+                                                                    class="pagination vault-entry-pagination vault-supplemental-pagination"
+                                                                    aria-label="Private entry pages"
+                                                                    x-show="pager.pages > 1"
+                                                                >
+                                                                    <span
+                                                                        aria-live="polite"
+                                                                        aria-atomic="true"
+                                                                        x-text="pager.start + '–' + pager.end + ' of ' + pager.total + ' entries · Page ' + pager.page + ' of ' + pager.pages"
+                                                                    ></span>
+                                                                    <div class="button-row">
+                                                                        <button
+                                                                            class="button"
+                                                                            type="button"
+                                                                            aria-label="Previous private entry page"
+                                                                            data-direction="-1"
+                                                                            data-tab="plugins"
+                                                                            :data-key="sectionId('private', plugin.key)"
+                                                                            :data-page="pager.page"
+                                                                            :data-pages="pager.pages"
+                                                                            :disabled="working || pager.page === 1"
+                                                                            @click="changeSupplementalPage"
+                                                                        >
+                                                                            Previous
+                                                                        </button>
+                                                                        <button
+                                                                            class="button"
+                                                                            type="button"
+                                                                            aria-label="Next private entry page"
+                                                                            data-direction="1"
+                                                                            data-tab="plugins"
+                                                                            :data-key="sectionId('private', plugin.key)"
+                                                                            :data-page="pager.page"
+                                                                            :data-pages="pager.pages"
+                                                                            :disabled="working || pager.page === pager.pages"
+                                                                            @click="changeSupplementalPage"
+                                                                        >
+                                                                            Next
+                                                                        </button>
+                                                                    </div>
+                                                                </nav>
+                                                                <div
+                                                                    class="runtime-table-scroll vault-table-scroll"
+                                                                    role="region"
+                                                                    tabindex="0"
+                                                                    aria-label="Private entries"
+                                                                >
+                                                                    <table
+                                                                        class="runtime-table vault-table vault-owned-table"
+                                                                        aria-label="Private entries"
+                                                                    >
+                                                                        <thead>
+                                                                            <tr>
+                                                                                <th scope="col">
+                                                                                    Name
+                                                                                </th>
+                                                                                <th scope="col">
+                                                                                    Type
+                                                                                </th>
+                                                                                <th scope="col">
+                                                                                    Actions
+                                                                                </th>
+                                                                            </tr>
+                                                                        </thead>
+                                                                        <tbody>
+                                                                            <template
+                                                                                x-for="entry in pager.items"
+                                                                                :key="entry.id"
+                                                                            >
+                                                                                <tr>
+                                                                                    <th scope="row">
+                                                                                        <span
+                                                                                            x-text="entry.label"
+                                                                                        ></span>
+                                                                                        <details
+                                                                                            class="vault-inline-detail"
+                                                                                            name="vault-entry-ids"
+                                                                                        >
+                                                                                            <summary>
+                                                                                                Entry
+                                                                                                ID
+                                                                                            </summary>
+                                                                                            <code
+                                                                                                x-text="entry.id"
+                                                                                            ></code>
+                                                                                        </details>
+                                                                                    </th>
+                                                                                    <td>
+                                                                                        <span
+                                                                                            x-text="kindLabel(entry.kind)"
+                                                                                        ></span>
+                                                                                        <small
+                                                                                            class="vault-table-note"
+                                                                                            x-show="entry.protected"
+                                                                                        >
+                                                                                            Protected
+                                                                                        </small>
+                                                                                    </td>
+                                                                                    <td>
+                                                                                        <button
+                                                                                            type="button"
+                                                                                            class="icon-button vault-row-icon danger-text"
+                                                                                            aria-label="Delete"
+                                                                                            title="Delete"
+                                                                                            :data-entry-id="entry.id"
+                                                                                            data-mode="delete"
+                                                                                            :disabled="working"
+                                                                                            @click="openEntry"
+                                                                                        >
+                                                                                            <svg
+                                                                                                class="workspace-icon"
+                                                                                                viewBox="0 0 24 24"
+                                                                                                fill="none"
+                                                                                                stroke="currentColor"
+                                                                                                stroke-width="1.8"
+                                                                                                stroke-linecap="round"
+                                                                                                stroke-linejoin="round"
+                                                                                                aria-hidden="true"
+                                                                                            >
+                                                                                                <path
+                                                                                                    d="M4 7h16m-14 0 1 14h10l1-14M9 7V4h6v3m-5 4v6m4-6v6"
+                                                                                                />
+                                                                                            </svg>
+                                                                                        </button>
+                                                                                    </td>
+                                                                                </tr>
+                                                                            </template>
+                                                                        </tbody>
+                                                                    </table>
+                                                                </div>
+                                                            </div>
+                                                        </template>
+                                                    </template>
+                                                </div>
+                                            </section>
+                                        </div>
+                                    </template>
+                                </div>
+                            </section>
+                        </template>
+                    </div>
+                </div>
+            </template>
+        </section>
+        <section
+            id="vault-panel-usage"
+            class="card settings-card vault-panel vault-usage-panel"
+            x-show="displayedTab === 'usage'"
+            role="tabpanel"
+            aria-labelledby="vault-tab-usage"
+            tabindex="0"
+        >
+            <div class="vault-panel-heading">
+                <div>
+                    <h2>Using Vault entries</h2>
+                    <p>Reference a saved value without storing it in the action or macro itself.</p>
+                </div>
+            </div>
+            <div class="vault-usage-guide">
+                <section class="vault-usage-card" aria-labelledby="vault-usage-start">
+                    <h3 id="vault-usage-start">Get started</h3>
+                    <ol>
+                        <li>
+                            Unlock Vault, then open
+                            <strong>Entries</strong>
+                            and select
+                            <strong>Add entry.</strong>
+                        </li>
+                        <li>
+                            Open a supported built-in action in the Device editor or select a step
+                            in a macro.
+                        </li>
+                        <li>
+                            Paste the reference in a supported field, or pick an eligible entry with
+                            <strong>Choose from Vault</strong>
+                            where available. Save your binding or macro.
+                        </li>
+                    </ol>
+                    <p>
+                        Your action reads the current value at run time. The saved reference stays
+                        the same when you replace the value in Vault.
+                    </p>
+                </section>
+                <section class="vault-usage-card" aria-labelledby="vault-usage-copy">
+                    <h3 id="vault-usage-copy">Copy a reference example</h3>
+                    <p>
+                        To copy a personal entry’s reference, choose
+                        <strong>Copy reference</strong>
+                        in Entries. Use it only in fields that support that entry type.
+                    </p>
+                    <p>
+                        Replace
+                        <code>&lt;vault-id&gt;.&lt;entry-id&gt;</code>
+                        with the full
+                        <strong>Entry ID</strong>
+                        shown in Entries, not its name.
+                    </p>
+                    <ul class="vault-usage-snippets">
+                        <template x-for="example in usageExamples" :key="example.id">
+                            <li>
+                                <div>
+                                    <strong x-text="example.label"></strong>
+                                    <code x-text="example.code"></code>
+                                </div>
+                                <button
+                                    type="button"
+                                    class="button"
+                                    :data-example="example.id"
+                                    :aria-label="'Copy ' + example.label + ' example'"
+                                    @click="copyUsageExample"
+                                >
+                                    Copy
+                                </button>
+                            </li>
+                        </template>
+                    </ul>
+                </section>
+            </div>
+            <section class="vault-usage-card" aria-labelledby="vault-usage-fields">
+                <h3 id="vault-usage-fields">Text fields that accept references</h3>
+                <p>
+                    Put a reference on its own or alongside other text. You can use the same
+                    references in individual built-in actions and in macro steps.
+                </p>
+                <ul>
+                    <li>
+                        <strong>Type text, Paste text, Set clipboard:</strong>
+                        text.
+                    </li>
+                    <li>
+                        <strong>Show notification, Input prompt:</strong>
+                        title and message.
+                    </li>
+                    <li>
+                        <strong>Action menu:</strong>
+                        title and choice labels.
+                    </li>
+                    <li>
+                        <strong>Icon, label &amp; live display:</strong>
+                        display titles, canvas Label text, and authored live-label text. The editor
+                        keeps the reference; live pixels use the current unprotected value.
+                    </li>
+                    <li>
+                        <strong>Insert date and time and Clipboard slots:</strong>
+                        the date format and the slot name. Date replacements are literal text.
+                    </li>
+                    <li>
+                        <strong>Conditional action and Wait for condition:</strong>
+                        literal text comparisons, process names, and one unprotected File or Folder
+                        reference for an exact local path.
+                    </li>
+                    <li>
+                        <strong>Write file:</strong>
+                        contents, not the destination path.
+                    </li>
+                    <li>
+                        <strong>Open website, Open link, Search selection:</strong>
+                        the path, query or fragment after a fixed HTTP or HTTPS website. Values are
+                        URL-encoded. Only use entries you want to share with that website.
+                    </li>
+                </ul>
+                <p>
+                    Use
+                    <strong>Choose from Vault</strong>
+                    in the action editor to insert at the caret or replace selected text.
+                    <strong>Insert run outputs</strong>
+                    is not needed for Vault references. It controls run-output placeholders such as
+                    <code>${run.name}</code>
+                    .
+                </p>
+            </section>
+            <section class="settings-section" aria-labelledby="vault-usage-types">
+                <h3 id="vault-usage-types">Where each type works</h3>
+                <div
+                    class="runtime-table-scroll"
+                    role="region"
+                    tabindex="0"
+                    aria-labelledby="vault-usage-types"
+                >
+                    <table class="runtime-table vault-usage-table">
+                        <thead>
+                            <tr>
+                                <th scope="col">Entry type</th>
+                                <th scope="col">Supported use</th>
+                            </tr>
+                        </thead>
+                        <tbody>
+                            <tr>
+                                <th scope="row">Text, Integer, Boolean</th>
+                                <td>
+                                    Unprotected values appear as normal text, whole numbers, or
+                                    <code>true</code>
+                                    and
+                                    <code>false</code>
+                                    .
+                                </td>
+                            </tr>
+                            <tr>
+                                <th scope="row">File or Folder path</th>
+                                <td>
+                                    Unprotected entries can appear as text. To open the location in
+                                    <strong>Reveal file</strong>
+                                    , use one eligible reference as the entire path or choose it
+                                    from Vault.
+                                </td>
+                            </tr>
+                            <tr>
+                                <th scope="row">JSON</th>
+                                <td>
+                                    Unprotected entries appear as compact JSON in text fields. To
+                                    compare clipboard JSON with a Vault entry, use
+                                    <strong>Matches Vault JSON</strong>
+                                    in a
+                                    <strong>Conditional</strong>
+                                    or
+                                    <strong>Wait for condition</strong>
+                                    action.
+                                </td>
+                            </tr>
+                            <tr>
+                                <th scope="row">Location</th>
+                                <td>
+                                    An unprotected location appears as
+                                    <code>latitude,longitude</code>
+                                    . Add
+                                    <code>.name</code>
+                                    ,
+                                    <code>.latitude</code>
+                                    , or
+                                    <code>.longitude</code>
+                                    before the closing brace to insert just that field.
+                                    <strong>Matches Vault JSON</strong>
+                                    is a separate comparison and rounds coordinates to two decimal
+                                    places.
+                                </td>
+                            </tr>
+                            <tr>
+                                <th scope="row">API key, Bearer token, Other secret</th>
+                                <td>
+                                    Not expanded in built-in text fields. A supported plugin can
+                                    request access to an eligible entry for a specific action.
+                                    Review the access in
+                                    <strong>Vault → Access.</strong>
+                                </td>
+                            </tr>
+                        </tbody>
+                    </table>
+                </div>
+            </section>
+            <section class="vault-usage-card" aria-labelledby="vault-usage-replace">
+                <h3 id="vault-usage-replace">Insert or replace a reference</h3>
+                <p>
+                    To switch entries, replace the whole reference. The rest of the text can stay.
+                    Consider where the result will appear before using an unprotected value in a
+                    notification, clipboard, menu, or file.
+                </p>
+                <p>
+                    If you see
+                    <code>${vault.unlinked}</code>
+                    in an imported field, use
+                    <strong>Choose from Vault</strong>
+                    where available, or copy a local reference from Entries and replace the
+                    placeholder. Live desktop actions insert nothing for missing, invalid, locked,
+                    or protected references in ordinary text fields. Macro previews and debug runs
+                    do not read Vault values; the live display canvas does render eligible
+                    unprotected text.
+                </p>
+            </section>
+        </section>
+    </div>
+    <dialog
+        id="vault-value-dialog"
+        class="feature-dialog vault-value-dialog"
+        aria-labelledby="vault-value-title"
+        @cancel.prevent="closeValueView"
+        @close="valueViewClosed"
+    >
+        <form @submit.prevent="submitValuePassword">
+            <header class="picker-header vault-value-header">
+                <div>
+                    <h2 id="vault-value-title">View value</h2>
+                    <p x-text="valueEntry ? valueEntry.label : ''"></p>
+                </div>
+                <span
+                    class="status-pill vault-value-type"
+                    x-show="valueEntry"
+                    x-text="valueEntry ? kindLabel(valueEntry.kind) : ''"
+                ></span>
+            </header>
+            <div class="feature-body vault-value-body">
+                <p class="field-help" x-show="valueNeedsPassword">
+                    Enter your Vault master password again to view this protected value.
+                </p>
+                <label x-show="valueNeedsPassword">
+                    Master password
+                    <input
+                        type="password"
+                        name="valuePassword"
+                        autocomplete="current-password"
+                        :disabled="!valueNeedsPassword || valueWorking"
+                        :required="valueNeedsPassword"
+                    />
+                </label>
+                <p class="field-help" x-show="valueWorking" role="status">Opening value…</p>
+                <div data-vault-value-content x-show="valueReady"></div>
+                <p class="vault-value-error" role="alert" x-text="valueError"></p>
+            </div>
+            <footer class="feature-footer vault-value-footer">
+                <button class="button" type="button" x-show="valueReady" @click="copyViewedValue">
+                    Copy value
+                </button>
+                <button
+                    class="button"
+                    type="button"
+                    data-close-value
+                    autofocus
+                    @click="closeValueView"
+                >
+                    Close
+                </button>
+                <button
+                    class="button primary"
+                    type="submit"
+                    x-show="valueNeedsPassword"
+                    :disabled="valueWorking"
+                >
+                    Reveal value
+                </button>
+            </footer>
+        </form>
+    </dialog>
+    <dialog
+        id="vault-settings-editor"
+        class="feature-dialog wide-dialog"
+        aria-labelledby="vault-settings-title"
+        @cancel.prevent="closeSettings"
+    >
+        <form @submit.prevent="saveSettings">
+            <header class="picker-header">
+                <h2 id="vault-settings-title" x-text="settingsTitle"></h2>
+            </header>
+            <div class="feature-body settings-section">
+                <p x-text="settingsDocument && settingsDocument.json_type"></p>
+                <template x-for="field in settingsFields" :key="field[0]">
+                    <div class="vault-row-heading">
+                        <code x-text="field[0]"></code>
+                        <small x-text="field[1]"></small>
+                    </div>
+                </template>
+                <button
+                    type="button"
+                    class="button"
+                    x-show="settingsDocument && settingsDocument.json === null"
+                    :disabled="working"
+                    @click="revealSettings"
+                >
+                    Reveal and edit JSON
+                </button>
+                <label x-show="settingsDocument && settingsDocument.json !== null">
+                    Settings JSON
+                    <textarea
+                        rows="10"
+                        spellcheck="false"
+                        autocomplete="off"
+                        x-model="settingsText"
+                    ></textarea>
+                </label>
+                <p x-show="settingsError || error" x-text="settingsError || error" role="alert"></p>
+            </div>
+            <footer class="feature-footer">
+                <button type="button" class="button" @click="closeSettings">Cancel</button>
+                <button
+                    type="submit"
+                    class="button primary"
+                    :disabled="working || !settingsDocument || settingsDocument.json === null"
+                >
+                    Save settings
+                </button>
+            </footer>
+        </form>
+    </dialog>
+    <dialog
+        id="vault-settings-delete"
+        class="feature-dialog"
+        aria-labelledby="vault-settings-delete-title"
+        @cancel.prevent="cancelSettingsDelete"
+        @close="closeSettingsDelete"
+    >
+        <form @submit.prevent="confirmSettingsDelete">
+            <header class="picker-header">
+                <h2
+                    id="vault-settings-delete-title"
+                    x-text="settingsDeleteMode === 'all' ? 'Delete all saved settings and data?' : 'Delete saved setting?'"
+                ></h2>
+            </header>
+            <div class="feature-body settings-section">
+                <strong x-text="settingsDeleteLabel"></strong>
+                <p x-show="settingsDeleteMode === 'all'">
+                    This clears saved settings and private SDK data for this plugin. Its package,
+                    bindings, and Vault entries are unchanged.
+                </p>
+                <p x-show="settingsDeleteMode === 'single'">
+                    This clears the selected settings record, including any linked copies of the
+                    same binding. Other settings, Vault entries, and bindings are unchanged.
+                </p>
+                <p>Disable the plugin and close its settings first.</p>
+                <p role="alert" x-show="settingsDeleteError" x-text="settingsDeleteError"></p>
+            </div>
+            <footer class="feature-footer button-row">
+                <button
+                    type="button"
+                    class="button"
+                    :disabled="working"
+                    @click="cancelSettingsDelete"
+                    autofocus
+                >
+                    Cancel
+                </button>
+                <button type="submit" class="button primary danger" :disabled="working">
+                    <span
+                        x-text="settingsDeleteMode === 'all' ? 'Delete all' : 'Delete setting'"
+                    ></span>
+                </button>
+            </footer>
+        </form>
+    </dialog>
+    <dialog
+        x-ref="entryDialog"
+        class="feature-dialog vault-entry-dialog"
+        aria-labelledby="vault-entry-title"
+        @cancel.prevent="closeEditor"
+        @close="closeEditor"
+    >
+        <form @submit.prevent="saveEntry">
+            <header class="picker-header">
+                <h2 id="vault-entry-title" x-text="draftTitle"></h2>
+            </header>
+            <div class="feature-body">
+                <label x-show="needsLabel">
+                    Name
+                    <input
+                        type="text"
+                        x-model="draftLabel"
+                        :required="needsLabel"
+                        maxlength="128"
+                        :disabled="!needsLabel || working"
+                    />
+                </label>
+                <label x-show="editor === 'create'">
+                    Type
+                    <select
+                        x-model="draftKind"
+                        @change="changeDraftKind"
+                        :disabled="editor !== 'create' || working"
+                    >
+                        <template x-for="kind in kinds" :key="kind.id">
+                            <option :value="kind.id" x-text="kind.label"></option>
+                        </template>
+                    </select>
+                </label>
+                <label
+                    class="preference-toggle"
+                    x-show="editor === 'create' || editor === 'protection'"
+                >
+                    <input type="checkbox" x-model="protect" :disabled="working" />
+                    <span>Protect this entry</span>
+                </label>
+                <p class="field-help" x-show="editor === 'create' || editor === 'protection'">
+                    Protected values require your Vault master password to view. All entries remain
+                    encrypted.
+                </p>
+                <p
+                    class="field-help"
+                    x-show="editor === 'protection' && draftKind === 'text' && protect && draftEntry && !draftEntry.protected"
+                >
+                    Protecting a text entry revokes existing plugin grants to its plain text.
+                </p>
+                <p class="field-help" x-show="protectionBlocked">
+                    To remove protection, switch Vault to master-password mode first.
+                </p>
+                <template x-if="protectionNeedsPassword">
+                    <label>
+                        Current Vault master password
+                        <input
+                            type="password"
+                            name="protectionPassword"
+                            autocomplete="off"
+                            required
+                            :disabled="working"
+                        />
+                    </label>
+                </template>
+                <template x-if="needsValue && draftKind !== 'location' && draftKind !== 'boolean'">
+                    <div class="vault-entry-value-row">
+                        <label>
+                            <span x-text="maskValue ? 'Protected value' : 'Value'"></span>
+                            <input
+                                :type="maskValue ? 'password' : 'text'"
+                                name="entryValue"
+                                autocomplete="off"
+                                :required="maskValue"
+                                :disabled="working"
+                            />
+                        </label>
+                        <button
+                            class="button"
+                            type="button"
+                            :disabled="working"
+                            x-show="pathEntry && hasHost"
+                            @click="choosePath"
+                            x-text="draftKind === 'folder' ? 'Choose folder' : 'Choose file'"
+                        ></button>
+                    </div>
+                </template>
+                <template x-if="needsValue && draftKind === 'boolean'">
+                    <label>
+                        Value
+                        <select name="entryValue" required :disabled="working">
+                            <option value="">Choose a value</option>
+                            <option value="true">True</option>
+                            <option value="false">False</option>
+                        </select>
+                    </label>
+                </template>
+                <template x-if="needsValue && draftKind === 'location'">
+                    <div
+                        class="vault-entry-location"
+                        @vault-location-fix="locationFix = $event.detail"
+                    >
+                        <label>
+                            Place name
+                            <input
+                                name="locationName"
+                                type="text"
+                                maxlength="128"
+                                required
+                                :disabled="working"
+                            />
+                        </label>
+                        <div class="vault-entry-coordinates">
+                            <label>
+                                Latitude
+                                <input
+                                    type="number"
+                                    name="latitude"
+                                    @input="clearLocation"
+                                    min="-90"
+                                    max="90"
+                                    step="any"
+                                    required
+                                    :disabled="working"
+                                />
+                            </label>
+                            <label>
+                                Longitude
+                                <input
+                                    type="number"
+                                    name="longitude"
+                                    @input="clearLocation"
+                                    min="-180"
+                                    max="180"
+                                    step="any"
+                                    required
+                                    :disabled="working"
+                                />
+                            </label>
+                        </div>
+                        <div class="field-group" x-show="canLocate">
+                            <div class="button-row">
+                                <button
+                                    type="button"
+                                    class="button"
+                                    x-data="locationFieldPicker"
+                                    :disabled="working || locationRequest !== ''"
+                                    @click="pick"
+                                >
+                                    Find a location
+                                </button>
+                                <button
+                                    class="button"
+                                    type="button"
+                                    :disabled="working || locationRequest !== ''"
+                                    @click="chooseLocation"
+                                >
+                                    Use current location
+                                </button>
+                            </div>
+                            <small role="status" x-show="locationRequest">
+                                Requesting location…
+                            </small>
+                            <small x-show="locationFix">
+                                Review the coordinates before saving this entry.
+                            </small>
+                        </div>
+                    </div>
+                </template>
+                <p x-show="editor === 'delete'">
+                    Delete
+                    <strong x-text="draftEntry ? draftEntry.label : ''"></strong>
+                    ? References to it will no longer work.
+                </p>
+                <p role="alert" x-show="error" x-text="error"></p>
+            </div>
+            <footer class="feature-footer button-row">
+                <button type="button" class="button" :disabled="working" @click="closeEditor">
+                    Cancel
+                </button>
+                <button
+                    type="submit"
+                    class="button primary"
+                    :class="{danger: editor === 'delete'}"
+                    :disabled="working || locationRequest !== '' || protectionBlocked || protectionUnchanged"
+                    x-text="editor === 'delete' ? 'Delete entry' : 'Save'"
+                ></button>
+            </footer>
+        </form>
+    </dialog>
+    <dialog
+        x-ref="resetDialog"
+        class="feature-dialog"
+        aria-labelledby="vault-reset-title"
+        @cancel.prevent="closeReset"
+        @close="closeReset"
+    >
+        <form @submit.prevent="confirmReset">
+            <header class="picker-header">
+                <h2 id="vault-reset-title">Clear Vault entries and access grants?</h2>
+            </header>
+            <div class="feature-body">
+                <p>
+                    All stored variables, paths, secrets, access approvals, and history will be
+                    lost. Manager will create an empty Vault. Existing bindings will need new Vault
+                    entries.
+                </p>
+                <label>
+                    Type CLEAR VAULT ENTRIES to confirm
+                    <input
+                        x-model="resetPhrase"
+                        type="text"
+                        autocomplete="off"
+                        spellcheck="false"
+                        required
+                    />
+                </label>
+            </div>
+            <footer class="feature-footer button-row">
+                <button type="button" class="button" autofocus @click="closeReset">Cancel</button>
+                <button
+                    type="submit"
+                    class="button danger"
+                    :disabled="working || resetPhrase !== 'CLEAR VAULT ENTRIES'"
+                >
+                    Reset Vault
+                </button>
+            </footer>
+        </form>
+    </dialog>
+    <dialog
+        class="feature-dialog vault-transfer-dialog"
+        x-data="vaultTransfer"
+        aria-labelledby="vault-transfer-title"
+        :data-vault-drop-ready="stage === 'choose' && !busy"
+        @open-vault-transfer.window="openTransfer"
+        @vault-transfer-drop.window="acceptDrop"
+        @vault-session-ended.window="close"
+        @pagehide.window="close"
+        @hashchange.window="close"
+        @visibilitychange.document="visibilityChanged"
+        x-effect="constrainTransfer(unlocked)"
+        @cancel.prevent="dismiss"
+        @close="dialogClosed"
+    >
+        <header class="picker-header">
+            <h2 id="vault-transfer-title" x-text="title">Vault transfer</h2>
+        </header>
+        <p class="vault-transfer-error" role="alert" x-show="error" x-text="error"></p>
+        <form
+            class="vault-transfer-export"
+            x-show="stage === 'export'"
+            @submit.prevent="submitExport"
+            autocomplete="off"
+        >
+            <div class="feature-body vault-transfer-body">
+                <p class="vault-transfer-export-note">
+                    Personal entries only. Plugin-owned entries and access grants stay in Vault.
+                </p>
+                <section class="vault-transfer-selection" aria-labelledby="vault-export-selection">
+                    <div class="vault-transfer-selection-header">
+                        <div>
+                            <h3 id="vault-export-selection">Entries to export</h3>
+                            <span role="status" x-text="exportSelectionLabel"></span>
+                        </div>
+                        <button
+                            type="button"
+                            class="button"
+                            :disabled="busy"
+                            @click="selectAll"
+                            x-show="entries.length"
+                            x-text="allExportEntriesSelected ? 'Clear selection' : 'Select all entries'"
+                        ></button>
+                    </div>
+                    <fieldset
+                        aria-label="Select personal entries"
+                        class="vault-transfer-selection-list"
+                        data-vault-export-list
+                        :disabled="busy"
+                    >
+                        <template x-for="entry in exportPageRows" :key="entry.id">
+                            <label class="vault-transfer-selection-row">
+                                <input
+                                    type="checkbox"
+                                    :data-entry-id="entry.id"
+                                    :checked="isSelected(entry.id)"
+                                    @change="selectEntry"
+                                />
+                                <span>
+                                    <strong x-text="entry.label"></strong>
+                                    <small
+                                        x-text="kindLabel(entry.kind) + (entry.protected ? ' · Protected' : '')"
+                                    ></small>
+                                </span>
+                            </label>
+                        </template>
+                        <p x-show="!entries.length">No personal entries to export.</p>
+                    </fieldset>
+                    <nav
+                        class="vault-transfer-pagination"
+                        aria-label="Export entry pages"
+                        x-show="exportPageCount > 1"
+                    >
+                        <button
+                            type="button"
+                            class="button"
+                            :disabled="busy || exportPage === 1"
+                            @click="navigateExport(-1)"
+                        >
+                            Previous
+                        </button>
+                        <span
+                            role="status"
+                            x-text="'Page ' + exportPage + ' of ' + exportPageCount"
+                        ></span>
+                        <button
+                            type="button"
+                            class="button"
+                            :disabled="busy || exportPage === exportPageCount"
+                            @click="navigateExport(1)"
+                        >
+                            Next
+                        </button>
+                    </nav>
+                </section>
+                <label class="preference-toggle">
+                    <input
+                        type="checkbox"
+                        :checked="encrypted"
+                        :disabled="busy"
+                        @change="changeEncryption"
+                    />
+                    <span>Encrypt the export file with a separate transfer password</span>
+                </label>
+                <div class="vault-transfer-passwords" x-show="encrypted">
+                    <label>
+                        Transfer password
+                        <input
+                            name="exportPassword"
+                            type="password"
+                            autocomplete="new-password"
+                            :required="encrypted"
+                            :disabled="!encrypted || busy"
+                        />
+                    </label>
+                    <label>
+                        Confirm transfer password
+                        <input
+                            name="confirmPassword"
+                            type="password"
+                            autocomplete="new-password"
+                            :required="encrypted"
+                            :disabled="!encrypted || busy"
+                        />
+                    </label>
+                </div>
+                <div x-show="!encrypted" class="vault-transfer-warning">
+                    <p>
+                        Anyone who opens the readable export can see its values, including secrets.
+                        Store it securely and only share it if you intend to share those values.
+                    </p>
+                    <label class="preference-toggle">
+                        <input
+                            type="checkbox"
+                            x-model="acknowledge"
+                            :disabled="encrypted || busy"
+                        />
+                        <span>I understand this file will contain readable values</span>
+                    </label>
+                </div>
+                <p x-show="needsMaster && !passwordMode" class="vault-transfer-warning">
+                    Protected entries require the current Vault master password. Use a master
+                    password in Vault first, or deselect protected entries.
+                </p>
+                <label class="vault-transfer-master" x-show="needsMaster && passwordMode">
+                    Current Vault master password
+                    <input
+                        name="master"
+                        type="password"
+                        autocomplete="off"
+                        :required="needsMaster && passwordMode"
+                        :disabled="!needsMaster || !passwordMode || busy"
+                    />
+                </label>
+            </div>
+            <footer class="feature-footer vault-transfer-export-footer">
+                <div class="vault-transfer-destination">
+                    <button
+                        type="button"
+                        class="button"
+                        :disabled="busy"
+                        @click="chooseExportPath"
+                        x-text="exportPath ? 'Change destination' : 'Choose destination'"
+                    ></button>
+                    <small x-show="exportPath" role="status">Destination selected</small>
+                </div>
+                <div class="button-row">
+                    <button type="button" class="button" :disabled="committing" @click="dismiss">
+                        Cancel
+                    </button>
+                    <button
+                        type="submit"
+                        class="button primary"
+                        :disabled="!canExport"
+                        x-text="committing ? 'Exporting…' : 'Export entries'"
+                    >
+                        Export entries
+                    </button>
+                </div>
+            </footer>
+        </form>
+        <div x-show="stage === 'choose'">
+            <div class="feature-body vault-transfer-body">
+                <p>
+                    Choose or drop one .sdmvault file to review its personal entries. Nothing is
+                    imported until you confirm.
+                </p>
+                <button
+                    type="button"
+                    class="button primary"
+                    :disabled="busy"
+                    @click="chooseFile"
+                    x-text="busy ? 'Reading file…' : 'Choose Vault file'"
+                >
+                    Choose Vault file
+                </button>
+            </div>
+            <footer class="feature-footer button-row">
+                <button type="button" class="button" @click="dismiss">Cancel</button>
+            </footer>
+        </div>
+        <form x-show="stage === 'password'" @submit.prevent="submitPassword" autocomplete="off">
+            <div class="feature-body vault-transfer-body">
+                <p>
+                    This export is protected by its own transfer password, not your current Vault
+                    master password.
+                </p>
+                <label>
+                    Transfer password
+                    <input
+                        name="importPassword"
+                        type="password"
+                        autocomplete="off"
+                        :required="stage === 'password'"
+                        :disabled="busy || stage !== 'password'"
+                    />
+                </label>
+            </div>
+            <footer class="feature-footer button-row">
+                <button type="button" class="button" @click="dismiss">Cancel</button>
+                <button type="submit" class="button primary" :disabled="busy">
+                    Review entries
+                </button>
+            </footer>
+        </form>
+        <div x-show="stage === 'review'">
+            <div class="feature-body vault-transfer-body">
+                <p>
+                    New entries will be added. Existing entries are kept unless you select Replace.
+                    Ambiguous matches are skipped.
+                </p>
+                <p class="vault-transfer-warning">
+                    Replacing an entry keeps its ID and any existing approved access. Workflows and
+                    approved plugins can use the replacement value.
+                </p>
+                <div class="vault-transfer-review" aria-label="Incoming entries">
+                    <template x-for="row in reviewRows" :key="row.row">
+                        <article class="vault-transfer-row">
+                            <h3 x-text="row.label"></h3>
+                            <p
+                                x-text="kindLabel(row.kind) + (row.protected ? ' · Protected' : '') + ' · ' + rowStatus(row)"
+                            ></p>
+                            <p
+                                x-show="row.existing"
+                                x-text="row.existing ? 'Existing: ' + row.existing.label + ' · ' + kindLabel(row.existing.kind) + (row.existing.protected ? ' · Protected' : '') : ''"
+                            ></p>
+                            <div class="button-row" x-show="row.status === 'conflict'">
+                                <label class="preference-toggle">
+                                    <input
+                                        type="checkbox"
+                                        :data-transfer-row="row.row"
+                                        :checked="rowIsOverwrite(row.row)"
+                                        :disabled="busy"
+                                        @change="chooseOverwrite"
+                                    />
+                                    <span>Replace existing value</span>
+                                </label>
+                                <button
+                                    type="button"
+                                    class="button"
+                                    :data-transfer-row="row.row"
+                                    :disabled="busy"
+                                    @click="showIncoming"
+                                    x-text="revealRow === row.row ? 'Hide incoming value' : 'View incoming value'"
+                                >
+                                    View incoming value
+                                </button>
+                            </div>
+                        </article>
+                    </template>
+                </div>
+                <div
+                    x-show="revealRow !== null"
+                    class="vault-transfer-warning"
+                    aria-label="Incoming value"
+                >
+                    <p>Incoming value only. The currently stored value stays hidden.</p>
+                    <pre data-transfer-value tabindex="0"></pre>
+                    <div class="button-row">
+                        <button
+                            type="button"
+                            class="button"
+                            :disabled="revealRow === null || busy"
+                            @click="copyIncomingValue"
+                        >
+                            Copy value
+                        </button>
+                    </div>
+                </div>
+            </div>
+            <footer class="feature-footer button-row">
+                <button type="button" class="button" :disabled="committing" @click="dismiss">
+                    Cancel
+                </button>
+                <button
+                    type="button"
+                    class="button primary"
+                    :disabled="!readyToImport"
+                    @click="applyImport"
+                    x-text="committing ? 'Importing…' : 'Apply import'"
+                >
+                    Apply import
+                </button>
+            </footer>
+        </div>
+        <div x-show="stage === 'complete'">
+            <div class="feature-body vault-transfer-body">
+                <p role="status" x-text="completion"></p>
+            </div>
+            <footer class="feature-footer button-row">
+                <button type="button" class="button primary" @click="dismiss">Done</button>
+            </footer>
+        </div>
+    </dialog>
+</section>

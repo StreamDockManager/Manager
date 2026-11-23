@@ -17,6 +17,7 @@ import { app } from './route-context';
 import { defaultAppearance } from './features';
 import { actionAppearanceDefaults } from './action-appearance-defaults';
 import { defaultMedia } from './bridge';
+import { insertVaultTextReference, type VaultTextSelection } from './vault-action-fields';
 import type { Binding } from './types';
 import type {
     IconAsset,
@@ -28,6 +29,7 @@ import type {
     DisplayComposition,
     DisplaySourceDescriptor,
     DisplayLayer,
+    VaultEntry,
 } from '../generated/runtime';
 import { iconImage } from './icon-selector';
 import { DEFAULT_BACKGROUND, backgroundRgb } from './background-color';
@@ -51,6 +53,53 @@ export function registerAppearanceEditor() {
                 ],
                 this.fontsLoaded,
             );
+        },
+        fontLabel(id: string): string {
+            return this.fontOptions.find((font) => font.id === id)?.label || id;
+        },
+        get appearanceFontLabel(): string {
+            return (
+                this.fontOptions.find((font) => font.id === this.appearance.font)?.label ||
+                this.appearance.font
+            );
+        },
+        applyLabelFont(
+            event: CustomEvent<{ font: string; fontWeight: number; fontItalic: boolean }>,
+        ) {
+            this.appearance = {
+                ...this.appearance,
+                font: event.detail.font,
+                font_weight: event.detail.fontWeight === 700 ? 700 : 400,
+                font_italic: event.detail.fontItalic === true,
+            };
+        },
+        applyLayerFont(
+            event: CustomEvent<{ font: string; fontWeight: number; fontItalic: boolean }>,
+        ) {
+            this.ensureComposition();
+            const layer = this.composition!.layers.find(
+                (entry) => entry.id === this.selectedLayerId,
+            );
+            if (!layer) return;
+            layer.style = {
+                ...layer.style,
+                font: event.detail.font,
+                font_weight: event.detail.fontWeight === 700 ? 700 : 400,
+                font_italic: event.detail.fontItalic === true,
+            };
+            this.requestAppearance();
+        },
+        applyPluginFont(
+            event: CustomEvent<{ font: string; fontWeight: number; fontItalic: boolean }>,
+        ) {
+            const element = this.editableElement;
+            if (!element || element.kind !== 'text') return;
+            Object.assign(element, {
+                font: event.detail.font,
+                font_weight: event.detail.fontWeight === 700 ? 700 : 400,
+                font_italic: event.detail.fontItalic === true,
+            });
+            this.styleElement();
         },
         // Load fonts while rejecting stale editor responses
         async loadFonts(refresh = false) {
@@ -111,7 +160,7 @@ export function registerAppearanceEditor() {
         // Convert a layer’s geometry into canvas coordinates
         canvasRect(layer: DisplayLayer) {
             const r = layer.style.rect;
-            return `left:${r[0]}%;top:${r[1]}%;width:${r[2]}%;height:${r[3]}%`;
+            return { left: `${r[0]}%`, top: `${r[1]}%`, width: `${r[2]}%`, height: `${r[3]}%` };
         },
         // Create a stable key for a display source
         sourceKey(source: DisplaySourceDescriptor) {
@@ -162,6 +211,89 @@ export function registerAppearanceEditor() {
                 field === 'vertical_align'
             )
                 layer.style[field] = input.value;
+            this.requestAppearance();
+        },
+        layerVaultEntries: [] as VaultEntry[],
+        layerVaultBusy: false,
+        layerVaultMessage: '',
+        layerVaultRequest: 0,
+        layerVaultSelection: null as VaultTextSelection | null,
+        resetLayerVault() {
+            this.layerVaultRequest++;
+            this.layerVaultEntries = [];
+            this.layerVaultBusy = false;
+            this.layerVaultMessage = '';
+            this.layerVaultSelection = null;
+        },
+        async chooseLayerVault(event: Event) {
+            const layer = this.selectedLayer;
+            if (!layer || layer.source.kind !== 'text' || this.layerVaultBusy) return;
+            const field = (event.currentTarget as HTMLButtonElement)
+                .closest('[data-layer-vault]')
+                ?.querySelector('textarea');
+            if (!field) return;
+            this.resetLayerVault();
+            const request = this.layerVaultRequest;
+            this.layerVaultSelection = {
+                value: field.value,
+                start: field.selectionStart,
+                end: field.selectionEnd,
+            };
+            this.layerVaultBusy = true;
+            this.layerVaultMessage = 'Loading Vault entries…';
+            const current = () =>
+                this.opened &&
+                this.layerVaultRequest === request &&
+                this.selectedLayerId === layer.id;
+            try {
+                const entries = await app().bridge.command('vault_builtin_choices', {
+                    pathField: false,
+                    jsonField: false,
+                });
+                if (!current()) return;
+                this.layerVaultEntries = entries.filter(
+                    (entry) =>
+                        !entry.owner &&
+                        !entry.protected &&
+                        ['text', 'integer', 'boolean', 'location'].includes(entry.kind),
+                );
+                this.layerVaultMessage = this.layerVaultEntries.length
+                    ? ''
+                    : 'No unprotected Vault entries can be displayed.';
+            } catch {
+                if (current()) this.layerVaultMessage = 'Unlock Vault to choose an entry.';
+            } finally {
+                if (current()) this.layerVaultBusy = false;
+            }
+        },
+        insertLayerVault(event: Event) {
+            const select = event.currentTarget as HTMLSelectElement;
+            const field = select.closest('[data-layer-vault]')?.querySelector('textarea');
+            const entry = this.layerVaultEntries.find((entry) => entry.id === select.value);
+            const selection = this.layerVaultSelection;
+            if (!entry || !field || !selection || this.selectedLayer?.source.kind !== 'text')
+                return;
+            if (selection.value !== field.value) {
+                this.resetLayerVault();
+                this.layerVaultMessage = 'Label text changed. Choose the Vault entry again.';
+                return;
+            }
+            const token = '${vault.' + entry.id + '}';
+            const next = insertVaultTextReference(field.value, token, selection);
+            if (new TextEncoder().encode(next).length > field.maxLength) {
+                this.resetLayerVault();
+                this.layerVaultMessage = 'This Vault reference exceeds the label text limit.';
+                return;
+            }
+            this.ensureComposition();
+            const layer = this.composition!.layers.find((l) => l.id === this.selectedLayerId);
+            if (!layer) return;
+            layer.text = next;
+            field.value = next;
+            this.resetLayerVault();
+            field.focus();
+            const caret = selection.start + token.length;
+            field.setSelectionRange(caret, caret);
             this.requestAppearance();
         },
         // Append a layer with defaults appropriate to its kind
@@ -331,6 +463,69 @@ export function registerAppearanceEditor() {
             );
         },
         title: '',
+        liveLabel: [] as NonNullable<Binding['live_label']>,
+        labelScenario: 'missing',
+        get labelExample() {
+            const sample =
+                this.labelScenario === 'missing'
+                    ? undefined
+                    : this.labelScenario === 'false'
+                      ? false
+                      : this.labelScenario === 'zero'
+                        ? 0
+                        : 'Sample';
+            const text = this.liveLabel
+                .map((s) => (s.kind === 'literal' ? s.text : String(sample ?? s.fallback)))
+                .join('');
+            return Array.from(text).slice(0, 160).join('') || this.title;
+        },
+        labelField: 'literal',
+        labelValue: '',
+        get labelFields() {
+            return [
+                { value: 'literal', label: 'Literal text' },
+                { value: 'macro', label: 'Macro state' },
+                ...(app().profile?.parameters || [])
+                    .filter((p) => !p.sensitive)
+                    .map((p) => ({ value: 'param:' + p.name, label: 'Parameter · ' + p.label })),
+                ...this.pluginElements
+                    .filter((e) => ['text', 'bar', 'gbar', 'gauge'].includes(e.style.kind))
+                    .map((e) => ({
+                        value: 'display:' + e.style.key,
+                        label: 'Display · ' + e.label,
+                    })),
+            ];
+        },
+        addLabelSegment() {
+            if (this.liveLabel.length >= 16) return;
+            const field = this.labelField,
+                fallback = this.labelValue;
+            this.liveLabel.push(
+                field === 'literal'
+                    ? { kind: 'literal', text: fallback }
+                    : field === 'macro'
+                      ? { kind: 'macro_state', fallback }
+                      : field.startsWith('param:')
+                        ? { kind: 'parameter', name: field.slice(6), fallback }
+                        : { kind: 'display', key: field.slice(8), fallback },
+            );
+            this.labelValue = '';
+            this.requestAppearance();
+        },
+        removeLabelSegment(index: number) {
+            this.liveLabel.splice(index, 1);
+            this.requestAppearance();
+        },
+        segmentText(s: NonNullable<Binding['live_label']>[number]) {
+            if (s.kind === 'literal') return s.text;
+            return (
+                (s.kind === 'macro_state'
+                    ? 'Macro state'
+                    : s.kind === 'parameter'
+                      ? s.name
+                      : s.key) + (s.fallback ? ' · Fallback: ' + s.fallback : '')
+            );
+        },
         color: DEFAULT_BACKGROUND,
         customBackground: false,
         backgroundSource: 'custom' as 'custom' | 'palette',
@@ -545,6 +740,7 @@ export function registerAppearanceEditor() {
         editableSignature() {
             return JSON.stringify([
                 this.title,
+                this.liveLabel,
                 this.color,
                 this.customBackground,
                 this.backgroundSource,
@@ -613,6 +809,7 @@ export function registerAppearanceEditor() {
                 this.$watch(key, () => {
                     if (this.opened) this.requestAppearance();
                 });
+            this.$watch('selectedLayerId', () => this.resetLayerVault());
             this.$watch('$store.app.controlId', () => this.cancel());
             // Cancel the editor when its binding context becomes stale
             this.$watch('contextCurrent', () => {
@@ -639,12 +836,15 @@ export function registerAppearanceEditor() {
             this.pluginIconState = 'default';
             this.previewGeneration++;
             this.title = b.title;
+            this.liveLabel = cloneJson(b.live_label || []);
+            this.labelField = 'literal';
+            this.labelValue = '';
             this.color = b.color;
             this.customBackground = Boolean(b.custom_background);
             this.backgroundSource = b.background_source || 'custom';
             this.asset = b.asset;
             this.media = b.media;
-            this.appearance = b.appearance || defaultAppearance();
+            this.appearance = { ...defaultAppearance(), ...b.appearance };
             if (!b.appearance && app().isProtectedControl(app().controlId)) {
                 this.appearance.position = 'center';
                 this.appearance.align = 'center';
@@ -753,6 +953,7 @@ export function registerAppearanceEditor() {
         },
         // Restore editable appearance fields to their default values
         resetAppearance() {
+            this.liveLabel = [];
             Object.assign(
                 this,
                 actionAppearanceDefaults(this.defaultAction, app().snapshot.plugins),
@@ -799,6 +1000,7 @@ export function registerAppearanceEditor() {
                     detail: {
                         context: this.context,
                         title: this.title,
+                        liveLabel: cloneJson(this.liveLabel),
                         color: this.color,
                         customBackground: this.customBackground,
                         backgroundSource: this.backgroundSource,
@@ -986,6 +1188,7 @@ export function registerAppearanceEditor() {
         // Project the draft appearance into a preview-only binding
         previewBinding(): Binding {
             const binding: Binding = {
+                live_label: this.liveLabel.length ? cloneJson(this.liveLabel) : undefined,
                 title: this.title,
                 color: this.color,
                 custom_background: this.customBackground || undefined,
@@ -1010,6 +1213,29 @@ export function registerAppearanceEditor() {
                 delete appearance.toggle_icon;
             }
             return binding;
+        },
+        vaultPresentationChanged() {
+            this.resetLayerVault();
+            if (!this.opened) return;
+            const template = '${vault.';
+            if (
+                !this.title.includes(template) &&
+                !this.liveLabel.some((segment) =>
+                    (segment.kind === 'literal' ? segment.text : segment.fallback).includes(
+                        template,
+                    ),
+                ) &&
+                !this.composition?.layers.some(
+                    (layer) => layer.source.kind === 'text' && layer.text.includes(template),
+                )
+            )
+                return;
+            this.previewGeneration++;
+            this.previewImage = '';
+            this.textWarnings = [];
+            clearTimeout(this.previewTimer);
+            this.previewTimer = undefined;
+            this.requestAppearance();
         },
         // Schedule an appearance preview for the current draft
         requestAppearance() {

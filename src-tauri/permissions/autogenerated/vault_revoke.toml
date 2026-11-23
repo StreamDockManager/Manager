@@ -1,0 +1,11 @@
+# Automatically generated - DO NOT EDIT!
+
+[[permission]]
+identifier = "allow-vault-revoke"
+description = "Enables the vault_revoke command without any pre-configured scope."
+commands.allow = ["vault_revoke"]
+
+[[permission]]
+identifier = "deny-vault-revoke"
+description = "Denies the vault_revoke command without any pre-configured scope."
+commands.deny = ["vault_revoke"]

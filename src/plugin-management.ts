@@ -1,3 +1,5 @@
+import { nextTab } from './tab-navigation';
+import { openPluginPermissions } from './plugin-permissions';
 import { cloneJson } from './json-clone';
 import type AlpineType from '@alpinejs/csp';
 import type { AppState } from './state';
@@ -24,6 +26,17 @@ export function registerPluginManagement(Alpine: typeof AlpineType, app: () => A
         epoch: 0,
         reviewEpoch: 0,
         pluginId: '',
+        openPermissions() {
+            if (
+                this.writing ||
+                this.preparing ||
+                (this.policyCloseValue() !== this.policyBaseline && this.policy)
+            )
+                return;
+            const id = this.pluginId;
+            this.close();
+            openPluginPermissions(id);
+        },
         tab: 'backups',
         page: 1,
         backups: null as PluginBackups | null,
@@ -192,6 +205,14 @@ export function registerPluginManagement(Alpine: typeof AlpineType, app: () => A
                 this.error = [this.error, String(policy.reason)].filter(Boolean).join('\n');
             }
             this.busy = false;
+        },
+        versionTabKey(event: KeyboardEvent) {
+            if (this.writing) return;
+            const next = nextTab(['backups', 'policy'], this.tab, event.key);
+            if (!next) return;
+            event.preventDefault();
+            this.tab = next;
+            document.getElementById('version-tab-' + next)?.focus();
         },
         // Show the backups
         showBackups() {

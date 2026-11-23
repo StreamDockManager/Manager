@@ -3,7 +3,7 @@ use std::{
     collections::{BTreeMap, BTreeSet},
     sync::{Arc, Mutex},
 };
-#[derive(Debug, Default)]
+#[derive(Clone, Debug, Default)]
 pub(crate) struct AssetPins {
     pub generation: u64,
     pub live: BTreeMap<String, (String, BTreeSet<String>)>,

@@ -26,7 +26,7 @@ jobs:
             QUALIFICATION_OLDER_BUILD: ${{ inputs.older_build }}
             QUALIFICATION_OLDER_COMMIT: ${{ inputs.older_commit }}
             QUALIFICATION_INSPECT_ONLY: ${{ inputs.inspect_only }}
-            STREAM_DOCK_MANAGER_LINUX_BASELINE_IMAGE: ubuntu@sha256:78d4744ead1f5b19b04d0df558ab182a5300903900755e515b2ca4d10eb2044d
+            STREAM_DOCK_MANAGER_LINUX_BASELINE_IMAGE: ubuntu@sha256:73b999393d07f2bf65a40373778a44dc9a6d54ad7718d29247d8ff9413c4d6a8
         steps:
             - uses: actions/checkout@v7.0.1
               with:

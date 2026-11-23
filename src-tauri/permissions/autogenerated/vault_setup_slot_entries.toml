@@ -1,0 +1,11 @@
+# Automatically generated - DO NOT EDIT!
+
+[[permission]]
+identifier = "allow-vault-setup-slot-entries"
+description = "Enables the vault_setup_slot_entries command without any pre-configured scope."
+commands.allow = ["vault_setup_slot_entries"]
+
+[[permission]]
+identifier = "deny-vault-setup-slot-entries"
+description = "Denies the vault_setup_slot_entries command without any pre-configured scope."
+commands.deny = ["vault_setup_slot_entries"]

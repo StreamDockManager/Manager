@@ -135,7 +135,8 @@ macro_rules! field_traversal {
                 },
                 Action::None | Action::Hotkey { .. } | Action::Media { .. } | Action::Volume { .. }
                 | Action::Mute | Action::Navigate { .. } | Action::SwipeNavigation { .. } | Action::Delay { .. }
-                | Action::Macro { .. } | Action::Dial { .. } | Action::Toggle { .. } | Action::Brightness { .. }
+                | Action::Macro { .. } | Action::Dial { .. } | Action::Events { .. }
+                | Action::Toggle { .. } | Action::Brightness { .. }
                 | Action::Lighting { .. } | Action::Sleep => {}
             }
             self.$children(|child| child.$name(text, plugin))?;

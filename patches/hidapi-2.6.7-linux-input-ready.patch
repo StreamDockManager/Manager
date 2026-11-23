@@ -1,0 +1,196 @@
+--- a/etc/hidapi/linux/hid.c
++++ b/etc/hidapi/linux/hid.c
+@@ -35,6 +35,11 @@
+ #include <sys/utsname.h>
+ #include <fcntl.h>
+ #include <poll.h>
++#include <pthread.h>
++#include <stdatomic.h>
++#include <stdint.h>
++#include <sys/epoll.h>
++#include <sys/eventfd.h>
+ 
+ /* Linux */
+ #include <linux/hidraw.h>
+@@ -71,9 +76,13 @@
+ #define HIDIOCSOUTPUT(len)   _IOC(_IOC_WRITE|_IOC_READ, 'H', 0x0B, len)
+ #endif
+ 
++struct hid_input_ready_waiter;
++
+ struct hid_device_ {
+ 	int device_handle;
+ 	int blocking;
++	struct hid_input_ready_waiter *input_ready_waiter;
++	atomic_int input_ready_failed;
+ 	wchar_t *last_error_str;
+ 	struct hid_device_info* device_info;
+ };
+@@ -96,6 +105,7 @@
+ 
+ 	dev->device_handle = -1;
+ 	dev->blocking = 1;
++	atomic_init(&dev->input_ready_failed, 0);
+ 	dev->last_error_str = NULL;
+ 	dev->device_info = NULL;
+ 
+@@ -181,6 +191,123 @@
+ 	va_start(args, format);
+ 	register_error_str_vformat(&dev->last_error_str, format, args);
+ 	va_end(args);
++}
++
++/* Manager extension: one cancellable, edge-triggered observer on the existing
++ * hidraw descriptor. It never reads, duplicates, reopens, or owns that descriptor.
++ * The normal HIDAPI reader remains the sole report consumer. */
++struct hid_input_ready_waiter {
++	hid_device *dev;
++	int epoll_fd;
++	int cancel_fd;
++	pthread_t thread;
++	void (*callback)(void *);
++	void *context;
++};
++
++static void *hid_input_ready_wait(void *context)
++{
++	struct hid_input_ready_waiter *waiter = context;
++	for (;;) {
++		struct epoll_event events[2];
++		int count = epoll_wait(waiter->epoll_fd, events, 2, -1);
++		if (count < 0) {
++			if (errno == EINTR)
++				continue;
++			atomic_store(&waiter->dev->input_ready_failed, 1);
++			waiter->callback(waiter->context);
++			return NULL;
++		}
++		/* Cancellation takes priority over a simultaneous device event. */
++		for (int i = 0; i < count; i++)
++			if (events[i].data.u32 == 1)
++				return NULL;
++		for (int i = 0; i < count; i++) {
++			if (events[i].events & (EPOLLERR | EPOLLHUP))
++				atomic_store(&waiter->dev->input_ready_failed, 1);
++			waiter->callback(waiter->context);
++			if (atomic_load(&waiter->dev->input_ready_failed))
++				return NULL;
++		}
++	}
++}
++
++/* Caller serializes registration/removal with normal device access. Callback
++ * may only signal independent state; it must not call HIDAPI. Removal joins
++ * the waiter before releasing its callback context or the original hidraw fd. */
++int HID_API_EXPORT hid_linux_set_input_ready_callback(hid_device *dev,
++	void (*callback)(void *), void *context)
++{
++	struct hid_input_ready_waiter *waiter = dev->input_ready_waiter;
++	if (waiter) {
++		uint64_t cancel = 1;
++		ssize_t result;
++		do {
++			result = write(waiter->cancel_fd, &cancel, sizeof(cancel));
++		} while (result < 0 && errno == EINTR);
++		/* The private eventfd stays open until after this join. EAGAIN means
++		 * cancellation is already pending; no other writer can fill it. */
++		if (result < 0 && errno != EAGAIN) {
++			register_device_error(dev, strerror(errno));
++			return -1; /* Keep waiter/callback/fd alive on failed cancellation. */
++		}
++		int joined = pthread_join(waiter->thread, NULL);
++		if (joined) {
++			register_device_error(dev, strerror(joined));
++			return -1; /* Never free a callback that might still execute. */
++		}
++		close(waiter->cancel_fd);
++		close(waiter->epoll_fd);
++		free(waiter);
++		dev->input_ready_waiter = NULL;
++	}
++	atomic_store(&dev->input_ready_failed, 0);
++	if (!callback)
++		return 0;
++
++	waiter = calloc(1, sizeof(*waiter));
++	if (!waiter) {
++		register_device_error(dev, "input readiness allocation failed");
++		return -1;
++	}
++	waiter->dev = dev;
++	waiter->callback = callback;
++	waiter->context = context;
++	waiter->cancel_fd = -1;
++	waiter->epoll_fd = epoll_create1(EPOLL_CLOEXEC);
++	int error = errno;
++	if (waiter->epoll_fd < 0)
++		goto failed;
++	waiter->cancel_fd = eventfd(0, EFD_CLOEXEC | EFD_NONBLOCK);
++	if (waiter->cancel_fd < 0) {
++		error = errno;
++		goto failed;
++	}
++	struct epoll_event event = { .events = EPOLLIN | EPOLLET, .data.u32 = 0 };
++	if (epoll_ctl(waiter->epoll_fd, EPOLL_CTL_ADD, dev->device_handle, &event) < 0) {
++		error = errno;
++		goto failed;
++	}
++	event.events = EPOLLIN;
++	event.data.u32 = 1;
++	if (epoll_ctl(waiter->epoll_fd, EPOLL_CTL_ADD, waiter->cancel_fd, &event) < 0) {
++		error = errno;
++		goto failed;
++	}
++	error = pthread_create(&waiter->thread, NULL, hid_input_ready_wait, waiter);
++	if (error)
++		goto failed;
++	dev->input_ready_waiter = waiter;
++	return 0;
++
++failed:
++	if (waiter->cancel_fd >= 0)
++		close(waiter->cancel_fd);
++	if (waiter->epoll_fd >= 0)
++		close(waiter->epoll_fd);
++	free(waiter);
++	register_device_error(dev, strerror(error));
++	return -1;
+ }
+ 
+ /* Get an attribute value from a udev_device and return it as a whar_t
+@@ -1107,6 +1234,12 @@
+ 
+ int HID_API_EXPORT hid_read_timeout(hid_device *dev, unsigned char *data, size_t length, int milliseconds)
+ {
++	/* Readiness failures must wake and fail the sole reader, not leave it parked. */
++	if (atomic_load(&dev->input_ready_failed)) {
++		register_device_error(dev, "hidraw input readiness failed (device disconnected or wait error)");
++		return -1;
++	}
++
+ 	/* Set device error to none */
+ 	register_device_error(dev, NULL);
+ 
+@@ -1230,6 +1363,8 @@
+ 	if (!dev)
+ 		return;
+ 
++	if (hid_linux_set_input_ready_callback(dev, NULL, NULL) < 0)
++		return; /* Fail closed rather than free a potentially active waiter. */
+ 	close(dev->device_handle);
+ 
+ 	/* Free the device error message */
+--- a/build.rs
++++ b/build.rs
+@@ -55,7 +55,10 @@
+             println!("cargo:rerun-if-changed=etc/hidapi/linux/hid.c");
+             config
+                 .file("etc/hidapi/linux/hid.c")
+-                .include("etc/hidapi/hidapi");
++                .include("etc/hidapi/hidapi")
++                .flag_if_supported("-std=gnu11")
++                .flag_if_supported("-pthread");
++            println!("cargo:rustc-link-lib=pthread");
+             pkg_config::probe_library("libudev").expect("Unable to find libudev");
+             config.compile("libhidapi.a");
+             println!("cargo:rustc-cfg=hidapi");

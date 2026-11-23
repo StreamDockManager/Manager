@@ -1,10 +1,11 @@
-//! Per-host runtime presentation facts. Never persisted or supplied over plugin RPC
+//! Trusted host presentation facts and desktop integrations. Never persisted or supplied over plugin RPC
 use super::*;
 
 #[derive(Clone, Debug, Default)]
 pub struct RegistrationEnvironment {
     language: Option<String>,
     display_scale: Option<f64>,
+    native_plugin_notifications: bool,
 }
 impl RegistrationEnvironment {
     /// Supply the host application's actual UI language and native display scale
@@ -18,8 +19,22 @@ impl RegistrationEnvironment {
         Ok(Self {
             language,
             display_scale,
+            native_plugin_notifications: false,
         })
     }
+
+    /// The native desktop wires a presenter during startup. This advertises the
+    /// supported protocol before workers can launch; no RPC can deliver until
+    /// the presenter is attached and the exact permission is granted.
+    pub fn with_native_plugin_notifications(mut self) -> Self {
+        self.native_plugin_notifications = true;
+        self
+    }
+
+    pub(super) fn allows_plugin_notifications(&self, browser: bool, declared: bool) -> bool {
+        self.native_plugin_notifications && !browser && declared
+    }
+
     // Apply for the current operation
     pub(crate) fn apply(&self, info: &mut Value, browser_context: bool) -> Result<(), String> {
         if let Some(language) = &self.language {
@@ -78,8 +93,12 @@ fn language_from_locale(locale: &str) -> Result<Option<String>, String> {
 impl PluginHost {
     /// Only the trusted native host supplies this context. A plugin/inspector
     /// cannot change another connection's locale or main-window display scale.
-    pub fn set_registration_environment(&self, environment: RegistrationEnvironment) {
-        self.hub.lock().unwrap().registration_environment = environment;
+    pub fn set_registration_environment(&self, mut environment: RegistrationEnvironment) {
+        let mut hub = self.hub.lock().unwrap();
+        // Window scale/locale changes do not remove a desktop integration.
+        environment.native_plugin_notifications |=
+            hub.registration_environment.native_plugin_notifications;
+        hub.registration_environment = environment;
     }
 }
 
@@ -160,6 +179,21 @@ mod tests {
         assert!(plugin.started.is_none());
         assert!(plugin.info.runtime.run_id.is_none());
         assert!(plugin.child.is_none());
+    }
+
+    #[test]
+    fn desktop_notification_contract_is_explicit_native_and_survives_display_refresh() {
+        let root = tempfile::tempdir().unwrap();
+        let host = lifecycle_tests::host(root.path());
+        let environment = || RegistrationEnvironment::new(Some("en"), Some(2.0)).unwrap();
+        assert!(!environment().allows_plugin_notifications(false, true));
+        host.set_registration_environment(environment().with_native_plugin_notifications());
+        host.set_registration_environment(environment());
+        let hub = host.hub.lock().unwrap();
+        let current = &hub.registration_environment;
+        assert!(current.allows_plugin_notifications(false, true));
+        assert!(!current.allows_plugin_notifications(true, true));
+        assert!(!current.allows_plugin_notifications(false, false));
     }
 
     #[test]

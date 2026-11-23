@@ -12,7 +12,7 @@ import subprocess
 
 from native_targets import NATIVE_TARGETS
 
-LINUX_BASELINE_IMAGE = 'ubuntu@sha256:78d4744ead1f5b19b04d0df558ab182a5300903900755e515b2ca4d10eb2044d'
+LINUX_BASELINE_IMAGE = 'ubuntu@sha256:73b999393d07f2bf65a40373778a44dc9a6d54ad7718d29247d8ff9413c4d6a8'
 
 TARGETS = {(target.os, target.arch): (target.system, target.runner_arch, target.rust)
            for target in NATIVE_TARGETS}

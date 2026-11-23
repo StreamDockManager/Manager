@@ -1,5 +1,6 @@
 <section
     x-data="pluginLogReader"
+    x-effect="updateEntries"
     @keydown.escape.window="logs.escape($event)"
     @click.window="logs.dismiss($event)"
 >
@@ -162,7 +163,7 @@
                     <p role="status" x-text="logs.status"></p>
                     <div class="plugin-log-toolbar">
                         <div
-                            class="plugin-log-tabs button-row"
+                            class="navigation-tabs plugin-log-tabs button-row"
                             role="tablist"
                             aria-label="Log stream"
                             @keydown="logs.tabKey($event)"
@@ -226,10 +227,10 @@
                         tabindex="0"
                         @scroll="logs.scrolled($event)"
                     >
-                        <p x-show="!logs.entries.length" class="field-help">
+                        <p x-show="!displayedEntries.length" class="field-help">
                             No captured entries in this stream on this page.
                         </p>
-                        <template x-for="entry in logs.entries" :key="entry.sequence">
+                        <template x-for="entry in displayedEntries" :key="entry.sequence">
                             <div class="plugin-log-entry">
                                 <div class="plugin-log-entry-meta">
                                     <time

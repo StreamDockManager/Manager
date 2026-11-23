@@ -181,12 +181,17 @@ impl Hub {
     }
     // Resolve settings for plugin execution
     pub(super) fn execution_settings(&self, context: &str, fallback: &Value) -> Value {
-        let mut result = self
+        let result = self
             .context_state
             .settings
             .get(context)
             .unwrap_or(fallback)
             .clone();
+        self.project_execution_settings(context, result)
+    }
+
+    // Resolve managed references for any candidate settings without publishing it
+    pub(super) fn project_execution_settings(&self, context: &str, mut result: Value) -> Value {
         if let (Some(result), Some(source), Some(resolved)) = (
             result.as_object_mut(),
             self.context_state
@@ -321,6 +326,36 @@ mod tests {
         let masked = redact_known_values("xabcdef / aaa / 🔒", &secrets);
         assert_eq!(masked, "[credential] / [credential] / 🔒");
         assert_eq!(redact_known_values(&masked, &secrets), masked);
+    }
+    #[test]
+    fn ordinary_plugin_settings_cannot_project_vault_templates() {
+        let root = tempfile::tempdir().unwrap();
+        let storage = stream_dock_manager_storage::Storage::open(root.path().into()).unwrap();
+        let mut hub = Hub::load(&storage).unwrap();
+        let expression =
+            "${vault.20000000-0000-4000-8000-000000000001.20000000-0000-4000-8000-000000000002}";
+        let authored = json!({
+            "token": expression,
+            "message": format!("Hello {expression}"),
+            "nested": {"values": [expression, "${vault.unlinked}"]},
+            "parameter": "${parameter.placeholder}"
+        });
+        let mut expected = authored.clone();
+        expected["parameter"] = json!("approved parameter");
+        hub.context_state
+            .reference_sources
+            .insert("context".into(), authored.clone());
+        hub.context_state.execution.insert(
+            "context".into(),
+            json!({
+                "token": "must not propagate",
+                "message": "must not propagate",
+                "nested": {"values": ["must not propagate"]},
+                "parameter": "approved parameter"
+            }),
+        );
+        assert_eq!(hub.execution_settings("context", &authored), expected);
+        assert_eq!(hub.durable_settings("context", &authored), authored);
     }
     #[test]
     // Verify plugin echoes keep named references and never persist resolved values

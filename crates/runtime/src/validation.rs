@@ -6,6 +6,7 @@ use std::collections::{BTreeMap, BTreeSet};
 struct Index {
     hashes: BTreeMap<String, String>,
     incoming: BTreeMap<String, BTreeSet<String>>,
+    document_entities_bytes: usize,
 }
 // Hash the validation value
 fn hash(value: &impl serde::Serialize) -> Result<String, String> {
@@ -16,8 +17,12 @@ fn hash(value: &impl serde::Serialize) -> Result<String, String> {
 }
 impl Index {
     // Add an entry to validation
-    fn add(&mut self, id: String, value: &impl serde::Serialize) -> Result<(), String> {
-        self.hashes.insert(id.clone(), hash(value)?);
+    fn add(&mut self, id: String, value: &impl serde::Serialize) -> Result<usize, String> {
+        use sha2::{Digest, Sha256};
+        let bytes = serde_json::to_vec(value).map_err(|e| e.to_string())?;
+        let len = bytes.len();
+        self.hashes
+            .insert(id.clone(), hex::encode(Sha256::digest(bytes)));
         let value = serde_json::to_value(value).map_err(|e| e.to_string())?;
         // Scan the available validation entries
         fn scan(index: &mut Index, source: &str, value: &Value) {
@@ -52,13 +57,13 @@ impl Index {
             }
         }
         scan(self, &id, &value);
-        Ok(())
+        Ok(len)
     }
     // Build validation from the configured inputs
     fn build(data: &ProfileData) -> Result<Self, String> {
         let mut index = Self::default();
         for p in &data.profiles {
-            index.add(format!("profile:{}", p.id), p)?;
+            index.document_entities_bytes += index.add(format!("profile:{}", p.id), p)?;
             for page in &p.pages {
                 index.add(format!("page:{}", page.id), page)?;
                 index
@@ -69,20 +74,32 @@ impl Index {
             }
         }
         for value in &data.saved_macros {
-            index.add(format!("macro:{}", value.id), value)?
+            index.document_entities_bytes += index.add(format!("macro:{}", value.id), value)?;
         }
         for value in &data.styles {
-            index.add(format!("style:{}", value.id), value)?
+            index.document_entities_bytes += index.add(format!("style:{}", value.id), value)?;
         }
         for value in &data.rules {
-            index.add(format!("rule:{}", value.id), value)?
+            index.document_entities_bytes += index.add(format!("rule:{}", value.id), value)?;
         }
+        // Empty-array brackets belong to the header; only inter-item commas are extra
+        index.document_entities_bytes += [
+            data.profiles.len(),
+            data.saved_macros.len(),
+            data.styles.len(),
+            data.rules.len(),
+        ]
+        .into_iter()
+        .map(|len| len.saturating_sub(1))
+        .sum::<usize>();
         Ok(index)
     }
 }
 pub struct EditValidation {
     pub revision: u64,
     pub affected: BTreeSet<String>,
+    pub(crate) document_entities_bytes: usize,
+    pub(crate) changed: BTreeSet<String>,
 }
 impl EditValidation {
     // Report whether current
@@ -111,13 +128,14 @@ pub fn validate_edit(before: &ProfileData, after: &ProfileData) -> Result<EditVa
     }
     let old = Index::build(before)?;
     let next = Index::build(after)?;
-    let mut affected: BTreeSet<_> = old
+    let changed: BTreeSet<_> = old
         .hashes
         .keys()
         .chain(next.hashes.keys())
         .filter(|key| old.hashes.get(*key) != next.hashes.get(*key))
         .cloned()
         .collect();
+    let mut affected = changed.clone();
     let mut queue: Vec<_> = affected.iter().cloned().collect();
     while let Some(entity) = queue.pop() {
         for source in old
@@ -149,6 +167,8 @@ pub fn validate_edit(before: &ProfileData, after: &ProfileData) -> Result<EditVa
     Ok(EditValidation {
         revision: after.configuration_revision,
         affected,
+        document_entities_bytes: next.document_entities_bytes,
+        changed,
     })
 }
 impl crate::ProfileStore {

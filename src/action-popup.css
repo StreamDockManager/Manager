@@ -1,3 +1,5 @@
+@import './styles.css';
+
 body.action-popup {
     min-height: 100dvh;
 }

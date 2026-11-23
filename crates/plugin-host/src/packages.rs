@@ -95,6 +95,36 @@ pub(super) fn inventory(root: &Path) -> Result<BTreeMap<String, String>, String>
     walk(root, root, 0, &mut 0, &mut out, &mut Default::default())?;
     Ok(out)
 }
+/// Recover the host executable permission in a private browser-drop staging tree
+///
+/// WebViews provide file bytes without Unix permissions. Use the same manifest
+/// resolution as installation and never mark other files executable.
+pub fn prepare_dropped_folder_executables(staging: &Path) -> Result<(), String> {
+    let source = safe_file(staging, "manifest.json")?;
+    const MAX_MANIFEST: u64 = 64 * 1024 * 1024;
+    let mut bytes = Vec::new();
+    std::fs::File::open(source)
+        .map_err(|_| "Could not read the plugin manifest")?
+        .take(MAX_MANIFEST + 1)
+        .read_to_end(&mut bytes)
+        .map_err(|_| "Could not read the plugin manifest")?;
+    if bytes.len() as u64 > MAX_MANIFEST {
+        return Err("Plugin manifest exceeds 64 MiB".into());
+    }
+    let payload = serde_json::from_slice(&bytes).map_err(|_| "Invalid plugin manifest")?;
+    let manifest = manifest::normalize(staging, &payload)?;
+    #[cfg(unix)]
+    if manifest.runtime_kind == "native" {
+        use std::os::unix::fs::PermissionsExt;
+        let entry = safe_file(staging, &manifest.entry_point)?;
+        std::fs::set_permissions(entry, std::fs::Permissions::from_mode(0o700))
+            .map_err(|_| "Could not set executable permission for the plugin entry point")?;
+    }
+    #[cfg(not(unix))]
+    let _ = manifest;
+    Ok(())
+}
+
 // Recognize metadata that does not become executable package content
 fn harmless_metadata(path: &Path) -> Result<u64, String> {
     let metadata = std::fs::symlink_metadata(path).map_err(|e| e.to_string())?;
@@ -288,6 +318,44 @@ impl PluginHost {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[cfg(unix)]
+    #[test]
+    fn browser_folder_drop_restores_only_the_selected_native_entry_permission() {
+        use std::os::unix::fs::PermissionsExt;
+        let temp = tempfile::tempdir().unwrap();
+        let root = temp.path().join("org.example.drop.sdPlugin");
+        std::fs::create_dir(&root).unwrap();
+        let manifest = root.join("manifest.json");
+        let entry = root.join("plugin-runner");
+        let asset = root.join("asset.txt");
+        for file in [&entry, &asset] {
+            std::fs::write(file, b"synthetic package file").unwrap();
+            std::fs::set_permissions(file, std::fs::Permissions::from_mode(0o600)).unwrap();
+        }
+        let mut metadata = json!({
+            "Name": "Folder drop", "SDKVersion": 1, "Version": "1.0",
+            "StreamDockManager": {"ManifestDialect":"vsd"},
+            "CodePath": "plugin-runner",
+            "Actions": [{"UUID": "org.example.drop.action", "Name":"Fixture"}]
+        });
+        std::fs::write(&manifest, metadata.to_string()).unwrap();
+        prepare_dropped_folder_executables(&root).unwrap();
+        let mode = |path| std::fs::metadata(path).unwrap().permissions().mode() & 0o777;
+        assert_eq!(mode(&entry), 0o700);
+        assert_eq!(mode(&asset), 0o600);
+
+        let browser = root.join("index.html");
+        std::fs::write(&browser, b"<!doctype html>").unwrap();
+        std::fs::set_permissions(&browser, std::fs::Permissions::from_mode(0o600)).unwrap();
+        metadata["CodePath"] = json!("index.html");
+        std::fs::write(&manifest, metadata.to_string()).unwrap();
+        prepare_dropped_folder_executables(&root).unwrap();
+        assert_eq!(mode(&browser), 0o600);
+        metadata["CodePath"] = json!("../asset.txt");
+        std::fs::write(&manifest, metadata.to_string()).unwrap();
+        assert!(prepare_dropped_folder_executables(&root).is_err());
+    }
 
     #[test]
     // Verify flat openaction archive passes full review and keeps original manifest

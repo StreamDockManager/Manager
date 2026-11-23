@@ -2,8 +2,11 @@ import { publishDecodedPreview } from './media-preview';
 import { previewCadence } from './preview-cadence';
 import type { PreviewDelta } from '../generated/runtime';
 
+type SurfacePacket = ArrayBuffer | number[];
+const maxSurfacePacketBytes = 32 * 1024 * 1024;
+
 interface SurfaceSubscriptionHost {
-    channel: { onmessage: (packet: ArrayBuffer) => void };
+    channel: { onmessage: (packet: SurfacePacket) => void };
     invoke: <T>(command: string, args: Record<string, unknown>) => Promise<T>;
     run: (label: string, work: () => Promise<void>) => Promise<unknown>;
     quiescing: () => boolean;
@@ -27,7 +30,7 @@ export class PreviewImageRegistry {
         return this.entries.get(token)?.url;
     }
     // Register immutable preview bytes as a blob URL within entry and byte budgets
-    insert(token: string, bytes: ArrayBuffer, mime: string) {
+    insert(token: string, bytes: ArrayBuffer | Uint8Array<ArrayBuffer>, mime: string) {
         // A token identifies immutable bytes for the life of its registration
         if (this.entries.has(token)) return;
         if (this.bytes + bytes.byteLength > 32 * 1024 * 1024 || this.entries.size >= 128)
@@ -60,6 +63,21 @@ export class PreviewImageRegistry {
     }
 }
 
+// Normalize the JSON byte array delivered when Tauri falls back to postMessage
+function surfacePacketBuffer(packet: SurfacePacket): ArrayBuffer {
+    const size = Array.isArray(packet) ? packet.length : packet.byteLength;
+    if (size > maxSurfacePacketBytes || size < 4) throw Error('Preview packet exceeds limits');
+    if (!Array.isArray(packet)) return packet;
+    const bytes = new Uint8Array(size);
+    for (let index = 0; index < size; index++) {
+        const value = packet[index];
+        if (!Number.isInteger(value) || value < 0 || value > 255)
+            throw Error('Invalid preview packet byte');
+        bytes[index] = value;
+    }
+    return bytes.buffer;
+}
+
 // Subscribe the native surfaces
 export async function subscribeNativeSurfaces(
     deviceId: string,
@@ -73,30 +91,45 @@ export async function subscribeNativeSurfaces(
     let stopped = false;
     let id = '';
     let pendingAck = false;
+    let acknowledgement: { generation: string; sequence: number } | null = null;
+    const sendAcknowledgement = () => {
+        if (id && acknowledgement)
+            void invoke('acknowledge_surface_frame', { id, ...acknowledgement }).catch(() => {});
+    };
     const cadence = previewCadence(
         // Complete the deferred surface subscription work using the current operation state
         () => {
             if (stopped || quiescing()) return;
-            if (id) void invoke('acknowledge_surface_frame', { id }).catch(() => {});
+            if (!acknowledgement) return;
+            if (id) sendAcknowledgement();
             else pendingAck = true;
         },
         () => typeof document === 'undefined' || document.hasFocus(),
         typeof window === 'undefined' ? new EventTarget() : window,
     );
     // Complete the deferred surface subscription work using the current operation state
-    channel.onmessage = (packet) => {
+    channel.onmessage = (message) => {
         if (stopped || quiescing()) return;
         // Complete the deferred surface subscription work using the current operation state
         void run('preview decode', async () => {
+            acknowledgement = null;
             try {
-                if (packet.byteLength > 32 * 1024 * 1024 || packet.byteLength < 4)
-                    throw Error('Preview packet exceeds limits');
+                const packet = surfacePacketBuffer(message);
                 const size = new DataView(packet).getUint32(0, true);
                 if (size > 65536 || size + 4 > packet.byteLength)
                     throw Error('Invalid preview metadata');
                 const metadata = JSON.parse(
                     new TextDecoder().decode(new Uint8Array(packet, 4, size)),
                 );
+                const ack = metadata.acknowledgement;
+                if (
+                    !ack ||
+                    typeof ack.generation !== 'string' ||
+                    !Number.isSafeInteger(ack.sequence) ||
+                    ack.sequence < 1
+                )
+                    throw Error('Invalid preview acknowledgement');
+                acknowledgement = { generation: ack.generation, sequence: ack.sequence };
                 const delta = metadata.delta as PreviewDelta;
                 let offset = 4 + size;
                 for (const frame of metadata.frames as {
@@ -113,7 +146,7 @@ export async function subscribeNativeSurfaces(
                         throw Error('Invalid preview image');
                     images.insert(
                         frame.id,
-                        packet.slice(offset, offset + frame.length),
+                        new Uint8Array(packet, offset, frame.length),
                         frame.mime,
                     );
                     offset += frame.length;
@@ -195,7 +228,7 @@ export async function subscribeNativeSurfaces(
         dispose();
         throw error;
     }
-    if (pendingAck && !stopped) void invoke('acknowledge_surface_frame', { id }).catch(() => {});
+    if (pendingAck && !stopped) sendAcknowledgement();
     // Complete the deferred surface subscription work using the current operation state
     return () => {
         if (stopped) return;

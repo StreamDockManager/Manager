@@ -95,3 +95,28 @@ pub(crate) fn registration(root: &Path, token: &str) -> Value {
         serde_json::from_slice(&std::fs::read(root.join("manifest.json")).unwrap()).unwrap();
     json!({"event":"registerPlugin","uuid":token,"payload":{"capabilities":manifest["StreamDockManager"]["Capabilities"]}})
 }
+
+// Keep portable HTML runtime fixtures within their vendor dialect's actual OS support
+pub(crate) fn use_portable_vendor_on_linux(manifest: &mut Value) {
+    if cfg!(target_os = "linux") {
+        manifest["SDKVersion"] = json!(1);
+        manifest.as_object_mut().unwrap().remove("Software");
+        manifest["OS"] = json!([{"Platform":"linux"}]);
+    }
+}
+
+// Verify that the native Elgato dialect was parsed but is not executable on Linux
+pub(crate) fn assert_elgato_platform_blocked(root: &Path) {
+    let report = stream_dock_manager_plugin_host::preflight::inspect(root);
+    assert!(report.can_install && !report.can_enable, "{report:#?}");
+    assert_eq!(
+        report
+            .checks
+            .iter()
+            .filter(|check| check.level == "blocker")
+            .map(|check| check.code.as_str())
+            .collect::<Vec<_>>(),
+        ["declared_platform"],
+        "{report:#?}"
+    );
+}

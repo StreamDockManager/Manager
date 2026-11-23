@@ -13,7 +13,9 @@ function source(name) {
     modules.set(name, url);
     return url;
 }
-const { PreviewImageRegistry } = await import(source('surface-subscription'));
+const { PreviewImageRegistry, subscribeNativeSurfaces } = await import(
+    source('surface-subscription')
+);
 const { publishDecodedPreview } = await import(source('media-preview'));
 
 // Verify repeated surface tokens share one URL and decode; retirement releases the registration
@@ -79,4 +81,89 @@ test('registry rejects excess entries and bytes without losing its admitted imag
     } finally {
         images.dispose();
     }
+});
+
+// Verify the preview publishes changing surface images over both native Tauri transports
+test('surface streaming renders binary and macOS fallback frames in sequence', async (t) => {
+    let urls = 0;
+    t.mock.method(globalThis.URL, 'createObjectURL', () => `blob:preview-${++urls}`);
+    t.mock.method(globalThis.URL, 'revokeObjectURL', () => {});
+    const originalFrame = globalThis.requestAnimationFrame;
+    const originalImage = globalThis.Image;
+    globalThis.requestAnimationFrame = (callback) => queueMicrotask(callback);
+    globalThis.Image = class {
+        async decode() {}
+    };
+    t.after(() => {
+        globalThis.requestAnimationFrame = originalFrame;
+        globalThis.Image = originalImage;
+    });
+
+    const channel = {};
+    const acknowledgements = [];
+    const published = [];
+    const pending = [];
+    const unsubscribe = await subscribeNativeSurfaces('dock', (frame) => published.push(frame), {
+        channel,
+        invoke: async (command, args) => {
+            if (command === 'acknowledge_surface_frame') acknowledgements.push(args.sequence);
+            return 'preview';
+        },
+        run: (_, work) => {
+            const operation = work();
+            pending.push(operation);
+            return operation;
+        },
+        quiescing: () => false,
+    });
+    t.after(unsubscribe);
+
+    // Construct native packets larger than Tauri's direct channel delivery threshold
+    function frame(sequence) {
+        const id = `frame-${sequence}`;
+        const length = 1024;
+        const data = new TextEncoder().encode(
+            JSON.stringify({
+                acknowledgement: { generation: 'preview', sequence },
+                delta: {
+                    generation: 'preview',
+                    sequence,
+                    reset: sequence === 1,
+                    surfaces: { 'key-1': id },
+                    trigger_descriptions: {},
+                    background_changed: false,
+                    background: null,
+                },
+                frames: [{ id, length, mime: 'image/png' }],
+            }),
+        );
+        const bytes = new Uint8Array(4 + data.length + length);
+        new DataView(bytes.buffer).setUint32(0, data.length, true);
+        bytes.set(data, 4);
+        bytes[4 + data.length] = sequence;
+        return bytes;
+    }
+
+    channel.onmessage(frame(1).buffer);
+    await pending.at(-1);
+    channel.onmessage(Array.from(frame(2)));
+    await pending.at(-1);
+    channel.onmessage(Array.from(frame(3)));
+    await pending.at(-1);
+    assert.deepEqual(
+        published.map(({ sequence, surfaces }) => [sequence, surfaces['key-1']]),
+        [
+            [1, 'blob:preview-1'],
+            [2, 'blob:preview-2'],
+            [3, 'blob:preview-3'],
+        ],
+    );
+    assert.deepEqual(acknowledgements, [1, 2, 3]);
+
+    const malformed = Array.from(frame(4));
+    malformed[malformed.length - 1] = 256;
+    channel.onmessage(malformed);
+    await pending.at(-1);
+    assert.equal(published.at(-1).generation, 'decode-error');
+    assert.deepEqual(acknowledgements, [1, 2, 3]);
 });

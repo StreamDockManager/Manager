@@ -1,4 +1,5 @@
-import type { Snapshot } from './types';
+import { actionChildren } from './builtin-actions';
+import type { Action, Snapshot } from './types';
 import type AlpineType from '@alpinejs/csp';
 import type { AppState } from './state';
 export interface Reference {
@@ -16,8 +17,140 @@ export interface Finding {
     page?: string;
     control?: string;
 }
+export interface NavigationEdge {
+    profile: string;
+    page: string;
+    control: string;
+    path: string;
+    destination: string | null;
+    targetProfile?: string;
+    conditional: boolean;
+}
+
+function navigationOrigins(snapshot: Snapshot) {
+    const macros = new Map(snapshot.saved_macros.map((m) => [m.id, m]));
+    const edges: NavigationEdge[] = [];
+    for (const profile of snapshot.profiles)
+        for (const page of profile.pages) {
+            for (const [control, binding] of Object.entries(page.bindings)) {
+                if (!binding || binding.disabled) continue;
+                let visited = 0;
+                const walk = (
+                    action: Action,
+                    path: string[],
+                    conditional: boolean,
+                    calls: string[],
+                ) => {
+                    const record = (
+                        destination: string | null,
+                        detail?: string,
+                        targetProfile?: string,
+                    ) =>
+                        edges.push({
+                            profile: profile.id,
+                            page: page.id,
+                            control,
+                            path: [...path, ...(detail ? [detail] : [])].join(' / '),
+                            conditional,
+                            destination,
+                            targetProfile,
+                        });
+                    if (++visited > 2048) {
+                        if (visited === 2049) record(null, 'Expansion limit');
+                        return;
+                    }
+                    if (action.kind === 'page')
+                        record(
+                            profile.pages.some((p) => p.id === action.page_id)
+                                ? action.page_id
+                                : null,
+                        );
+                    else if (action.kind === 'profile')
+                        record(null, 'Remembered page', action.profile_id);
+                    else if (action.kind === 'navigate') {
+                        const offset = action.direction === 'next' ? 1 : -1;
+                        if (action.target === 'page') {
+                            const pages = profile.pages;
+                            record(
+                                pages[(pages.indexOf(page) + pages.length + offset) % pages.length]
+                                    .id,
+                                action.direction + ' page',
+                            );
+                        } else {
+                            const profiles = snapshot.profiles.filter(
+                                (p) => p.model_id === profile.model_id,
+                            );
+                            const next =
+                                profiles[
+                                    (profiles.indexOf(profile) + profiles.length + offset) %
+                                        profiles.length
+                                ];
+                            record(next.active_page, action.direction + ' profile', next.id);
+                        }
+                    } else if (action.kind === 'swipe_navigation') record(null, 'Swipe direction');
+                    else if (action.kind === 'builtin') {
+                        const a = action.action;
+                        if (a.kind === 'momentary_page') record(a.page_id, 'While held');
+                        if (
+                            ['page_step', 'page_back', 'binding_layer', 'trigger_binding'].includes(
+                                a.kind,
+                            )
+                        )
+                            record(null, a.kind);
+                        if (a.kind === 'saved_macro') {
+                            const macro = macros.get(a.macro_id);
+                            if (macro && !calls.includes(macro.id))
+                                walk(macro.action, [...path, macro.name], conditional, [
+                                    ...calls,
+                                    macro.id,
+                                ]);
+                            else record(null, 'Unresolved macro');
+                        }
+                    }
+                    const kind = action.kind === 'builtin' ? action.action.kind : action.kind;
+                    const branches: Record<string, string[]> = {
+                        gesture: ['Tap', 'Double tap', 'Hold'],
+                        press_release: ['Press', 'Release'],
+                        dial: ['Counterclockwise', 'Clockwise', 'Press'],
+                        toggle: ['On', 'Off'],
+                        conditional: ['If true', 'If false'],
+                    };
+                    actionChildren(action).forEach((child, i) =>
+                        walk(
+                            child,
+                            [...path, branches[kind]?.[i] || 'Step ' + (i + 1)],
+                            conditional ||
+                                !!branches[kind] ||
+                                [
+                                    'action_menu',
+                                    'random_action',
+                                    'cycle_actions',
+                                    'cooldown',
+                                    'failure_policy',
+                                ].includes(kind),
+                            calls,
+                        ),
+                    );
+                };
+                walk(binding.action, [], false, []);
+            }
+        }
+    return edges;
+}
+
+function sessionEntries(snapshot: Snapshot) {
+    return JSON.stringify(
+        Object.values(snapshot.sessions).map((s) => [
+            s?.profile_id,
+            s?.page_id,
+            s?.remembered_pages,
+        ]),
+    );
+}
 export class ReferenceIndex {
     readonly revision: number;
+    readonly navigation: NavigationEdge[];
+    private readonly entries: string;
     readonly edges: Reference[] = [];
     readonly findings: Finding[] = [];
     private outgoing = new Map<string, Reference[]>();
@@ -25,6 +158,8 @@ export class ReferenceIndex {
     // Build a dependency index from the current workspace snapshot
     constructor(snapshot: Snapshot) {
         this.revision = snapshot.configuration_revision;
+        this.navigation = navigationOrigins(snapshot);
+        this.entries = sessionEntries(snapshot);
         // Add a discovered reference to both dependency directions
         const edge = (reference: Reference) => {
             this.edges.push(reference);
@@ -121,15 +256,6 @@ export class ReferenceIndex {
             scan(macro.action, { source: 'macro:' + macro.id, path: 'action' }),
         );
         snapshot.rules.forEach((rule) => scan(rule, { source: 'rule:' + rule.id, path: 'rule' }));
-        // Recognize navigation that cannot be resolved statically
-        const navigationUncertain = (value: unknown) =>
-            /swipe_navigation|page_step|page_back|momentary_page|binding_layer|trigger_binding|"kind":"profile"/.test(
-                JSON.stringify(value),
-            );
-        const macroActions = new Map(
-            snapshot.saved_macros.map((macro) => ['macro:' + macro.id, macro.action]),
-        );
-        const uncertainProfiles = new Set<string>();
         // Bind portable macro references to the calling profile and page. Page
         // navigation through a macro participates in the same reachability graph
         for (const call of [...this.edges].filter(
@@ -141,8 +267,6 @@ export class ReferenceIndex {
                 const macro = pending.pop()!;
                 if (visited.has(macro)) continue;
                 visited.add(macro);
-                if (navigationUncertain(macroActions.get(macro)))
-                    uncertainProfiles.add(call.profile!);
                 for (const reference of this.references(macro, 'outgoing')) {
                     if (
                         reference.target.startsWith('parameter:*:') ||
@@ -185,53 +309,39 @@ export class ReferenceIndex {
             const reached = new Set([profile.active_page]);
             for (const rule of snapshot.rules)
                 if (rule.profile_id === profile.id && rule.page_id) reached.add(rule.page_id);
-            let changed = true;
-            while (changed) {
-                changed = false;
-                for (const page of profile.pages)
-                    if (reached.has(page.id)) {
-                        const references = this.edges.filter(
-                            (e) =>
-                                e.profile === profile.id &&
-                                e.page === page.id &&
-                                e.target.startsWith('page:'),
-                        );
-                        for (const reference of references) {
-                            const id = reference.target.slice(5);
-                            if (!reached.has(id)) {
-                                reached.add(id);
-                                changed = true;
-                            }
-                        }
+            for (const session of Object.values(snapshot.sessions)) {
+                if (session?.profile_id === profile.id) reached.add(session.page_id);
+                const remembered = session?.remembered_pages?.[profile.id];
+                if (remembered) reached.add(remembered);
+            }
+            const edges = this.navigation.filter((e) => e.profile === profile.id);
+            const graph = new Map(profile.pages.map((p) => [p.id, new Set<string>()]));
+            for (const edge of edges)
+                if (edge.destination && (!edge.targetProfile || edge.targetProfile === profile.id))
+                    graph.get(edge.page)?.add(edge.destination);
+            const pending = [...reached];
+            while (pending.length) {
+                for (const id of graph.get(pending.pop()!) || [])
+                    if (!reached.has(id)) {
+                        reached.add(id);
+                        pending.push(id);
                     }
             }
-            // Swipe, page-step, menu, and external profile navigation make reachability uncertain
-            const uncertain = navigationUncertain(profile) || uncertainProfiles.has(profile.id);
+            const uncertain =
+                edges.some((e) => !e.destination) ||
+                this.navigation.some((e) => e.targetProfile === profile.id);
             if (!uncertain) {
                 for (const page of profile.pages)
                     if (!reached.has(page.id))
                         this.findings.push({
                             code: 'unreachable_page',
-                            message: `Page “${page.name}” has no path from this profile’s initial page`,
+                            message:
+                                'Page “' +
+                                page.name +
+                                '” has no known navigation path from an entry page',
                             profile: profile.id,
                             page: page.id,
                         });
-                const graph = new Map(
-                    profile.pages.map((page) => [
-                        page.id,
-                        new Set(
-                            this.edges
-                                .filter(
-                                    (e) =>
-                                        e.source.startsWith('control:') &&
-                                        e.profile === profile.id &&
-                                        e.page === page.id &&
-                                        e.target.startsWith('page:'),
-                                )
-                                .map((e) => e.target.slice(5)),
-                        ),
-                    ]),
-                );
                 // Find entities reachable from a dependency graph node
                 const reach = (start: string) => {
                     const seen = new Set([start]),
@@ -249,8 +359,7 @@ export class ReferenceIndex {
                     const outbound = reach(page.id);
                     const cycle = [...outbound].filter((id) => reach(id).has(page.id));
                     if (
-                        cycle.length > 1 &&
-                        !cycle.includes(profile.active_page) &&
+                        (cycle.length > 1 || graph.get(page.id)?.has(page.id)) &&
                         !cycle.some((id) =>
                             [...(graph.get(id) || [])].some((next) => !cycle.includes(next)),
                         ) &&
@@ -308,7 +417,10 @@ export class ReferenceIndex {
     }
     // Check whether the index still describes the supplied snapshot
     isCurrent(snapshot: Snapshot) {
-        return snapshot.configuration_revision === this.revision;
+        return (
+            snapshot.configuration_revision === this.revision &&
+            this.entries === sessionEntries(snapshot)
+        );
     }
 }
 // Register dependency inspection and navigation controls

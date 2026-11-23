@@ -87,6 +87,7 @@ impl Pending {
             let _ = completion.send(status);
         }
         self.surface.as_ref().map(|s| OutputOutcome {
+            write_interval: None,
             surface_id: s.id.clone(),
             content_revision: s.revision,
             scene_revision: s.scene,
@@ -443,7 +444,8 @@ impl OutputWorker {
                                 .map(|p| p.upload.embedded_commit_count)
                                 .sum::<usize>();
                     }
-                    let elapsed = start.elapsed().as_secs_f64() * 1000.0;
+                    let finished = Instant::now();
+                    let elapsed = (finished - start).as_secs_f64() * 1000.0;
                     let mut queue = state.queue.lock().unwrap();
                     queue.stats.total_report_bytes =
                         queue.stats.total_report_bytes.saturating_add(bytes as u64);
@@ -506,6 +508,9 @@ impl OutputWorker {
                             },
                         );
                         if let Some(outcome) = outcome.as_mut() {
+                            if status == OutputStatus::Completed {
+                                outcome.write_interval = Some((start, finished));
+                            }
                             outcome.queue_ms = start
                                 .saturating_duration_since(item.queued_at)
                                 .as_secs_f64()
@@ -1920,6 +1925,7 @@ mod frame_tests {
         let mut queue = worker.shared.queue.lock().unwrap();
         for revision in 0..4100 {
             queue.record(Some(OutputOutcome {
+                write_interval: None,
                 surface_id: "key".into(),
                 content_revision: revision,
                 scene_revision: 1,

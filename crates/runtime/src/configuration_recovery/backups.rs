@@ -91,7 +91,16 @@ fn rows(conn: &Connection) -> Result<Rows, String> {
 }
 // Report whether there is recoverable backups
 pub fn has_recoverable_backups(root: &Path) -> Result<bool, String> {
-    match root.join("recovery").symlink_metadata() {
+    // Do not follow a redirected database directory before taking the owner lock
+    match stream_dock_manager_storage::database_directory(root).symlink_metadata() {
+        Ok(metadata) if !metadata.is_dir() || metadata.file_type().is_symlink() => {
+            return Ok(false)
+        }
+        Ok(_) => {}
+        Err(error) if error.kind() == std::io::ErrorKind::NotFound => return Ok(false),
+        Err(error) => return Err(error.to_string()),
+    }
+    match recovery_directory(root).symlink_metadata() {
         Ok(metadata) if !metadata.is_dir() || metadata.file_type().is_symlink() => {
             return Ok(false)
         }
@@ -129,16 +138,20 @@ fn profile_row(key: &str, value: &Value) -> Result<Profile, String> {
     if !issues.is_empty() {
         return Err(issues.join("; "));
     }
-    serde_json::from_value(value.clone()).map_err(|e| e.to_string())
+    let mut value = record.value;
+    crate::vault::detach_portable_references(&mut value);
+    serde_json::from_value(value).map_err(|e| e.to_string())
 }
 // Check source media
 fn check_source_media(
     profile: &Profile,
     deleted: &crate::media_deletion::DeletedMedia,
 ) -> Result<(), String> {
-    let mut data = ProfileData::default();
-    data.profiles = vec![profile.clone()];
-    data.saved_macros.clear();
+    let data = ProfileData {
+        profiles: vec![profile.clone()],
+        saved_macros: Vec::new(),
+        ..ProfileData::default()
+    };
     if crate::profiles::referenced_assets(&data)
         .iter()
         .any(|id| deleted.assets.contains(id))
@@ -198,12 +211,14 @@ pub(super) fn check_references(
             }
         }
     }
-    let mut data = ProfileData::default();
-    data.profiles = vec![profile.clone()];
-    data.saved_macros = macros
-        .into_iter()
-        .filter(|saved| used_macros.contains(&saved.id))
-        .collect();
+    let data = ProfileData {
+        profiles: vec![profile.clone()],
+        saved_macros: macros
+            .into_iter()
+            .filter(|saved| used_macros.contains(&saved.id))
+            .collect(),
+        ..ProfileData::default()
+    };
     issues.extend(check_files(conn, root, &data).err());
     if issues.is_empty() {
         Ok(())
@@ -246,7 +261,7 @@ pub(super) fn check_files(
         }
     }
     let resources = root.join("profiles/plugin-resources");
-    for id in crate::vendor_resources::referenced(&data) {
+    for id in crate::vendor_resources::referenced(data) {
         let safe_dir = resources
             .symlink_metadata()
             .is_ok_and(|m| m.is_dir() && !m.file_type().is_symlink());
@@ -367,6 +382,7 @@ impl ConfigurationRecovery {
         revision: &str,
     ) -> Result<ConfigurationRecoveryBackupProfiles, String> {
         let rows = self.backup_rows(backup_id, revision, false)?;
+        let mut warnings=vec!["Only selected profiles are copied. Settings, macros, plugins, media, and history are not restored. Referenced profiles must already exist or be selected together.".into()];
         let profiles = self.editor.read(|conn, current| {
             if current != revision {
                 return Err("Configuration changed; reload backups".into());
@@ -386,6 +402,10 @@ impl ConfigurationRecovery {
                 .iter()
                 .map(|(id, value)| {
                     let result = profile_row(id, value).and_then(|p| {
+                        warnings.extend(crate::profiles::omitted_settings_warnings(
+                            std::slice::from_ref(&p),
+                            &[],
+                        ));
                         check_source_media(&p, &rows.deleted)?;
                         check_references(conn, &self.root, &p, &available)
                     });
@@ -404,7 +424,12 @@ impl ConfigurationRecovery {
             .lock()
             .map_err(|_| "Backup cache lock failed")?
             .reviewed = Some(backup_id.into());
-        Ok(ConfigurationRecoveryBackupProfiles{backup_id:backup_id.into(),revision:revision.into(),profiles,warnings:vec!["Only selected profiles are copied. Settings, macros, plugins, media, and history are not restored. Referenced profiles must already exist or be selected together.".into()]})
+        Ok(ConfigurationRecoveryBackupProfiles {
+            backup_id: backup_id.into(),
+            revision: revision.into(),
+            profiles,
+            warnings,
+        })
     }
     // Import only explicitly selected profiles from the reviewed backup
     pub fn transfer_backup_profiles(
@@ -576,7 +601,7 @@ mod tests {
             .unwrap();
         let name = "selected.sqlite3";
         storage
-            .backup(root.path().join("recovery").join(name))
+            .backup(recovery_directory(root.path()).join(name))
             .unwrap();
         drop(storage);
         (root, name.into())
@@ -598,7 +623,7 @@ mod tests {
     // Verify that selected profiles are new copies and source is immutable
     fn selected_profiles_are_new_copies_and_source_is_immutable() {
         let (root, name) = fixture();
-        let source = root.path().join("recovery").join(&name);
+        let source = recovery_directory(root.path()).join(&name);
         let bytes = std::fs::read(&source).unwrap();
         let recovery = ConfigurationRecovery::open(root.path().into(), String::new()).unwrap();
         let (id, revision) = review(&recovery, &name);
@@ -637,7 +662,7 @@ mod tests {
     // Verify that missing primary can copy old generation into empty schema
     fn missing_primary_can_copy_old_generation_into_empty_schema() {
         let (root, name) = fixture();
-        std::fs::remove_file(root.path().join(stream_dock_manager_storage::DATABASE_NAME)).unwrap();
+        std::fs::remove_file(database_path(root.path(), DATABASE_NAME)).unwrap();
         assert!(has_recoverable_backups(root.path()).unwrap());
         drop(Storage::open(root.path().into()).unwrap());
         let recovery = ConfigurationRecovery::open(root.path().into(), String::new()).unwrap();
@@ -672,9 +697,14 @@ mod tests {
         assert!(recovery
             .transfer_backup_profiles(&id, &catalog.revision, &["default".into()])
             .is_err());
-        assert!(recovery
-            .backup_profiles("../manager.sqlite3", &catalog.revision)
-            .is_err());
+        for live_path in ["../manager.sqlite3", "../databases/manager.sqlite3"] {
+            assert!(recovery
+                .backup_profiles(live_path, &catalog.revision)
+                .is_err());
+            assert!(recovery
+                .preview_backup_restore(live_path, &catalog.revision)
+                .is_err());
+        }
         recovery.backup_profiles(&id, &catalog.revision).unwrap();
         assert!(recovery
             .transfer_backup_profiles(
@@ -683,7 +713,7 @@ mod tests {
                 &["default".into(), "default".into()]
             )
             .is_err());
-        let conn = Connection::open(root.path().join("recovery").join(name)).unwrap();
+        let conn = Connection::open(recovery_directory(root.path()).join(name)).unwrap();
         let mut value = read(&conn, Domain::Profiles, "default").unwrap().unwrap();
         value["name"] = Value::String("Changed".into());
         write(&conn, Domain::Profiles, "default", &value).unwrap();
@@ -705,7 +735,7 @@ mod tests {
         let root = tempfile::tempdir().unwrap();
         let storage = Storage::open(root.path().into()).unwrap();
         storage
-            .backup(root.path().join("recovery/empty.sqlite3"))
+            .backup(recovery_directory(root.path()).join("empty.sqlite3"))
             .unwrap();
         drop(storage);
         assert!(!has_recoverable_backups(root.path()).unwrap());
@@ -724,7 +754,7 @@ mod tests {
             .transaction(move |conn| crate::profile_database::save(conn, &data))
             .unwrap();
         storage
-            .backup(root.path().join("recovery/settings-only.sqlite3"))
+            .backup(recovery_directory(root.path()).join("settings-only.sqlite3"))
             .unwrap();
         drop(storage);
         assert!(has_recoverable_backups(root.path()).unwrap());
@@ -743,7 +773,7 @@ mod tests {
     }
     // Modify the fixture backup’s default profile through its SQLite record
     fn mutate_backup(root: &Path, name: &str, change: impl FnOnce(&mut Value)) {
-        let conn = Connection::open(root.join("recovery").join(name)).unwrap();
+        let conn = Connection::open(recovery_directory(root).join(name)).unwrap();
         let mut value = read(&conn, Domain::Profiles, "default").unwrap().unwrap();
         change(&mut value);
         write(&conn, Domain::Profiles, "default", &value).unwrap();
@@ -813,7 +843,7 @@ mod tests {
             value["pages"][0]["bindings"]["key-1"]["action"] =
                 serde_json::json!({"kind":"profile","profile_id":"second"})
         });
-        std::fs::remove_file(root.path().join(stream_dock_manager_storage::DATABASE_NAME)).unwrap();
+        std::fs::remove_file(database_path(root.path(), DATABASE_NAME)).unwrap();
         drop(Storage::open(root.path().into()).unwrap());
         let recovery = ConfigurationRecovery::open(root.path().into(), String::new()).unwrap();
         let (id, revision) = review(&recovery, &name);
@@ -953,7 +983,7 @@ mod tests {
         {
             std::fs::remove_file(directory.join(&resource)).unwrap();
             std::os::unix::fs::symlink(
-                root.path().join("recovery").join(name),
+                recovery_directory(root.path()).join(name),
                 directory.join(&resource),
             )
             .unwrap();
@@ -972,11 +1002,26 @@ mod tests {
         #[cfg(not(unix))]
         let _ = name;
     }
+    #[cfg(unix)]
+    #[test]
+    fn startup_backup_probe_does_not_follow_a_redirected_database_directory() {
+        let (other, _) = fixture();
+        let root = tempfile::tempdir().unwrap();
+        std::os::unix::fs::symlink(
+            stream_dock_manager_storage::database_directory(other.path()),
+            stream_dock_manager_storage::database_directory(root.path()),
+        )
+        .unwrap();
+        assert!(has_recoverable_backups(other.path()).unwrap());
+        assert!(!has_recoverable_backups(root.path()).unwrap());
+    }
+
     #[test]
     // Verify that non directory backup evidence does not block new install routing
     fn non_directory_backup_evidence_does_not_block_new_install_routing() {
         let root = tempfile::tempdir().unwrap();
-        let path = root.path().join("recovery");
+        let path = recovery_directory(root.path());
+        std::fs::create_dir_all(path.parent().unwrap()).unwrap();
         std::fs::write(&path, b"preserved evidence").unwrap();
         assert!(!has_recoverable_backups(root.path()).unwrap());
         assert_eq!(std::fs::read(&path).unwrap(), b"preserved evidence");

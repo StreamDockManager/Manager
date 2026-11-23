@@ -1,22 +1,23 @@
 # Contributing to Stream Dock Manager
 
-Thanks for helping improve Manager. Start with a small, focused change, run the checks that cover it, and describe what you verified. This repository builds independently and contains the desktop app, CLI, device modules and plugin host.
+[Install and use Manager](README.md) · [Feature reference](REFERENCE.md) · [Packaging](packaging/README.md)
 
-**Current project version: unreleased 0.1.0.** Do not change release versions or turn incomplete platform coverage into a support claim as part of an unrelated change.
+Start with [Get running](#get-running) and use a disposable configuration for native tests.
+Before opening a PR, [run the checks for your change](#validate-your-change). A successful
+build does not qualify a device or a desktop session.
 
-| Task                          | Guide                                                 |
-| ----------------------------- | ----------------------------------------------------- |
-| Set up a development checkout | [Get running](#get-running)                           |
-| Choose the right checks       | [Validate your change](#validate-your-change)         |
-| Change the interface          | [Frontend conventions](#frontend-conventions)         |
-| Change saved data             | [Managed persistence](#managed-persistence)           |
-| Work on a device adapter      | [Hardware contribution guide](hardware/README.md)     |
-| Build installers              | [Packaging](packaging/README.md)                      |
-| Maintain CI or releases       | [CI and release reference](#ci-and-release-reference) |
+| Work area                              | Start here                                                                         |
+| -------------------------------------- | ---------------------------------------------------------------------------------- |
+| Interface or desktop command           | [Frontend conventions](#frontend-conventions)                                      |
+| Stored settings or recovery            | [Managed persistence](#managed-persistence)                                        |
+| Hardware                               | [Hardware contribution guide](hardware/README.md)                                  |
+| Plugin host                            | [Plugin connection contracts](#plugin-connection-contracts)                        |
+| Test, package, or release              | [Validation](#validate-your-change) · [CI and releases](#ci-and-release-reference) |
+| Keep a stable local macOS app identity | [Local signing](#optional-local-macos-development-signing)                         |
 
 ## Get running
 
-Install the [toolchain and native prerequisites](README.md#requirements): Node 26.x, npm 12.2.2, Rust 1.95+, Git, GNU Make and Python 3.11+. Rustfmt and Clippy are needed for contribution checks.
+Install the [toolchain and native prerequisites](README.md#requirements): Node 26.x, npm 12.2.3, Rust 1.95+, Git, GNU Make and Python 3.11+. Rustfmt and Clippy are needed for contribution checks.
 
 ```sh
 git clone https://github.com/StreamDockManager/Manager.git StreamDockManager
@@ -25,7 +26,15 @@ make deps
 make desktop
 ```
 
-For an existing checkout, start with `make deps`. The desktop command compiles Rust and launches the frontend with hot reload. Without GNU Make, `npm ci` followed by `npm run desktop` starts the same development app. For a browser-only simulator, use `npm run dev` and open the address Vite prints. Browser preview cannot test USB devices or native actions.
+Use `npm ci` and `npm run desktop` if you do not have GNU Make. Choose a fresh absolute data
+path outside build and artifact folders for any native test. Quit existing Manager
+processes before opening the same configuration.
+
+| Goal                                                                | Command                                                               |
+| ------------------------------------------------------------------- | --------------------------------------------------------------------- |
+| Run desktop against a test configuration                            | `npm run desktop -- -- -- --config /absolute/path/to/test-config`     |
+| Run the browser simulator (no USB, native actions, or real plugins) | `npm run dev`                                                         |
+| Check local development signing on macOS                            | [Inspect the signing plan](#optional-local-macos-development-signing) |
 
 ### Public website demo
 
@@ -49,32 +58,23 @@ Run `node --test scripts/public-preview.test.mjs` for isolation guard regression
 and verify actual sandboxed rendering and direct-route hosting in the website.
 Browser simulations are not hardware or operating-system qualification.
 
-Use a fresh configuration for native development. Quit any running Manager first, then substitute a new absolute directory outside build/artifact folders:
-
-```sh
-npm run desktop -- -- -- --config /absolute/path/to/test-config
-```
-
-Keep real profiles and backups separate. Closing the editor does not stop the runtime; choose **Quit** from its tray/menu-bar menu.
-
 ### Prepare patched Rust dependencies
 
-Run `python3 scripts/prepare_patched_deps.py` before direct Cargo commands, including
-`cargo metadata`, `cargo fmt`, tests and xtask. This downloads pinned crate archives,
-verifies their SHA-256 checksums, applies the reviewed files in `patches/`, and verifies
-reusable generated sources under ignored `vendor/.cache/`. Make/npm/Tauri launchers and
-CI prepare these dependencies automatically. Raw Cargo cannot do so through `build.rs`,
-because Cargo resolves local dependency paths first.
-Run the preparer before opening a fresh checkout in a Rust IDE as well; language
-servers such as rust-analyzer invoke Cargo metadata to load the workspace. If the
-IDE was opened first, prepare the dependencies and reload its Rust workspace.
+Before running Cargo directly or opening a Rust IDE, prepare the dependency patches:
 
-For an offline build, warm the cache once, then run the preparer with `--offline` and
-Cargo with `--offline --locked`. `CARGO_NET_OFFLINE=true` also disables preparation
-network access. `--check` validates the prepared tree without preparing missing inputs.
-Deleting the cache requires preparation again; never commit or hand-edit its contents.
-See [dependency provenance](vendor/README.md) and `vendor/dependencies.json` for pins.
-On Windows, use `python` instead of `python3` if that is your installed launcher.
+```sh
+python3 scripts/prepare_patched_deps.py
+```
+
+Make, npm, Tauri wrappers, and CI already do this. The preparer checks the archive hashes
+in `vendor/dependencies.json`, applies reviewed changes from `patches/`, and stores the
+result in ignored `vendor/.cache/`. Never edit or commit those generated sources.
+Cargo resolves them before build scripts can run.
+
+For an offline build, warm the cache first, then add `--offline` to both this script
+and Cargo. Use Cargo's `--locked` for reproducible checks. The preparer's `--check`
+validates existing files without downloading them. On Windows, use `python` if that
+is your launcher. See [dependency provenance](vendor/README.md).
 
 ### Linux system libraries
 
@@ -161,6 +161,8 @@ Formatting can affect more files than your change. Inspect the diff and keep unr
 
 Keep first-party templates script-free, register named Alpine controllers in TypeScript, use the CSP build, and package dependencies locally. Never load plugin HTML into first-party ACL components. Profiles and assets must be written by Rust, with validation and atomic replacement.
 
+Use CSS classes or Alpine style objects for first-party styles. The packaged CSP permits the exact style attribute `text-overflow:inherit` by SHA-256 because macOS WebKit applies it internally when creating native select controls. Keep editor bindings safe to evaluate before device and control selection, including bindings inside sections hidden by `x-show`.
+
 ### IPC commands and generated contracts
 
 Desktop IPC handlers marked `#[tauri::command]` are discovered from Rust source. The native build
@@ -190,7 +192,17 @@ and restart without the variable to disable it. Production builds ignore this se
 
 ## Managed persistence
 
-Use disposable fresh configuration roots for SQLite development. Only the current schema and owned-record contract is supported: no old SQLite or JSON migration, default-on-error loading, or automatic reset. Startup and CLI maintenance validate a recovered disposable copy before opening original data for writes; backups and restore share the same pure validators. Preserve rejected primary files, WAL/SHM/journal sidecars, and recovery markers. Choose a new empty `--config` directory instead of changing user data. Run `cargo test -p stream-dock-manager-storage -p stream-dock-manager-runtime -p stream-dock-manager-plugin-host -p stream-dock-manager-plugin-runtimes -p stream-dock-manager-cli` and regenerate command contracts with `cargo run -p xtask -- types` after API changes. Tests marked for disposable loopback hosts require local socket access; inspect each ignore reason before running. Keep SQL in Rust-owned services and register pure domain validators for backups/restoration.
+Preserve compatibility with saved data from published releases. Changes to persisted schemas or record contracts must preserve supported released data or provide an explicitly reviewed, tested migration with original-data backup and failure recovery. Do not remove support merely because this is a development checkout. No new migration is implied by this policy.
+
+The development settings schema does not convert older incompatible databases. Use a fresh
+data directory and keep your earlier one. Compatible flat SQLite files are relocated under
+`databases/` while holding the configuration writer lock. Recovery evidence lives under
+`databases/recovery/`; conflicting copies and unfinished persistent SQLite transactions
+are not overwritten. Portable profiles and plugin protocols retain their separate compatibility rules.
+
+Use disposable fresh configuration roots for SQLite development. On a headless test runner, configure the owner-only installation key file described in REFERENCE.md. Reuse this test key across subprocesses while keeping it outside their temporary app-data and backup directories. The current loader accepts the current schema and owned-record contract; unsupported formats remain fail-closed: no old SQLite or JSON migration, default-on-error loading, or automatic reset. Startup and CLI maintenance validate a recovered disposable copy before opening original data for writes; backups and restore share the same pure validators. Preserve rejected primary files, WAL/SHM/journal sidecars, and recovery markers. Choose a new empty `--config` directory instead of changing user data. Run `cargo test -p stream-dock-manager-storage -p stream-dock-manager-runtime -p stream-dock-manager-plugin-host -p stream-dock-manager-plugin-runtimes -p stream-dock-manager-cli` and regenerate command contracts with `cargo run -p xtask -- types` after API changes. Tests marked for disposable loopback hosts require local socket access; inspect each ignore reason before running. Keep SQL in Rust-owned services and register pure domain validators for backups/restoration.
+
+To qualify the native installation credential, run `cargo test --locked -p stream-dock-manager-storage native_installation_credentials_survive_restart_and_distinguish_fresh_installs -- --ignored` in a signed-in OS session with `STREAM_DOCK_MANAGER_INSTALLATION_KEY_FILE` unset. The test creates and removes its own credential entries. On Linux, unlock the session’s Secret Service collection first. For the headless suite, run `python3 scripts/with_test_key.py cargo test --locked -p stream-dock-manager-storage`.
 
 Explicit Recovery mode and desktop domain-validation failure open a separate configuration-recovery
 window. Startup routing inspection is read-only; validated exit choices persist one-shot intent
@@ -210,7 +222,18 @@ errors. Test these paths using disposable configurations, never the developer's 
 
 ### Current persistence contract and call inventory
 
-The canonical schema is built by `crates/storage/src/schema.rs::initialize` and checked against the complete `sqlite_schema` inventory, including indexes, SQL constraints, application ID, schema v1, and `database_metadata.contract = current-v1`. Only a pristine root can initialize a new primary. The 16 JSON domains in `records.rs::Domain::ALL`, metadata, and the three plugin-storage namespace/record/receipt tables are current. The unused second context authority (`plugin_contexts`) has been removed; plugin context settings belong to workspace actions.
+The Manager schema is initialized in `crates/storage/src/schema.rs`. Validation checks the
+complete `sqlite_schema` inventory, application ID, local schema version 3, and the
+`settings-v3` metadata contract. Only a pristine root can initialize a new primary.
+
+| Database                      | What it owns                                                                                       |
+| ----------------------------- | -------------------------------------------------------------------------------------------------- |
+| `databases/manager.sqlite3`   | Workspace records and Manager-owned state, including typed plugin health and installation records. |
+| `databases/datastore.sqlite3` | Encrypted plugin settings and plugin-storage namespaces, records, and receipts.                    |
+| `databases/keystore.sqlite3`  | Personal Vault entries.                                                                            |
+
+Plugin context settings still belong to the owning workspace action; there is no separate
+`plugin_contexts` authority.
 
 | Owner and callers                                                                                                     | Current contract                                                                   | Disposition                                                                                                                                                                                                                                                       |
 | --------------------------------------------------------------------------------------------------------------------- | ---------------------------------------------------------------------------------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
@@ -443,9 +466,16 @@ Ordinary development pushes and pull requests do not run repository-defined Acti
 
 ### Runner selection
 
-CI defaults to GitHub-hosted Ubuntu, macOS and Windows runners. To use registered self-hosted runners, set repository variables to JSON label arrays matching each runner:
+Checks, release preparation and publication default to `runner_service=github`. Select
+`runner_service=blacksmith` to use Blacksmith's [native runner labels](https://docs.blacksmith.sh/blacksmith-runners/overview)
+with its GitHub App enabled for the repository. Blacksmith uses Ubuntu 24.04 x64, Windows Server
+2025 x64, and Apple Silicon macOS 15. It does not silently fall back to GitHub. The Linux builds
+retain the same digest-pinned Ubuntu build container on either provider.
 
-- `LINUX_RUNNER_LABELS`: for example, `["self-hosted","Linux","X64"]`, used by quality and Linux desktop/CLI builds. Release planning, assembly and publication use GitHub-hosted Ubuntu runners.
+The default GitHub option uses hosted Ubuntu, macOS and Windows runners unless the repository
+configures native label overrides. Use JSON label arrays matching each registered runner:
+
+- `LINUX_RUNNER_LABELS`: for example, `["self-hosted","Linux","X64"]`, used by quality and Linux desktop/CLI builds. Release planning, assembly and publication use the selected Ubuntu service directly.
 - `MACOS_RUNNER_LABELS`: for example, `["self-hosted","macOS","ARM64"]`, used by macOS native checks. Install the native ARM64 runner on Apple Silicon; use the X64 runner and label on Intel Macs.
 - `WINDOWS_RUNNER_LABELS`: for example, `["self-hosted","Windows","X64"]`, used by Windows native checks and desktop/CLI builds.
 
@@ -453,7 +483,11 @@ Desktop installer and standalone CLI builds use separate `MACOS_ARM64_RUNNER_LAB
 
 Runtime qualification uses `LINUX_RUNNER_LABELS`, `WINDOWS_RUNNER_LABELS`, `MACOS_ARM64_RUNNER_LABELS` and `MACOS_X64_RUNNER_LABELS` for its corresponding native targets, with the same hosted defaults when unset.
 
-Set `DEFER_MACOS_X64=true` to omit Intel macOS from the default build-only package and runtime qualification matrices while its native runner is unavailable. Explicit package target selections still apply; publication continues to require all four native targets. Deferred Intel coverage must be recorded separately and is not a successful check. Clear the variable when Intel execution is restored.
+Intel macOS is not included by default. With GitHub runners, use `macos_intel=true` on **Prepare Release**
+or **Native runtime qualification** to opt in, or select `macos-amd64` in the build-only package workflow.
+An old `DEFER_MACOS_X64=true` repository setting still prevents optional Intel runtime qualification
+until cleared. Blacksmith has no native Intel macOS runner and rejects the release option rather than
+silently scheduling GitHub jobs. Intel users can [build from source](packaging/README.md).
 
 Purpose-branch pushes and dispatches use these overrides. Ordinary development pushes and pull requests run no repository-defined Actions jobs. Clearing a variable restores that platform's hosted default. A self-hosted result qualifies the runner's actual OS/architecture, not the hosted fallback label displayed in the job name.
 
@@ -466,17 +500,17 @@ Purpose-branch pushes and dispatches use these overrides. Ordinary development p
 | `main` (manual only)    | **Prepare Release**, then separate **Publish Release** |
 | `runtime-qualification` | Native runtime matrix                                  |
 
-Promote internal-check code by pull request into its matching purpose branch; dispatch internal jobs only from that branch. Branch creation is suppressed. Release preparation and publication are manual Actions on `main`, never triggered by a push. Package product/target selectors can prepare desktop, CLI or both and platform subsets without tags or releases. Publication still requires every native desktop installer, native CLI package and portable CLI ZIP variant. See [packaging and release qualification](packaging/README.md).
+Promote internal-check code by pull request into its matching purpose branch; dispatch internal jobs only from that branch. Branch creation is suppressed. Release preparation and publication are manual Actions on `main`, never triggered by a push. Package product/target selectors can prepare desktop, CLI or both and platform subsets without tags or releases. Publication requires every native desktop installer, native CLI package and portable CLI ZIP variant in the selected release profile. See [packaging and release qualification](packaging/README.md).
 
 ### Prepare once, publish the same files
 
-On other repositories, manually running **Prepare Release** on `main` is a build-only rehearsal. It builds installers and CLI packages for all four platform/architecture targets, including Intel macOS even when `DEFER_MACOS_X64` is set. The workflow captures the exact dispatch commit, uploads development build artifacts, and does not assemble `manager-publication`, create tags, or publish a release. Only the canonical product repository can prepare publication artifacts or run **Publish Release** successfully. Forks may also run this read-only rehearsal using their own runners and settings.
+On other repositories, manually running **Prepare Release** on `main` is a build-only rehearsal. It builds the same selected target profile as a canonical preparation: Linux x64, Windows x64 and Apple Silicon macOS by default, or also Intel macOS with an explicit GitHub opt-in. The workflow captures the exact dispatch commit, uploads development build artifacts, and does not assemble `manager-publication`, create tags, or publish a release. Only the canonical product repository can prepare publication artifacts or run **Publish Release** successfully. Forks may also run this read-only rehearsal using their own runners and settings.
 
 1. Review the version and source on `main`. Align `VERSION`, Cargo/npm manifests and locks before preparation. Do not change a version merely to retry publication.
 2. Prepare and publish through separate explicit manual workflows on `main`; no readiness environment flag is required. Full vendor, native, installer and physical-device qualification is not required for this initial public release; limitations remain documented.
-3. In Actions, run **Prepare Release** (`prepare-release.yml`) on `main`. It takes no inputs and captures that exact commit and checked-in version. It validates pinned compatibility evidence without requiring every row to be verified, then builds desktop installers and CLI native packages/portable ZIPs for Linux x64, Windows x64, macOS ARM64 and macOS Intel. It creates no tag or release. Exhaustive quality and native qualification suites remain separate CI workflows, not preparation dependencies; package structure, integrity and provenance checks remain mandatory.
-4. Wait for the **entire run** to succeed. Review its results and record its run ID. The final `manager-publication` artifact contains `catalog.json`, `cli-catalog.json`, `SHA256SUMS`, and the exact release files; it is retained for 30 days, subject to repository retention policy.
-5. Separately run **Publish Release** (`publish-release.yml`) on `main`, supplying that ID as `prepare_run_id`. It verifies the GitHub workflow/run/repository/commit/attempt, artifact identity and SHA-256, source version, complete file inventory and checksums. It does not rebuild or execute artifact contents. Only after verification does it create or verify `vVERSION`, upload missing matching draft files, verify the downloaded bytes and make the draft visible.
+3. In Actions, run **Prepare Release** (`prepare-release.yml`) on `main`. Choose `runner_service` and leave `macos_intel` off unless a native Intel build is needed and GitHub runners are selected. This captures the exact commit and checked-in version. It validates pinned compatibility evidence without requiring every row to be verified, then builds desktop installers and CLI native packages/portable ZIPs for Linux x64, Windows x64 and macOS ARM64, plus Intel macOS only when selected. It creates no tag or release. Exhaustive quality and native qualification suites remain separate CI workflows, not preparation dependencies; package structure, integrity and provenance checks remain mandatory.
+4. Wait for the **entire run** to succeed. Review its results and record its run ID. The final `manager-publication` artifact contains `catalog.json`, `cli-catalog.json`, `THIRD_PARTY_NOTICES.md`, `SHA256SUMS`, and the exact release files; both catalogues record the validated target profile. The artifact is retained for 30 days, subject to repository retention policy.
+5. Separately run **Publish Release** (`publish-release.yml`) on `main`, supplying that ID as `prepare_run_id` and choosing the publication runner service. It verifies the GitHub workflow/run/repository/commit/attempt, artifact identity and SHA-256, source version, complete file inventory and checksums. It does not rebuild or execute artifact contents. Only after verification does it create or verify `vVERSION`, upload missing matching draft files, verify the downloaded bytes and make the draft visible.
 
 For an interrupted publication, rerun **Publish Release** with the **same preparation ID**. An identical already-published release is verified without overwrite. A mismatched tag, draft, published file, expired/ambiguous artifact, failed preparation, or stale artifact from an earlier attempt fails closed. Prefer a new complete Prepare run rather than rerunning only failed preparation jobs and mixing attempts. If artifacts expire before publication, prepare again; do not replace an existing published version with different bytes.
 
@@ -486,14 +520,180 @@ Private repositories may be published explicitly without changing their visibili
 
 Provision Git on each runner. Linux quality and desktop/CLI installer jobs require Docker and use a digest-pinned official Ubuntu 24.04 amd64 container. They bootstrap Git and Python 3.12 before checkout, install build dependencies inside the container, and verify Ubuntu userspace, glibc 2.39 and native architecture. Other Linux jobs retain their host prerequisites. Self-hosted macOS requires Xcode Command Line Tools and Python 3.12 or newer on `PATH`; CI creates an isolated Python environment in the runner's temporary directory. Windows requires Visual Studio C++ Build Tools and a Windows SDK with x64 libraries. The job reports missing native prerequisites before compiling. CI installs Rust and Node.js on all platforms.
 
-For a separately provisioned Linux runner, manually dispatch **checks** from `test-build` with `targets=linux-host` to run quality checks directly on that host without Docker or APT changes. The job records its actual distribution, kernel, glibc and source revision, retains the syntax, formatting, static analysis and compilation gates. This result describes that host; the Ubuntu 24.04 release build baseline remains independently checked. Ordinary `test-build` promotions retain their normal container/default-platform coverage.
+### Native checks
+
+In a development checkout, manually dispatch **checks** (`ci.yml`) from `main` or the existing
+`test-build` branch. Choose the OS you need; a single-OS dispatch schedules no other OS:
+
+| `targets`       | Checks                                                                                          |
+| --------------- | ----------------------------------------------------------------------------------------------- |
+| `linux`         | Linux quality and native tests in the pinned Ubuntu container                                   |
+| `linux-host`    | Linux quality and native tests on a separately provisioned runner without Docker or APT changes |
+| `macos`         | macOS native compile checks and tests                                                           |
+| `windows`       | Windows native compile checks and tests                                                         |
+| `linux-windows` | Linux container and Windows checks                                                              |
+| `all` (default) | Linux container, macOS and Windows checks                                                       |
+
+Choose a `profile`:
+
+- **Quick** (default for manual checks) runs all workspace unit tests on each selected native OS,
+  including library and binary targets. On Linux it also runs format and generated contract checks.
+  Use `focus=plugin-host` for an explicitly narrower plugin-host library retry; it skips the
+  workspace-generated contract and desktop build checks. For a Windows-only retry, select
+  `targets=windows`, `profile=quick`, and `focus=plugin-host`. Quick never guesses what to test
+  from a diff.
+- **Full** adds integration and documentation tests, Windows/macOS all-targets and normal desktop
+  checks, and Linux strict Clippy, connection-contract registry, and optimized GLib checks. The
+  registry checks the same harness as the full Linux workspace test run. Pushes to an existing
+  `test-build` branch run Full on all three OSes.
+
+Both profiles use a disposable installation key and leave ignored GUI, HID and OS credential-store
+tests out. `linux-host` records the actual distribution, kernel, glibc and source revision; that lane
+does not replace the Ubuntu release build baseline. Normal checks do not prepare or publish releases.
+The pinned Ubuntu development check may reuse dependency archives tied to the exact lock and patch
+inventory. Default GitHub-hosted Windows development checks can also reuse compiled Rust artifacts
+for the same runner image, toolchain, dependency graph and check profile. Cargo still rebuilds code
+when inputs change. The first run on a new cache key can still compile from scratch. Unpacked
+dependency sources, test credentials, and release-job outputs are not cached.
 
 Official Plugins native validation lives in the Plugins repository's `native-validation.yml`. Its protected `test-build` promotions run Linux x64, Windows x64 and macOS ARM64 checks using that repository's own read-only token and registered runners. This avoids cross-repository checkout permissions. Each result records its actual platform and source; it does not qualify a desktop session or hardware.
 
 Linux container jobs require a clean checkout `target/` and keep Cargo, Rustup, npm and Python state there, preventing reuse of binaries linked on a newer host. Cleanup restores the workspace's captured UID/GID without following symlinks. Other jobs use a dedicated npm cache in the runner's temporary directory so cache restore/upload does not include packages from the runner user's other projects.
 
+When both products are selected, the packaging workflows use one runner per OS and architecture.
+They package the CLI first and then build the desktop app with the same Cargo target directory.
+Cargo reuses compatible release dependencies; each binary still has its own link, checks and
+artifact upload. Desktop-only and CLI-only builds skip the other product. The broad workspace
+check runs in the separate checks workflow; Tauri builds the desktop frontend once.
+
+Windows desktop and CLI builds require native Windows Perl (for example, Strawberry Perl) for
+bundled OpenSSL. If a custom runner cannot discover it, set `OPENSSL_SRC_PERL` to the absolute path
+of its native `perl.exe`. Git for Windows Perl is not supported.
+
 Publication uses GitHub CLI (`gh`) supplied by the GitHub-hosted Ubuntu runner; the workflow checks its presence and reports its version. Build-only desktop and CLI jobs do not require `gh`. The standalone CLI workflow uses Cargo without Node.js/frontend compilation and produces native packages plus portable ZIPs separately from the desktop app. Linux CLI packaging installs `dpkg-dev` and `rpm`; Windows CLI packaging verifies and extracts a pinned portable NSIS archive into its owned tools directory. Windows tools are not executed by macOS/Linux jobs. Installer and release jobs use isolated Python environments on self-hosted runners. Release bundles keep downloaded Tauri tools, including NSIS, under the checkout's `target/.tauri` directory. Windows builds need network access for the verified tool downloads; NSIS does not need a separate global installation. Linux installer evidence includes the exact executable digest and GLIBC requirements, rejecting versions above 2.39. A container build does not qualify a graphical session, device access, installation or the host distribution; test those on the declared release targets.
 
 </details>
 
+## HID input readiness
+
+HID input readiness is enabled automatically on macOS, Linux and Windows when the
+backend can register it. No environment variable or persisted opt-in is required.
+`npm run desktop` rebuilds and launches the development app; use the fresh `--config`
+procedure above to keep real profiles separate. Fully quit any existing Manager first.
+
+The hash-pinned hidapi extensions observe the existing input handle rather than opening
+another device or consuming reports through a competing reader. macOS uses its existing
+IOKit report queue. The runtime performs nonblocking reads, then waits outside the HID
+mutex. Firmware enqueue and connection cancellation wake that wait, with a connection-local
+generation preventing lost notifications and stale callbacks from affecting a replacement.
+Failed readiness registration retains the original bounded polling path automatically.
+A terminal observer failure wakes the worker and surfaces a read error through the normal
+connection-retirement/reconnect path rather than leaving an idle worker stranded.
+Windows retains its existing separate input handle; device collection selection, initial
+firmware queries and output ordering are unchanged.
+
+Physical-device qualification remains necessary on each platform: initial reports, held
+buttons, dial bursts, firmware queries, simultaneous output, unplug/reconnect, permissions,
+suspend/resume and repeated shutdown. Synthetic tests and successful compilation do not
+establish physical-device safety, native cross-platform runtime validation or CPU savings.
+
 [Back to Manager](README.md) · [Packaging guide](packaging/README.md)
+
+### Bundled font defaults
+
+Inter is the sole bundled default family for the interface and device labels. Existing
+built-in `sans` and `mono` selections resolve to Inter without rewriting saved profiles;
+the former bundled monospace appearance therefore changes, and Inter is not advertised
+as fixed-width. Explicit system/custom family selections remain distinct. Interface font
+weight (100–900) and italic style are saved together with the family; existing settings
+without those fields use regular 400. Native device labels use the bundled static Inter
+regular, bold, italic and bold-italic faces, not newly introduced variable font axes.
+
+### Firmware discovery and instructions
+
+The Device settings Firmware tab uses two independent standard metadata feeds: Mirabox
+(`StreamDock/firmware/firmware-version-mirabox.json`) and VSD Craft
+(`VSDCraft/firmware/firmware-version-check.json`) on `https://cdn1.key123.vip`.
+The extended test feed is off by default and requires the explicit advanced preference.
+Generic, Stock, and Prajnasys feeds are not requested. Opening this section reads cached
+metadata only; Check for updates is explicit. No catalog operation flashes firmware,
+launches an updater, or opens another device handle. Installed-version reads continue
+through the connected device's existing owner.
+
+Catalog requests use the existing reqwest/system-proxy stack, a 15-second request timeout,
+a 2 MiB encoded and decompressed limit, and at most three independent requests. Accepted
+raw manifests and HTTP validators are atomically cached under `firmware-cache`, outside
+profile recovery data. The default freshness interval is 24 hours. Overlapping refreshes
+coalesce; transient failures retry once, but a Retry-After response is not retried early.
+Metadata redirects must retain the exact source endpoint, so a standard feed cannot
+silently become the experimental feed. Failed checks retain the last accepted snapshot.
+
+Confirmed comparisons are deliberately limited to the model-qualified N4 Pro VSDinside,
+N4 Pro Mirabox, and K1 Pro regional branches already recognized by the device firmware
+reader. The explicit VSD N4 keys `VSD_N4Pro`, `VSD-N4Pro`, and test `VSDN4Pro` retain their
+source provenance. A generic N4 identity does not prove HJDF/HXWY identity. Unsupported
+models, generation/region ambiguity, unknown fields, `MiniVersion`/`Prohibited`, missing
+versions, and contradictory labels remain discovery-only. Filenames never repair a
+version label. No catalog count or current release number is hardcoded as an eligibility
+rule. Missing standard coverage cannot establish that installed firmware is up to date.
+
+The Firmware section offers Instructions from the connected variant's hardware source
+configuration rather than downloading firmware. Recognized physical variants without an
+exact link use their explicitly labeled model/brand guidance (MiraBox for the confirmed
+N4 Pro E variant, otherwise the shared VSD N4 Pro guide); this does not establish device
+or firmware compatibility. Simulators and unknown identities receive no link. Catalog
+artifact URLs and checksums remain
+visible provenance only. There are no firmware download commands, transfer permissions,
+updater launches, or flashing actions. Previously saved files are not deleted. See
+[hardware maintainer guidance](hardware/README.md#firmware-instruction-links) for the optional
+`firmware_instructions` field and the reviewed URL policy.
+
+The native fixture suite uses disposable HTTP servers and captured/synthetic metadata,
+not vendor firmware artifacts or physical hardware:
+
+```sh
+cargo test --locked -p stream-dock-manager-runtime firmware_catalog --lib
+```
+
+Full macOS/Windows/Linux UI and physical-device qualification remains separate from these
+catalog and instruction-selection fixtures. Adding another source or a comparable device family
+requires explicit origin/path policy, documented identity/variant evidence, supported
+version semantics, and conflict/negative tests before enabling ordinary recommendations.
+
+## Optional local macOS development signing
+
+On a Mac, the normal and signed development launchers use the same app, config,
+features, Vite server, and Rust rebuild flow. Normal development uses an ad hoc
+signature. Signed development uses an existing Keychain identity; it does not
+notarize the app or make macOS grant permissions automatically.
+
+1. Select or create a local **Apple Development** identity in Xcode. A free Personal Team
+   is sufficient to try local signing. See [Apple's team setup](https://help.apple.com/xcode/mac/current/en.lproj/dev23aab79b4.html)
+   and [certificate guidance](https://help.apple.com/xcode/mac/current/en.lproj/dev154b28f09.html).
+2. Run `security find-identity -v -p codesigning`. Put the chosen **40-character fingerprint**
+   on one line in the Manager checkout's ignored `.dev-signing-identity` file. Do not add the
+   certificate, private key, password, or other Keychain data. Alternatively pass `--identity SHA1`.
+3. Inspect the plan before signing or starting the app:
+
+    ```sh
+    npm run desktop:signed-dev -- --data-dir /absolute/path/to/disposable-manager-dev --dry-run --no-watch
+    ```
+
+4. Remove `--dry-run` to start. Use `--no-watch` when testing one unchanged binary;
+   omit it to rebuild and re-sign after native edits. Frontend changes still hot-reload.
+
+| Behavior             | Detail                                                                                                                                                                                        |
+| -------------------- | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| Development data     | Both commands default to ignored `.cache/signed-dev-data`. Select the same isolated directory with `--data-dir PATH` (or `--config PATH`). Never point it at installed profiles.              |
+| Bundle               | `artifacts/local-dev-signing/Stream Dock Manager Local Dev.app`, identifier `app.streamdockmanager.manager.localdev`. No production deep links or second concurrent development instance.     |
+| Build or path limits | Host architecture, normal `target/debug`, and no spaces in the checkout or Node executable path. Spaces in the data directory are allowed. `--offline` uses warmed caches.                    |
+| macOS permissions    | Grant permissions manually, then check quit/relaunch and rebuild. TCC may attribute requests to a responsible development process; stable identity does not guarantee permission persistence. |
+| After a hard kill    | The runner retains the previous bundle as `artifacts/local-dev-signing/previous.app`. Remove a stale `running.lock` only once both the runner **and** app have exited.                        |
+
+The launcher does not create identities, alter Keychain trust, reset TCC, change security
+policy, or enable autostart. If signing fails, fix the selected certificate or Keychain
+access before retrying. Test the launcher without signing or launching an app:
+
+```sh
+node --test scripts/dev-native-{watch,cycle}.test.mjs scripts/dev-signed.test.mjs scripts/tauri-metadata.test.mjs
+```

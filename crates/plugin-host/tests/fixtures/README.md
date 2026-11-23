@@ -2,15 +2,9 @@
 
 Small, project-owned plugin ZIPs used to test installation and archive validation. These are test inputs, not plugins to install for normal use.
 
-## Getting started
-
-These archives are already checked in. You do not need to download or install a plugin. Run the Rust check below, then inspect the [package tests](../../src/packages.rs) when adding a new archive case. For executable SDK or plugin transport checks, use the separate [plugin acceptance fixtures](../../../../tests/fixtures/plugins/README.md).
-
 ## Run the checks
 
-From the **Manager repository root**, after setting up the [contributor prerequisites](../../../../CONTRIBUTING.md):
-
-Prepare the [pinned native dependencies](../../../../CONTRIBUTING.md#prepare-patched-rust-dependencies) before running raw Cargo commands in a fresh checkout:
+The ZIPs are checked in. No plugin install or download is needed. From the **Manager repository root**, with the [build prerequisites](../../../../CONTRIBUTING.md):
 
 ```sh
 python3 scripts/prepare_patched_deps.py
@@ -26,7 +20,7 @@ cargo test -p stream-dock-manager-plugin-host --lib packages
 | Legacy manifest      | No plugin UUID; four-part version `0.1.0.0` |
 | Source and license   | Project-owned; no third-party plugin code   |
 
-The package tests decode each representation, preserve original manifest bytes, and exercise rejection of invalid paths, CRCs, data, LZMA properties, dictionaries, and staging operations.
+The [package tests](../../src/packages.rs) check decoding and keep the original manifest bytes. They also reject invalid paths, CRCs, archive data, LZMA parameters and unsafe staging operations.
 
 ## Validate a built package
 

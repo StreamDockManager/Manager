@@ -1,6 +1,18 @@
 name: Prepare Release
 on:
     workflow_dispatch:
+        inputs:
+            runner_service:
+                description: Native runner service (Blacksmith must be enabled for this repository)
+                required: false
+                type: choice
+                default: github
+                options: [github, blacksmith]
+            macos_intel:
+                description: Also build Intel macOS installers and CLI packages (GitHub runners only)
+                required: false
+                type: boolean
+                default: false
 permissions:
     contents: read
     actions: read
@@ -10,12 +22,21 @@ concurrency:
 jobs:
     plan:
         if: github.event_name == 'workflow_dispatch' && github.ref == 'refs/heads/main'
-        runs-on: ubuntu-24.04
+        runs-on: ${{ inputs.runner_service == 'blacksmith' && 'blacksmith-4vcpu-ubuntu-2404' || 'ubuntu-24.04' }}
         outputs:
             tag: ${{ steps.plan.outputs.tag }}
             commit: ${{ steps.plan.outputs.commit }}
             mode: ${{ github.repository == 'StreamDockManager/Manager' && 'publish' || 'build-only' }}
         steps:
+            - name: Validate the requested runner service and optional Intel target
+              env:
+                  RUNNER_SERVICE: ${{ inputs.runner_service }}
+                  MACOS_INTEL: ${{ inputs.macos_intel }}
+              run: |
+                  if [[ "$RUNNER_SERVICE" == blacksmith && "$MACOS_INTEL" == true ]]; then
+                      echo 'Blacksmith has no native Intel macOS runner. Select GitHub to include Intel, or turn off macos_intel.' >&2
+                      exit 1
+                  fi
             - uses: actions/checkout@v7.0.1
               with:
                   persist-credentials: false
@@ -31,7 +52,7 @@ jobs:
                   python scripts/vsd_contract_inventory.py --check
                   python scripts/vendor-compatibility.py
             - run: python -m unittest discover -s scripts -p 'test_prepared_release.py'
-    installers:
+    packages:
         if: github.event_name == 'workflow_dispatch' && github.ref == 'refs/heads/main'
         needs: plan
         uses: ./.github/workflows/build-installers.yml
@@ -39,38 +60,31 @@ jobs:
             tag: ${{ needs.plan.outputs.tag }}
             commit: ${{ needs.plan.outputs.commit }}
             mode: ${{ needs.plan.outputs.mode }}
+            product: all
             targets: all
-    cli:
-        if: github.event_name == 'workflow_dispatch' && github.ref == 'refs/heads/main'
-        needs: plan
-        uses: ./.github/workflows/build-cli.yml
-        with:
-            tag: ${{ needs.plan.outputs.tag }}
-            commit: ${{ needs.plan.outputs.commit }}
-            mode: ${{ needs.plan.outputs.mode }}
-            targets: all
+            runner_service: ${{ inputs.runner_service }}
+            macos_intel: ${{ inputs.macos_intel }}
     rehearsal:
         if: always() && github.repository != 'StreamDockManager/Manager' && github.event_name == 'workflow_dispatch' && github.ref == 'refs/heads/main'
-        needs: [plan, installers, cli]
-        runs-on: ubuntu-24.04
+        needs: [plan, packages]
+        runs-on: ${{ inputs.runner_service == 'blacksmith' && 'blacksmith-4vcpu-ubuntu-2404' || 'ubuntu-24.04' }}
         steps:
-            - name: Require both complete platform build matrices
+            - name: Require all native package builds
               env:
                   PLAN_RESULT: ${{ needs.plan.result }}
-                  INSTALLERS_RESULT: ${{ needs.installers.result }}
-                  CLI_RESULT: ${{ needs.cli.result }}
+                  PACKAGES_RESULT: ${{ needs.packages.result }}
               run: |
                   test "$PLAN_RESULT" = success
-                  test "$INSTALLERS_RESULT" = success
-                  test "$CLI_RESULT" = success
+                  test "$PACKAGES_RESULT" = success
                   echo 'Build-only rehearsal succeeded; download manager-development-* and manager-cli-development-* artifacts.' >> "$GITHUB_STEP_SUMMARY"
     publication:
         if: github.repository == 'StreamDockManager/Manager' && github.event_name == 'workflow_dispatch' && github.ref == 'refs/heads/main'
-        needs: [plan, installers, cli]
-        runs-on: ubuntu-24.04
+        needs: [plan, packages]
+        runs-on: ${{ inputs.runner_service == 'blacksmith' && 'blacksmith-4vcpu-ubuntu-2404' || 'ubuntu-24.04' }}
         env:
             RELEASE_COMMIT: ${{ needs.plan.outputs.commit }}
             RELEASE_BUILD: ${{ github.run_id }}
+            RELEASE_TARGET_PROFILE: ${{ inputs.macos_intel && 'with-intel' || 'standard' }}
         steps:
             - uses: actions/checkout@v7.0.1
               with:

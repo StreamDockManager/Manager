@@ -727,6 +727,16 @@ mod tests {
     fn deletes_only_default_config_and_empty_application_parent() {
         let fixture = Fixture::new();
         let root = fixture.populate();
+        let databases = stream_dock_manager_storage::database_directory(&root);
+        fs::create_dir(&databases).unwrap();
+        fs::write(
+            databases.join(stream_dock_manager_storage::DATABASE_NAME),
+            b"fixture",
+        )
+        .unwrap();
+        let recovery = stream_dock_manager_storage::recovery_directory(&root);
+        fs::create_dir(&recovery).unwrap();
+        fs::write(recovery.join("snapshot.sqlite3"), b"backup fixture").unwrap();
         let shared_sibling = fixture.0.join("streamdockmanager/another-product");
         let custom = fixture.0.join("custom-config");
         fs::create_dir_all(&shared_sibling).unwrap();
@@ -772,10 +782,13 @@ mod tests {
     // Verify custom or malformed scope is rejected
     fn custom_or_malformed_scope_is_rejected() {
         let fixture = Fixture::new();
+        // PathBuf::join normalizes away parent traversal on Windows verbatim paths
+        let mut traversal = fixture.root().into_os_string();
+        traversal.push(format!("{0}..{0}config", std::path::MAIN_SEPARATOR));
         for path in [
             fixture.0.clone(),
             fixture.0.join("custom"),
-            fixture.root().join("../config"),
+            PathBuf::from(traversal),
             PathBuf::from("streamdockmanager/Stream Dock Manager/config"),
         ] {
             assert!(cleanup::Scope::new(&path).is_err(), "{}", path.display());

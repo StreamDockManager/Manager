@@ -10,6 +10,65 @@
             <h1>Device editor</h1>
         </div>
         <div class="heading-actions">
+            <div x-data="navigationMap">
+                <button
+                    class="button"
+                    @click="open"
+                    :disabled="!app.profile"
+                    aria-haspopup="dialog"
+                >
+                    Navigation map
+                </button>
+                <dialog
+                    x-ref="map"
+                    class="feature-dialog"
+                    aria-labelledby="navigation-title"
+                    @cancel.prevent="close"
+                >
+                    <header class="picker-header">
+                        <h2 id="navigation-title">Navigation map</h2>
+                        <button
+                            class="icon-button"
+                            aria-label="Close navigation map"
+                            @click="close"
+                        >
+                            ×
+                        </button>
+                    </header>
+                    <div class="feature-body">
+                        <label>
+                            View
+                            <select x-model="view">
+                                <option value="map">Page map</option>
+                                <option value="list">List</option>
+                            </select>
+                        </label>
+                        <ul :class="view === 'map' ? 'navigation-map' : ''">
+                            <template x-for="page in pages" :key="page.id">
+                                <li>
+                                    <strong x-text="page.name"></strong>
+                                    <p
+                                        class="field-help"
+                                        x-show="page.finding"
+                                        x-text="page.finding"
+                                    ></p>
+                                    <ul>
+                                        <template x-for="(edge, index) in page.edges" :key="index">
+                                            <li>
+                                                <button
+                                                    class="text-button"
+                                                    @click="edit(edge)"
+                                                    x-text="edge.label"
+                                                ></button>
+                                            </li>
+                                        </template>
+                                    </ul>
+                                </li>
+                            </template>
+                        </ul>
+                    </div>
+                </dialog>
+            </div>
             <sd-automatic-profiles></sd-automatic-profiles>
             <button
                 class="button"
@@ -36,14 +95,12 @@
                         <div class="workspace-field">
                             <div class="workspace-field-heading">
                                 <label for="device-picker">Device</label>
-                                <small
-                                    x-show="app.device"
-                                    x-text="app.simulated ? 'Simulator' : app.device.connected ? 'Connected' : 'Disconnected'"
-                                ></small>
+                                <small x-show="app.device" x-text="deviceStatus"></small>
                             </div>
                             <div class="workspace-select">
                                 <select
                                     id="device-picker"
+                                    :title="app.device ? app.device.name : 'No devices'"
                                     :value="app.deviceId"
                                     :disabled="!app.snapshot.devices.length"
                                     @change="app.selectDevice($event)"
@@ -52,7 +109,11 @@
                                         x-for="device in app.snapshot.devices"
                                         :key="device.id"
                                     >
-                                        <option :value="device.id" x-text="device.name"></option>
+                                        <option
+                                            :value="device.id"
+                                            :selected="device.id === app.deviceId"
+                                            x-text="device.name"
+                                        ></option>
                                     </template>
                                 </select>
                                 <span
@@ -67,6 +128,7 @@
                                 <div class="workspace-select">
                                     <select
                                         id="profile"
+                                        :title="app.profile ? app.profile.name : 'No profile selected'"
                                         :value="app.profile ? app.profile.id : app.snapshot.active_profile"
                                         :disabled="app.busy || !app.compatibleProfiles.length"
                                         @change="$dispatch('profile-change', {id: $event.target.value})"
@@ -176,6 +238,109 @@
                                             />
                                         </svg>
                                     </button>
+                                    <div x-data="profileReference">
+                                        <button
+                                            type="button"
+                                            class="icon-button"
+                                            :disabled="!app.profile"
+                                            @click="open"
+                                            aria-haspopup="dialog"
+                                            aria-label="Export reference"
+                                            data-tooltip="Export reference"
+                                        >
+                                            <svg
+                                                class="workspace-icon"
+                                                viewBox="0 0 24 24"
+                                                fill="none"
+                                                stroke="currentColor"
+                                                stroke-width="1.8"
+                                                stroke-linecap="round"
+                                                stroke-linejoin="round"
+                                                aria-hidden="true"
+                                            >
+                                                <path
+                                                    d="M7 8V3h10v5M7 17H4V9h16v8h-3M7 14h10v7H7z"
+                                                />
+                                            </svg>
+                                        </button>
+                                        <dialog
+                                            x-ref="reference"
+                                            class="feature-dialog"
+                                            aria-labelledby="reference-title"
+                                            @cancel.prevent="close"
+                                        >
+                                            <header class="picker-header">
+                                                <h2 id="reference-title">Export reference</h2>
+                                                <button
+                                                    class="icon-button"
+                                                    :disabled="writing"
+                                                    @click="close"
+                                                    aria-label="Close reference export"
+                                                >
+                                                    ×
+                                                </button>
+                                            </header>
+                                            <div class="feature-body settings-section">
+                                                <fieldset :disabled="busy">
+                                                    <legend>Pages to export as PNG</legend>
+                                                    <template x-for="p in pages" :key="p.id">
+                                                        <label class="preference-toggle">
+                                                            <input
+                                                                type="checkbox"
+                                                                :value="p.id"
+                                                                x-model="selected"
+                                                            />
+                                                            <span x-text="p.name"></span>
+                                                        </label>
+                                                    </template>
+                                                </fieldset>
+                                                <label>
+                                                    Paper size
+                                                    <select x-model="paper" :disabled="busy">
+                                                        <option>A4</option>
+                                                        <option>Letter</option>
+                                                    </select>
+                                                </label>
+                                                <p
+                                                    class="field-help"
+                                                    x-show="selected.length"
+                                                    x-text="filenames.join(', ')"
+                                                ></p>
+                                                <p
+                                                    role="status"
+                                                    x-show="status"
+                                                    x-text="status"
+                                                ></p>
+                                                <template
+                                                    x-for="file in downloads"
+                                                    :key="file.name"
+                                                >
+                                                    <a
+                                                        class="text-button"
+                                                        :href="file.url"
+                                                        :download="file.name"
+                                                        x-text="file.name"
+                                                    ></a>
+                                                </template>
+                                            </div>
+                                            <footer class="feature-footer">
+                                                <button
+                                                    class="button"
+                                                    @click="close"
+                                                    :disabled="writing"
+                                                >
+                                                    Close
+                                                </button>
+                                                <button
+                                                    class="button primary"
+                                                    @click="save"
+                                                    :disabled="busy || !selected.length"
+                                                >
+                                                    Save reference
+                                                </button>
+                                            </footer>
+                                        </dialog>
+                                    </div>
                                 </div>
                             </div>
                         </div>
@@ -262,7 +427,12 @@
                             aria-haspopup="dialog"
                             @click="showHistory"
                         >
-                            <img class="nav-icon" src="/appearance/icons/clock.svg" alt="" />
+                            <img
+                                data-resource-role="interface-icon"
+                                class="nav-icon"
+                                src="/appearance/icons/clock.svg"
+                                alt=""
+                            />
                             History
                         </button>
                     </div>
@@ -270,7 +440,19 @@
                 <div class="preview-area" x-show="app.device && app.profile">
                     <div class="device-label">
                         <span><span x-text="controlSummary"></span></span>
-                        <div class="button-row">
+                        <div class="button-row device-preview-actions">
+                            <template x-for="control in swipeStrips" :key="control.id">
+                                <button
+                                    type="button"
+                                    class="button"
+                                    :data-id="control.id"
+                                    :aria-pressed="app.controlId === control.id"
+                                    :disabled="app.busy"
+                                    @click="configureSwipes"
+                                >
+                                    Configure swipes
+                                </button>
+                            </template>
                             <button
                                 type="button"
                                 class="button"
@@ -407,7 +589,7 @@
                                 </svg>
                             </button>
                             <div
-                                class="page-tab-strip"
+                                class="navigation-tabs page-tab-strip"
                                 x-ref="pageTabs"
                                 x-init="observePageStrip"
                                 @keydown="navigatePageTabs"
@@ -632,8 +814,9 @@
                                         <figure>
                                             <figcaption>Before</figcaption>
                                             <img
+                                                data-resource-role="binding-icon"
                                                 x-show="historyPreview.before.image"
-                                                :src="historyPreview.before.image"
+                                                :src="historyPreview.before.image || null"
                                                 alt="Saved control appearance before this edit"
                                             />
                                             <p
@@ -645,8 +828,9 @@
                                         <figure>
                                             <figcaption>After</figcaption>
                                             <img
+                                                data-resource-role="binding-icon"
                                                 x-show="historyPreview.after.image"
-                                                :src="historyPreview.after.image"
+                                                :src="historyPreview.after.image || null"
                                                 alt="Saved control appearance after this edit"
                                             />
                                             <p

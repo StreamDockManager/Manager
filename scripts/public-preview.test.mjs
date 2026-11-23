@@ -114,6 +114,7 @@ test('all sidebar and in-page fragments work on both index and clean-URL documen
             '#/macros',
             '#/plugins',
             '#/settings',
+            '#/vault',
             '#/diagnostics',
             '#main-content',
             '#',

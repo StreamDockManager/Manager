@@ -739,10 +739,23 @@ mod tests {
                 32 * 1024 * 1024,
             )
             .unwrap();
-        assert!(runtime
-            .compare_history(revision + 1, &id)
-            .unwrap_err()
-            .contains("legacy"));
+        // Released history requires integrity hashes. A rejected record must
+        // survive inspection and undo attempts until its intact copy is restored.
+        let recorded = runtime.profiles.history_bytes(&id).unwrap();
+        assert!(runtime.compare_history(revision + 1, &id).is_err());
+        assert!(runtime.history_action("undo", revision + 1).is_err());
+        assert_eq!(runtime.profiles.history_bytes(&id).unwrap(), recorded);
+        let valid: Value = serde_json::from_slice(&original).unwrap();
+        runtime
+            .profiles
+            .storage
+            .write_json(
+                stream_dock_manager_storage::Domain::History,
+                &id,
+                &valid,
+                32 * 1024 * 1024,
+            )
+            .unwrap();
         let undone = runtime.history_action("undo", revision + 1).unwrap();
         assert_eq!(undone.profiles[0].name, "Default");
         runtime.shutdown();

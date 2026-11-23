@@ -11,6 +11,7 @@ use std::{
 pub struct RecoverySource {
     pub path: PathBuf,
     pub connection: Connection,
+    _directory: tempfile::TempDir,
 }
 
 #[derive(Clone, Debug, Serialize, Deserialize)]
@@ -39,6 +40,7 @@ impl Storage {
         // Keep ownership declared before all connections, so both normal return
         // and unwinding close SQLite handles before the explicit lock release.
         let (root, _owner) = crate::own_root(&config_root)?;
+        crate::database_layout::prepare_owned(&root)?;
         recover_locked(&root, candidate, None, validate, reconcile)
     }
 }
@@ -55,34 +57,88 @@ where
     F: Fn(&Connection) -> Result<(), String>,
     G: FnOnce(&Connection, &[RecoverySource]) -> Result<Vec<String>, String>,
 {
-    if candidate.canonicalize().map_err(|e| e.to_string())? == root.join(schema::DATABASE_NAME) {
+    recover_locked_inner(
+        root,
+        candidate,
+        expected_source,
+        validate,
+        false,
+        |db, sources| Ok((reconcile(db, sources)?, None)),
+    )
+}
+
+pub(crate) fn recover_locked_inner<F, G>(
+    root: &Path,
+    candidate: PathBuf,
+    expected_source: Option<&str>,
+    validate: F,
+    replaces_datastore: bool,
+    reconcile: G,
+) -> Result<RecoveryReport, String>
+where
+    F: Fn(&Connection) -> Result<(), String>,
+    G: FnOnce(
+        &Connection,
+        &[RecoverySource],
+    ) -> Result<(Vec<String>, Option<tempfile::NamedTempFile>), String>,
+{
+    if crate::installation_key::is_reset_marker(root)? {
+        return Err("Complete the interrupted plugin settings reset before restoring a configuration backup".into());
+    }
+    if candidate.canonicalize().map_err(|e| e.to_string())?
+        == crate::database_path(root, schema::DATABASE_NAME)
+    {
         return Err("Select a backup, not the live configuration database".into());
     }
-    let expected = recovery_fingerprint(root)?;
+    let fingerprint = || -> Result<schema::Fingerprint, String> {
+        let mut result = recovery_fingerprint(root)?;
+        if replaces_datastore {
+            result.extend(schema::fingerprint(&crate::database_path(
+                root,
+                crate::installation_key::NAME,
+            ))?);
+        }
+        Ok(result)
+    };
+    let expected = fingerprint()?;
     check_source(&candidate, expected_source)?;
     let source = maintenance::open_snapshot(&candidate)?;
     check_source(&candidate, expected_source)?;
-    let temporary = tempfile::NamedTempFile::new_in(&root).map_err(|e| e.to_string())?;
+    let temporary = tempfile::NamedTempFile::new_in(crate::database_directory(root))
+        .map_err(|e| e.to_string())?;
     let mut replacement = Connection::open(temporary.path()).map_err(|e| e.to_string())?;
     maintenance::copy_database(&source, &mut replacement)?;
     drop(source);
     schema::configure(&replacement)?;
     schema::validate(&replacement)?;
     validate(&replacement)?;
+    crate::permissions::discard(&replacement)?;
 
-    let recovery = root.join("recovery");
-    files::ensure_directory(&recovery)?;
+    let recovery = crate::database_layout::ensure_recovery_directory(root)?;
     let preserved = recovery.join(format!("quarantine-{}", uuid::Uuid::new_v4()));
     files::ensure_directory(&preserved)?;
     // Copy all original evidence before opening the previous database. A
     // read-only SQLite connection can otherwise attempt hot-journal recovery.
     for filename in evidence_names() {
-        preserve_regular(&root.join(filename), &preserved.join(filename))?;
+        preserve_regular(
+            &schema::live_evidence_path(root, filename),
+            &preserved.join(filename),
+        )?;
+    }
+    if replaces_datastore {
+        for suffix in ["", "-journal", "-wal", "-shm"] {
+            let name = format!("{}{suffix}", crate::installation_key::NAME);
+            preserve_regular(&crate::database_path(root, &name), &preserved.join(&name))?;
+        }
     }
     files::sync_directory(&preserved)?;
     files::sync_directory(&recovery)?;
     let (sources, mut warnings) = prior_sources(root);
-    warnings.extend(reconcile(&replacement, &sources)?);
+    let (reconciled_warnings, datastore) = reconcile(&replacement, &sources)?;
+    if datastore.is_some() != replaces_datastore {
+        return Err("Recovery did not stage the expected encrypted datastore".into());
+    }
+    warnings.extend(reconciled_warnings);
     if !replacement.is_autocommit() {
         return Err(
             "Recovery reconciliation left an uncommitted transaction; primary preserved".into(),
@@ -108,14 +164,17 @@ where
     temporary.as_file().sync_all().map_err(|e| e.to_string())?;
 
     check_source(&candidate, expected_source)?;
-    if recovery_fingerprint(root)? != expected {
+    if let Some(datastore) = &datastore {
+        datastore.as_file().sync_all().map_err(|e| e.to_string())?;
+    }
+    if fingerprint()? != expected {
         return Err("Configuration changed during restore preparation; originals preserved. Reload recovery.".into());
     }
 
     // Fence normal startup across the multi-file replacement. If any removal,
     // rename, sync or final validation fails, the marker remains for explicit
     // recovery and the original byte-for-byte evidence remains in quarantine.
-    let mut pending = tempfile::NamedTempFile::new_in(&root).map_err(|e| e.to_string())?;
+    let mut pending = tempfile::NamedTempFile::new_in(root).map_err(|e| e.to_string())?;
     serde_json::to_writer(
         pending.as_file_mut(),
         &serde_json::json!({"version":1,"preserved_directory":preserved,"candidate":candidate}),
@@ -125,26 +184,39 @@ where
     pending.as_file().sync_all().map_err(|e| e.to_string())?;
     files::atomic_replace(pending.path(), &root.join(schema::RECOVERY_PENDING))?;
     for suffix in ["-journal", "-wal", "-shm"] {
-        let path = root.join(format!("{}{suffix}", schema::DATABASE_NAME));
+        let path = crate::database_path(root, &format!("{}{suffix}", schema::DATABASE_NAME));
         match fs::remove_file(path) {
             Ok(()) => {}
             Err(error) if error.kind() == std::io::ErrorKind::NotFound => {}
             Err(error) => {
                 return Err(format!(
                     "Recovery remains fenced; raw evidence preserved: {error}"
-                ))
+                ));
             }
         }
     }
-    files::sync_directory(&root)?;
-    files::atomic_replace(temporary.path(), &root.join(schema::DATABASE_NAME))?;
-    let published = maintenance::open_snapshot(&root.join(schema::DATABASE_NAME))?;
+    files::sync_directory(&crate::database_directory(root))?;
+    // Replace the encrypted datastore first. Both the prior and new Manager
+    // database use the same key identity when the datastore already existed,
+    // making an interrupted portable restore retriable under the fence.
+    if let Some(datastore) = &datastore {
+        files::atomic_replace(
+            datastore.path(),
+            &crate::database_path(root, crate::installation_key::NAME),
+        )?;
+        files::sync_directory(&crate::database_directory(root))?;
+    }
+    files::atomic_replace(
+        temporary.path(),
+        &crate::database_path(root, schema::DATABASE_NAME),
+    )?;
+    let published = schema::live_snapshot_copy(root)?;
     validate(&published)?;
     drop(published);
-    schema::mark_initialized(&root)?;
-    let restored = maintenance::snapshot_metadata(root.join(schema::DATABASE_NAME))?;
+    let restored =
+        maintenance::snapshot_metadata(crate::database_path(root, schema::DATABASE_NAME))?;
     fs::remove_file(root.join(schema::RECOVERY_PENDING)).map_err(|e| e.to_string())?;
-    files::sync_directory(&root)?;
+    files::sync_directory(root)?;
     Ok(RecoveryReport {
         restored,
         preserved_directory: preserved,
@@ -154,13 +226,12 @@ where
 }
 
 // List filenames that can contain recovery evidence
-fn evidence_names() -> [&'static str; 6] {
+fn evidence_names() -> [&'static str; 5] {
     [
         schema::DATABASE_NAME,
         "manager.sqlite3-journal",
         "manager.sqlite3-wal",
         "manager.sqlite3-shm",
-        schema::INITIALIZED_MARKER,
         schema::RECOVERY_PENDING,
     ]
 }
@@ -216,21 +287,17 @@ mod tests {
         let source = tempfile::tempdir().unwrap();
         let snapshot = candidate(source.path());
         let target = tempfile::tempdir().unwrap();
-        fs::create_dir(target.path().join("profiles")).unwrap();
+        crate::prepare_database_layout(target.path()).unwrap();
+
         fs::write(
-            target.path().join(schema::DATABASE_NAME),
+            crate::database_path(target.path(), schema::DATABASE_NAME),
             b"corrupt database evidence",
         )
         .unwrap();
         assert!(Storage::open(target.path().to_owned()).is_err());
         fs::write(
-            target.path().join("manager.sqlite3-journal"),
+            crate::database_path(target.path(), "manager.sqlite3-journal"),
             b"journal evidence",
-        )
-        .unwrap();
-        fs::write(
-            target.path().join(schema::INITIALIZED_MARKER),
-            b"initialized evidence",
         )
         .unwrap();
         fs::write(
@@ -256,14 +323,10 @@ mod tests {
             b"journal evidence"
         );
         assert_eq!(
-            fs::read(report.preserved_directory.join(schema::INITIALIZED_MARKER)).unwrap(),
-            b"initialized evidence"
-        );
-        assert_eq!(
             fs::read(target.path().join("profiles/profiles.json")).unwrap(),
             b"legacy evidence"
         );
-        assert!(!target.path().join("manager.sqlite3-journal").exists());
+        assert!(!crate::database_path(target.path(), "manager.sqlite3-journal").exists());
         assert!(!target.path().join(schema::RECOVERY_PENDING).exists());
         let restored = Storage::open(target.path().to_owned()).unwrap();
         assert_eq!(
@@ -278,7 +341,7 @@ mod tests {
     // Verify interrupted recovery with missing primary is preserved before fresh start
     fn interrupted_recovery_with_missing_primary_is_preserved_before_fresh_start() {
         let target = tempfile::tempdir().unwrap();
-        fs::write(target.path().join(schema::INITIALIZED_MARKER), b"").unwrap();
+        crate::prepare_database_layout(target.path()).unwrap();
         fs::write(
             target.path().join(schema::RECOVERY_PENDING),
             b"prior recovery evidence",
@@ -317,7 +380,8 @@ mod tests {
         let source = tempfile::tempdir().unwrap();
         let snapshot = candidate(source.path());
         let target = tempfile::tempdir().unwrap();
-        let primary = target.path().join(schema::DATABASE_NAME);
+        crate::prepare_database_layout(target.path()).unwrap();
+        let primary = crate::database_path(target.path(), schema::DATABASE_NAME);
         fs::write(&primary, b"original corrupt evidence").unwrap();
         let bad_candidate = source.path().join("invalid.sqlite3");
         fs::write(&bad_candidate, b"invalid candidate").unwrap();
@@ -355,6 +419,7 @@ mod tests {
         let source = tempfile::tempdir().unwrap();
         let snapshot = candidate(source.path());
         let target = tempfile::tempdir().unwrap();
+        crate::prepare_database_layout(target.path()).unwrap();
         let live = Storage::open(target.path().to_owned()).unwrap();
         live.write_json(Domain::ManagerPreferences, "protected", &42u64, 32)
             .unwrap();
@@ -394,13 +459,10 @@ mod tests {
             },
         )
         .unwrap();
-        assert!(report.prior_sources.contains(
-            &target
-                .path()
-                .canonicalize()
-                .unwrap()
-                .join(schema::DATABASE_NAME)
-        ));
+        assert!(report.prior_sources.contains(&crate::database_path(
+            &target.path().canonicalize().unwrap(),
+            schema::DATABASE_NAME
+        )));
         let restored = Storage::open(target.path().to_owned()).unwrap();
         assert_eq!(
             restored
@@ -416,6 +478,7 @@ mod tests {
         let source = tempfile::tempdir().unwrap();
         let snapshot = candidate(source.path());
         let target = tempfile::tempdir().unwrap();
+        crate::prepare_database_layout(target.path()).unwrap();
         let live = Storage::open(target.path().to_owned()).unwrap();
         live.write_json(Domain::ManagerPreferences, "setting", &false, 32)
             .unwrap();
@@ -446,17 +509,18 @@ fn prior_sources(root: &Path) -> (Vec<RecoverySource>, Vec<String>) {
     let mut sources = Vec::new();
     // The immutable raw copies are never opened by SQLite, which may touch
     // journal/shared-memory files even while opening a read-only connection.
-    let old_primary = root.join(schema::DATABASE_NAME);
-    match maintenance::open_snapshot(&old_primary) {
-            Ok(connection) => sources.push(RecoverySource {path:root.join(schema::DATABASE_NAME),connection}),
+    let old_primary = crate::database_path(root, schema::DATABASE_NAME);
+    match schema::live_snapshot_copy(root) {
+            Ok(connection) => sources.push(RecoverySource {path:old_primary,connection: connection.connection, _directory: connection.directory}),
             Err(error) => warnings.push(format!("The prior primary could not be read. Raw evidence was preserved; deletion metadata newer than readable recovery snapshots may be unavailable: {error}")),
         }
     match crate::inspect_recovery_backups(root, 1024, |name, _, source| {
-        let mut connection = Connection::open("").map_err(|e| e.to_string())?;
+        let mut connection = schema::ScratchDatabase::new()?;
         maintenance::copy_database(source, &mut connection)?;
         Ok(RecoverySource {
-            path: root.join("recovery").join(name),
-            connection,
+            path: crate::recovery_directory(root).join(name),
+            connection: connection.connection,
+            _directory: connection.directory,
         })
     }) {
         Ok((backups, issues)) => {
@@ -481,10 +545,13 @@ where
     F: Fn(&Connection) -> Result<(), String>,
     G: FnOnce(&Connection, &[RecoverySource]) -> Result<Vec<String>, String>,
 {
+    if crate::installation_key::is_reset_marker(root)? {
+        return Err("Complete the interrupted plugin settings reset before restoring a configuration backup".into());
+    }
     let source_fingerprint = source_identity(candidate)?;
     let source = maintenance::open_snapshot(candidate)?;
     check_source(candidate, Some(&source_fingerprint))?;
-    let mut replacement = Connection::open("").map_err(|e| e.to_string())?;
+    let mut replacement = schema::ScratchDatabase::new()?;
     maintenance::copy_database(&source, &mut replacement)?;
     drop(source);
     schema::configure(&replacement)?;
@@ -508,7 +575,7 @@ where
 
 // Compute the identity used to detect changed recovery data
 fn recovery_fingerprint(root: &Path) -> Result<schema::Fingerprint, String> {
-    let mut result = schema::fingerprint(&root.join(schema::DATABASE_NAME))?;
+    let mut result = schema::fingerprint(&crate::database_path(root, schema::DATABASE_NAME))?;
     result.extend(schema::fingerprint(&root.join(schema::RECOVERY_PENDING))?);
     Ok(result)
 }
@@ -560,9 +627,14 @@ mod cold_editor_tests {
         let candidate = backup(source.path());
         let candidate_bytes = fs::read(&candidate).unwrap();
         let target = tempfile::tempdir().unwrap();
-        let primary = target.path().join(schema::DATABASE_NAME);
+        crate::prepare_database_layout(target.path()).unwrap();
+        let primary = crate::database_path(target.path(), schema::DATABASE_NAME);
         fs::write(&primary, b"corrupt primary").unwrap();
-        fs::write(target.path().join("manager.sqlite3-wal"), b"orphan wal").unwrap();
+        fs::write(
+            crate::database_path(target.path(), "manager.sqlite3-wal"),
+            b"orphan wal",
+        )
+        .unwrap();
         let editor = RecoveryEditor::open_for_recovery(target.path().into()).unwrap();
         assert!(editor.unavailable_reason().unwrap().is_some());
         assert!(editor.read(|_, _| Ok(())).is_err());
@@ -571,7 +643,7 @@ mod cold_editor_tests {
         let preview = editor
             .preview_restore(&revision, candidate.clone(), validate, |_, _| Ok(vec![]))
             .unwrap();
-        assert!(!target.path().join("recovery").exists());
+        assert!(!crate::recovery_directory(target.path()).exists());
         assert_eq!(fs::read(&primary).unwrap(), b"corrupt primary");
         let report = editor
             .restore_reviewed(
@@ -612,7 +684,8 @@ mod cold_editor_tests {
         let source = tempfile::tempdir().unwrap();
         let candidate = backup(source.path());
         let target = tempfile::tempdir().unwrap();
-        let primary = target.path().join(schema::DATABASE_NAME);
+        crate::prepare_database_layout(target.path()).unwrap();
+        let primary = crate::database_path(target.path(), schema::DATABASE_NAME);
         fs::write(&primary, b"corrupt original").unwrap();
         let editor = RecoveryEditor::open_for_recovery(target.path().into()).unwrap();
         let revision = editor.revision().unwrap();
@@ -652,6 +725,7 @@ mod cold_editor_tests {
         let source = tempfile::tempdir().unwrap();
         let candidate = backup(source.path());
         let target = tempfile::tempdir().unwrap();
+        crate::prepare_database_layout(target.path()).unwrap();
         let storage = Storage::open(target.path().into()).unwrap();
         drop(storage);
         fs::write(
@@ -681,8 +755,9 @@ mod cold_editor_tests {
         let candidate = backup(source.path());
         let bytes = fs::read(&candidate).unwrap();
         let target = tempfile::tempdir().unwrap();
+        crate::prepare_database_layout(target.path()).unwrap();
         fs::write(
-            target.path().join(schema::DATABASE_NAME),
+            crate::database_path(target.path(), schema::DATABASE_NAME),
             b"original evidence",
         )
         .unwrap();
@@ -707,7 +782,7 @@ mod cold_editor_tests {
         assert!(editor.read(|_, _| Ok(())).is_err());
         assert!(Storage::open(target.path().into()).is_err());
         assert_eq!(fs::read(candidate).unwrap(), bytes);
-        let quarantine = fs::read_dir(target.path().join("recovery"))
+        let quarantine = fs::read_dir(crate::recovery_directory(target.path()))
             .unwrap()
             .flatten()
             .find(|e| e.file_name().to_string_lossy().starts_with("quarantine-"))

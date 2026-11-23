@@ -1,0 +1,19 @@
+{
+  "version": 1,
+  "basePath": "..",
+  "components": {
+    "sd-runtime-dialog": {
+      "source": "components/sd-runtime-dialog.html",
+      "dependencies": [],
+      "options": {
+        "shadow": false,
+        "templateRevision": "sha256-Upde0vaB7UmkfOCxoDwX0vS8d4VcU9MCANFrubK-RP8"
+      }
+    }
+  },
+  "groups": {
+    "runtime-dialog": [
+      "sd-runtime-dialog"
+    ]
+  }
+}

@@ -12,6 +12,14 @@ pub(super) struct ManualActions {
     changed: bool,
 }
 impl ManualActions {
+    pub(super) fn next_deadline(&self, now: Instant) -> Option<Instant> {
+        if self.changed {
+            Some(now)
+        } else {
+            self.contexts.values().map(|(_, deadline)| *deadline).min()
+        }
+    }
+
     // Check whether manual execution still requires the plugin
     pub(super) fn demanded(&self, id: &str) -> bool {
         self.pending.values().any(|owner| owner == id)
@@ -94,6 +102,8 @@ impl PluginHost {
     // Resolve the plugin owning the manual action
     fn manual_action_plugin(&self, id: &str, action: &str) -> Result<&Plugin, String> {
         self.recovery.check()?;
+        self.check_vault_runtime(id)?;
+        self.check_action_permissions(id, action)?;
         let plugin = self.plugins.get(id).ok_or("Plugin not installed")?;
         if !plugin.info.enabled {
             return Err(format!(

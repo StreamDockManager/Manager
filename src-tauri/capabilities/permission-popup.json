@@ -1,0 +1,10 @@
+{
+    "identifier": "permission-popup",
+    "description": "First-party permission, transfer and result window for a single physical activation.",
+    "windows": ["permission-popup-*"],
+    "permissions": [
+        "allow-permission-window-view",
+        "allow-permission-window-reply",
+        "core:window:allow-close"
+    ]
+}

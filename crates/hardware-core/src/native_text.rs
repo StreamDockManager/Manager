@@ -268,6 +268,11 @@ fn line(
     underline: bool,
     db: &Database,
 ) -> Result<Owned> {
+    let font = styled_font(family, size, bold, italic, db)?;
+    attributed_line(text, &font, underline)
+}
+// Reuse one styled native font for both glyph metrics and complete line rendering
+fn styled_font(family: &str, size: f64, bold: bool, italic: bool, db: &Database) -> Result<Owned> {
     let font = create_font(family, size, db)?;
     let traits = u32::from(italic) | (u32::from(bold) << 1);
     let styled = if traits != 0 {
@@ -284,7 +289,7 @@ fn line(
     } else {
         None
     };
-    attributed_line(text, styled.as_ref().unwrap_or(&font), underline)
+    Ok(styled.unwrap_or(font))
 }
 // Create a native text line with the supplied attributes
 fn attributed_line(text: &str, font: &Owned, underline: bool) -> Result<Owned> {
@@ -331,18 +336,30 @@ fn width(line: &Owned) -> f64 {
         )
     }
 }
-// Measure glyph advances for the requested text
+// Measure regular glyph advances for native text regression tests
+#[cfg(test)]
 pub(crate) fn advances(
     font: &str,
     text: &str,
     size: f64,
     db: &Database,
 ) -> Option<HashMap<char, f64>> {
+    styled_advances(font, text, size, db, false, false)
+}
+// Match CoreText measurements to the symbolic traits used by the rendered line
+pub(crate) fn styled_advances(
+    font: &str,
+    text: &str,
+    size: f64,
+    db: &Database,
+    bold: bool,
+    italic: bool,
+) -> Option<HashMap<char, f64>> {
     if !needed(font, text, db) {
         return None;
     }
     let family = crate::fonts::family(font, db);
-    let font = create_font(family, size, db).ok()?;
+    let font = styled_font(family, size, bold, italic, db).ok()?;
     let mut result = HashMap::new();
     for ch in text.chars() {
         if let std::collections::hash_map::Entry::Vacant(entry) = result.entry(ch) {
@@ -522,7 +539,7 @@ mod tests {
         let output =
             std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("../../artifacts/font-audit");
         std::fs::create_dir_all(&output).unwrap();
-        for name in ["PingFang SC", "GB18030 Bitmap", "Noto Sans", "Georgia"] {
+        for name in ["PingFang SC", "GB18030 Bitmap", "Inter", "Georgia"] {
             for size in [12, 16, 24, 32] {
                 let font = format!("system:{name}");
                 let db = crate::fonts::database_for(&font);
@@ -530,7 +547,9 @@ mod tests {
                     fontdb: db,
                     ..Default::default()
                 };
-                let source = format!("<svg xmlns=\"http://www.w3.org/2000/svg\" width=\"300\" height=\"70\"><text x=\"10\" y=\"45\" font-size=\"{size}\" fill=\"#ff8000\">Abc 汉字 !</text></svg>");
+                let source = format!(
+                    "<svg xmlns=\"http://www.w3.org/2000/svg\" width=\"300\" height=\"70\"><text x=\"10\" y=\"45\" font-size=\"{size}\" fill=\"#ff8000\">Abc 汉字 !</text></svg>"
+                );
                 let (source, _) = prepare_svg(&source, &font, &mut options).unwrap();
                 let tree = resvg::usvg::Tree::from_str(&source, &options).unwrap();
                 let mut pixmap = resvg::tiny_skia::Pixmap::new(300, 70).unwrap();
@@ -595,7 +614,9 @@ mod tests {
                 fontdb: db.clone(),
                 ..Default::default()
             };
-            let source = format!("<svg xmlns=\"http://www.w3.org/2000/svg\" width=\"160\" height=\"60\"><text x=\"{x}\" y=\"40\" font-size=\"28\" fill=\"#ff8000\" {style}>Abc 汉字</text></svg>");
+            let source = format!(
+                "<svg xmlns=\"http://www.w3.org/2000/svg\" width=\"160\" height=\"60\"><text x=\"{x}\" y=\"40\" font-size=\"28\" fill=\"#ff8000\" {style}>Abc 汉字</text></svg>"
+            );
             let (source, clipped) =
                 prepare_svg(&source, "system:PingFang SC", &mut options).unwrap();
             assert!(
@@ -624,7 +645,10 @@ mod tests {
         let (plain, clipped) = render(5., "");
         assert!(!clipped);
         assert!(render(-15., "").1);
-        let (styled,_) = render(5., "font-weight=\"bold\" font-style=\"italic\" text-decoration=\"underline\" stroke=\"#000000\" stroke-width=\"2\"");
+        let (styled, _) = render(
+            5.,
+            "font-weight=\"bold\" font-style=\"italic\" text-decoration=\"underline\" stroke=\"#000000\" stroke-width=\"2\"",
+        );
         assert_ne!(plain.data(), styled.data());
         assert!(styled
             .pixels()

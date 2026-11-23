@@ -7,25 +7,38 @@ import type {
     AppRule,
     AutomationStatus,
     RuleEvaluation,
+    RuleTestResult,
     HistoryComparison,
     HistoryChange,
     HistoryControlComparison,
     FirmwareStatus,
 } from '../generated/runtime';
 import { registerMediaOptions } from './media-options';
+import { hasTestSurface, registerDisplayTest } from './display-test';
 import { paginate } from './pagination';
 import { createDevicePowerDraft } from './device-power';
 import { registerFramePolicy } from './frame-policy';
 import { registerKeyboardSettings } from './keyboard-settings';
 import { registerBootLogo } from './boot-logo';
+import { registerFirmwareCatalog } from './firmware-catalog';
 import { ownWindowMethods, windowWork } from './window-work';
 import { windowCloseOwners } from './window-close-owners';
 import { registerCloseDraft } from './close-releases';
 import { hasBindingContent } from './bindings';
+type PowerController = ReturnType<typeof createDevicePowerDraft> & {
+    $watch: (key: string, callback: () => void) => void;
+    $refs: Record<string, HTMLElement>;
+    close(): void;
+    show(event?: Event): Promise<void>;
+    save(): Promise<void>;
+    unregisterCloseOwner?: () => void;
+};
 // Register the workspace ui
 export function registerWorkspaceUI(Alpine: typeof AlpineType, app: () => AppState) {
+    registerDisplayTest(Alpine, app);
     registerFramePolicy(Alpine, app);
     registerBootLogo(Alpine, app);
+    registerFirmwareCatalog(Alpine, app);
     registerKeyboardSettings(Alpine, app);
     registerMediaOptions(Alpine, app);
     Alpine.data('simulatorManager', () => ({
@@ -74,112 +87,110 @@ export function registerWorkspaceUI(Alpine: typeof AlpineType, app: () => AppSta
             } catch {}
         },
     }));
-    Alpine.data('devicePower', () => ({
-        ...createDevicePowerDraft(app),
-        unregisterCloseOwner: undefined as (() => void) | undefined,
-        // Derive app from the current workspace ui state
-        get app() {
-            return app();
+    Alpine.data('devicePower', () =>
+        Object.assign(createDevicePowerDraft(app), {
+            unregisterCloseOwner: undefined as (() => void) | undefined,
+            app: app(),
+            // Initialize workspace ui state and its required lifecycle hooks
+            init(this: PowerController) {
+                ownWindowMethods(this, 'device power', ['show', 'save']);
+                this.unregisterCloseOwner = registerCloseDraft(this, ['save'], {
+                    name: 'Device power settings',
+                    retainOnUnmount: true,
+                    // Return a snapshot of the current workspace ui state
+                    state: () => (this.dirty ? 'dirty' : 'clean'),
+                    // Discard pending workspace ui edits without saving them
+                    discard: () => this.close(),
+                    // Release resources retained by the workspace ui operation
+                    release: () => this.close(),
+                });
+                this.$watch('$store.app.deviceId', () => this.close());
+                this.$watch('$store.app.route', () => this.close());
+            },
+            // Show the selected workspace ui content
+            async show(this: PowerController, event?: Event) {
+                (event?.currentTarget as HTMLElement | null)?.focus();
+                (this.$refs.power as HTMLDialogElement).showModal();
+                await this.openSettings();
+            },
+            // Release workspace ui state and associated lifecycle resources
+            close(this: PowerController) {
+                this.discard();
+                (this.$refs.power as HTMLDialogElement | undefined)?.close();
+            },
+            // Save pending changes through the workspace ui workflow
+            async save(this: PowerController) {
+                if (await this.commit()) this.close();
+            },
+            // Release workspace ui state and associated lifecycle resources
+            destroy(this: PowerController) {
+                this.unregisterCloseOwner?.();
+                this.close();
+            },
+        }),
+    );
+    const summary = () => ({
+        // Derive channels from the current workspace ui state
+        get channels() {
+            return app().device?.manifest.capabilities.lighting
+                ? app().device!.manifest.capabilities.lighting_channels
+                : [];
         },
-        // Initialize workspace ui state and its required lifecycle hooks
-        init() {
-            ownWindowMethods(this, 'device power', ['show', 'save']);
-            this.unregisterCloseOwner = registerCloseDraft(this, ['save'], {
-                name: 'Device power settings',
-                retainOnUnmount: true,
-                // Return a snapshot of the current workspace ui state
-                state: () => (this.dirty ? 'dirty' : 'clean'),
-                // Discard pending workspace ui edits without saving them
-                discard: () => this.close(),
-                // Release resources retained by the workspace ui operation
-                release: () => this.close(),
-            });
-            this.$watch('$store.app.deviceId', () => this.close());
-            this.$watch('$store.app.route', () => this.close());
+        // Derive heading from the current workspace ui state
+        get heading() {
+            return this.channels.length ? 'Brightness and lighting' : 'Device controls';
         },
-        // Show the selected workspace ui content
-        async show(event?: Event) {
-            (event?.currentTarget as HTMLElement | null)?.focus();
-            (this.$refs.power as HTMLDialogElement).showModal();
-            await this.openSettings();
+        // Derive image output warning from the current workspace ui state
+        get imageOutputWarning() {
+            return app().device?.manifest.capabilities.image_output_unavailable_reason || '';
         },
-        // Release workspace ui state and associated lifecycle resources
-        close() {
-            this.discard();
-            (this.$refs.power as HTMLDialogElement | undefined)?.close();
+        // Derive output summary from the current workspace ui state
+        get outputSummary() {
+            const output = app().effectiveDeviceOutput;
+            const parts = [];
+            if (app().device?.manifest.capabilities.brightness)
+                parts.push(`Screen ${output.brightness}%`);
+            if (this.channels.length) parts.push(`Lighting ${output.lighting_brightness}%`);
+            if (app().device?.manifest.capabilities.sleep)
+                parts.push(output.sleeping ? 'Sleeping' : 'Awake');
+            if (app().device?.manifest.capabilities.vibration?.toggle)
+                parts.push(
+                    output.vibration_enabled == null
+                        ? 'Vibration: Device default'
+                        : output.vibration_enabled
+                          ? 'Vibration on'
+                          : 'Vibration off',
+                );
+            return parts.join(' · ');
         },
-        // Save pending changes through the workspace ui workflow
-        async save() {
-            if (await this.commit()) this.close();
+        // Derive supports output from the current workspace ui state
+        get supportsOutput() {
+            const capabilities = app().device?.manifest.capabilities;
+            return Boolean(
+                capabilities &&
+                (capabilities.brightness ||
+                    capabilities.lighting ||
+                    capabilities.sleep ||
+                    capabilities.keyboard ||
+                    hasTestSurface(app().device?.manifest)),
+            );
         },
-        // Release workspace ui state and associated lifecycle resources
-        destroy() {
-            this.unregisterCloseOwner?.();
-            this.close();
+        showOutput(event: Event) {
+            (event.currentTarget as HTMLElement).focus({ preventScroll: true });
+            window.dispatchEvent(new Event('open-device-output'));
         },
-    }));
+    });
+    Alpine.data('deviceOutputSummary', summary);
     Alpine.data('deviceOutput', () => ({
         outputTab: 'display',
         brightness: 65,
         lightingBrightness: 65,
         colors: [] as string[],
         loaded: '',
-        powerTimer: 0,
-        resumeListener: undefined as (() => void) | undefined,
         firmware: null as FirmwareStatus | null,
         firmwareBusy: false,
         firmwareError: '',
         firmwareGeneration: 0,
-        // Derive firmware read message from the current workspace ui state
-        get firmwareReadMessage() {
-            if (this.firmwareBusy) return 'Checking firmware…';
-            const firmware = this.firmware;
-            if (firmware?.state === 'installed_known' && !firmware.stale) return '';
-            return firmware?.message || '';
-        },
-        // Derive firmware release message from the current workspace ui state
-        get firmwareReleaseMessage() {
-            if (app().simulated) return '';
-            return this.firmware?.latest_state === 'not_checked'
-                ? 'Check for updates from the manufacturer.'
-                : this.firmware?.latest_message || '';
-        },
-        // Derive firmware checked at from the current workspace ui state
-        get firmwareCheckedAt() {
-            return this.firmware?.latest_checked || this.firmware?.last_checked || '';
-        },
-        // Derive firmware checked from the current workspace ui state
-        get firmwareChecked() {
-            if (!this.firmwareCheckedAt) return 'Never';
-            const date = new Date(this.firmwareCheckedAt);
-            return Number.isFinite(date.getTime())
-                ? date.toLocaleString(undefined, { timeZoneName: 'short' })
-                : 'Unavailable';
-        },
-        // Derive installed firmware from the current workspace ui state
-        get installedFirmware() {
-            const firmware = this.firmware;
-            return firmware?.installed
-                ? firmware.installed + (firmware.stale ? ' (last known)' : '')
-                : 'Unknown';
-        },
-        // Derive latest firmware from the current workspace ui state
-        get latestFirmware() {
-            const firmware = this.firmware;
-            if (firmware?.latest)
-                return firmware.latest + (firmware.latest_stale ? ' (last known)' : '');
-            switch (firmware?.latest_state) {
-                case 'available':
-                case 'not_listed':
-                    return 'No matching release listed';
-                case 'failed':
-                    return 'Lookup failed';
-                case 'unsupported':
-                    return 'Not available for this variant';
-                default:
-                    return 'Not checked yet';
-            }
-        },
         vibrationEnabled: null as boolean | null,
         configurationDraft: {} as Record<string, string>,
         configurationVibration: '',
@@ -354,15 +365,18 @@ export function registerWorkspaceUI(Alpine: typeof AlpineType, app: () => AppSta
                 if (generation === this.configurationGeneration) this.configurationSaving = false;
             }
         },
+        receiveFirmware(event: CustomEvent<FirmwareStatus>) {
+            this.firmware = event.detail;
+        },
         // Load firmware for the workspace ui workflow
-        async loadFirmware(check = false) {
+        async loadFirmware() {
             const deviceId = app().deviceId;
             if (!deviceId || this.firmwareBusy) return;
             const generation = ++this.firmwareGeneration;
             this.firmwareBusy = true;
             this.firmwareError = '';
             try {
-                const result = await app().command(check ? 'check_firmware' : 'firmware_status', {
+                const result = await app().command('firmware_status', {
                     deviceId,
                 });
                 if (generation === this.firmwareGeneration && deviceId === app().deviceId)
@@ -374,64 +388,33 @@ export function registerWorkspaceUI(Alpine: typeof AlpineType, app: () => AppSta
                 if (generation === this.firmwareGeneration) this.firmwareBusy = false;
             }
         },
-        // Check the firmware
-        async checkFirmware() {
-            await this.loadFirmware(true);
-        },
-        // Open the firmware instructions
-        async openFirmwareInstructions() {
-            await app().command('open_firmware_instructions', { deviceId: app().deviceId });
-        },
         // Release workspace ui state and associated lifecycle resources
         destroy() {
             this.unregisterCloseOwner?.();
             this.closeOutput();
-            window.clearInterval(this.powerTimer);
-            if (this.resumeListener)
-                window.removeEventListener('editor-window-resumed', this.resumeListener);
         },
         // Derive app from the current workspace ui state
         get app() {
             return app();
         },
-        // Derive channels from the current workspace ui state
         get channels() {
-            return app().device?.manifest.capabilities.lighting
-                ? app().device!.manifest.capabilities.lighting_channels
-                : [];
+            return summary().channels;
         },
-        // Derive heading from the current workspace ui state
         get heading() {
-            return this.channels.length ? 'Brightness and lighting' : 'Device controls';
-        },
-        // Derive image output warning from the current workspace ui state
-        get imageOutputWarning() {
-            return app().device?.manifest.capabilities.image_output_unavailable_reason || '';
-        },
-        // Derive output summary from the current workspace ui state
-        get outputSummary() {
-            const output = app().effectiveDeviceOutput;
-            const parts = [];
-            if (app().device?.manifest.capabilities.brightness)
-                parts.push(`Screen ${output.brightness}%`);
-            if (this.channels.length) parts.push(`Lighting ${output.lighting_brightness}%`);
-            if (app().device?.manifest.capabilities.sleep)
-                parts.push(output.sleeping ? 'Sleeping' : 'Awake');
-            if (this.vibration?.toggle)
-                parts.push(
-                    output.vibration_enabled == null
-                        ? 'Vibration: Device default'
-                        : output.vibration_enabled
-                          ? 'Vibration on'
-                          : 'Vibration off',
-                );
-            return parts.join(' · ');
+            return summary().heading;
         },
         // Derive has display settings from the current workspace ui state
+        get hasTestSurface() {
+            return hasTestSurface(app().device?.manifest);
+        },
+        get hasBrightnessSettings() {
+            return Boolean(app().device?.manifest.capabilities.brightness || this.channels.length);
+        },
         get hasDisplaySettings() {
-            const capabilities = app().device?.manifest.capabilities;
-            return Boolean(
-                capabilities?.brightness || this.channels.length || capabilities?.boot_logo,
+            return (
+                this.hasTestSurface ||
+                this.hasBrightnessSettings ||
+                Boolean(app().device?.manifest.capabilities.boot_logo)
             );
         },
         // Derive has keyboard settings from the current workspace ui state
@@ -452,6 +435,10 @@ export function registerWorkspaceUI(Alpine: typeof AlpineType, app: () => AppSta
             if (!this.outputTabs.includes(tab)) return;
             this.outputTab = tab;
             if (tab === 'keyboard') window.dispatchEvent(new Event('keyboard-settings-open'));
+            if (tab === 'firmware')
+                (this.$refs.output as HTMLElement)
+                    .querySelector('[data-firmware-catalog]')
+                    ?.dispatchEvent(new Event('firmware-catalog-open'));
             (this.$refs.outputBody as HTMLElement).scrollTop = 0;
         },
         // Navigate available device-output tabs and move focus with supported keys
@@ -469,7 +456,6 @@ export function registerWorkspaceUI(Alpine: typeof AlpineType, app: () => AppSta
         // Show the output
         showOutput(event?: Event) {
             if (!this.supportsOutput) return;
-            (event?.currentTarget as HTMLElement | null)?.focus();
             this.selectOutputTab(this.outputTabs[0]);
             (this.$refs.output as HTMLDialogElement).showModal();
             void this.loadFirmware();
@@ -480,6 +466,9 @@ export function registerWorkspaceUI(Alpine: typeof AlpineType, app: () => AppSta
             this.configurationSaving = false;
             this.firmwareGeneration++;
             this.firmwareBusy = false;
+            (this.$refs.output as HTMLElement | undefined)
+                ?.querySelector('[data-firmware-catalog]')
+                ?.dispatchEvent(new Event('firmware-catalog-close'));
             const dialog = this.$refs.output as HTMLDialogElement | undefined;
             if (!dialog) return;
             const pending: Promise<unknown>[] = [];
@@ -497,16 +486,8 @@ export function registerWorkspaceUI(Alpine: typeof AlpineType, app: () => AppSta
                 child.close();
             dialog.close();
         },
-        // Derive supports output from the current workspace ui state
         get supportsOutput() {
-            const capabilities = app().device?.manifest.capabilities;
-            return Boolean(
-                capabilities &&
-                (capabilities.brightness ||
-                    capabilities.lighting ||
-                    capabilities.sleep ||
-                    capabilities.keyboard),
-            );
+            return summary().supportsOutput;
         },
         // Toggle the sleep
         async toggleSleep() {
@@ -538,8 +519,6 @@ export function registerWorkspaceUI(Alpine: typeof AlpineType, app: () => AppSta
                 'changeVibration',
                 'saveConfiguration',
                 'loadFirmware',
-                'checkFirmware',
-                'openFirmwareInstructions',
                 'toggleSleep',
                 'colorChanged',
                 'save',
@@ -557,15 +536,10 @@ export function registerWorkspaceUI(Alpine: typeof AlpineType, app: () => AppSta
                 discard: () => this.closeOutput(),
                 // Release resources retained by the workspace ui operation
                 release: () => {
-                    window.clearInterval(this.powerTimer);
-                    this.powerTimer = 0;
                     this.closeOutput();
                 },
             });
             this.load();
-            this.resumeListener = () => this.startPowerReader();
-            window.addEventListener('editor-window-resumed', this.resumeListener);
-            this.startPowerReader();
             this.$watch('outputSignature', () => this.load());
             // Complete the deferred workspace ui work using the current operation state
             this.$watch('$store.app.deviceId', () => {
@@ -577,19 +551,6 @@ export function registerWorkspaceUI(Alpine: typeof AlpineType, app: () => AppSta
                 this.load();
             });
             this.$watch('$store.app.route', () => this.closeOutput());
-        },
-        // Start the power reader
-        startPowerReader() {
-            window.clearInterval(this.powerTimer);
-            // Refresh workspace ui data while keeping the view synchronized
-            const refresh = () => {
-                if (document.hidden || windowWork.quiescing || windowCloseOwners.closing) return;
-                void windowWork
-                    .run('device power status', () => app().refreshPower())
-                    .catch(() => {});
-            };
-            refresh();
-            this.powerTimer = window.setInterval(refresh, 1000);
         },
         // Load the data required by the workspace ui workflow
         load() {
@@ -808,6 +769,11 @@ export function registerWorkspaceUI(Alpine: typeof AlpineType, app: () => AppSta
         historyTime(timestamp: number) {
             return new Date(timestamp).toLocaleString();
         },
+        get deviceStatus() {
+            const device = app().device;
+            if (!device) return '';
+            return device.simulated ? 'Simulator' : device.connected ? 'Connected' : 'Disconnected';
+        },
         // Derive undo items from the current workspace ui state
         get undoItems() {
             return this.historyWindow.items;
@@ -905,6 +871,107 @@ export function registerWorkspaceUI(Alpine: typeof AlpineType, app: () => AppSta
             { value: '6', label: 'Sun' },
         ],
         evaluations: [] as RuleEvaluation[],
+        testApplication: '',
+        testTitle: '',
+        testDay: '0',
+        testTime: '12:00',
+        testDevice: '',
+        testResult: null as RuleTestResult | null,
+        testedRules: [] as AppRule[],
+        get testRows() {
+            return (this.currentTest?.evaluations || []).map((row, index) => {
+                const rule = this.testedRules[index];
+                const label = [
+                    rule?.application || 'Any application',
+                    rule?.title?.value,
+                    rule?.schedule && 'Scheduled',
+                ]
+                    .filter(Boolean)
+                    .join(' · ');
+                return { id: row.id, label, reasons: row.reasons.join(' · ') };
+            });
+        },
+        testedInputs: '',
+        testEpoch: 0,
+        get testInputs() {
+            return JSON.stringify([
+                this.closeValue(),
+                this.testDevice,
+                this.testApplication,
+                this.testTitle,
+                this.testDay,
+                this.testTime,
+                app().snapshot.configuration_revision,
+                app().snapshot.sessions,
+            ]);
+        },
+        get currentTest() {
+            return this.testedInputs === this.testInputs ? this.testResult : null;
+        },
+        get testDestination() {
+            const result = this.currentTest;
+            if (!result) return '';
+            const profile = app().snapshot.profiles.find((p) => p.id === result.profile_id);
+            const page = profile?.pages.find((p) => p.id === result.page_id);
+            return [result.outcome, profile?.name, page?.name].filter(Boolean).join(' · ');
+        },
+        async testRules() {
+            const epoch = ++this.testEpoch;
+            this.testResult = null;
+            this.error = '';
+            const inputs = this.testInputs;
+            try {
+                const device = app().snapshot.devices.find((d) => d.id === this.testDevice);
+                if (!device) throw Error('Choose a device.');
+                const draft = device.id === this.deviceId;
+                const session = app().snapshot.sessions[device.persistence_key];
+                const rules = cloneJson(
+                    draft
+                        ? this.draftRules
+                        : app().snapshot.rules.filter(
+                              (r) => r.device_key === device.persistence_key,
+                          ),
+                );
+                if (
+                    draft &&
+                    (this.editingRuleId ||
+                        this.application.trim() ||
+                        this.titleValue.trim() ||
+                        this.scheduleEnabled)
+                ) {
+                    const rule = this.formRule();
+                    if (!rule) return;
+                    const index = rules.findIndex((r) => r.id === rule.id);
+                    if (index < 0) rules.push(rule);
+                    else rules[index] = rule;
+                }
+                if (!/^([01]\d|2[0-3]):[0-5]\d$/.test(this.testTime))
+                    throw Error('Enter a valid local time.');
+                const [hour, min] = this.testTime.split(':').map(Number);
+                const result = await app().command('test_automation_rules', {
+                    request: {
+                        device_id: device.id,
+                        rules,
+                        application: this.testApplication,
+                        title: this.testTitle || null,
+                        weekday: Number(this.testDay),
+                        minute: hour * 60 + min,
+                        enabled: draft ? this.enabled : Boolean(session?.automation_enabled),
+                        paused: draft ? this.paused : Boolean(session?.automation_paused),
+                        restore_on_exit: draft
+                            ? this.restoreOnExit
+                            : Boolean(session?.automation_restore_on_exit),
+                    },
+                });
+                if (this.opened && epoch === this.testEpoch && inputs === this.testInputs) {
+                    this.testedInputs = inputs;
+                    this.testedRules = rules;
+                    this.testResult = result;
+                }
+            } catch (error) {
+                if (this.opened && epoch === this.testEpoch) this.error = String(error);
+            }
+        },
         status: { available: false, reason: 'Loading…', application: null } as AutomationStatus,
         // Derive app from the current workspace ui state
         get app() {
@@ -946,6 +1013,15 @@ export function registerWorkspaceUI(Alpine: typeof AlpineType, app: () => AppSta
             if (this.opened || !app().device) return;
             this.draftEpoch += 1;
             this.deviceId = app().deviceId;
+            this.testDevice = this.deviceId;
+            this.testResult = null;
+            this.testApplication = '';
+            this.testTitle = '';
+            const now = new Date();
+            this.testDay = String((now.getDay() + 6) % 7);
+            this.testTime = [now.getHours(), now.getMinutes()]
+                .map((n) => String(n).padStart(2, '0'))
+                .join(':');
             this.deviceKey = app().device?.persistence_key || this.deviceId;
             this.deviceName = app().device?.name || 'Device';
             this.portDependent = Boolean(app().device?.identity_port_dependent);
@@ -977,6 +1053,9 @@ export function registerWorkspaceUI(Alpine: typeof AlpineType, app: () => AppSta
             if (this.saving) return;
             this.opened = false;
             this.draftEpoch += 1;
+            this.testEpoch++;
+            this.testResult = null;
+            this.testTitle = this.testApplication = '';
             this.draftRules = [];
             this.cancelEdit();
             this.error = '';
@@ -1067,6 +1146,7 @@ export function registerWorkspaceUI(Alpine: typeof AlpineType, app: () => AppSta
                 'openDialog',
                 'browseApplication',
                 'previewRules',
+                'testRules',
                 'authorizeTitle',
                 'refresh',
                 'applyDraft',
@@ -1122,7 +1202,7 @@ export function registerWorkspaceUI(Alpine: typeof AlpineType, app: () => AppSta
             this.paused = false;
         },
         // Add the workspace ui operation
-        add() {
+        formRule(): AppRule | false {
             this.error = '';
             if (
                 (!this.application.trim() && !this.titleValue.trim() && !this.scheduleEnabled) ||
@@ -1165,6 +1245,11 @@ export function registerWorkspaceUI(Alpine: typeof AlpineType, app: () => AppSta
                 profile_id: this.profileId,
                 page_id: this.pageId || null,
             };
+            return rule;
+        },
+        add() {
+            const rule = this.formRule();
+            if (!rule) return false;
             const index = this.draftRules.findIndex((r) => r.id === rule.id);
             if (index < 0) this.draftRules.push(rule);
             else this.draftRules.splice(index, 1, rule);

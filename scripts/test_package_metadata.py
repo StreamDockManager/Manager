@@ -1,6 +1,7 @@
 import copy
 import json
 import ntpath
+import re
 from pathlib import Path
 import tempfile
 import unittest
@@ -44,6 +45,7 @@ class MetadataTests(unittest.TestCase):
     # Verify config date is release date not build date
     def test_config_date_is_release_date_not_build_date(self):
         data = m.load()
+        data['package']['last_updated'] = ''
         self.assertIsNone(ET.fromstring(m.appstream(data, '0.1.0')).find('releases'))
         data['package']['last_updated'] = '2026-11-12'
         tree = ET.fromstring(m.appstream(data, '0.1.0'))
@@ -90,8 +92,10 @@ class MetadataTests(unittest.TestCase):
         with tempfile.TemporaryDirectory(dir=m.ROOT / 'packaging') as config_dir, tempfile.TemporaryDirectory() as output:
             config = Path(config_dir) / 'metadata.toml'
             original = (m.ROOT / 'packaging/metadata.toml').read_text()
-            config.write_text(original.replace('Stream Dock Manager contributors', 'Example Publisher')
-                              .replace('last_updated = ""', 'last_updated = "2026-11-12"'))
+            override, count = re.subn(r'(?m)^last_updated = "[^"]*"$',
+                                      'last_updated = "2026-11-12"', original)
+            self.assertEqual(count, 1)
+            config.write_text(override.replace('Stream Dock Manager contributors', 'Example Publisher'))
             env = {m.VARIABLE: str(config)}
             for platform in ('linux', 'windows', 'macos'):
                 bundle = m.tauri_override(Path(output), env, platform)['bundle']

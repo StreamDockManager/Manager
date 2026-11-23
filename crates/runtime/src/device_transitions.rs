@@ -255,6 +255,7 @@ pub(super) fn advance(runtime: &Runtime, c: &mut Connection) {
     // per turn (and a time slice between surfaces) leave polling/devices runnable
     for _ in 0..2 {
         let context = transition.context.as_ref().unwrap();
+        let render_start = Instant::now();
         let command = if transition.cursor == 0 {
             c.manifest
                 .capabilities
@@ -314,6 +315,12 @@ pub(super) fn advance(runtime: &Runtime, c: &mut Connection) {
         } else {
             break;
         };
+        if matches!(&command, Ok(Some(_))) {
+            runtime.metrics.record(
+                "transition_surface_render_ms",
+                render_start.elapsed().as_secs_f64() * 1000.,
+            );
+        }
         transition.cursor += 1;
         if let Err(error) = command
             .and_then(|command| command.map_or(Ok(()), |command| transition.retain(c, command)))
@@ -341,7 +348,8 @@ pub(super) fn advance(runtime: &Runtime, c: &mut Connection) {
             restore(runtime, c);
             return;
         }
-        match submit(c, std::mem::take(&mut transition.commands)) {
+        let origin = input_gate.origin(&c.device_id, c.epoch, transition.generation);
+        match submit(c, std::mem::take(&mut transition.commands), origin) {
             Ok(receipt) => {
                 transition.receipt = Some(receipt);
                 transition.submitted = Some(Instant::now());
@@ -365,6 +373,7 @@ pub(super) fn advance(runtime: &Runtime, c: &mut Connection) {
 pub(super) fn submit(
     c: &mut Connection,
     commands: Vec<DeviceCommand>,
+    origin: Option<crate::input_trace::InputOrigin>,
 ) -> std::result::Result<mpsc::Receiver<OutputStatus>, String> {
     let encoding = if !c.force_individual_updates
         && c.policy.mode == OutputMode::FrameScheduling
@@ -390,12 +399,7 @@ pub(super) fn submit(
         .iter()
         .map(|command| (command_surface(command).unwrap(), command_digest(command)))
         .collect();
-    let uploads = c
-        .session
-        .lock()
-        .unwrap()
-        .encode_frame(commands, encoding)
-        .map_err(|e| e.to_string())?;
+    let uploads = encode_output(c, |session| session.encode_frame(commands, encoding))?;
     if uploads.len() != metadata.len() {
         return Err("Encoder did not preserve scene surfaces".into());
     }
@@ -427,6 +431,8 @@ pub(super) fn submit(
         c.delivery.insert(
             surface,
             Delivery {
+                presentation: None,
+                origin: origin.clone(),
                 digest,
                 revision,
                 pending: true,

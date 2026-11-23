@@ -8,11 +8,13 @@ export function workspaceSnapshot(current: Snapshot, changes: Partial<WorkspaceC
         removed: string[],
         order: string[] | null | undefined,
     ): T[] {
+        if (!updates.length && !removed.length && !order) return values;
         const map = new Map(values.map((value) => [value.id, value]));
+        const removedIds = new Set(removed);
         if (
             new Set(updates.map((value) => value.id)).size !== updates.length ||
-            new Set(removed).size !== removed.length ||
-            updates.some((value) => removed.includes(value.id))
+            removedIds.size !== removed.length ||
+            updates.some((value) => removedIds.has(value.id))
         )
             throw Error('Invalid workspace entity batch');
         for (const id of removed) {
@@ -72,24 +74,22 @@ export function workspaceSnapshot(current: Snapshot, changes: Partial<WorkspaceC
 /** Browser fixtures use the same wire contract; native code captures only touched entities. */
 export function workspaceDifference(before: Snapshot, after: Snapshot): WorkspaceChanges {
     // Compare workspace values through their JSON representations
-    const equal = (a: unknown, b: unknown) => JSON.stringify(a) === JSON.stringify(b);
+    const equal = (a: unknown, b: unknown) => a === b || JSON.stringify(a) === JSON.stringify(b);
     // Compute changed entities, removed IDs and any new ordering
-    const diff = <T extends { id: string }>(old: T[], next: T[]) => ({
-        updates: next.filter(
-            (value) =>
-                !equal(
-                    old.find((v) => v.id === value.id),
-                    value,
-                ),
-        ),
-        removed: old.filter((value) => !next.some((v) => v.id === value.id)).map((v) => v.id),
-        order: equal(
-            old.map((v) => v.id),
-            next.map((v) => v.id),
-        )
-            ? null
-            : next.map((v) => v.id),
-    });
+    const diff = <T extends { id: string }>(old: T[], next: T[]) => {
+        if (old === next) return { updates: [], removed: [], order: null };
+        const previous = new Map(old.map((value) => [value.id, value]));
+        const ids = new Set(next.map((value) => value.id));
+        return {
+            updates: next.filter((value) => !equal(previous.get(value.id), value)),
+            removed: old.filter((value) => !ids.has(value.id)).map((value) => value.id),
+            order:
+                old.length === next.length &&
+                next.every((value, index) => value.id === old[index].id)
+                    ? null
+                    : next.map((value) => value.id),
+        };
+    };
     const p = diff(before.profiles, after.profiles),
         m = diff(before.saved_macros, after.saved_macros),
         s = diff(before.styles || [], after.styles || []);

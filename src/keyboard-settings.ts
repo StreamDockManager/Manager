@@ -789,6 +789,7 @@ type Controller = {
 // Register keyboard settings controls and reset confirmation
 export function registerKeyboardSettings(Alpine: typeof AlpineType, app: () => AppState) {
     Alpine.data('keyboardSettings', () => ({
+        unregisterClose: undefined as (() => void) | undefined,
         keyboard: createKeyboardSettings(app),
         // Open confirmation for the current keyboard identity
         requestFactoryReset(this: Controller) {

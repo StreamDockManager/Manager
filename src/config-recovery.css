@@ -1,3 +1,5 @@
+@import './styles.css';
+
 .configuration-recovery-window {
     overflow: auto;
 }
@@ -162,6 +164,10 @@
     overflow-wrap: anywhere;
 }
 @media (max-width: 600px) {
+    #recovery-leave > .feature-footer {
+        display: grid;
+        grid-template-columns: repeat(2, minmax(0, 1fr));
+    }
     .configuration-recovery-shell {
         padding: 20px 12px;
         gap: 16px;
@@ -495,4 +501,42 @@
 }
 #recovery-restore-review[hidden] {
     display: none;
+}
+
+#incompatible-data[hidden] {
+    display: none;
+}
+.incompatible-format .configuration-recovery-shell > :not(header, #incompatible-data) {
+    display: none;
+}
+#incompatible-path {
+    user-select: text;
+    overflow-wrap: anywhere;
+    align-self: center;
+}
+
+.configuration-recovery-keystore,
+.configuration-recovery-keystore > section {
+    display: grid;
+    gap: 10px;
+    min-width: 0;
+    overflow-wrap: anywhere;
+}
+.configuration-recovery-keystore[hidden],
+.configuration-recovery-keystore [hidden] {
+    display: none;
+}
+.configuration-recovery-keystore :is(h2, h3, p) {
+    margin: 0;
+}
+.configuration-recovery-keystore > section {
+    border-top: 1px solid var(--border);
+    padding-top: 12px;
+}
+.configuration-recovery-keystore select {
+    width: 100%;
+    min-width: 0;
+}
+.configuration-recovery-keystore > section > button {
+    justify-self: start;
 }

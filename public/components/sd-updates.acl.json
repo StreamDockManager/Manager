@@ -1,6 +1,6 @@
 {
     "version": 1,
-    "groups": ["settings", "plugins"],
+    "groups": ["settings"],
     "options": { "shadow": false },
     "metadata": {
         "description": "First-party update management; plugin inspectors have no access."

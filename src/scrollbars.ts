@@ -29,37 +29,46 @@ export function registerAutoScrollbars() {
         if (target instanceof HTMLElement) reveal(target);
     };
     // Reveal scrollbars when the pointer approaches a scrollable ancestor's edge
+    // Computed style declarations are live. Follow the current parent chain on
+    // every frame so reparenting and layout changes do not require a DOM observer.
+    const styles = new WeakMap<HTMLElement, CSSStyleDeclaration>();
     const nearEdge = (event: PointerEvent) => {
-        let element = event.target instanceof Element ? event.target : null;
-        while (element) {
-            if (element instanceof HTMLElement) {
-                const style = getComputedStyle(element);
-                const isRoot = element === root;
-                const vertical =
-                    element.scrollHeight > element.clientHeight + 1 &&
-                    (isRoot ? style.overflowY !== 'hidden' : /auto|scroll/.test(style.overflowY));
-                const horizontal =
-                    element.scrollWidth > element.clientWidth + 1 &&
-                    /auto|scroll/.test(style.overflowX);
-                if (vertical || horizontal) {
-                    const bounds = isRoot
-                        ? { left: 0, right: innerWidth, top: 0, bottom: innerHeight }
-                        : element.getBoundingClientRect();
-                    const side = style.direction === 'rtl' ? bounds.left : bounds.right;
-                    if (
-                        (vertical &&
-                            Math.abs(event.clientX - side) <= 18 &&
-                            event.clientY >= bounds.top &&
-                            event.clientY <= bounds.bottom) ||
-                        (horizontal &&
-                            Math.abs(event.clientY - bounds.bottom) <= 18 &&
-                            event.clientX >= bounds.left &&
-                            event.clientX <= bounds.right)
-                    )
-                        return element;
-                }
+        for (
+            let node = event.target instanceof Element ? event.target : null;
+            node;
+            node = node.parentElement
+        ) {
+            if (!(node instanceof HTMLElement)) continue;
+            const element = node;
+            let style = styles.get(element);
+            if (!style) {
+                style = getComputedStyle(element);
+                styles.set(element, style);
             }
-            element = element.parentElement;
+            const isRoot = element === root;
+            const vertical = isRoot
+                ? style.overflowY !== 'hidden'
+                : /auto|scroll/.test(style.overflowY);
+            const horizontal = /auto|scroll/.test(style.overflowX);
+            if (vertical || horizontal) {
+                const bounds = isRoot
+                    ? { left: 0, right: innerWidth, top: 0, bottom: innerHeight }
+                    : element.getBoundingClientRect();
+                const side = style.direction === 'rtl' ? bounds.left : bounds.right;
+                if (
+                    (vertical &&
+                        Math.abs(event.clientX - side) <= 18 &&
+                        event.clientY >= bounds.top &&
+                        event.clientY <= bounds.bottom &&
+                        element.scrollHeight > element.clientHeight + 1) ||
+                    (horizontal &&
+                        Math.abs(event.clientY - bounds.bottom) <= 18 &&
+                        event.clientX >= bounds.left &&
+                        event.clientX <= bounds.right &&
+                        element.scrollWidth > element.clientWidth + 1)
+                )
+                    return element;
+            }
         }
         return null;
     };
@@ -68,7 +77,7 @@ export function registerAutoScrollbars() {
         const previous = edge;
         edge = nearEdge(event);
         if (previous && previous !== edge) reveal(previous);
-        if (edge) reveal(edge);
+        if (edge && edge !== previous) reveal(edge);
     };
     const options = { signal: events.signal, passive: true };
     const removePageScrollbar = registerPageScrollbar(root, reveal, events.signal);

@@ -1,3 +1,4 @@
+.vscode
 /target/
 /node_modules/
 /dist/
@@ -26,3 +27,7 @@ __pycache__/
 
 # Per-invocation bundler metadata is removed when the CLI exits
 /src-tauri/.package-metadata-*/
+
+# Local signing identity selector only; never commit certificate/key material.
+/.dev-signing-identity
+/.cache/signed-dev-data/

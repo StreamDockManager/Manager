@@ -1,0 +1,22 @@
+{
+  "version": 1,
+  "basePath": "..",
+  "components": {
+    "sd-profile-versions": {
+      "source": "components/sd-profile-versions.html",
+      "dependencies": [],
+      "options": {
+        "shadow": false,
+        "templateRevision": "sha256-Gd4RsUUkF0-Pn_E4BY4hgIDPg-eWerylaiHG83pb65g"
+      },
+      "metadata": {
+        "description": "Reviewed single-profile history comparison and atomic restoration."
+      }
+    }
+  },
+  "groups": {
+    "profile-versions": [
+      "sd-profile-versions"
+    ]
+  }
+}

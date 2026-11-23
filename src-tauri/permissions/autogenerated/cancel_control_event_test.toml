@@ -1,0 +1,11 @@
+# Automatically generated - DO NOT EDIT!
+
+[[permission]]
+identifier = "allow-cancel-control-event-test"
+description = "Enables the cancel_control_event_test command without any pre-configured scope."
+commands.allow = ["cancel_control_event_test"]
+
+[[permission]]
+identifier = "deny-cancel-control-event-test"
+description = "Denies the cancel_control_event_test command without any pre-configured scope."
+commands.deny = ["cancel_control_event_test"]

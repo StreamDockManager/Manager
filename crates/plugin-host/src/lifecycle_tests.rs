@@ -73,88 +73,77 @@ fn sleep_is_default_persistent_and_unions_visible_and_configuration_demand() {
 }
 
 #[test]
-// Verify sleep preferences migrate known plugins and preserve explicit bools
-fn sleep_preferences_migrate_known_plugins_and_preserve_explicit_bools() {
-    use stream_dock_manager_storage::{write_json, Domain, Storage};
+fn installation_rows_keep_explicit_sleep_overrides_and_default_new_plugins_to_sleep() {
+    use stream_dock_manager_storage::{
+        plugin_installations::{self, State},
+        Storage,
+    };
     let root = tempfile::tempdir().unwrap();
     let storage = Storage::open(root.path().join("state")).unwrap();
+    let token = uuid::Uuid::new_v4().to_string();
     storage
-        .transaction(|tx| {
-            write_json(
-                tx,
-                Domain::PluginMetadata,
-                "enabled",
-                &json!(["fixture.awake", "fixture.sleep"]),
-                4096,
-            )?;
-            write_json(
-                tx,
-                Domain::PluginMetadata,
-                "retained",
-                &json!({"fixture.disabled":"Disabled"}),
-                4096,
-            )?;
-            write_json(
-                tx,
-                Domain::PluginMetadata,
-                "sleep_when_hidden",
-                &json!(["fixture.sleep"]),
-                4096,
-            )
+        .transaction({
+            let token = token.clone();
+            move |tx| {
+                plugin_installations::put(
+                    tx,
+                    "fixture.awake",
+                    &State {
+                        enabled: true,
+                        sleep_when_hidden: Some(false),
+                        installation_uuid: Some(token),
+                        provenance: Some(json!({"source":"synthetic"})),
+                        ..Default::default()
+                    },
+                )?;
+                plugin_installations::put(
+                    tx,
+                    "fixture.sleep",
+                    &State {
+                        sleep_when_hidden: Some(true),
+                        retained_name: Some("Fixture Sleep".into()),
+                        ..Default::default()
+                    },
+                )
+            }
         })
         .unwrap();
     let loaded = Hub::load(&storage).unwrap();
+    assert!(loaded.enabled.contains("fixture.awake"));
+    assert_eq!(loaded.installations.get("fixture.awake"), Some(&token));
+    assert_eq!(
+        loaded.provenance["fixture.awake"],
+        json!({"source":"synthetic"})
+    );
+    assert_eq!(loaded.retained["fixture.sleep"], "Fixture Sleep");
     assert!(!loaded.sleeps_when_hidden("fixture.awake"));
-    assert!(!loaded.sleeps_when_hidden("fixture.disabled"));
     assert!(loaded.sleeps_when_hidden("fixture.sleep"));
     assert!(loaded.sleeps_when_hidden("fixture.new"));
     loaded.persist().unwrap();
-    let reloaded = Hub::load(&storage).unwrap();
-    assert_eq!(reloaded.sleep_when_hidden, loaded.sleep_when_hidden);
-    assert!(!reloaded.sleeps_when_hidden("fixture.awake"));
-    assert!(reloaded.sleeps_when_hidden("fixture.new"));
-    storage
-        .transaction(|tx| {
-            write_json(
-                tx,
-                Domain::PluginMetadata,
-                "sleep_when_hidden",
-                &json!({"fixture.new":false, "fixture.awake":true}),
-                4096,
-            )
-        })
-        .unwrap();
-    let explicit = Hub::load(&storage).unwrap();
-    assert!(!explicit.sleeps_when_hidden("fixture.new"));
-    assert!(explicit.sleeps_when_hidden("fixture.awake"));
-    assert!(explicit.sleeps_when_hidden("fixture.disabled"));
+    assert_eq!(
+        Hub::load(&storage).unwrap().sleep_when_hidden,
+        loaded.sleep_when_hidden
+    );
 }
 
 #[test]
-// Verify malformed sleep preferences fail instead of resetting choices
-fn malformed_sleep_preferences_fail_instead_of_resetting_choices() {
-    use stream_dock_manager_storage::{write_json, Domain, Storage};
-    for value in [
-        json!({"fixture.plugin":"false"}),
-        json!({"../invalid":false}),
-        json!(["../invalid"]),
-        json!(null),
-    ] {
-        let root = tempfile::tempdir().unwrap();
-        let storage = Storage::open(root.path().join("state")).unwrap();
-        storage
-            .transaction(move |tx| {
-                write_json(
-                    tx,
-                    Domain::PluginMetadata,
-                    "sleep_when_hidden",
-                    &value,
-                    4096,
-                )
-            })
-            .unwrap();
-        assert!(Hub::load(&storage).is_err());
-    }
+fn malformed_saved_installation_state_is_not_silently_reset() {
+    use stream_dock_manager_storage::{
+        plugin_installations::{self, State},
+        Storage,
+    };
+    let root = tempfile::tempdir().unwrap();
+    let storage = Storage::open(root.path().join("state")).unwrap();
+    storage.transaction(|tx| {
+        assert!(plugin_installations::put(tx, "../invalid", &State { enabled: true, ..Default::default() }).is_err());
+        assert!(plugin_installations::put(tx, "fixture.plugin", &State {
+            installation_uuid: Some("invalid".into()), ..Default::default()
+        }).is_err());
+        tx.execute("INSERT INTO plugin_installation_state (plugin_id,enabled,installation_uuid) VALUES('fixture.plugin',1,'invalid')", [])
+            .map_err(|error| error.to_string())?;
+        Ok(())
+    }).unwrap();
+    assert!(Hub::load(&storage).is_err());
 }
 
 // Construct the package representation
@@ -198,7 +187,10 @@ pub(super) fn current_descriptor(path: &Path, manifest: &mut Value) {
             (action["UUID"].as_str().unwrap().to_owned(), capability)
         })
         .collect();
-    let capabilities = json!({"version":1,"id":manifest["UUID"],"plugin_version":manifest["Version"],"theme_protocol":1,"settings_protocol":1,"input_protocol":0,"icon":asset,"actions":actions});
+    let mut capabilities = json!({"version":1,"id":manifest["UUID"],"plugin_version":manifest["Version"],"theme_protocol":1,"settings_protocol":1,"input_protocol":0,"icon":asset,"actions":actions});
+    if let Some(scopes) = manifest["StreamDockManager"].get("Permissions") {
+        capabilities["permissions"] = scopes.clone();
+    }
     manifest["StreamDockManager"]["Capabilities"] = capabilities.clone();
     let encoded = base64::engine::general_purpose::STANDARD
         .encode(serde_json::to_vec(&capabilities).unwrap());
@@ -224,6 +216,8 @@ pub(super) fn host(root: &Path) -> PluginHost {
     let mut host = PluginHost {
         recovery: crate::recovery::Recovery::open(storage.clone()).unwrap(),
         transport_threads: vec![],
+        listener_wake: None,
+        exit_registry: None,
         logs,
         runtimes: stream_dock_manager_plugin_runtimes::RuntimeService::open_shared(
             // TempDir roots are siblings: their parent is shared by parallel
@@ -236,6 +230,8 @@ pub(super) fn host(root: &Path) -> PluginHost {
         visible_plugins: Default::default(),
         starting: Default::default(),
         next_start: std::time::Instant::now(),
+        vault_locked: false,
+        vault_setup_waiting: Default::default(),
         hub: Arc::new(Mutex::new(Hub::load(&storage).unwrap())),
         root,
         plugins: HashMap::new(),
@@ -1377,17 +1373,17 @@ fn resource_updates_are_scoped_to_runs_and_history_and_health_are_bounded() {
     }
     assert_eq!(host.list()[0].health.totals.issues, 151);
     host.hub.lock().unwrap().flush_health().unwrap();
-    let persisted = serde_json::to_string(
-        &host
-            .storage()
-            .list_json::<PluginHealth>(
-                stream_dock_manager_storage::Domain::PluginHealth,
-                4096,
-                16 * 1024 * 1024,
-            )
-            .unwrap(),
-    )
-    .unwrap();
+    let persisted = host
+        .storage()
+        .run(|conn| {
+            let mut saved = stream_dock_manager_storage::plugin_health::read(conn)?;
+            let health = monitor::from_stored_health(saved.remove("fixture.metrics").unwrap());
+            assert_eq!(health.events.len(), 100);
+            assert_eq!(health.totals.issues, 151);
+            assert_eq!(health.last_run_peak_resident_bytes, Some(10));
+            serde_json::to_string(&health).map_err(|err| err.to_string())
+        })
+        .unwrap();
     assert!(!persisted.contains(&token));
     assert!(persisted.contains(&run));
 }
@@ -1826,6 +1822,7 @@ fn named_session_revocation_preserves_draft_grants_and_other_plugins() {
             token.into(),
             FileGrant {
                 root: PathBuf::new(),
+                runtime_entry: None,
                 bootstrap: String::new(),
                 context: context.map(str::to_owned),
                 setup_runtime: false,
@@ -1986,4 +1983,46 @@ fn stable_registration_does_not_replenish_automatic_restart_budget() {
     host.poll();
     assert_eq!(host.plugins["fixture.budget"].restarts, 3);
     host.shutdown();
+}
+
+#[cfg(any(target_os = "macos", target_os = "linux"))]
+#[test]
+fn observed_running_plugin_parks_but_preserves_housekeeping_and_fallback_deadlines() {
+    let root = tempfile::tempdir().unwrap();
+    package(&root.path().join("plugin"), "fixture.exit-watch");
+    let mut host = host(root.path());
+    let (registry, observer) = process_exit::Registry::new(Arc::new(|| {})).unwrap();
+    let mut command = Command::new("/bin/sleep");
+    command.arg("30");
+    process_tree::configure(&mut command);
+    let child = command.spawn().unwrap();
+    let tree = process_tree::ProcessTree::attach(&child).unwrap();
+    let plugin = host.plugins.get_mut("fixture.exit-watch").unwrap();
+    plugin.info.runtime.state = RuntimeState::Running;
+    plugin.exit_watch = registry.register(&child);
+    assert!(plugin.exit_watch.is_some());
+    plugin.child = Some(child);
+    plugin.tree = Some(tree);
+    host.hub.lock().unwrap().health_dirty.clear();
+    assert!(host.next_deadline().is_none());
+    let badge = std::time::Instant::now() + Duration::from_secs(5);
+    host.hub
+        .lock()
+        .unwrap()
+        .visual_state
+        .badges
+        .insert("fixture".into(), badge);
+    assert_eq!(host.next_deadline(), Some(badge));
+    host.hub.lock().unwrap().health_mut("fixture.exit-watch");
+    assert_eq!(
+        host.next_deadline(),
+        Some(host.last_health_flush + Duration::from_secs(2))
+    );
+    registry.shutdown();
+    observer.join().unwrap();
+    assert!(host.next_deadline().unwrap() < std::time::Instant::now() + Duration::from_millis(150));
+    let plugin = host.plugins.get_mut("fixture.exit-watch").unwrap();
+    plugin.exit_watch = None;
+    plugin.tree.take().unwrap().terminate();
+    plugin.child.take().unwrap().wait().unwrap();
 }

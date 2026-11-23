@@ -155,7 +155,8 @@ pub(crate) fn validate_snapshot(connection: &Connection) -> Result<(), String> {
     LocalPreference::ConfigurationRecoveryBypass
         .snapshot_record::<bool>()
         .read_from(connection)?;
-    if let Some(data) = load(connection)? {
+    let data = load(connection)?;
+    if let Some(data) = &data {
         let retained: HashSet<&str> = data
             .history
             .undo
@@ -178,7 +179,7 @@ pub(crate) fn validate_snapshot(connection: &Connection) -> Result<(), String> {
         }
     }
     crate::vendor_profiles::validate_snapshot(connection)?;
-    crate::workspace::snapshot_media(connection)?;
+    crate::workspace::snapshot_media_for_workspace(connection, data.as_ref())?;
     crate::builtins::validate_storage_snapshot(connection)?;
     crate::updates::validate_storage_snapshot(connection)?;
     crate::resource_alerts::validate_storage_snapshot(connection)?;
@@ -190,6 +191,8 @@ pub(crate) fn validate_snapshot(connection: &Connection) -> Result<(), String> {
     crate::application_data::ACCESSIBILITY_RECORD.read_from(connection)?;
     crate::application_data::OFFLINE_ICONS_RECORD.read_from(connection)?;
     crate::application_data::DIAGNOSTICS_RECORD.read_from(connection)?;
+    crate::application_data::FIRMWARE_TEST_CATALOG_RECORD.read_from(connection)?;
+    crate::application_data::FAVORITE_DEVICE_RECORD.read_from(connection)?;
     if let Some(value) = LocalPreference::Sessions
         .snapshot_record::<serde_json::Value>()
         .read_from(connection)?
@@ -231,11 +234,56 @@ pub(crate) fn validate_snapshot(connection: &Connection) -> Result<(), String> {
 type EncodedRecords = Vec<(Domain, String, EncodedJson)>;
 type EncodedWorkspace = (PreparedRecords, EncodedRecords);
 
+// Detect changes made by another writer even if the public workspace revision is unchanged
+#[derive(PartialEq, Eq)]
+pub(crate) struct WorkspaceStamp(Vec<(usize, String, i64)>);
+impl WorkspaceStamp {
+    pub(crate) fn read(connection: &Connection) -> Result<Self, String> {
+        let mut rows = Vec::new();
+        for (index, domain) in [
+            Domain::Workspace,
+            Domain::Profiles,
+            Domain::SavedMacros,
+            Domain::AppearancePresets,
+            Domain::ProfileRules,
+        ]
+        .into_iter()
+        .enumerate()
+        {
+            let mut query = connection
+                .prepare(&format!(
+                    "SELECT key, revision FROM {} ORDER BY key",
+                    domain.table()
+                ))
+                .map_err(|error| error.to_string())?;
+            let records = query
+                .query_map([], |row| Ok((index, row.get(0)?, row.get(1)?)))
+                .map_err(|error| error.to_string())?;
+            for record in records {
+                rows.push(record.map_err(|error| error.to_string())?);
+            }
+        }
+        Ok(Self(rows))
+    }
+
+    fn retained_bytes(&self) -> usize {
+        self.0.iter().map(|(_, key, _)| key.len() + 32).sum()
+    }
+}
+
+struct ScopedWorkspace {
+    stamp: WorkspaceStamp,
+    changed: std::collections::BTreeSet<String>,
+    rules_changed: bool,
+    document_entities_bytes: usize,
+}
+
 pub(crate) struct PreparedWorkspace {
     data: ProfileData,
     expected: u64,
     history: Option<(String, serde_json::Value)>,
     sidecar: Option<(String, serde_json::Value)>,
+    scoped: Option<ScopedWorkspace>,
     encoded: std::sync::OnceLock<Result<EncodedWorkspace, String>>,
 }
 impl PreparedWorkspace {
@@ -251,8 +299,24 @@ impl PreparedWorkspace {
             expected,
             history,
             sidecar,
+            scoped: None,
             encoded: std::sync::OnceLock::new(),
         }
+    }
+    // Record the precise validated entity changes for an ordinary workspace edit
+    pub(crate) fn with_scoped_records(
+        mut self,
+        stamp: Option<WorkspaceStamp>,
+        validation: crate::validation::EditValidation,
+        rules_changed: bool,
+    ) -> Self {
+        self.scoped = stamp.map(|stamp| ScopedWorkspace {
+            stamp,
+            changed: validation.changed,
+            rules_changed,
+            document_entities_bytes: validation.document_entities_bytes,
+        });
+        self
     }
     // Set sidecar
     pub(crate) fn set_sidecar(&mut self, sidecar: (String, serde_json::Value)) {
@@ -263,7 +327,7 @@ impl PreparedWorkspace {
     fn encoded(&self) -> Result<&EncodedWorkspace, String> {
         self.encoded
             .get_or_init(|| {
-                let records = PreparedRecords::new(&self.data)?;
+                let records = PreparedRecords::prepare(&self.data, self.scoped.as_ref())?;
                 let mut extra = Vec::new();
                 for (domain, record) in [
                     (Domain::History, &self.history),
@@ -286,6 +350,20 @@ impl PreparedWorkspace {
     pub(crate) fn retained_bytes(&self) -> Result<usize, String> {
         let (records, extra) = self.encoded()?;
         let mut bytes = records.1;
+        if let Some(scoped) = &self.scoped {
+            bytes += scoped.stamp.retained_bytes()
+                + scoped
+                    .changed
+                    .iter()
+                    .map(|key| key.len() + 32)
+                    .sum::<usize>()
+                + records
+                    .2
+                    .iter()
+                    .flatten()
+                    .map(|(_, key)| key.len() + 32)
+                    .sum::<usize>();
+        }
         // Values and serialized bytes are both retained until commit. Charge both
         // representations, using the prepared byte lengths instead of serializing again
         for (_, key, value) in extra {
@@ -308,10 +386,18 @@ impl PreparedWorkspace {
 
     // Commit the staged profile database change
     pub fn commit(self, connection: &Connection) -> Result<ProfileData, String> {
+        use stream_dock_manager_storage::timing::{start, Phase};
+        let check = start(Phase::WorkspaceCommitCheck);
         let current = load(connection)?.ok_or("Workspace is not initialized")?;
         if current.configuration_revision != self.expected {
             return Err("Configuration changed. Refresh before saving.".into());
         }
+        if let Some(scoped) = &self.scoped {
+            if WorkspaceStamp::read(connection)? != scoped.stamp {
+                return Err("Configuration changed. Refresh before saving.".into());
+            }
+        }
+        drop(check);
         let (records, extra) = self.encoded()?;
         for (domain, id, value) in extra {
             value.write(connection, *domain, id)?;
@@ -353,6 +439,31 @@ mod tests {
     use stream_dock_manager_storage::Storage;
 
     #[test]
+    // Preserve workspace metadata and entity rows through the ordinary full writer
+    fn workspace_header_and_full_save_preserve_data() {
+        let data = ProfileData {
+            minimum_manager: Some("0.1.0".into()),
+            configuration_revision: 42,
+            ..ProfileData::default()
+        };
+        let mut expected_header = data.clone();
+        expected_header.profiles.clear();
+        expected_header.saved_macros.clear();
+        expected_header.styles.clear();
+        expected_header.rules.clear();
+        assert_eq!(
+            serde_json::to_value(workspace_document(&data)).unwrap(),
+            serde_json::to_value(expected_header).unwrap()
+        );
+        let expected = serde_json::to_value(&data).unwrap();
+        let directory = tempfile::tempdir().unwrap();
+        let storage = Storage::open(directory.path().to_owned()).unwrap();
+        storage.transaction(move |tx| save(tx, &data)).unwrap();
+        let actual = storage.run(|connection| load(connection)).unwrap().unwrap();
+        assert_eq!(serde_json::to_value(actual).unwrap(), expected);
+    }
+
+    #[test]
     // Verify that prepared records are reused and sidecar changes invalidate admission
     fn prepared_records_are_reused_and_sidecar_changes_invalidate_admission() {
         let mut prepared = PreparedWorkspace::new(ProfileData::default(), 0, None, None);
@@ -363,6 +474,180 @@ mod tests {
         prepared.set_sidecar(("id".into(), serde_json::json!({"value":"é"})));
         assert!(prepared.retained_bytes().unwrap() > first_cost);
         assert_eq!(prepared.encoded().unwrap().1.len(), 1);
+    }
+
+    // Populate every entity family so sparse edits cannot accidentally prune untouched rows
+    fn scoped_edit_fixture(store: &ProfileStore) -> ProfileData {
+        use crate::{
+            actions::Action,
+            builtins::SavedMacro,
+            workspace::{AppRule, AppearancePreset},
+        };
+        let mut data = store.load().unwrap();
+        let mut extra = data.profiles[0].clone();
+        extra.id = "second".into();
+        extra.name = "Second".into();
+        data.profiles.push(extra);
+        data.saved_macros.push(SavedMacro {
+            id: "macro-test".into(),
+            name: "Mute".into(),
+            action: Action::Macro {
+                actions: vec![Action::Mute],
+            },
+            inputs: vec![],
+        });
+        data.styles.push(AppearancePreset {
+            id: "appearance-test".into(),
+            name: "Appearance".into(),
+            background_source: None,
+            appearance: Default::default(),
+            plugin_appearance: None,
+            composition: None,
+            overlay_enabled: None,
+            color: None,
+        });
+        for id in ["first-rule", "second-rule"] {
+            data.rules.push(AppRule {
+                id: id.into(),
+                device_key: "device".into(),
+                application: id.into(),
+                title: None,
+                schedule: None,
+                profile_id: data.active_profile.clone(),
+                page_id: None,
+            });
+        }
+        store.save(&data).unwrap();
+        data
+    }
+
+    #[test]
+    // Confirm an ordinary profile edit stages one domain row, not the entire workspace
+    fn scoped_edit_only_encodes_changed_entities_and_keeps_exact_admission_size() {
+        let directory = tempfile::tempdir().unwrap();
+        let store = ProfileStore::open(directory.path().into()).unwrap();
+        let data = scoped_edit_fixture(&store);
+        let prepared = store
+            .prepare_import_transaction(data.configuration_revision, "Rename", None, 0, |data| {
+                data.profiles[0].name = "Café\n\"✨\"".into();
+                Ok(())
+            })
+            .unwrap();
+        let (rows, history) = prepared.encoded().unwrap();
+        assert!(prepared.scoped.is_some());
+        assert_eq!(rows.0.len(), 2);
+        assert_eq!(rows.0[0].0, Domain::Profiles);
+        assert_eq!(rows.0[0].1, data.active_profile);
+        assert_eq!(rows.0[1].0, Domain::Workspace);
+        assert_eq!(history.len(), 1);
+        assert_eq!(rows.1, serde_json::to_vec(&prepared.data).unwrap().len());
+        assert_eq!(PreparedRecords::new(&prepared.data).unwrap().0.len(), 6);
+        let expected = serde_json::to_value(&prepared.data).unwrap();
+        let cost = prepared.retained_bytes().unwrap();
+        store
+            .storage
+            .transaction_with_cost(cost, move |tx| prepared.commit(tx))
+            .unwrap();
+        assert_eq!(
+            serde_json::to_value(store.load().unwrap()).unwrap(),
+            expected
+        );
+    }
+
+    #[test]
+    // Prevent sparse commits from accepting same-revision writes to an untouched domain row
+    fn scoped_edit_rejects_intervening_same_revision_entity_write() {
+        let directory = tempfile::tempdir().unwrap();
+        let store = ProfileStore::open(directory.path().into()).unwrap();
+        let mut data = scoped_edit_fixture(&store);
+        let prepared = store
+            .prepare_import_transaction(data.configuration_revision, "Rename", None, 0, |data| {
+                data.profiles[0].name = "Pending rename".into();
+                Ok(())
+            })
+            .unwrap();
+        assert!(prepared.scoped.is_some());
+        data.profiles[1].name = "Intervening rename".into();
+        store.save(&data).unwrap();
+        let expected = serde_json::to_value(store.load().unwrap()).unwrap();
+        let cost = prepared.retained_bytes().unwrap();
+        let result = store
+            .storage
+            .transaction_with_cost(cost, move |tx| prepared.commit(tx));
+        assert!(result.unwrap_err().contains("Configuration changed"));
+        assert_eq!(
+            serde_json::to_value(store.load().unwrap()).unwrap(),
+            expected
+        );
+    }
+
+    #[test]
+    // Keep order-only rule changes and indexed entity removals in the same transaction
+    fn scoped_edit_preserves_rule_order_and_prunes_removed_entities() {
+        let directory = tempfile::tempdir().unwrap();
+        let store = ProfileStore::open(directory.path().into()).unwrap();
+        let data = scoped_edit_fixture(&store);
+        let prepared = store
+            .prepare_import_transaction(data.configuration_revision, "Clean up", None, 0, |data| {
+                data.rules.reverse();
+                data.saved_macros.clear();
+                data.styles.clear();
+                Ok(())
+            })
+            .unwrap();
+        assert_eq!(
+            prepared
+                .encoded()
+                .unwrap()
+                .0
+                 .0
+                .iter()
+                .map(|row| row.0)
+                .collect::<Vec<_>>(),
+            vec![Domain::ProfileRules, Domain::Workspace]
+        );
+        let expected = serde_json::to_value(&prepared.data).unwrap();
+        let cost = prepared.retained_bytes().unwrap();
+        store
+            .storage
+            .transaction_with_cost(cost, move |tx| prepared.commit(tx))
+            .unwrap();
+        assert_eq!(
+            serde_json::to_value(store.load().unwrap()).unwrap(),
+            expected
+        );
+    }
+
+    #[test]
+    // Repair the stored keyboard Navigation page even when normalization hid the difference
+    fn scoped_edit_falls_back_when_loaded_workspace_needs_normalization() {
+        let directory = tempfile::tempdir().unwrap();
+        let store = ProfileStore::open(directory.path().into()).unwrap();
+        let mut old = scoped_edit_fixture(&store);
+        old.profiles[1].model_id = "k1-pro".into();
+        old.profiles[1].pages[0].bindings.clear();
+        store.storage.transaction(move |tx| save(tx, &old)).unwrap();
+        let baseline = store.load().unwrap();
+        assert_eq!(baseline.profiles[1].pages[0].name, "Navigation");
+        let prepared = store
+            .prepare_import_transaction(
+                baseline.configuration_revision,
+                "Rename",
+                None,
+                0,
+                |data| {
+                    data.profiles[0].name = "Changed".into();
+                    Ok(())
+                },
+            )
+            .unwrap();
+        assert!(prepared.scoped.is_none());
+        store
+            .storage
+            .transaction(move |tx| prepared.commit(tx))
+            .unwrap();
+        let raw = store.storage.run(|tx| load(tx)).unwrap().unwrap();
+        assert_eq!(raw.profiles[1].pages[0].name, "Navigation");
     }
 
     #[test]
@@ -502,6 +787,11 @@ mod tests {
             (Domain::ManagerPreferences, "accessibility"),
             (Domain::ManagerPreferences, "offline_icons"),
             (Domain::ManagerPreferences, "diagnostics_sampling"),
+            (Domain::ManagerPreferences, "favorite_device"),
+            (
+                Domain::ManagerPreferences,
+                crate::application_data::FIRMWARE_TEST_CATALOG_RECORD.key,
+            ),
             (Domain::LocalPreferences, "updates"),
             (Domain::LocalPreferences, "builtin-values"),
             (Domain::LocalPreferences, "sessions"),
@@ -596,6 +886,62 @@ mod tests {
                 "{key}"
             );
             storage.delete(Domain::LocalPreferences, key).unwrap();
+        }
+    }
+
+    #[test]
+    // Verify that persisted binding drafts keep live labels through snapshot validation
+    fn runtime_snapshot_accepts_and_preserves_binding_draft_live_labels() {
+        let directory = tempfile::tempdir().unwrap();
+        let storage = Storage::open(directory.path().to_owned()).unwrap();
+        storage
+            .transaction(|tx| save(tx, &ProfileData::default()))
+            .unwrap();
+        let draft = serde_json::json!({
+            "key": "button", "base": null,
+            "value": {
+                "title": "Count",
+                "actionDraft": {"action": {"kind": "none"}},
+                "dialActions": null,
+                "dialActionIndex": 2,
+                "dialLinkedTurns": true
+            }
+        });
+        let mut populated = draft.clone();
+        populated["value"]["liveLabel"] = serde_json::json!([
+            {"kind": "literal", "text": "Count: "},
+            {"kind": "display", "key": "count", "fallback": "0"}
+        ]);
+        let mut empty = draft.clone();
+        empty["value"]["liveLabel"] = serde_json::json!([]);
+        let supported = serde_json::json!({"old": draft, "empty": empty, "edited": populated});
+        let write = |value: &serde_json::Value| {
+            storage
+                .write_json(Domain::LocalPreferences, "drafts", value, 4096)
+                .unwrap();
+        };
+        write(&supported);
+        storage
+            .run(|connection| validate_snapshot(connection))
+            .unwrap();
+        assert_eq!(
+            storage
+                .read_json::<serde_json::Value>(Domain::LocalPreferences, "drafts", 4096)
+                .unwrap(),
+            Some(supported.clone())
+        );
+
+        for label in [
+            serde_json::json!("not a segment list"),
+            serde_json::json!([{"kind": "display", "key": "", "fallback": "0"}]),
+        ] {
+            let mut invalid = supported.clone();
+            invalid["edited"]["value"]["liveLabel"] = label;
+            write(&invalid);
+            assert!(storage
+                .run(|connection| validate_snapshot(connection))
+                .unwrap_err()
+                .contains("live label"));
         }
     }
 
@@ -757,6 +1103,7 @@ mod tests {
     fn prepared_admission_includes_workspace_history_and_sidecar_and_is_bounded() {
         let prepared = PreparedWorkspace {
             encoded: std::sync::OnceLock::new(),
+            scoped: None,
             data: ProfileData::default(),
             expected: 1,
             history: Some(("history".into(), serde_json::json!({"value":"é"}))),
@@ -1093,43 +1440,92 @@ fn reconcile_overrides(
     });
 }
 
-pub(crate) struct PreparedRecords(EncodedRecords, usize);
+/// The workspace row owns metadata/indexes, not entity payloads. Construct its
+/// document directly instead of deep-cloning every binding just to remove them.
+fn workspace_document(data: &ProfileData) -> ProfileData {
+    ProfileData {
+        minimum_manager: data.minimum_manager.clone(),
+        schema_version: data.schema_version,
+        active_profile: data.active_profile.clone(),
+        configuration_revision: data.configuration_revision,
+        history: data.history.clone(),
+        profiles: Vec::new(),
+        saved_macros: Vec::new(),
+        styles: Vec::new(),
+        rules: Vec::new(),
+    }
+}
+
+pub(crate) struct PreparedRecords(EncodedRecords, usize, Option<Vec<(Domain, String)>>);
 impl PreparedRecords {
     // Initialize profile database state from the supplied inputs
     pub(crate) fn new(data: &ProfileData) -> Result<Self, String> {
-        let document_bytes = encoded_size(data, LIMIT)?;
-        let mut document = data.clone();
-        let profiles = std::mem::take(&mut document.profiles);
-        let macros = std::mem::take(&mut document.saved_macros);
-        let styles = std::mem::take(&mut document.styles);
-        let rules = std::mem::take(&mut document.rules);
+        Self::prepare(data, None)
+    }
+
+    // Encode only the records this validated edit can change, while retaining the complete index
+    fn prepare(data: &ProfileData, scoped: Option<&ScopedWorkspace>) -> Result<Self, String> {
+        let document = workspace_document(data);
+        let document_bytes = if let Some(scoped) = scoped {
+            encoded_size(&document, LIMIT)?
+                .checked_add(scoped.document_entities_bytes)
+                .filter(|bytes| *bytes <= LIMIT)
+                .ok_or("Workspace document exceeds size limit or cannot be encoded")?
+        } else {
+            encoded_size(data, LIMIT)?
+        };
+        let profiles = &data.profiles;
+        let macros = &data.saved_macros;
+        let styles = &data.styles;
+        let rules = &data.rules;
         let mut records = Vec::new();
-        for profile in &profiles {
+        let mut retained = scoped.map(|_| Vec::new());
+        let changed = |prefix: &str, id: &str| {
+            scoped.is_none_or(|scope| scope.changed.contains(&format!("{prefix}:{id}")))
+        };
+        for profile in profiles {
+            if let Some(retained) = &mut retained {
+                retained.push((Domain::Profiles, profile.id.clone()));
+            }
+            if changed("profile", &profile.id) {
+                records.push((
+                    Domain::Profiles,
+                    profile.id.clone(),
+                    EncodedJson::new(profile, LIMIT)?,
+                ));
+            }
+        }
+        for saved in macros {
+            if let Some(retained) = &mut retained {
+                retained.push((Domain::SavedMacros, saved.id.clone()));
+            }
+            if changed("macro", &saved.id) {
+                records.push((
+                    Domain::SavedMacros,
+                    saved.id.clone(),
+                    EncodedJson::new(saved, LIMIT)?,
+                ));
+            }
+        }
+        for style in styles {
+            if let Some(retained) = &mut retained {
+                retained.push((Domain::AppearancePresets, style.id.clone()));
+            }
+            if changed("style", &style.id) {
+                records.push((
+                    Domain::AppearancePresets,
+                    style.id.clone(),
+                    EncodedJson::new(style, LIMIT)?,
+                ));
+            }
+        }
+        if scoped.is_none_or(|scope| scope.rules_changed) {
             records.push((
-                Domain::Profiles,
-                profile.id.clone(),
-                EncodedJson::new(profile, LIMIT)?,
+                Domain::ProfileRules,
+                "current".into(),
+                EncodedJson::new(&rules, LIMIT)?,
             ));
         }
-        for saved in &macros {
-            records.push((
-                Domain::SavedMacros,
-                saved.id.clone(),
-                EncodedJson::new(saved, LIMIT)?,
-            ));
-        }
-        for style in &styles {
-            records.push((
-                Domain::AppearancePresets,
-                style.id.clone(),
-                EncodedJson::new(style, LIMIT)?,
-            ));
-        }
-        records.push((
-            Domain::ProfileRules,
-            "current".into(),
-            EncodedJson::new(&rules, LIMIT)?,
-        ));
         records.push((
             Domain::Workspace,
             "current".into(),
@@ -1143,7 +1539,7 @@ impl PreparedRecords {
                 LIMIT,
             )?,
         ));
-        Ok(Self(records, document_bytes))
+        Ok(Self(records, document_bytes, retained))
     }
     // Sum retained transaction key and value bytes while enforcing the storage admission limit
     pub(crate) fn retained_bytes(&self) -> Result<usize, String> {
@@ -1173,16 +1569,20 @@ impl PreparedRecords {
             Domain::SavedMacros,
             Domain::AppearancePresets,
         ] {
-            prune(
-                connection,
-                domain,
-                &self
+            let retained = match &self.2 {
+                Some(retained) => retained
+                    .iter()
+                    .filter(|(kind, _)| *kind == domain)
+                    .map(|(_, key)| key.as_str())
+                    .collect(),
+                None => self
                     .0
                     .iter()
-                    .filter(|r| r.0 == domain)
-                    .map(|r| r.1.as_str())
+                    .filter(|(kind, _, _)| *kind == domain)
+                    .map(|(_, key, _)| key.as_str())
                     .collect(),
-            )?;
+            };
+            prune(connection, domain, &retained)?;
         }
         for (domain, key, value) in &self.0 {
             value.write_changed(connection, *domain, key)?;
@@ -1283,7 +1683,10 @@ mod current_contract_tests {
                     .unwrap();
             }
             drop(storage);
-            let path = root.path().join(stream_dock_manager_storage::DATABASE_NAME);
+            let path = stream_dock_manager_storage::database_path(
+                root.path(),
+                stream_dock_manager_storage::DATABASE_NAME,
+            );
             let before = std::fs::read(&path).unwrap();
             let error = Storage::open_validated(root.path().into(), validate_snapshot).unwrap_err();
             assert!(!error.contains("do-not-print"));
@@ -1432,7 +1835,10 @@ mod current_dial_and_draft_tests {
             .unwrap();
         assert!(store.load().is_err());
         drop(store);
-        let path = root.path().join(stream_dock_manager_storage::DATABASE_NAME);
+        let path = stream_dock_manager_storage::database_path(
+            root.path(),
+            stream_dock_manager_storage::DATABASE_NAME,
+        );
         let before = std::fs::read(&path).unwrap();
         assert!(ProfileStore::open(root.path().into()).is_err());
         assert_eq!(std::fs::read(&path).unwrap(), before);
@@ -1816,7 +2222,10 @@ mod keyboard_macro_storage_tests {
                 Some(saved)
             );
             drop(store);
-            let path = root.path().join(stream_dock_manager_storage::DATABASE_NAME);
+            let path = stream_dock_manager_storage::database_path(
+                root.path(),
+                stream_dock_manager_storage::DATABASE_NAME,
+            );
             let before = std::fs::read(&path).unwrap();
             assert!(ProfileStore::open(root.path().join("profiles")).is_err());
             assert_eq!(std::fs::read(path).unwrap(), before);

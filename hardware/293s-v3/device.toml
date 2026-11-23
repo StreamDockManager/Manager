@@ -5,6 +5,9 @@ name = "293s V3"
 protocol = "vendor-crt-1"
 status = "experimental"
 
+firmware_instructions = "https://www.vsdinside.com/blogs/tutorial/vsd-stream-dock-connection-issues"
+firmware_instructions_shared = true
+
 [capabilities]
 firmware_query = true
 boot_logo = { size = [854, 480] }

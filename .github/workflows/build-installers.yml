@@ -1,16 +1,19 @@
-name: native installers
+name: native release packages
 on:
     workflow_call:
         inputs:
             tag: { required: false, type: string, default: '' }
             commit: { required: true, type: string }
             mode: { required: false, type: string, default: 'build-only' }
+            product: { required: false, type: string, default: 'desktop' }
             targets: { required: false, type: string, default: 'all' }
+            runner_service: { required: false, type: string, default: 'github' }
+            macos_intel: { required: false, type: boolean, default: false }
 permissions:
     contents: read
 jobs:
     installers:
-        if: (github.event_name == 'workflow_dispatch' || (github.event_name == 'push' && !github.event.created)) && inputs.commit == github.sha && ((github.ref == 'refs/heads/package-build' && inputs.mode == 'build-only') || (github.ref == 'refs/heads/main' && github.event_name == 'workflow_dispatch' && github.workflow_ref == format('{0}/.github/workflows/prepare-release.yml@refs/heads/main', github.repository) && ((github.repository == 'StreamDockManager/Manager' && inputs.mode == 'publish' && inputs.tag != '') || (github.repository != 'StreamDockManager/Manager' && inputs.mode == 'build-only' && inputs.tag == '')) && inputs.targets == 'all'))
+        if: (github.event_name == 'workflow_dispatch' || (github.event_name == 'push' && !github.event.created)) && inputs.commit == github.sha && ((github.ref == 'refs/heads/package-build' && inputs.mode == 'build-only') || (github.ref == 'refs/heads/main' && github.event_name == 'workflow_dispatch' && github.workflow_ref == format('{0}/.github/workflows/prepare-release.yml@refs/heads/main', github.repository) && ((github.repository == 'StreamDockManager/Manager' && inputs.mode == 'publish' && inputs.tag != '') || (github.repository != 'StreamDockManager/Manager' && inputs.mode == 'build-only' && inputs.tag == '')) && inputs.targets == 'all')) && (inputs.runner_service == 'github' || (inputs.runner_service == 'blacksmith' && !inputs.macos_intel && inputs.targets != 'macos-amd64')) && (inputs.product == 'desktop' || inputs.product == 'cli' || inputs.product == 'all')
         strategy:
             fail-fast: false
             matrix:
@@ -21,17 +24,19 @@ jobs:
                       inputs.targets == 'windows' && '[{"runner":"windows-2022","runner_variable":"WINDOWS_RUNNER_LABELS","os":"windows","arch":"amd64","bundles":"nsis"}]' ||
                       inputs.targets == 'macos-arm64' && '[{"runner":"macos-15","runner_variable":"MACOS_ARM64_RUNNER_LABELS","os":"macos","arch":"arm64","bundles":"app,dmg"}]' ||
                       inputs.targets == 'macos-amd64' && '[{"runner":"macos-15-intel","runner_variable":"MACOS_X64_RUNNER_LABELS","os":"macos","arch":"amd64","bundles":"app,dmg"}]' ||
-                      github.ref == 'refs/heads/package-build' && inputs.mode == 'build-only' && vars.DEFER_MACOS_X64 == 'true' && '[{"runner":"ubuntu-24.04","runner_variable":"LINUX_RUNNER_LABELS","os":"linux","arch":"amd64","bundles":"deb,rpm"},{"runner":"windows-2022","runner_variable":"WINDOWS_RUNNER_LABELS","os":"windows","arch":"amd64","bundles":"nsis"},{"runner":"macos-15","runner_variable":"MACOS_ARM64_RUNNER_LABELS","os":"macos","arch":"arm64","bundles":"app,dmg"}]' ||
+                      (!inputs.macos_intel || (github.ref == 'refs/heads/package-build' && inputs.mode == 'build-only' && vars.DEFER_MACOS_X64 == 'true')) && '[{"runner":"ubuntu-24.04","runner_variable":"LINUX_RUNNER_LABELS","os":"linux","arch":"amd64","bundles":"deb,rpm"},{"runner":"windows-2022","runner_variable":"WINDOWS_RUNNER_LABELS","os":"windows","arch":"amd64","bundles":"nsis"},{"runner":"macos-15","runner_variable":"MACOS_ARM64_RUNNER_LABELS","os":"macos","arch":"arm64","bundles":"app,dmg"}]' ||
                       '[{"runner":"ubuntu-24.04","runner_variable":"LINUX_RUNNER_LABELS","os":"linux","arch":"amd64","bundles":"deb,rpm"},{"runner":"windows-2022","runner_variable":"WINDOWS_RUNNER_LABELS","os":"windows","arch":"amd64","bundles":"nsis"},{"runner":"macos-15","runner_variable":"MACOS_ARM64_RUNNER_LABELS","os":"macos","arch":"arm64","bundles":"app,dmg"},{"runner":"macos-15-intel","runner_variable":"MACOS_X64_RUNNER_LABELS","os":"macos","arch":"amd64","bundles":"app,dmg"}]'
                     ) }}
-        runs-on: ${{ vars[matrix.runner_variable] != '' && (github.event_name == 'push' || github.event_name == 'workflow_dispatch' || (github.event_name == 'pull_request' && github.event.pull_request.head.repo.full_name == github.repository) || (github.event_name == 'workflow_run' && github.event.workflow_run.event == 'push' && github.event.workflow_run.head_repository.full_name == github.repository)) && fromJSON(vars[matrix.runner_variable]) || matrix.runner }}
+        runs-on: ${{ inputs.runner_service == 'github' && (vars[matrix.runner_variable] != '' && (github.event_name == 'push' || github.event_name == 'workflow_dispatch' || (github.event_name == 'pull_request' && github.event.pull_request.head.repo.full_name == github.repository) || (github.event_name == 'workflow_run' && github.event.workflow_run.event == 'push' && github.event.workflow_run.head_repository.full_name == github.repository)) && fromJSON(vars[matrix.runner_variable]) || matrix.runner) || (fromJSON('{"linux-amd64":"blacksmith-4vcpu-ubuntu-2404","windows-amd64":"blacksmith-4vcpu-windows-2025","macos-arm64":"blacksmith-6vcpu-macos-15"}')[format('{0}-{1}', matrix.os, matrix.arch)]) }}
         # Empty scalar disables the job container on Windows/macOS
-        container: ${{ matrix.os == 'linux' && 'ubuntu@sha256:78d4744ead1f5b19b04d0df558ab182a5300903900755e515b2ca4d10eb2044d' || '' }}
+        container: ${{ matrix.os == 'linux' && 'ubuntu@sha256:73b999393d07f2bf65a40373778a44dc9a6d54ad7718d29247d8ff9413c4d6a8' || '' }}
         timeout-minutes: 180
         env:
-            STREAM_DOCK_MANAGER_LINUX_BASELINE_IMAGE: ubuntu@sha256:78d4744ead1f5b19b04d0df558ab182a5300903900755e515b2ca4d10eb2044d
+            STREAM_DOCK_MANAGER_LINUX_BASELINE_IMAGE: ubuntu@sha256:73b999393d07f2bf65a40373778a44dc9a6d54ad7718d29247d8ff9413c4d6a8
             CARGO_TARGET_DIR: ${{ github.workspace }}/target
             CARGO_BUILD_JOBS: '4'
+            BUILD_PRODUCT: ${{ inputs.product }}
+            CLI_BINARY: ${{ matrix.os == 'windows' && 'target/release/stream-dock-manager-cli.exe' || 'target/release/stream-dock-manager-cli' }}
             CARGO_PROFILE_DEV_DEBUG: '0'
             CARGO_PROFILE_TEST_DEBUG: '0'
             CARGO_INCREMENTAL: '0'
@@ -61,8 +66,9 @@ jobs:
                   echo "CARGO_HOME=$GITHUB_WORKSPACE/target/.cargo" >> "$GITHUB_ENV"
                   echo "RUSTUP_HOME=$GITHUB_WORKSPACE/target/.rustup" >> "$GITHUB_ENV"
                   echo "CARGO_TARGET_DIR=$GITHUB_WORKSPACE/target" >> "$GITHUB_ENV"
-                  echo "NPM_CONFIG_PREFIX=$GITHUB_WORKSPACE/target/.npm-prefix" >> "$GITHUB_ENV"
-                  echo "$GITHUB_WORKSPACE/target/.npm-prefix/bin" >> "$GITHUB_PATH"
+                  if [ "$BUILD_PRODUCT" != cli ]; then
+                    echo "NPM_CONFIG_PREFIX=$GITHUB_WORKSPACE/target/.npm-prefix" >> "$GITHUB_ENV"
+                  fi
             - uses: actions/checkout@v7.0.1
               with:
                   ref: ${{ inputs.commit }}
@@ -88,12 +94,6 @@ jobs:
                   if (!(Test-Path -LiteralPath $gitBash)) { throw 'Git for Windows Bash is required; the WSL bash launcher cannot run native Windows setup actions.' }
                   $bashDirectory = Split-Path (Resolve-Path -LiteralPath $gitBash).Path -Parent
                   $bashDirectory | Out-File -FilePath $env:GITHUB_PATH -Encoding utf8 -Append
-            - name: Configure npm cache
-              shell: bash
-              run: |
-                  npm_cache="$RUNNER_TEMP/npm-cache"
-                  if [ "$RUNNER_OS" = Linux ]; then npm_cache="$GITHUB_WORKSPACE/target/.npm-cache"; fi
-                  echo "NPM_CONFIG_CACHE=$npm_cache" >> "$GITHUB_ENV"
             - uses: actions/setup-python@v7.1.0
               if: runner.os != 'Linux' && (runner.os != 'macOS' || runner.environment != 'self-hosted')
               with:
@@ -120,16 +120,7 @@ jobs:
               shell: bash
               run: echo "STREAM_DOCK_MANAGER_PLUGINS_RELEASE_REPOSITORY=$PLUGINS_RELEASE_REPOSITORY" >> "$GITHUB_ENV"
             - uses: dtolnay/rust-toolchain@stable
-            - uses: actions/setup-node@v7.1.0
-              with:
-                  node-version: 26
-                  cache: npm
-            - run: npm install --global npm@12.2.2
-            - name: Activate isolated Ubuntu npm
-              if: runner.os == 'Linux'
-              shell: bash
-              run: echo "$NPM_CONFIG_PREFIX/bin" >> "$GITHUB_PATH"
-            - name: Verify native installer architecture
+            - name: Verify native package architecture
               env:
                   NATIVE_OS: ${{ matrix.os }}
                   NATIVE_ARCH: ${{ matrix.arch }}
@@ -144,8 +135,6 @@ jobs:
                   python --version
                   rustc -Vv
                   cargo -V
-                  node --version
-                  npm --version
                   git --version
                   $vswhere = Join-Path ${env:ProgramFiles(x86)} 'Microsoft Visual Studio\Installer\vswhere.exe'
                   if (!(Test-Path -LiteralPath $vswhere)) { throw 'Install Visual Studio C++ Build Tools and the Windows SDK on this runner.' }
@@ -154,6 +143,9 @@ jobs:
                   Write-Output "MSVC installation: $installation"
                   $sdkLibraries = Join-Path ${env:ProgramFiles(x86)} 'Windows Kits\10\Lib\*\um\x64\kernel32.lib'
                   if (!(Get-ChildItem -Path $sdkLibraries -ErrorAction SilentlyContinue)) { throw 'A Windows SDK with x64 libraries is required.' }
+            - name: Select native Windows Perl for vendored OpenSSL
+              if: runner.os == 'Windows'
+              run: python scripts/windows_openssl_perl.py
             - name: Verify macOS native toolchain
               if: runner.os == 'macOS'
               run: |
@@ -163,43 +155,148 @@ jobs:
                   xcode-select -p
                   xcrun --find clang
                   xcrun --sdk macosx --show-sdk-path
-            - if: runner.os == 'Linux'
-              run: sudo apt-get update && sudo env DEBIAN_FRONTEND=noninteractive apt-get install -y build-essential pkg-config libssl-dev libudev-dev libxdo-dev libdbus-1-dev libwebkit2gtk-4.1-dev libappindicator3-dev librsvg2-dev patchelf ffmpeg
+            - name: Install dependencies for the selected Linux packages
+              if: runner.os == 'Linux'
+              shell: bash
+              run: |
+                  packages=(libssl-dev libudev-dev libxdo-dev libdbus-1-dev)
+                  if [ "$BUILD_PRODUCT" != cli ]; then
+                    packages+=(libwebkit2gtk-4.1-dev libappindicator3-dev librsvg2-dev patchelf ffmpeg)
+                  fi
+                  if [ "$BUILD_PRODUCT" != desktop ]; then
+                    packages+=(dpkg-dev rpm)
+                  fi
+                  sudo env DEBIAN_FRONTEND=noninteractive apt-get install -y "${packages[@]}"
             - id: source
               env:
                   BUILD_ONLY: 'true'
               run: python scripts/release.py plan
-            - run: python -m compileall -q scripts
-            - run: npm ci
-            - run: npm run build:native
-            - name: Prepare verified patched Rust dependencies
+            - name: Prepare verified patched Rust dependencies for CLI-only Cargo
+              if: inputs.product == 'cli'
               run: python scripts/prepare_patched_deps.py
-            - run: cargo check --workspace --all-targets --locked
-            - name: Build desktop packages with the platform integrity policy
+            - name: Compile standalone CLI only
+              id: cli-compile
+              if: inputs.product == 'cli'
+              run: cargo build --release --locked -p stream-dock-manager-cli
+            - name: Configure npm cache
+              id: desktop-cache
+              if: inputs.product != 'cli'
               shell: bash
-              run: node scripts/tauri.mjs build --config src-tauri/tauri.release.conf.json --bundles "${{ matrix.bundles }}"
+              run: |
+                  npm_cache="$RUNNER_TEMP/npm-cache"
+                  if [ "$RUNNER_OS" = Linux ]; then npm_cache="$GITHUB_WORKSPACE/target/.npm-cache"; fi
+                  echo "NPM_CONFIG_CACHE=$npm_cache" >> "$GITHUB_ENV"
+            - uses: actions/setup-node@v7.1.0
+              id: desktop-node
+              if: ${{ !cancelled() && steps.desktop-cache.outcome == 'success' }}
+              with:
+                  node-version: 26
+                  cache: npm
+            - run: npm install --global npm@12.2.3
+              id: desktop-npm
+              if: ${{ !cancelled() && steps.desktop-node.outcome == 'success' }}
+            - name: Activate isolated Ubuntu npm
+              id: desktop-linux-npm
+              if: ${{ !cancelled() && runner.os == 'Linux' && steps.desktop-npm.outcome == 'success' }}
+              shell: bash
+              run: echo "$NPM_CONFIG_PREFIX/bin" >> "$GITHUB_PATH"
+            # Tauri's beforeBuildCommand builds the frontend once
+            - run: npm ci
+              id: desktop-deps
+              if: ${{ !cancelled() && steps.desktop-npm.outcome == 'success' && (runner.os != 'Linux' || steps.desktop-linux-npm.outcome == 'success') }}
+            # Resolve one Rust feature graph on each native target. A second Cargo call
+            # for the other binary changes feature resolution and rebuilds shared crates
+            # even when both calls write to the same target directory.
+            - name: Compile selected Rust binaries once
+              id: desktop-compile
+              if: steps.desktop-deps.outcome == 'success'
+              shell: bash
+              run: |
+                  cargo_args=(--locked)
+                  if [ "$BUILD_PRODUCT" = all ]; then
+                    cargo_args+=(-p stream-dock-manager -p stream-dock-manager-cli)
+                  fi
+                  node scripts/tauri.mjs build --config src-tauri/tauri.release.conf.json --no-bundle -- "${cargo_args[@]}"
+            - name: Require the compiled CLI payload
+              id: cli-ready
+              if: steps.cli-compile.outcome == 'success' || (inputs.product == 'all' && steps.desktop-compile.outcome == 'success')
+              shell: bash
+              run: test -s "$CLI_BINARY"
             - name: Verify Linux executable baseline
-              if: runner.os == 'Linux'
+              if: runner.os == 'Linux' && steps.cli-ready.outcome == 'success'
+              shell: bash
+              env:
+                  BUILD_MODE: ${{ inputs.mode }}
+                  BUILD_TARGETS: ${{ inputs.targets }}
+              run: python scripts/native_build.py --os linux --arch amd64 --mode "$BUILD_MODE" --targets "$BUILD_TARGETS" --binary "$CLI_BINARY" --report target/release/cli/build-environment-linux-amd64.json
+            - name: Smoke test standalone CLI without opening devices
+              if: steps.cli-ready.outcome == 'success'
+              shell: bash
+              run: |
+                  "$CLI_BINARY" --version
+                  "$CLI_BINARY" models > "$RUNNER_TEMP/stream-dock-manager-cli-models.json"
+            - name: Prepare portable Windows CLI installer tools
+              if: runner.os == 'Windows' && steps.cli-ready.outcome == 'success'
+              run: python scripts/native_installer_tools.py
+            - name: Package standalone CLI
+              if: steps.cli-ready.outcome == 'success'
+              env:
+                  RELEASE_COMMIT: ${{ steps.source.outputs.commit }}
+                  NATIVE_OS: ${{ matrix.os }}
+                  NATIVE_ARCH: ${{ matrix.arch }}
+              shell: bash
+              run: python scripts/package_cli.py --binary "$CLI_BINARY" --dir target/release/cli --os "$NATIVE_OS" --arch "$NATIVE_ARCH" --native
+            - uses: actions/upload-artifact@v7.0.2
+              if: steps.cli-ready.outcome == 'success'
+              with:
+                  name: ${{ inputs.mode == 'publish' && 'manager-cli' || 'manager-cli-development' }}-${{ matrix.os }}-${{ matrix.arch }}
+                  path: |
+                      target/release/cli/*.zip
+                      target/release/cli/*.dmg
+                      target/release/cli/*.exe
+                      target/release/cli/*.deb
+                      target/release/cli/*.rpm
+                      target/release/cli/cli-catalog-*.json
+                      target/release/cli/build-environment-*.json
+                  if-no-files-found: error
+            # Packaging reuses the binaries already in the native job's target
+            # directory. Desktop bundling does not depend on the CLI packager succeeding.
+            - name: Bundle the compiled desktop executable
+              id: desktop-build
+              if: ${{ !cancelled() && steps.desktop-compile.outcome == 'success' }}
+              shell: bash
+              run: node scripts/tauri.mjs bundle --config src-tauri/tauri.release.conf.json --bundles "${{ matrix.bundles }}"
+            - name: Verify desktop Linux executable baseline
+              id: desktop-linux-verify
+              if: ${{ !cancelled() && runner.os == 'Linux' && steps.desktop-build.outcome == 'success' }}
               shell: bash
               env:
                   BUILD_MODE: ${{ inputs.mode }}
                   BUILD_TARGETS: ${{ inputs.targets }}
               run: python scripts/native_build.py --os linux --arch amd64 --mode "$BUILD_MODE" --targets "$BUILD_TARGETS" --binary target/release/stream-dock-manager --report target/release/bundle/build-environment-linux-amd64.json
             - name: Verify macOS desktop bundle inventory
-              if: runner.os == 'macOS'
+              id: desktop-macos-verify
+              if: ${{ !cancelled() && runner.os == 'macOS' && steps.desktop-build.outcome == 'success' }}
               env:
                   RELEASE_COMMIT: ${{ steps.source.outputs.commit }}
                   NATIVE_ARCH: ${{ matrix.arch }}
               shell: bash
               run: python scripts/verify_desktop_bundle.py --dir target/release/bundle --arch "$NATIVE_ARCH" --report "target/release/bundle/desktop-inventory-macos-$NATIVE_ARCH.json"
             - name: Include instructions in the macOS disk image
-              if: runner.os == 'macOS'
+              id: desktop-macos-dmg
+              if: ${{ !cancelled() && steps.desktop-macos-verify.outcome == 'success' }}
               run: python scripts/finalize_desktop_dmg.py --dir target/release/bundle
             - name: Catalogue native installers
+              id: desktop-catalog
+              if: >-
+                  ${{ !cancelled() && steps.desktop-build.outcome == 'success' &&
+                  (runner.os != 'Linux' || steps.desktop-linux-verify.outcome == 'success') &&
+                  (runner.os != 'macOS' || steps.desktop-macos-dmg.outcome == 'success') }}
               env:
                   RELEASE_COMMIT: ${{ steps.source.outputs.commit }}
               run: python scripts/release.py manager-catalog --dir target/release/bundle --os ${{ matrix.os }} --arch ${{ matrix.arch }}
             - uses: actions/upload-artifact@v7.0.2
+              if: ${{ !cancelled() && steps.desktop-catalog.outcome == 'success' }}
               with:
                   name: ${{ inputs.mode == 'publish' && 'manager' || 'manager-development' }}-${{ matrix.os }}-${{ matrix.arch }}
                   path: |

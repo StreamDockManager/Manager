@@ -16,6 +16,7 @@ export function registerTooltips() {
 
     let trigger: HTMLElement | undefined;
     let dismissedTrigger: HTMLElement | undefined;
+    let dismissedPointer: { x: number; y: number } | undefined;
     let describedElement: HTMLElement | undefined;
     let describedBy: string | null = null;
     let hideTimer: number | undefined;
@@ -94,10 +95,24 @@ export function registerTooltips() {
             hide();
         }, 150);
     };
+    const hover = (event: PointerEvent) => {
+        if (event.pointerType !== 'mouse') return;
+        // Expanding the sidebar can move another control under a stationary pointer.
+        // ClickEvent rounds CSS coordinates; PointerEvent can retain their fractional part.
+        if (
+            dismissedPointer &&
+            dismissedPointer.x === Math.floor(event.clientX) &&
+            dismissedPointer.y === Math.floor(event.clientY)
+        )
+            return;
+        dismissedPointer = undefined;
+        show(event.target);
+    };
+    document.addEventListener('pointerover', hover, options);
     document.addEventListener(
-        'pointerover',
+        'pointermove',
         (event) => {
-            if (event.pointerType === 'mouse') show(event.target);
+            if (dismissedPointer) hover(event);
         },
         options,
     );
@@ -131,6 +146,8 @@ export function registerTooltips() {
             if (!element) return;
             // Keep keyboard focus, but wait for a fresh hover or focus before reopening
             dismissedTrigger = element;
+            if (event.detail > 0)
+                dismissedPointer = { x: Math.floor(event.clientX), y: Math.floor(event.clientY) };
             hide();
         },
         options,

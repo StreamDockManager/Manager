@@ -34,6 +34,18 @@ export function registerRuntimes(Alpine: typeof AlpineType, app: () => AppState)
             status.jobs.some((job) => !['complete', 'failed', 'cancelled'].includes(job.state)),
     );
     Alpine.data('runtimes', () => ({
+        scrollVersions(event: KeyboardEvent) {
+            const region = event.currentTarget as HTMLElement;
+            if (
+                event.target !== region ||
+                (event.key !== 'ArrowLeft' && event.key !== 'ArrowRight') ||
+                region.scrollWidth <= region.clientWidth
+            )
+                return;
+            event.preventDefault();
+            region.scrollLeft += event.key === 'ArrowRight' ? 48 : -48;
+        },
+
         status: null as RuntimeStatus | null,
         usage: [] as RuntimeUsage[],
         candidates: [] as RuntimeInstallation[],
@@ -104,11 +116,7 @@ export function registerRuntimes(Alpine: typeof AlpineType, app: () => AppState)
                 external: this.status?.defaults[kind]?.external || '',
                 latest:
                     this.lines(kind)
-                        .map(
-                            (line) =>
-                                this.activeReleases.find((release) => release.line === line.line)
-                                    ?.version,
-                        )
+                        .map((line) => this.indexReleases().byLine.get(line.line)?.[0]?.version)
                         .filter(Boolean)
                         .join(', ') || 'Check for releases',
             }));
@@ -136,7 +144,29 @@ export function registerRuntimes(Alpine: typeof AlpineType, app: () => AppState)
             return this.lines(this.kind);
         },
         // Derive active releases from the current runtimes state
+        releaseIndex: null as {
+            day: string;
+            kind: RuntimeKind;
+            releases: RuntimeRelease[];
+            byLine: Map<string, RuntimeRelease[]>;
+        } | null,
+        indexReleases() {
+            const day = new Date().toISOString().slice(0, 10);
+            if (this.releaseIndex?.day === day && this.releaseIndex.kind === this.kind)
+                return this.releaseIndex;
+            const releases = this.sortReleases();
+            const byLine = new Map<string, RuntimeRelease[]>();
+            for (const release of releases) {
+                const list = byLine.get(release.line);
+                if (list) list.push(release);
+                else byLine.set(release.line, [release]);
+            }
+            return (this.releaseIndex = { day, kind: this.kind, releases, byLine });
+        },
         get activeReleases(): RuntimeRelease[] {
+            return this.indexReleases().releases;
+        },
+        sortReleases(): RuntimeRelease[] {
             const lines = new Set(this.selectedLines.map((line) => line.line));
             return (this.status?.releases || [])
                 .filter((r) => r.kind === this.kind && lines.has(r.line))
@@ -144,7 +174,7 @@ export function registerRuntimes(Alpine: typeof AlpineType, app: () => AppState)
         },
         // Derive selected releases from the current runtimes state
         get selectedReleases(): RuntimeRelease[] {
-            return this.activeReleases.filter((r) => r.line === this.line);
+            return this.indexReleases().byLine.get(this.line) || [];
         },
         // Derive release from the current runtimes state
         get release(): RuntimeRelease | undefined {
@@ -283,8 +313,19 @@ export function registerRuntimes(Alpine: typeof AlpineType, app: () => AppState)
         async acceptStatus(status: RuntimeStatus, usage: RuntimeUsage[]) {
             if (this.destroyed || windowCloseOwners.closing) return;
             try {
-                if (this.status) reconcile(this.status, cloneJson(status));
-                else this.status = cloneJson(status);
+                if (
+                    this.releaseIndex &&
+                    this.releaseIndex.day !== new Date().toISOString().slice(0, 10)
+                )
+                    this.releaseIndex = null;
+                if (this.status)
+                    reconcile(this.status, cloneJson(status), (key) => {
+                        if (key === 'lines' || key === 'releases') this.releaseIndex = null;
+                    });
+                else {
+                    this.status = cloneJson(status);
+                    this.releaseIndex = null;
+                }
                 reconcile(this.usage, cloneJson(usage));
                 this.error = '';
                 if (!this.version) this.version = this.selectedReleases[0]?.version || '';
@@ -430,6 +471,7 @@ export function registerRuntimes(Alpine: typeof AlpineType, app: () => AppState)
         choose(event: Event) {
             const el = event.currentTarget as HTMLSelectElement | HTMLButtonElement;
             const kind = el.dataset.kind as RuntimeKind;
+            el.focus({ preventScroll: true });
             window.dispatchEvent(
                 new CustomEvent('open-runtime', {
                     detail: { kind, releaseId: el.value || undefined },

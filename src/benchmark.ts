@@ -252,8 +252,10 @@ export function registerBenchmark() {
             }
         },
         // Open the shared progress dialog
-        showProgress() {
+        showProgress(event?: Event) {
             if (windowCloseOwners.closing) return;
+            if (event?.currentTarget instanceof HTMLButtonElement)
+                event.currentTarget.focus({ preventScroll: true });
             window.dispatchEvent(new CustomEvent('open-benchmark-progress'));
         },
         // Export the current report as JSON

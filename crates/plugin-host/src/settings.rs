@@ -48,12 +48,29 @@ pub struct SettingsPanel {
     pub path_picker_modes: Option<std::collections::BTreeMap<String, String>>,
 }
 
-// Read settings module
+const SETTINGS_MODULE_LIMIT: usize = 256 * 1024;
+
+// Read at most the strict limit, including the byte that disqualifies an exactly
+// limit-sized module. Do not trust metadata: files can grow after opening and
+// sparse files must not determine allocation size. Missing/invalid schemas keep
+// the existing null behavior and do not grant selectors or location access.
+fn parse_settings_module(reader: impl std::io::Read) -> Value {
+    use std::io::Read;
+    let mut bytes = Vec::new();
+    match reader
+        .take(SETTINGS_MODULE_LIMIT as u64)
+        .read_to_end(&mut bytes)
+    {
+        Ok(length) if length < SETTINGS_MODULE_LIMIT => {
+            serde_json::from_slice(&bytes).unwrap_or(Value::Null)
+        }
+        _ => Value::Null,
+    }
+}
+
 fn read_settings_module(root: &Path) -> Value {
-    std::fs::read(root.join("settings-module.json"))
-        .ok()
-        .filter(|bytes| bytes.len() < 256 * 1024)
-        .and_then(|bytes| serde_json::from_slice(&bytes).ok())
+    std::fs::File::open(root.join("settings-module.json"))
+        .map(parse_settings_module)
         .unwrap_or(Value::Null)
 }
 
@@ -96,14 +113,9 @@ impl PluginHost {
         if !safe_id(id) {
             return Err("Invalid plugin identity".into());
         }
-        Ok(self
-            .storage()
-            .read_json(
-                stream_dock_manager_storage::Domain::PluginMetadata,
-                &format!("storage-generation:{id}"),
-                128,
-            )?
-            .unwrap_or(0))
+        let owner = id.to_owned();
+        self.storage()
+            .run(move |db| storage_rpc::plugin_storage_purge_generation(db, &owner))
     }
     // Read the plugin configuration
     pub fn configuration(&self, id: &str) -> Result<PluginConfiguration, String> {
@@ -221,6 +233,7 @@ impl PluginHost {
                 stored_data::mark_updated(tx, &owner)?;
                 commit(tx)
             })?;
+        hub.invalidate_persistence_sizes();
         hub.globals.insert(id.into(), value.settings.clone());
         hub.action_defaults.insert(
             id.into(),
@@ -411,10 +424,10 @@ impl PluginHost {
         if let Some(capability) = &plugin.info.capabilities {
             h.capabilities.insert(id.into(), capability.clone());
         }
-        let settings = if action.is_none() {
-            h.globals.get(id).cloned().unwrap_or(json!({}))
+        let settings = if let Some(action) = action {
+            browser::vsd_action_settings(plugin, action, settings).into_owned()
         } else {
-            settings.clone()
+            h.globals.get(id).cloned().unwrap_or(json!({}))
         };
         if (!settings.is_object() && plugin.info.dialect != "openaction")
             || settings.to_string().len() > 256 * 1024
@@ -453,12 +466,12 @@ impl PluginHost {
             token.clone(),
             FileGrant {
                 root: plugin.path.clone(),
+                runtime_entry: None,
                 bootstrap: bootstrap(
                     self.port,
                     &token,
-                    "registerPropertyInspector",
                     &info,
-                    &details,
+                    browser::BootstrapRole::Inspector(&details),
                 ),
                 context: Some(context),
                 setup_runtime,
@@ -629,8 +642,8 @@ impl PluginHost {
         if global.is_none() && defaults.is_none() {
             return Ok(());
         }
-        let previous_globals = h.globals.clone();
-        let previous_defaults = h.action_defaults.clone();
+        let previous_globals = h.globals.get(id).cloned();
+        let previous_defaults = h.action_defaults.get(id).cloned();
         if let Some(value) = &global {
             let mut safe = value.clone();
             h.redact_payload(&mut safe);
@@ -643,9 +656,21 @@ impl PluginHost {
                 .or_default()
                 .insert(action, value);
         }
-        if let Err(error) = h.persist() {
-            h.globals = previous_globals;
-            h.action_defaults = previous_defaults;
+        if let Err(error) = h.persist_scoped(persistence::Scope {
+            globals: &[id],
+            defaults: &[id],
+            metadata: &[],
+        }) {
+            if let Some(value) = previous_globals {
+                h.globals.insert(id.into(), value);
+            } else {
+                h.globals.remove(id);
+            }
+            if let Some(value) = previous_defaults {
+                h.action_defaults.insert(id.into(), value);
+            } else {
+                h.action_defaults.remove(id);
+            }
             return Err(error);
         }
         if global.is_some() && h.enabled.contains(id) {
@@ -1832,5 +1857,300 @@ mod default_tests {
             1
         );
         host.shutdown();
+    }
+}
+
+#[cfg(test)]
+mod bounded_schema_tests {
+    use super::*;
+    use std::io::{Cursor, Read};
+
+    #[test]
+    fn strict_schema_boundary_preserves_null_behavior() {
+        for length in [
+            SETTINGS_MODULE_LIMIT - 1,
+            SETTINGS_MODULE_LIMIT,
+            SETTINGS_MODULE_LIMIT + 1,
+        ] {
+            let mut bytes = b"{\"plugin\":[]}".to_vec();
+            bytes.resize(length, b' ');
+            let result = parse_settings_module(Cursor::new(bytes));
+            assert_eq!(
+                result,
+                if length < SETTINGS_MODULE_LIMIT {
+                    json!({"plugin": []})
+                } else {
+                    Value::Null
+                }
+            );
+        }
+        for bytes in [b"".as_slice(), b"{", b"{} trailing", &[0xff]] {
+            assert_eq!(parse_settings_module(bytes), Value::Null);
+        }
+    }
+
+    #[test]
+    fn reader_never_consumes_more_than_limit_even_without_eof() {
+        struct Endless {
+            read: usize,
+        }
+        impl Read for Endless {
+            fn read(&mut self, out: &mut [u8]) -> std::io::Result<usize> {
+                out.fill(b' ');
+                self.read += out.len();
+                Ok(out.len())
+            }
+        }
+        let mut reader = Endless { read: 0 };
+        assert_eq!(parse_settings_module(&mut reader), Value::Null);
+        assert_eq!(reader.read, SETTINGS_MODULE_LIMIT);
+    }
+
+    #[test]
+    fn read_error_after_valid_prefix_does_not_authorize_schema() {
+        struct FailsAfterPrefix(bool);
+        impl Read for FailsAfterPrefix {
+            fn read(&mut self, out: &mut [u8]) -> std::io::Result<usize> {
+                if self.0 {
+                    return Err(std::io::Error::other("fixture read failure"));
+                }
+                self.0 = true;
+                out[..2].copy_from_slice(b"{}");
+                Ok(2)
+            }
+        }
+        assert_eq!(parse_settings_module(FailsAfterPrefix(false)), Value::Null);
+    }
+
+    #[test]
+    fn missing_sparse_and_replaced_schema_are_not_cached() {
+        let root = tempfile::tempdir().unwrap();
+        let path = root.path().join("settings-module.json");
+        assert_eq!(read_settings_module(root.path()), Value::Null);
+        let file = std::fs::File::create(&path).unwrap();
+        file.set_len(8 * 1024 * 1024 * 1024).unwrap();
+        assert_eq!(read_settings_module(root.path()), Value::Null);
+        std::fs::write(&path, br#"{"plugin":[]}"#).unwrap();
+        assert_eq!(read_settings_module(root.path()), json!({"plugin":[]}));
+        std::fs::write(&path, b"malformed").unwrap();
+        assert_eq!(read_settings_module(root.path()), Value::Null);
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn schema_symlink_behavior_is_unchanged_and_still_bounded() {
+        let root = tempfile::tempdir().unwrap();
+        let target = root.path().join("schema.json");
+        std::fs::write(&target, br#"{"plugin":[]}"#).unwrap();
+        std::os::unix::fs::symlink(&target, root.path().join("settings-module.json")).unwrap();
+        assert_eq!(read_settings_module(root.path()), json!({"plugin":[]}));
+        std::fs::write(&target, vec![b' '; SETTINGS_MODULE_LIMIT]).unwrap();
+        assert_eq!(read_settings_module(root.path()), Value::Null);
+    }
+}
+
+impl PluginHost {
+    /// Serialize this edit with socket writes under the same hub guard. Persist the
+    /// complete vendor JSON with the host's scoped admission and rollback behavior.
+    pub fn edit_vault_setting(&self, id: &str, value: Value) -> Result<(), String> {
+        let mut hub = self.hub.lock().unwrap();
+        let id = id.to_owned();
+        let setting = self
+            .storage()
+            .run(move |db| stream_dock_manager_storage::plugin_settings::setting(db, &id))?;
+        let owner = &setting.owner;
+        let installed = self.plugins.get(owner);
+        let dialect = if let Some(plugin) = installed {
+            plugin.info.dialect.clone()
+        } else {
+            self.storage()
+                .read_json::<(String, bool)>(
+                    stream_dock_manager_storage::Domain::PluginMetadata,
+                    &format!("retained-family:{owner}"),
+                    1024,
+                )?
+                .ok_or("The retained package dialect is unavailable")?
+                .0
+        };
+        if value.to_string().len() > 256 * 1024 || (!value.is_object() && dialect != "openaction") {
+            return Err(
+                "The settings must match the plugin’s JSON format and fit within 256 KiB.".into(),
+            );
+        }
+        let ids = [owner.as_str()];
+        if setting.domain == stream_dock_manager_storage::Domain::PluginGlobals {
+            let slot = hub
+                .globals
+                .get_mut(owner)
+                .ok_or("Global settings changed")?;
+            let old = std::mem::replace(slot, value.clone());
+            if let Err(e) = hub.persist_scoped(persistence::Scope {
+                globals: &ids,
+                defaults: &[],
+                metadata: &[],
+            }) {
+                hub.globals.insert(owner.clone(), old);
+                return Err(e);
+            }
+            if hub.enabled.contains(owner) {
+                hub.sessions
+                    .queues
+                    .entry(owner.clone())
+                    .or_default()
+                    .push_back(
+                        json!({"event":"didReceiveGlobalSettings","payload":{"settings":value}}),
+                    );
+            }
+        } else if setting.domain == stream_dock_manager_storage::Domain::PluginDefaults {
+            let action = setting.action.ok_or("Missing action default")?;
+            let slot = hub
+                .action_defaults
+                .get_mut(owner)
+                .and_then(|d| d.get_mut(&action))
+                .ok_or("Action default changed")?;
+            let old = std::mem::replace(slot, value);
+            if let Err(e) = hub.persist_scoped(persistence::Scope {
+                globals: &[],
+                defaults: &ids,
+                metadata: &[],
+            }) {
+                hub.action_defaults
+                    .get_mut(owner)
+                    .unwrap()
+                    .insert(action, old);
+                return Err(e);
+            }
+        } else {
+            return Err("Choose a plugin configuration record".into());
+        }
+        Ok(())
+    }
+}
+
+/// The exact managed settings location to retire after a successful Vault edit
+pub enum VaultSettingsClear {
+    Global,
+    Default(String),
+    Binding,
+    All,
+}
+
+impl PluginHost {
+    /// The editor owns review and workspace locks. Refuse a live session instead
+    /// of racing its writes or clearing another action's running cache.
+    pub fn clear_vault_settings<T: Send + 'static>(
+        &self,
+        owner: &str,
+        operation: impl FnOnce(
+                &stream_dock_manager_storage::rusqlite::Transaction<'_>,
+            ) -> Result<(T, VaultSettingsClear), String>
+            + Send
+            + 'static,
+    ) -> Result<T, String> {
+        use stream_dock_manager_storage::Domain;
+        if !safe_id(owner) {
+            return Err("Invalid plugin identity".into());
+        }
+        let mut hub = self.hub.lock().unwrap();
+        if hub.enabled.contains(owner)
+            || hub.sessions.tokens.values().any(|id| id == owner)
+            || self.plugins.get(owner).is_some_and(|plugin| {
+                plugin.child.is_some()
+                    || plugin
+                        .stopping
+                        .as_ref()
+                        .is_some_and(|done| !done.load(Ordering::Acquire))
+            })
+        {
+            return Err(
+                "Disable the plugin and close its settings before deleting saved data.".into(),
+            );
+        }
+        let id = owner.to_owned();
+        let (result, scope) = self.storage().transaction(move |tx| {
+            let (result, scope) = operation(tx)?;
+            match &scope {
+                VaultSettingsClear::Global | VaultSettingsClear::All => {
+                    stream_dock_manager_storage::delete(tx, Domain::PluginGlobals, &id)?;
+                }
+                _ => {}
+            }
+            match &scope {
+                VaultSettingsClear::All => {
+                    stream_dock_manager_storage::delete(tx, Domain::PluginDefaults, &id)?;
+                    storage_rpc::purge(tx, &id)?;
+                }
+                VaultSettingsClear::Default(action) => {
+                    let mut values: HashMap<String, Value> =
+                        stream_dock_manager_storage::read_json(
+                            tx,
+                            Domain::PluginDefaults,
+                            &id,
+                            16 * 1024 * 1024,
+                        )?
+                        .ok_or("Action defaults changed")?;
+                    if values.remove(action).is_none() {
+                        return Err("Action defaults changed".into());
+                    }
+                    if values.is_empty() {
+                        stream_dock_manager_storage::delete(tx, Domain::PluginDefaults, &id)?;
+                    } else {
+                        stream_dock_manager_storage::write_json(
+                            tx,
+                            Domain::PluginDefaults,
+                            &id,
+                            &values,
+                            16 * 1024 * 1024,
+                        )?;
+                    }
+                }
+                _ => {}
+            }
+            stored_data::mark_updated(tx, &id)?;
+            Ok((result, scope))
+        })?;
+        hub.invalidate_persistence_sizes();
+        if matches!(scope, VaultSettingsClear::Global | VaultSettingsClear::All) {
+            hub.globals.remove(owner);
+        }
+        match &scope {
+            VaultSettingsClear::All => {
+                hub.action_defaults.remove(owner);
+            }
+            VaultSettingsClear::Default(action) => {
+                if let Some(values) = hub.action_defaults.get_mut(owner) {
+                    values.remove(action);
+                    if values.is_empty() {
+                        hub.action_defaults.remove(owner);
+                    }
+                }
+            }
+            _ => {}
+        }
+        if matches!(scope, VaultSettingsClear::Binding | VaultSettingsClear::All) {
+            let prefix = format!("{owner}:");
+            hub.context_state
+                .binding_settings
+                .retain(|key, _| !key.starts_with(&prefix));
+            let contexts: HashSet<_> = hub
+                .context_state
+                .contexts
+                .iter()
+                .filter(|(_, id)| id.as_str() == owner)
+                .map(|(context, _)| context.clone())
+                .collect();
+            for context in &contexts {
+                hub.context_state.settings.remove(context);
+                hub.context_state.configured.remove(context);
+                hub.context_state.execution.remove(context);
+                hub.context_state.reference_sources.remove(context);
+                hub.forget_saved_reads_for_context(context);
+            }
+            hub.pending_settings
+                .retain(|_, (_, context)| !contexts.contains(context));
+            hub.settings_bursts.revoke_owner(owner);
+        }
+        hub.refresh_log_secrets();
+        Ok(result)
     }
 }

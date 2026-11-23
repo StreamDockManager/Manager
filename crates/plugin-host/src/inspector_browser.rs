@@ -214,6 +214,7 @@ mod tests {
             "token".into(),
             FileGrant {
                 root: PathBuf::new(),
+                runtime_entry: None,
                 bootstrap: String::new(),
                 context: Some("context".into()),
                 setup_runtime: false,
@@ -307,6 +308,7 @@ mod transport_tests {
                 "isolated".into(),
                 FileGrant {
                     root: PathBuf::new(),
+                    runtime_entry: None,
                     bootstrap: String::new(),
                     context: Some("context".into()),
                     setup_runtime: false,
@@ -403,6 +405,85 @@ mod transport_tests {
 #[cfg(test)]
 mod http_tests {
     use super::*;
+    #[cfg(unix)]
+    #[test]
+    // Verify a large inspector document and its trailing bootstrap survive socket backpressure
+    fn inspector_sends_complete_html_when_accepted_socket_is_nonblocking() {
+        use std::io::{BufRead, BufReader};
+        use std::os::fd::AsRawFd;
+        let root = tempfile::tempdir().unwrap();
+        let html = format!("<!doctype html><div>{}</div>", "x".repeat(1024 * 1024));
+        let bootstrap = "<script>window.bootstrapReceived = true;</script>";
+        std::fs::write(root.path().join("index.html"), &html).unwrap();
+        let listener = TcpListener::bind("127.0.0.1:0").unwrap();
+        let socket = listener.local_addr().unwrap();
+        let mut hub = Hub::default();
+        hub.sessions.tokens.insert("fixture".into(), "owner".into());
+        hub.sessions.files.insert(
+            "fixture".into(),
+            FileGrant {
+                root: root.path().canonicalize().unwrap(),
+                runtime_entry: None,
+                bootstrap: bootstrap.into(),
+                context: Some("context".into()),
+                setup_runtime: false,
+            },
+        );
+        hub.sessions.inspector_origins.insert(
+            "fixture".into(),
+            (socket.port(), Arc::new(AtomicBool::new(true))),
+        );
+        let server = std::thread::spawn(move || {
+            let stream = listener.accept().unwrap().0;
+            stream.set_nonblocking(true).unwrap();
+            // Force backpressure independently of the platform's default TCP buffer size
+            let buffer: libc::c_int = 4096;
+            assert_eq!(
+                unsafe {
+                    libc::setsockopt(
+                        stream.as_raw_fd(),
+                        libc::SOL_SOCKET,
+                        libc::SO_SNDBUF,
+                        (&buffer as *const libc::c_int).cast(),
+                        std::mem::size_of_val(&buffer) as libc::socklen_t,
+                    )
+                },
+                0
+            );
+            browser::serve_inspector_file(stream, Arc::new(Mutex::new(hub)), "fixture");
+        });
+        let mut client = TcpStream::connect(socket).unwrap();
+        client
+            .set_read_timeout(Some(Duration::from_secs(5)))
+            .unwrap();
+        write!(
+            client,
+            "GET /files/fixture/index.html HTTP/1.1\r\nHost: {socket}\r\n\r\n"
+        )
+        .unwrap();
+        let mut reader = BufReader::new(client);
+        let mut header = String::new();
+        loop {
+            let n = reader.read_line(&mut header).unwrap();
+            assert!(n > 0, "Server closed before sending a response");
+            if header.ends_with("\r\n\r\n") {
+                break;
+            }
+        }
+        assert!(header.starts_with("HTTP/1.1 200"));
+        assert!(header.contains(&format!(
+            "Content-Length: {}\r\n",
+            html.len() + bootstrap.len()
+        )));
+        // Leave the server blocked long enough to encounter a full send buffer
+        std::thread::sleep(Duration::from_millis(60));
+        let mut body = String::new();
+        reader.read_to_string(&mut body).unwrap();
+        assert_eq!(body.len(), html.len() + bootstrap.len());
+        assert!(body.starts_with(&html) && body.ends_with(bootstrap));
+        server.join().unwrap();
+    }
+
     #[test]
     // Verify isolated HTTP rejects cross session shared listener and inflight revocation
     fn isolated_http_rejects_cross_session_shared_listener_and_inflight_revocation() {
@@ -429,6 +510,7 @@ mod http_tests {
                     token.into(),
                     FileGrant {
                         root: root.path().canonicalize().unwrap(),
+                        runtime_entry: None,
                         bootstrap: String::new(),
                         context: Some("context".into()),
                         setup_runtime: false,

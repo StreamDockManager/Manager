@@ -5,6 +5,7 @@ import type { PreviewHandlers } from './preview-handlers';
 
 // Report native resource metrics as unavailable in the browser simulator
 const unavailableResources = (): ManagerResourceReport => ({
+    memory: { timestamp_ms: 0, primary_metric: '', platform: '', groups: [] },
     process_count: 0,
     process_note: 'Browser preview has no native process metrics.',
     cpu_state: 'unavailable',
@@ -28,6 +29,26 @@ export function createPreviewSettingsHandlers() {
                 protected_entries: 0,
             },
             {
+                id: 'cached-media',
+                label: 'Cached artwork',
+                bytes: 0,
+                entries: 0,
+                max_bytes: 2000000000,
+                max_entries: 0,
+                max_age_seconds: 604800,
+                protected_entries: 0,
+            },
+            {
+                id: 'updates/cache',
+                label: 'Update metadata',
+                bytes: 209715200,
+                entries: 2,
+                max_bytes: 536870912,
+                max_entries: 64,
+                max_age_seconds: 86400,
+                protected_entries: 0,
+            },
+            {
                 id: 'updates/downloads',
                 label: 'Update downloads',
                 bytes: 536870912,
@@ -38,13 +59,13 @@ export function createPreviewSettingsHandlers() {
                 protected_entries: 0,
             },
             {
-                id: 'updates/cache',
-                label: 'Update metadata',
-                bytes: 209715200,
-                entries: 2,
-                max_bytes: 1073741824,
-                max_entries: 64,
-                max_age_seconds: 86400,
+                id: 'firmware-cache',
+                label: 'Firmware catalogs',
+                bytes: 0,
+                entries: 0,
+                max_bytes: 18874368,
+                max_entries: 3,
+                max_age_seconds: 0,
                 protected_entries: 0,
             },
         ],
@@ -301,6 +322,9 @@ export function createPreviewSettingsHandlers() {
     } satisfies PreviewHandlers;
     const mediaHandlers = {
         // Simulate prepare export review in the browser without calling native services
+        rehearse_export: () => {
+            throw Error('Import rehearsal requires the desktop application.');
+        },
         prepare_export_review: (args) => {
             throw Error('Immutable export review requires the native desktop application.');
         },
@@ -350,6 +374,9 @@ export function createPreviewSettingsHandlers() {
         },
         // Simulate media library in the browser without calling native services
         media_library: (args) => {
+            throw Error('The media library requires the native application.');
+        },
+        audit_media_library: () => {
             throw Error('The media library requires the native application.');
         },
         // Simulate media thumbnail in the browser without calling native services

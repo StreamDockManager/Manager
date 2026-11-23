@@ -116,6 +116,10 @@ export function registerPaletteEditor(Alpine: typeof AlpineType, app: () => AppS
         init() {
             ownWindowMethods(this, 'palette editor', ['selectInput', 'save', 'deletePalette']);
             this.$watch('wallpaperAsset', () => void this.previewWallpaper());
+            this.$watch('draft', () => {
+                if (this.draft)
+                    theme().showPalettePreview(this.previewOwner, this.mode, 'preview', this.draft);
+            });
             this.unregister = registerCloseDraft(this, ['save', 'deletePalette'], {
                 name: 'Palette editor',
                 // Return a snapshot of the current palette editor state

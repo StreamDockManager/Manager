@@ -1,6 +1,16 @@
 # Hyprland Keyboard Guard
 
-This source-only compositor plugin provides the Manager's scoped physical-keyboard observation and native Wayland target identity. It does **not** inject keys. Playback still requires a separately available RemoteDesktop portal provider, its keyboard authorization and explicit **System** repeat mode. Stock xdg-desktop-portal-hyprland does not advertise RemoteDesktop, so the companion alone does not enable playback on a stock installation. Manager reports playback unavailable without a compatible, separately configured provider; it does not install a bridge or inject directly. Recording captures physical edges/holds, not client-generated autorepeat counts.
+An optional, source-only Hyprland plugin that lets Manager observe physical
+keyboard input for recording and identify native Wayland windows. It cannot inject keys.
+
+| Goal                 | What you need                                                                                                                 |
+| -------------------- | ----------------------------------------------------------------------------------------------------------------------------- |
+| Record physical keys | This companion built for your exact compositor and Manager binary; recording preserves edges and holds, not client autorepeat |
+| Play a macro         | A separate RemoteDesktop portal provider, keyboard authorization, and **System** repeat mode                                  |
+
+Stock xdg-desktop-portal-hyprland does not provide RemoteDesktop. Installing this
+companion alone does not enable playback. Manager does not install a bridge or
+inject keys directly.
 
 ## Check compatibility first
 

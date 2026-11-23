@@ -17,26 +17,20 @@ function git(root: string, args: string[]): string {
     }).trim();
 }
 
-// Combine the package version with verified source revision and dirty-state provenance
+// Combine the package version with verified source revision
 export function buildVersion(
     version: string,
     root: string,
     env: NodeJS.ProcessEnv = process.env,
 ): string {
-    // Packaged source exports use the pair captured by the packaging pipeline
-    // Missing/invalid dirty provenance is unknown, never implicitly clean
+    // Packaged source exports retain their authoritative source revision
     let revision = env[sourceRevisionKey];
-    let dirty: boolean | undefined;
-    if (revision !== undefined) {
-        const supplied = env.STREAM_DOCK_MANAGER_SOURCE_DIRTY;
-        dirty = supplied === 'true' ? true : supplied === 'false' ? false : undefined;
-    } else {
+    if (revision === undefined) {
         try {
             if (realpathSync(git(root, ['rev-parse', '--show-toplevel'])) !== realpathSync(root)) {
                 throw new Error('Not the manager checkout');
             }
             revision = git(root, ['rev-parse', '--verify', 'HEAD']);
-            dirty = git(root, ['status', '--porcelain', '--untracked-files=normal']).length > 0;
         } catch {
             revision ??= 'unknown';
         }
@@ -44,10 +38,8 @@ export function buildVersion(
     const hash = /^(?:[a-f0-9]{40}|[a-f0-9]{64})$/i.test(revision)
         ? revision.slice(0, 7).toLowerCase()
         : 'unknown';
-    // This is a display label, not the package/release SemVer. The user requested
-    // a separate +dirty suffix; leave the authoritative package version unchanged
-    const suffix = dirty === true ? '+dirty' : dirty === false ? '' : '+dirty-unknown';
-    return `${version}${version.includes('+') ? '.' : '+'}${hash}${suffix}`;
+    // Keep package SemVer and Git revision independent from mutable checkout state
+    return `${version}${version.includes('+') ? '.' : '+'}${hash}`;
 }
 
 // Expose source provenance through a virtual Vite module

@@ -1,3 +1,6 @@
+#[path = "preview_orientation.rs"]
+mod orientation;
+
 use crate::SurfacePreview;
 use serde::{Deserialize, Serialize};
 use std::collections::BTreeMap;
@@ -11,26 +14,54 @@ impl crate::Runtime {
         bytes: crate::media::SharedBytes,
         rotation: u16,
     ) -> Result<crate::media::SharedBytes, String> {
+        self.preview_image_for_surface(bytes, rotation, None, false)
+    }
+
+    pub(super) fn preview_image_for_surface(
+        &self,
+        bytes: crate::media::SharedBytes,
+        rotation: u16,
+        live: Option<(&str, &str)>,
+        browser: bool,
+    ) -> Result<crate::media::SharedBytes, String> {
         if rotation == 0 {
             return Ok(bytes);
         }
         use sha2::{Digest, Sha256};
+        let tag = browser
+            .then(|| orientation::Container::detect(&bytes))
+            .flatten();
+        let tagged = tag.is_some();
         let key = format!(
-            "preview-upright:{rotation}:{}",
+            "preview-upright:{rotation}:{tagged}:{}",
             hex::encode(Sha256::digest(&**bytes))
         );
-        self.cached_render(key, || {
-            let pixels = image::load_from_memory(&bytes).map_err(|e| e.to_string())?;
-            let upright = match rotation {
-                90 => pixels.rotate270(),
-                180 => pixels.rotate180(),
-                270 => pixels.rotate90(),
-                _ => return Err("Invalid preview rotation".into()),
-            };
-            hardware_core::render::encode_pixels(upright, "png")
-                .map(crate::media::shared_bytes)
-                .map_err(|e| e.to_string())
-        })
+        let slot = live
+            .map(|(device, control)| {
+                crate::media::RenderKey::from_inputs(&("latest-upright", device, control))
+            })
+            .transpose()?;
+        self.cached_surface_render(
+            crate::media::RenderKey::from_name(&key),
+            slot.as_slice(),
+            || {
+                if let Some(container) = tag {
+                    return container
+                        .upright(&bytes, rotation)
+                        .map(crate::media::shared_bytes);
+                }
+                let pixels = image::load_from_memory(&bytes).map_err(|e| e.to_string())?;
+                let upright = match rotation {
+                    90 => pixels.rotate270(),
+                    180 => pixels.rotate180(),
+                    270 => pixels.rotate90(),
+                    _ => return Err("Invalid preview rotation".into()),
+                };
+                hardware_core::render::encode_pixels(upright, "png")
+                    .map(crate::media::shared_bytes)
+                    .map_err(|e| e.to_string())
+            },
+        )
     }
 }
 
@@ -94,8 +125,64 @@ pub fn difference(
     })
 }
 
-/// Tracks successful frames while transient render failures retry with bounded backoff
+use crate::render_scene::PreviewRevisions;
+pub(super) struct Sample<'a> {
+    pub stream: &'a mut SurfacePreviewStream,
+    pub rates: &'a BTreeMap<String, u8>,
+    pub at: std::time::Instant,
+}
+impl Sample<'_> {
+    pub fn scene(&mut self, context: &crate::render_scene::RenderSceneContext) {
+        let revisions = context.preview_revisions();
+        if self.stream.scene != context.scope || self.stream.revisions.as_ref() != Some(&revisions)
+        {
+            self.stream.sample_slots.clear();
+            self.stream.clips.clear();
+        }
+        self.stream.revisions = Some(revisions);
+    }
+    pub fn prior(
+        &mut self,
+        id: &str,
+        clip: Option<&std::sync::Arc<crate::media::Clip>>,
+    ) -> Option<String> {
+        let stream = &mut self.stream;
+        let Some((clip, fps)) = clip.zip(self.rates.get(id)) else {
+            if stream.clips.remove(id).is_some() {
+                stream.sample_slots.remove(id);
+            }
+            return None;
+        };
+        let weak = std::sync::Arc::downgrade(clip);
+        if stream
+            .clips
+            .get(id)
+            .is_none_or(|previous| !previous.ptr_eq(&weak))
+        {
+            stream.clips.insert(id.into(), weak);
+            stream.sample_slots.remove(id);
+            return None;
+        }
+        let slot = sample_slot(stream.origin, self.at, *fps);
+        if stream.sample_slots.get(id) != Some(&slot) {
+            return None;
+        }
+        let previous = stream.previous.as_ref()?;
+        if id == "@background" {
+            previous.background.clone()
+        } else {
+            previous.surfaces.get(id).cloned()
+        }
+    }
+}
+fn sample_slot(origin: std::time::Instant, now: std::time::Instant, fps: u8) -> u128 {
+    now.saturating_duration_since(origin).as_nanos() * u128::from(fps) / 1_000_000_000
+}
+/// Tracks successful frames while transient render failures retry with bounded backoff.
 pub struct SurfacePreviewStream {
+    revisions: Option<PreviewRevisions>,
+    clips: BTreeMap<String, std::sync::Weak<crate::media::Clip>>,
+    browser_orientation: bool,
     generation: String,
     scene: String,
     previous: Option<SurfacePreview>,
@@ -108,6 +195,9 @@ impl SurfacePreviewStream {
     // Initialize preview state from the supplied inputs
     pub fn new(generation: String) -> Self {
         Self {
+            revisions: None,
+            clips: Default::default(),
+            browser_orientation: false,
             generation,
             scene: String::new(),
             previous: None,
@@ -117,6 +207,14 @@ impl SurfacePreviewStream {
             sample_slots: BTreeMap::new(),
         }
     }
+    /// Desktop webviews display EXIF orientation. Other consumers get upright raster bytes.
+    pub fn for_browser(generation: String) -> Self {
+        Self {
+            browser_orientation: true,
+            ..Self::new(generation)
+        }
+    }
+
     // Apply the new preview state
     pub fn update(
         &mut self,
@@ -155,8 +253,7 @@ impl SurfacePreviewStream {
             self.sample_slots.clear();
         }
         for (surface, fps) in rates {
-            let slot = now.saturating_duration_since(self.origin).as_nanos() * u128::from(*fps)
-                / 1_000_000_000;
+            let slot = sample_slot(self.origin, now, *fps);
             if !full && self.sample_slots.get(surface) == Some(&slot) {
                 if let Some(previous) = self.previous.as_ref() {
                     if surface == "@background" {
@@ -165,7 +262,17 @@ impl SurfacePreviewStream {
                         current.surfaces.insert(surface.clone(), value.clone());
                     }
                 }
-            } else {
+            } else if full
+                || self.previous.as_ref().is_some_and(|previous| {
+                    if surface == "@background" {
+                        previous.background != current.background
+                    } else {
+                        previous.surfaces.get(surface) != current.surfaces.get(surface)
+                    }
+                })
+            {
+                // An unchanged poll leaves this slot available for a source frame
+                // arriving later in it. Source timestamps and the UI clock can differ.
                 self.sample_slots.insert(surface.clone(), slot);
             }
         }
@@ -193,28 +300,107 @@ impl SurfacePreviewStream {
     }
 }
 
+/// The preview worker needs only the selected profile, device and revisions. Building a
+/// workspace snapshot here would resolve the installed plugin catalog on every frame.
+pub(crate) struct PreviewTarget {
+    pub(super) profile: Option<crate::Profile>,
+    pub(super) page_id: String,
+    scope: String,
+    pub(super) device: Option<crate::DeviceInfo>,
+    pub(super) explicit_device: bool,
+    pub(super) device_scope: String,
+    pub(super) revision: u64,
+    pub(super) configuration_revision: u64,
+}
+
+impl SurfacePreviewStream {
+    pub fn render_next(
+        &mut self,
+        runtime: &crate::Runtime,
+        device_id: &str,
+    ) -> Option<(PreviewDelta, BTreeMap<String, crate::media::SharedBytes>)> {
+        let sampled_at = std::time::Instant::now();
+        let target = runtime.preview_target(Some(device_id));
+        let rates = runtime.frame_rates_for_target(&target);
+        let browser = self.browser_orientation;
+        let (current, mut frames) = match runtime.preview_shared_frames(
+            &target,
+            browser,
+            Some(&mut Sample {
+                stream: self,
+                rates: &rates,
+                at: sampled_at,
+            }),
+        ) {
+            Ok(sample) => sample,
+            Err(_) => {
+                self.failures = self.failures.saturating_add(1);
+                self.sample_slots.clear();
+                runtime.metrics.record("preview_render_retries", 1.0);
+                return None;
+            }
+        };
+        let delta = self.update_at(&target.scope, Ok(current), &rates, sampled_at)?;
+        let wanted: std::collections::BTreeSet<_> = delta
+            .surfaces
+            .values()
+            .flatten()
+            .chain(delta.background.iter())
+            .collect();
+        frames.retain(|id, _| wanted.contains(id));
+        Some((delta, frames))
+    }
+}
+
 impl crate::Runtime {
-    // Preview frame rates using the current preview state
+    pub(super) fn preview_target(&self, device_id: Option<&str>) -> PreviewTarget {
+        let state = self.state.lock().unwrap();
+        let session = state.session(device_id.unwrap_or(""));
+        let profile = state.profiles.iter().find(|p| p.id == session.profile_id);
+        let device = state.devices.iter().find(|d| match device_id {
+            Some(id) => d.id == id,
+            None => profile.is_some_and(|p| d.model_id == p.model_id),
+        });
+        let scope = format!("{}:{}", session.profile_id, session.page_id);
+        let effective_id = device.map_or("", |d| d.id.as_str());
+        let device_scope = if effective_id == device_id.unwrap_or("") {
+            scope.clone()
+        } else {
+            let effective = state.session(effective_id);
+            format!("{}:{}", effective.profile_id, effective.page_id)
+        };
+        PreviewTarget {
+            profile: profile.cloned(),
+            device: device.cloned(),
+            explicit_device: device_id.is_some(),
+            page_id: session.page_id,
+            device_scope,
+            scope,
+            revision: state.revision,
+            configuration_revision: state.configuration_revision,
+        }
+    }
+
     pub fn preview_frame_rates(&self, device_id: &str) -> BTreeMap<String, u8> {
-        let state = self.snapshot();
-        let session = state.session(device_id);
-        let Some(device) = state.devices.iter().find(|d| d.id == device_id) else {
+        self.frame_rates_for_target(&self.preview_target(Some(device_id)))
+    }
+
+    fn frame_rates_for_target(&self, target: &PreviewTarget) -> BTreeMap<String, u8> {
+        let (Some(device), Some(profile)) = (&target.device, &target.profile) else {
             return BTreeMap::new();
         };
-        let Some(profile) = state.profiles.iter().find(|p| p.id == session.profile_id) else {
-            return BTreeMap::new();
-        };
-        let Some(page) = profile.pages.iter().find(|p| p.id == session.page_id) else {
+        let Some(page) = profile.pages.iter().find(|p| p.id == target.page_id) else {
             return BTreeMap::new();
         };
         let mut rates = BTreeMap::new();
+        let clips = crate::profiles::ClipCycle::default();
         if profile.background_asset.is_some() {
             rates.insert(
                 "@background".into(),
                 profile
                     .background_asset
                     .as_ref()
-                    .and_then(|asset| self.profiles.clip(asset).ok().flatten())
+                    .and_then(|asset| clips.get(&self.profiles, asset).ok().flatten())
                     .map_or(24, |clip| {
                         profile
                             .background_media
@@ -236,7 +422,7 @@ impl crate::Runtime {
                     binding
                         .asset
                         .as_ref()
-                        .and_then(|asset| self.profiles.clip(asset).ok().flatten())
+                        .and_then(|asset| clips.get(&self.profiles, asset).ok().flatten())
                         .map_or(24, |clip| {
                             binding.media.requested_fps(&clip).clamp(1.0, 60.0).ceil() as u8
                         }),
@@ -247,7 +433,7 @@ impl crate::Runtime {
             .vendor_animations
             .lock()
             .unwrap()
-            .active(device_id, true)
+            .active(&device.id, true)
         {
             if let Ok(control) = device.manifest.control(&source) {
                 rates.insert(
@@ -267,6 +453,78 @@ impl crate::Runtime {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn sample_skips_only_committed_slots_of_the_same_clip() {
+        let data = include_bytes!("../../../tests/fixtures/media/source-25.gif");
+        let clip = std::sync::Arc::new(crate::media::prepare(data).unwrap());
+        let mut stream = SurfacePreviewStream::new("sample".into());
+        let start = stream.origin;
+        let rates = BTreeMap::from([("key".into(), 5)]);
+        let frame = SurfacePreview {
+            configuration_revision: 1,
+            animated: true,
+            surfaces: BTreeMap::from([("key".into(), "first".into())]),
+            background: None,
+            trigger_descriptions: Default::default(),
+        };
+        let sample = |s: &mut SurfacePreviewStream, at, clip| {
+            Sample {
+                stream: s,
+                at,
+                rates: &rates,
+            }
+            .prior("key", clip)
+        };
+        assert!(sample(&mut stream, start, Some(&clip)).is_none());
+        stream.update_at("scene", Ok(frame), &rates, start).unwrap();
+        assert_eq!(
+            sample(&mut stream, start, Some(&clip)).as_deref(),
+            Some("first")
+        );
+        assert!(
+            sample(
+                &mut stream,
+                start + std::time::Duration::from_millis(200),
+                Some(&clip)
+            )
+            .is_none()
+        );
+        assert!(sample(&mut stream, start, None).is_none());
+        assert!(sample(&mut stream, start, Some(&clip)).is_none());
+    }
+    #[test]
+    fn unchanged_poll_leaves_room_for_a_due_key_and_background() {
+        let mut stream = SurfacePreviewStream::new("test".into());
+        let start = stream.origin;
+        let rates = BTreeMap::from([("key".into(), 25), ("@background".into(), 25)]);
+        let frame = |value: &str| SurfacePreview {
+            configuration_revision: 1,
+            animated: true,
+            surfaces: BTreeMap::from([("key".into(), value.into())]),
+            trigger_descriptions: Default::default(),
+            background: Some(value.into()),
+        };
+        for (ms, value, published) in [
+            (0, "a", true),
+            (41, "a", false),
+            (52, "b", true),
+            (60, "c", false),
+            (82, "c", true),
+        ] {
+            let delta = stream.update_at(
+                "scene",
+                Ok(frame(value)),
+                &rates,
+                start + std::time::Duration::from_millis(ms),
+            );
+            assert_eq!(delta.is_some(), published);
+            if let Some(delta) = delta {
+                assert_eq!(delta.surfaces["key"].as_deref(), Some(value));
+                assert_eq!(delta.background.as_deref(), Some(value));
+            }
+        }
+    }
 
     #[test]
     // Verify that trigger description changes publish even when pixels do not change
@@ -312,14 +570,16 @@ mod tests {
                 .unwrap()
                 .reset
         );
-        assert!(stream
-            .update_at(
-                "profile:first",
-                Ok(frame("early", 1)),
-                &rates,
-                start + std::time::Duration::from_millis(40)
-            )
-            .is_none());
+        assert!(
+            stream
+                .update_at(
+                    "profile:first",
+                    Ok(frame("early", 1)),
+                    &rates,
+                    start + std::time::Duration::from_millis(40)
+                )
+                .is_none()
+        );
         let next = stream
             .update_at(
                 "profile:first",
@@ -406,12 +666,14 @@ mod tests {
         assert_eq!(first.sequence, 1);
         assert!(!stream.needs_refresh());
         for _ in 0..40 {
-            assert!(stream
-                .update(
-                    "profile:page",
-                    Err("Render scene changed during capture".into())
-                )
-                .is_none());
+            assert!(
+                stream
+                    .update(
+                        "profile:page",
+                        Err("Render scene changed during capture".into())
+                    )
+                    .is_none()
+            );
             assert!(stream.needs_refresh());
             assert!(stream.interval() <= std::time::Duration::from_secs(1));
         }
@@ -427,9 +689,11 @@ mod tests {
             stream.interval(),
             std::time::Duration::from_nanos(1_000_000_000 / 60)
         );
-        assert!(stream
-            .update("profile:page", Ok(frame(2, "purple")))
-            .is_none());
+        assert!(
+            stream
+                .update("profile:page", Ok(frame(2, "purple")))
+                .is_none()
+        );
         let switched = stream
             .update("profile:other", Ok(frame(2, "other-page")))
             .unwrap();
@@ -440,9 +704,11 @@ mod tests {
     // Verify that initial render failure keeps the preview subscription ready for its first frame
     fn initial_render_failure_keeps_the_preview_subscription_ready_for_its_first_frame() {
         let mut stream = SurfacePreviewStream::new("preview-start".into());
-        assert!(stream
-            .update("profile:page", Err("Scene is changing".into()))
-            .is_none());
+        assert!(
+            stream
+                .update("profile:page", Err("Scene is changing".into()))
+                .is_none()
+        );
         assert!(stream.needs_refresh());
         let first = stream
             .update(
@@ -603,6 +869,34 @@ impl crate::Runtime {
         }) {
             availability = "image_only";
         }
+        let label_parameters = if binding
+            .live_label
+            .iter()
+            .any(|s| matches!(s, crate::live_label::LabelSegment::Parameter { .. }))
+        {
+            self.label_overrides(snapshot.configuration_revision)?
+        } else {
+            Default::default()
+        };
+        let authored_title = &binding.title;
+        let vault_title = crate::live_label::has_vault_title(binding);
+        let vault_revision =
+            crate::live_label::has_vault_text(binding).then(|| self.vault.presentation_revision());
+        let live = self.display_label_binding(
+            binding,
+            |name| {
+                snapshot
+                    .profiles
+                    .iter()
+                    .find(|p| p.id == session.profile_id)
+                    .and_then(|p| {
+                        crate::live_label::parameter(p, &label_parameters, device_id, name)
+                    })
+            },
+            || crate::feedback::text(self, "macro", device_id, &scope, control_id),
+            if placeholder { None } else { visual.as_ref() },
+        );
+        let binding = live.as_ref().unwrap_or(binding);
         let feedback = crate::feedback::text(
             self,
             binding.feedback.as_deref().unwrap_or("off"),
@@ -653,7 +947,7 @@ impl crate::Runtime {
             colors["ink"].as_str().expect("theme ink"),
         );
         let binding = themed_binding.as_ref().unwrap_or(binding);
-        let sources = self.display_sources(
+        let mut sources = self.display_sources(
             control,
             binding,
             &feedback,
@@ -661,6 +955,17 @@ impl crate::Runtime {
             self.media_elapsed(),
             placeholder,
         )?;
+
+        // Only pixels and layout checks consume expanded Vault text.
+        if vault_title {
+            if let Some(source) = sources
+                .iter_mut()
+                .find(|source| source.source.kind == "title")
+            {
+                source.value = serde_json::json!(authored_title);
+                source.available = !authored_title.is_empty();
+            }
+        }
 
         let elapsed = self.media_elapsed();
         let text_warnings = self.binding_text_checks(
@@ -685,6 +990,8 @@ impl crate::Runtime {
             true,
             None,
             navigation_ink,
+            None,
+            true,
         )?;
         let bytes = self.encode_surface_shared(
             bytes,
@@ -694,6 +1001,9 @@ impl crate::Runtime {
             false,
         )?;
         let bytes = self.preview_image(bytes, rotation)?;
+        if vault_revision.is_some_and(|revision| self.vault.presentation_revision() != revision) {
+            return Err("Vault changed during the display preview. Try again.".into());
+        }
         Ok(BindingPreview {
             text_warnings,
             image: format!(
@@ -907,6 +1217,169 @@ impl crate::Runtime {
 
 #[cfg(test)]
 mod composition_runtime_tests {
+    #[test]
+    #[ignore = "Uses an isolated loopback host and simulator; never HID"]
+    fn vault_display_text_matches_authored_literals_only_while_unlocked() {
+        use crate::{
+            live_label::LabelSegment,
+            vault::{VaultEntryInput, VaultKind},
+        };
+        use hardware_core::{
+            composition::{DisplayComposition, DisplayLayer, DisplaySource},
+            plugin_display::ElementStyle,
+        };
+        let dir = tempfile::tempdir().unwrap();
+        let runtime = crate::Runtime::build(dir.path().into(), false).unwrap();
+        let password = "isolated display fixture password";
+        runtime
+            .vault
+            .initialize_password(password, password)
+            .unwrap();
+        let entry = |label, kind, protected, value| {
+            runtime
+                .vault
+                .create_entry(VaultEntryInput {
+                    label,
+                    kind,
+                    protected,
+                    value,
+                })
+                .unwrap()
+        };
+        let value = entry(
+            "Display fixture".into(),
+            VaultKind::Text,
+            false,
+            serde_json::json!("42"),
+        );
+        let protected = entry(
+            "Protected fixture".into(),
+            VaultKind::Text,
+            true,
+            serde_json::json!("do not display"),
+        );
+        let token = |id: &str| format!("${{vault.{id}}}");
+        let id = "simulator:vault-display";
+        runtime.simulate_device(true, id).unwrap();
+        let before = runtime.snapshot();
+        let session = before.session(id);
+        let profile = before
+            .profiles
+            .iter()
+            .find(|p| p.id == session.profile_id)
+            .unwrap();
+        let page = profile
+            .pages
+            .iter()
+            .find(|p| p.id == session.page_id)
+            .unwrap();
+        let mut binding = page.bindings["key-1"].clone();
+        binding.action = crate::actions::Action::None;
+        binding.appearance = None;
+        binding.plugin_appearance = None;
+        binding.asset = None;
+        binding.feedback = None;
+        binding.title = "Fallback title".into();
+        binding.live_label = vec![
+            LabelSegment::Literal { text: "N=".into() },
+            LabelSegment::Literal {
+                text: token(&value.id),
+            },
+        ];
+        binding.composition = Some(Box::new(DisplayComposition {
+            layers: vec![
+                DisplayLayer {
+                    id: "live-title".into(),
+                    label: "Live title".into(),
+                    source: DisplaySource {
+                        kind: "title".into(),
+                        ..Default::default()
+                    },
+                    style: ElementStyle {
+                        layout: "$composition".into(),
+                        key: "live-title".into(),
+                        rect: [0., 0., 100., 50.],
+                        ..Default::default()
+                    },
+                    text: String::new(),
+                },
+                DisplayLayer {
+                    id: "value".into(),
+                    label: "Static text".into(),
+                    source: DisplaySource {
+                        kind: "text".into(),
+                        ..Default::default()
+                    },
+                    style: ElementStyle {
+                        layout: "$composition".into(),
+                        key: "value".into(),
+                        rect: [0., 50., 100., 50.],
+                        ..Default::default()
+                    },
+                    text: format!("{}{}", token(&value.id), token(&protected.id)),
+                },
+            ],
+        }));
+        let render = |binding: &crate::Binding| {
+            runtime
+                .preview_binding_details(id, "key-1", binding, None)
+                .unwrap()
+        };
+        let mut literal = binding.clone();
+        literal.live_label.clear();
+        literal.title = "N=42".into();
+        literal.composition.as_mut().unwrap().layers[1].text = "42".into();
+        let expected = render(&literal);
+        let preview = render(&binding);
+        assert_eq!(preview.image, expected.image);
+        assert_eq!(preview.text_warnings, expected.text_warnings);
+        assert!(
+            !serde_json::to_string(&preview.sources)
+                .unwrap()
+                .contains("N=42")
+        );
+        runtime
+            .apply_edits(
+                before.configuration_revision,
+                "Save Vault display fixture",
+                vec![crate::workspace::Edit::Bindings {
+                    profile_id: profile.id.clone(),
+                    page_id: page.id.clone(),
+                    bindings: std::collections::BTreeMap::from([(
+                        "key-1".into(),
+                        Some(binding.clone()),
+                    )]),
+                }],
+            )
+            .unwrap();
+        let saved = runtime.snapshot();
+        let saved_binding = &saved
+            .profiles
+            .iter()
+            .find(|p| p.id == profile.id)
+            .unwrap()
+            .pages
+            .iter()
+            .find(|p| p.id == page.id)
+            .unwrap()
+            .bindings["key-1"];
+        assert_eq!(
+            saved_binding.composition.as_ref().unwrap().layers[1].text,
+            format!("{}{}", token(&value.id), token(&protected.id)),
+        );
+        let surface = || runtime.preview_surfaces(Some(id)).unwrap().surfaces["key-1"].clone();
+        assert_eq!(surface(), preview.image);
+        let scene = runtime.render_scene(id).unwrap();
+        runtime.vault.lock();
+        assert!(!scene.current(&runtime));
+        literal.title = "N=".into();
+        literal.composition.as_mut().unwrap().layers[1].text.clear();
+        let locked = render(&binding);
+        assert_eq!(locked.image, render(&literal).image);
+        assert_eq!(surface(), locked.image);
+        assert_ne!(locked.image, preview.image);
+    }
+
     #[test]
     #[ignore = "Uses an isolated loopback host and simulator; never HID"]
     // Verify that composition preview matches saved simulator output
@@ -1127,8 +1600,8 @@ mod system_font_tests {
             .unwrap();
         let data: serde_json::Value = serde_json::from_str(&json).unwrap();
         assert_eq!(
-            data["profiles"][0]["pages"][0]["bindings"]["key-1"]["composition"]["layers"][0]
-                ["style"]["font"],
+            data["profiles"][0]["pages"][0]["bindings"]["key-1"]["composition"]["layers"][0]["style"]
+                ["font"],
             font
         );
         assert!(

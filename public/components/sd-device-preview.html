@@ -1,4 +1,4 @@
-<div x-data="preview">
+<div x-data="preview" x-effect="updateGeometry">
     <div class="device-preview-frame">
         <div
             class="device-body"
@@ -6,6 +6,18 @@
             :class="{sleeping: app.effectiveDeviceOutput.sleeping}"
             aria-label="Device control layout"
         >
+            <button
+                type="button"
+                class="device-favorite"
+                title="Favorite"
+                aria-label="Favorite"
+                :aria-pressed="app.isFavoriteDevice"
+                :disabled="!app.canFavoriteDevice || app.favoriteDeviceSaving"
+                @click="app.toggleFavoriteDevice()"
+                x-show="!app.simulated"
+            >
+                <span aria-hidden="true" x-text="app.isFavoriteDevice ? '★' : '☆'"></span>
+            </button>
             <div class="device-wordmark" x-text="app.modelName" :title="app.modelName"></div>
             <span class="sleep-indicator" x-show="app.effectiveDeviceOutput.sleeping">
                 ☾ Sleeping
@@ -17,7 +29,27 @@
                     aria-hidden="true"
                 ></div>
             </template>
-            <template x-for="control in controls" :key="control.id">
+            <template x-for="panel in touchPanels" :key="panel.id">
+                <div
+                    class="hardware-touch-panel"
+                    :style="touchPanelStyle(panel)"
+                    aria-hidden="true"
+                >
+                    <span
+                        class="screen-background touch"
+                        x-show="app.device.manifest.capabilities.background && screenBackground"
+                    >
+                        <img
+                            data-resource-role="background-preview"
+                            :src="screenBackground || null"
+                            :style="screenBackgroundStyle(panel)"
+                            alt=""
+                            draggable="false"
+                        />
+                    </span>
+                </div>
+            </template>
+            <template x-for="control in controls" :key="controlKey(control)">
                 <div
                     class="hardware-location"
                     :class="dragClass(control)"
@@ -35,7 +67,8 @@
                         aria-hidden="true"
                     >
                         <img
-                            :src="screenBackground"
+                            data-resource-role="background-preview"
+                            :src="screenBackground || null"
                             :style="screenBackgroundStyle(control)"
                             alt=""
                             draggable="false"
@@ -56,8 +89,9 @@
                         @click="selectControl"
                     >
                         <img
+                            data-resource-role="control-surface"
                             class="surface-image"
-                            :src="app.previewSurface(control.id)"
+                            :src="app.previewSurface(control.id) || null"
                             alt=""
                             draggable="false"
                             x-show="hasSurface(control)"

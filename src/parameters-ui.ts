@@ -10,25 +10,66 @@ import { initialValue, parseValue } from './parameter-values';
 import { ownWindowMethods } from './window-work';
 import { registerCloseDraft } from './close-releases';
 
-// Register the parameters
-export function registerParameters(Alpine: typeof AlpineType, app: () => AppState) {
-    Alpine.data('profileParameters', () => ({
+function parameterDraft() {
+    return {
         definitions: [] as ProfileParameter[],
         values: {} as Record<string, unknown>,
-        overrides: { installation: {}, devices: {} } as ParameterOverrides,
         secrets: {} as Record<string, string>,
+        closeBaseline: '',
+    };
+}
+
+function parameterOwner(draft: ReturnType<typeof parameterDraft>) {
+    return {
+        name: 'Profile parameters',
+        retainOnUnmount: true,
+        state() {
+            const changed =
+                draft.closeBaseline &&
+                JSON.stringify([draft.definitions, draft.values]) !== draft.closeBaseline;
+            return changed || Object.values(draft.secrets).some(Boolean)
+                ? ('dirty' as const)
+                : ('clean' as const);
+        },
+        discard() {
+            draft.secrets = {};
+            if (draft.closeBaseline)
+                [draft.definitions, draft.values] = JSON.parse(draft.closeBaseline);
+        },
+    };
+}
+
+// Only the data needed to resolve an unfinished draft may outlive the Settings DOM.
+export function registerParameters(Alpine: typeof AlpineType, app: () => AppState) {
+    Alpine.data('profileParameters', () => ({
+        parameterDraft: parameterDraft(),
+        get definitions() {
+            return this.parameterDraft.definitions;
+        },
+        set definitions(value: ProfileParameter[]) {
+            this.parameterDraft.definitions = value;
+        },
+        get values() {
+            return this.parameterDraft.values;
+        },
+        set values(value: Record<string, unknown>) {
+            this.parameterDraft.values = value;
+        },
+        get secrets() {
+            return this.parameterDraft.secrets;
+        },
+        set secrets(value: Record<string, string>) {
+            this.parameterDraft.secrets = value;
+        },
+        overrides: { installation: {}, devices: {} } as ParameterOverrides,
         statuses: {} as Record<string, CredentialState | 'unsaved'>,
         deviceOnly: false,
         error: '',
         profileId: '',
         credentialBusy: '',
-        closeBaseline: '',
         definitionsBaseline: '[]',
+        loadGeneration: 0,
         unregisterCloseOwner: undefined as (() => void) | undefined,
-        // Close the value
-        closeValue() {
-            return JSON.stringify([this.definitions, this.values]);
-        },
         // Initialize parameters ui state and its required lifecycle hooks
         async init() {
             ownWindowMethods(this, 'profile parameters', [
@@ -37,61 +78,57 @@ export function registerParameters(Alpine: typeof AlpineType, app: () => AppStat
                 'save',
                 'credentialAction',
             ]);
-            this.unregisterCloseOwner = registerCloseDraft(this, ['save', 'credentialAction'], {
-                name: 'Profile parameters',
-                retainOnUnmount: true,
-                // Return a snapshot of the current parameters ui state
-                state: () =>
-                    (this.closeBaseline && this.closeValue() !== this.closeBaseline) ||
-                    Object.values(this.secrets).some(Boolean)
-                        ? 'dirty'
-                        : 'clean',
-                // Discard pending parameters ui edits without saving them
-                discard: () => {
-                    this.secrets = {};
-                    if (this.closeBaseline)
-                        [this.definitions, this.values] = JSON.parse(this.closeBaseline);
-                    this.error = '';
-                },
-            });
+            this.unregisterCloseOwner = registerCloseDraft(
+                this,
+                ['save', 'credentialAction'],
+                parameterOwner(this.parameterDraft),
+            );
             await this.load();
         },
         // Release parameters ui state and associated lifecycle resources
         destroy() {
+            this.loadGeneration++;
             this.unregisterCloseOwner?.();
         },
         // Load the data required by the parameters ui workflow
         async load() {
+            const generation = ++this.loadGeneration;
             this.profileId = app().profile?.id || '';
             this.definitions = structuredClone(Alpine.raw(app().profile?.parameters || []));
             this.definitionsBaseline = JSON.stringify(this.definitions);
-            this.overrides = await app().command('parameter_overrides');
+            const overrides = await app().command('parameter_overrides');
+            if (generation !== this.loadGeneration) return;
+            this.overrides = overrides;
             await this.loadValues();
         },
         // Load values for the parameters ui workflow
         async loadValues() {
+            const generation = ++this.loadGeneration;
             this.secrets = {};
             this.values = {
                 ...(this.deviceOnly
                     ? this.overrides.devices[app().deviceId]?.[this.profileId]
                     : this.overrides.installation[this.profileId]),
             };
+            this.parameterDraft.closeBaseline = JSON.stringify([
+                JSON.parse(this.definitionsBaseline),
+                this.values,
+            ]);
             this.statuses = {};
             for (const parameter of this.definitions.filter((p) => p.sensitive)) {
+                let status: CredentialState | 'unsaved';
                 try {
-                    this.statuses[parameter.name] = await app().command(
+                    status = await app().command(
                         'credential_status',
                         { target: this.target(parameter.name) },
                         false,
                     );
                 } catch {
-                    this.statuses[parameter.name] = 'unsaved';
+                    status = 'unsaved';
                 }
+                if (generation !== this.loadGeneration) return;
+                this.statuses[parameter.name] = status;
             }
-            this.closeBaseline = JSON.stringify([
-                JSON.parse(this.definitionsBaseline),
-                this.values,
-            ]);
         },
         // Build the profile-scoped credential target with an optional device restriction
         target(name: string): CredentialTarget {
@@ -231,6 +268,8 @@ export function registerParameters(Alpine: typeof AlpineType, app: () => AppStat
             const name = el.dataset.name || '';
             if (this.credentialBusy) return;
             this.credentialBusy = name;
+            const generation = this.loadGeneration;
+            const submitted = this.secrets[name];
             try {
                 if (app().profile?.id !== this.profileId)
                     throw Error('Profile changed. Reload parameters.');
@@ -239,7 +278,7 @@ export function registerParameters(Alpine: typeof AlpineType, app: () => AppStat
                 const operation = el.dataset.operation;
                 if (operation !== 'write' && operation !== 'clear')
                     throw Error('Unsupported credential operation.');
-                this.statuses[name] =
+                const status =
                     operation === 'write'
                         ? await app().command('write_credential', {
                               write: { target, expected_revision, value: this.secrets[name] || '' },
@@ -248,8 +287,10 @@ export function registerParameters(Alpine: typeof AlpineType, app: () => AppStat
                               target,
                               expectedRevision: expected_revision,
                           });
-                this.overrides = await app().command('parameter_overrides');
-                await this.loadValues();
+                const overrides = await app().command('parameter_overrides');
+                if (generation !== this.loadGeneration) return;
+                this.overrides = overrides;
+                this.statuses[name] = status;
                 this.error = '';
                 app().notify(
                     operation === 'clear'
@@ -258,9 +299,10 @@ export function registerParameters(Alpine: typeof AlpineType, app: () => AppStat
                     'success',
                 );
             } catch (error) {
-                this.error = String(error);
+                if (generation === this.loadGeneration) this.error = String(error);
             } finally {
-                delete this.secrets[name];
+                if (generation === this.loadGeneration && this.secrets[name] === submitted)
+                    delete this.secrets[name];
                 this.credentialBusy = '';
             }
         },

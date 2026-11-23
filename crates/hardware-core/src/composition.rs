@@ -289,6 +289,8 @@ mod tests {
             .unwrap();
         let mut layer = text("temp", source.source.clone());
         layer.style.size = 32.;
+        layer.style.font_weight = 700;
+        layer.style.font_italic = true;
         let composition = DisplayComposition {
             layers: vec![layer],
         };
@@ -300,6 +302,14 @@ mod tests {
             rendered["layout"]["items"][0]["__manager_style"]["size"],
             32.
         );
+        assert_eq!(
+            rendered["layout"]["items"][0]["__manager_style"]["font_weight"],
+            700
+        );
+        assert_eq!(
+            rendered["layout"]["items"][0]["__manager_style"]["font_italic"],
+            true
+        );
         let mut other = source.clone();
         other.source.action_id = "forecast".into();
         assert!(
@@ -309,6 +319,34 @@ mod tests {
                 .is_empty()
         );
         assert_eq!(composition.layers[0].text, "Static label");
+    }
+    #[test]
+    // Persist canvas style fields and render each actual native face through the shared compositor
+    fn canvas_font_styles_survive_roundtrip_and_change_pixels() {
+        let mut outputs = std::collections::BTreeSet::new();
+        for weight in [400, 700] {
+            for italic in [false, true] {
+                let mut layer = text(
+                    "title",
+                    DisplaySource {
+                        kind: "text".into(),
+                        ..Default::default()
+                    },
+                );
+                layer.style.font_weight = weight;
+                layer.style.font_italic = italic;
+                layer.style.size = 24.;
+                let composition = DisplayComposition {
+                    layers: vec![layer],
+                };
+                let saved = serde_json::to_value(&composition).unwrap();
+                let restored: DisplayComposition = serde_json::from_value(saved.clone()).unwrap();
+                assert_eq!(serde_json::to_value(&restored).unwrap(), saved);
+                let scene = restored.visual(&[], "#00000000", None).unwrap();
+                outputs.insert(crate::render::visual(&scene, 112, 112, 0).unwrap());
+            }
+        }
+        assert_eq!(outputs.len(), 4);
     }
     #[test]
     // Verify ordering visibility validation and pixel rendering share one compositor

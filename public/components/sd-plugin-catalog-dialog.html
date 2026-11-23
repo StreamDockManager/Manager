@@ -1,8 +1,11 @@
-<div x-data="pluginCatalog">
+<div
+    x-data="pluginCatalog"
+    @vault-session-ended.window="updates.vaultReview.reset()"
+    x-effect="updateMatches"
+>
     <dialog
         x-ref="catalogDialog"
         class="feature-dialog catalog-dialog"
-        :class="updates.reviewActive ? 'catalog-review-dialog' : ''"
         aria-labelledby="catalog-title"
         @cancel.prevent="cancel"
         @keydown.escape.prevent.stop="cancel"
@@ -23,7 +26,13 @@
                     :disabled="updates.working || updates.reviewActive || sourceSaving"
                     @click="toggleSettings"
                 >
-                    <img src="/appearance/icons/settings.svg" width="20" height="20" alt="" />
+                    <img
+                        data-resource-role="plugin-icon"
+                        src="/appearance/icons/settings.svg"
+                        width="20"
+                        height="20"
+                        alt=""
+                    />
                 </button>
                 <button
                     type="button"
@@ -38,7 +47,7 @@
             <p x-show="!updates.reviewActive">Find plugins and review updates.</p>
         </header>
         <div
-            class="catalog-tabs"
+            class="navigation-tabs catalog-tabs"
             role="tablist"
             aria-label="Plugin catalog views"
             x-show="!settingsOpen && !updates.reviewActive"
@@ -70,322 +79,13 @@
                 <span x-text="updates.count"></span>
             </button>
         </div>
-        <div
-            class="feature-body catalog-body"
-            :class="updates.reviewActive ? 'catalog-review-body' : ''"
-            x-ref="catalogBody"
-        >
+        <div class="feature-body catalog-body" x-ref="catalogBody">
             <p
                 class="error"
                 role="alert"
                 x-show="updates.error && !settingsOpen"
                 x-text="updates.error"
             ></p>
-            <section
-                role="region"
-                aria-label="Package review"
-                class="package-review"
-                :aria-busy="updates.reviewLoading ? 'true' : 'false'"
-                x-show="updates.reviewActive && !settingsOpen"
-            >
-                <div class="feature-body package-review-loading" x-show="updates.reviewLoading">
-                    <span class="review-spinner" aria-hidden="true"></span>
-                    <div class="field-group" role="status">
-                        <h3
-                            x-ref="reviewLoadingHeading"
-                            tabindex="-1"
-                            x-text="updates.reviewLoadingTitle"
-                        ></h3>
-                        <p class="field-help">
-                            Checking package files and compatibility before installation.
-                        </p>
-                    </div>
-                    <template x-if="updates.reviewDownload && updates.reviewDownload.total > 0">
-                        <div class="field-group package-review-progress">
-                            <progress
-                                :value="updates.reviewDownload.completed + ''"
-                                :max="updates.reviewDownload.total"
-                                aria-label="Package download progress"
-                            ></progress>
-                            <small
-                                x-text="updates.downloadProgress(updates.reviewDownload)"
-                            ></small>
-                        </div>
-                    </template>
-                </div>
-                <div
-                    class="feature-body package-review-content"
-                    x-ref="reviewBody"
-                    x-show="updates.review"
-                >
-                    <header class="package-review-heading">
-                        <h3>Review installation</h3>
-                        <div class="package-review-identity">
-                            <strong
-                                x-text="updates.review ? updates.review.manifest.name : ''"
-                            ></strong>
-                            <span
-                                class="chip"
-                                x-text="updates.review ? 'v' + updates.review.package.version : ''"
-                            ></span>
-                        </div>
-                        <p
-                            class="field-help"
-                            x-text="updates.review ? updates.review.manifest.publisher || 'Publisher not declared' : ''"
-                        ></p>
-                    </header>
-                    <div class="package-review-status">
-                        <span
-                            class="chip"
-                            x-text="updates.review && updates.review.can_import ? 'Can import' : 'Cannot import'"
-                        ></span>
-                        <span
-                            class="chip"
-                            x-text="updates.review && updates.review.can_run ? 'Runtime requirements met' : 'Runtime blocked'"
-                        ></span>
-                    </div>
-                    <p
-                        class="field-help"
-                        x-text="updates.review && updates.review.trusted ? 'Verified catalog package. Files and capabilities have been checked.' : 'Local package: manually managed. Only install packages you trust.'"
-                    ></p>
-                    <p
-                        class="error"
-                        role="alert"
-                        x-show="updates.review && updates.review.reason"
-                        x-text="updates.review ? updates.review.reason || '' : ''"
-                    ></p>
-                    <p class="danger-text" x-show="updates.review && !updates.review.can_run">
-                        The plugin will remain blocked until its runtime requirements are met. See
-                        Compatibility for details.
-                    </p>
-                    <div
-                        class="catalog-tabs package-review-tabs"
-                        role="tablist"
-                        aria-label="Installation review details"
-                        x-ref="reviewTabs"
-                        @keydown="navigateReviewTabs"
-                    >
-                        <template x-for="tab in reviewTabs" :key="tab.id">
-                            <button
-                                type="button"
-                                role="tab"
-                                :id="'review-' + tab.id + '-tab'"
-                                :aria-controls="'review-' + tab.id + '-panel'"
-                                :aria-selected="reviewTab === tab.id"
-                                :tabindex="reviewTab === tab.id ? 0 : -1"
-                                :data-review-tab="tab.id"
-                                @click="selectReviewTab"
-                                x-text="tab.label"
-                            ></button>
-                        </template>
-                    </div>
-                    <section
-                        role="tabpanel"
-                        id="review-overview-panel"
-                        aria-labelledby="review-overview-tab"
-                        tabindex="0"
-                        class="package-review-panel"
-                        x-show="reviewTab === 'overview'"
-                    >
-                        <dl class="package-review-facts">
-                            <div>
-                                <dt>Actions</dt>
-                                <dd
-                                    x-text="updates.review ? updates.review.manifest.action_count : ''"
-                                ></dd>
-                            </div>
-                            <div>
-                                <dt>Runtime</dt>
-                                <dd
-                                    x-text="updates.review ? updates.review.manifest.runtime_kind : ''"
-                                ></dd>
-                            </div>
-                            <div>
-                                <dt>Controls</dt>
-                                <dd
-                                    x-text="updates.review ? updates.review.manifest.control_types.join(', ') || 'Not declared' : ''"
-                                ></dd>
-                            </div>
-                            <div>
-                                <dt>Platforms</dt>
-                                <dd
-                                    x-text="updates.review ? updates.review.manifest.platforms.join(', ') || 'Not declared' : ''"
-                                ></dd>
-                            </div>
-                            <div>
-                                <dt>Installed version</dt>
-                                <dd
-                                    x-text="updates.review ? updates.review.installed_version || 'New plugin' : ''"
-                                ></dd>
-                            </div>
-                            <div>
-                                <dt>Release channel</dt>
-                                <dd x-text="updates.review ? updates.review.channel : ''"></dd>
-                            </div>
-                        </dl>
-                        <p
-                            class="field-help"
-                            x-show="updates.review && !updates.review.installed_version"
-                        >
-                            New plugins stay disabled until enabled and used by an active device
-                            profile.
-                        </p>
-                    </section>
-                    <section
-                        role="tabpanel"
-                        id="review-compatibility-panel"
-                        aria-labelledby="review-compatibility-tab"
-                        tabindex="0"
-                        class="package-review-panel"
-                        x-show="reviewTab === 'compatibility'"
-                    >
-                        <dl
-                            class="package-review-facts"
-                            x-show="updates.review && updates.review.compatibility.runtime"
-                        >
-                            <div>
-                                <dt>Declared runtime</dt>
-                                <dd
-                                    x-text="updates.review && updates.review.compatibility.runtime ? updates.review.compatibility.runtime.requirement.version || 'Supported default' : ''"
-                                ></dd>
-                            </div>
-                            <div>
-                                <dt>Selected runtime</dt>
-                                <dd
-                                    x-text="updates.review && updates.review.compatibility.runtime && updates.review.compatibility.runtime.selected ? updates.review.compatibility.runtime.selected.version : 'None'"
-                                ></dd>
-                            </div>
-                        </dl>
-                        <ul
-                            class="package-review-findings"
-                            x-show="updates.review && updates.review.compatibility.checks.length"
-                        >
-                            <template
-                                x-for="finding in updates.review ? updates.review.compatibility.checks : []"
-                                :key="finding.code + finding.message"
-                            >
-                                <li>
-                                    <span class="chip" x-text="finding.level"></span>
-                                    <div class="field-group">
-                                        <p x-text="finding.message"></p>
-                                        <p
-                                            class="field-help"
-                                            x-show="finding.remedy"
-                                            x-text="finding.remedy"
-                                        ></p>
-                                    </div>
-                                </li>
-                            </template>
-                        </ul>
-                        <p
-                            class="field-help"
-                            x-show="updates.review && !updates.review.compatibility.checks.length"
-                        >
-                            No additional compatibility findings.
-                        </p>
-                    </section>
-                    <section
-                        role="tabpanel"
-                        id="review-package-panel"
-                        aria-labelledby="review-package-tab"
-                        tabindex="0"
-                        class="package-review-panel"
-                        x-show="reviewTab === 'package'"
-                    >
-                        <dl class="package-review-facts">
-                            <div class="package-review-wide">
-                                <dt>Plugin ID</dt>
-                                <dd
-                                    class="source-path"
-                                    x-text="updates.review ? updates.review.package.id : ''"
-                                ></dd>
-                            </div>
-                            <div>
-                                <dt>Package type</dt>
-                                <dd
-                                    x-text="updates.review ? updates.review.manifest.dialect + ' · ' + updates.review.source.format : ''"
-                                ></dd>
-                            </div>
-                            <div>
-                                <dt>Minimum Manager version</dt>
-                                <dd
-                                    x-text="updates.review ? updates.review.package.minimum_manager : ''"
-                                ></dd>
-                            </div>
-                            <div>
-                                <dt>Entry point</dt>
-                                <dd
-                                    class="source-path"
-                                    x-text="updates.review ? updates.review.manifest.entry_point : ''"
-                                ></dd>
-                            </div>
-                            <div>
-                                <dt>Source</dt>
-                                <dd
-                                    class="source-path"
-                                    x-text="updates.review ? updates.review.source.filename : ''"
-                                ></dd>
-                            </div>
-                            <div class="package-review-wide">
-                                <dt>SHA-256</dt>
-                                <dd
-                                    class="source-path"
-                                    x-text="updates.review ? updates.review.source.sha256 : ''"
-                                ></dd>
-                            </div>
-                        </dl>
-                    </section>
-                </div>
-                <footer class="feature-footer package-review-footer">
-                    <div
-                        class="settings-section"
-                        x-show="updates.review && updates.review.channel_change || updates.review && !updates.review.trusted && updates.review.installed_version"
-                    >
-                        <label
-                            class="preference-toggle"
-                            x-show="updates.review && updates.review.channel_change"
-                        >
-                            <input
-                                type="checkbox"
-                                x-model="updates.allowChannelChange"
-                                :disabled="updates.working"
-                            />
-                            <span>Allow changing this plugin’s release channel</span>
-                        </label>
-                        <label
-                            class="preference-toggle"
-                            x-show="updates.review && !updates.review.trusted && updates.review.installed_version"
-                        >
-                            <input
-                                type="checkbox"
-                                x-model="updates.replaceInstalled"
-                                :disabled="updates.working"
-                            />
-                            <span>
-                                Replace the installed package; preserve settings, bindings, and
-                                enabled preference, and keep a backup
-                            </span>
-                        </label>
-                    </div>
-                    <div class="button-row">
-                        <button
-                            type="button"
-                            class="button"
-                            @click="updates.closeReview()"
-                            :disabled="updates.working"
-                            x-text="updates.reviewLoading ? 'Cancel review' : 'Cancel installation'"
-                        ></button>
-                        <button
-                            type="button"
-                            class="button primary"
-                            @click="updates.commit()"
-                            x-show="updates.review"
-                            :disabled="!updates.canCommit"
-                            x-text="updates.working ? 'Installing…' : 'Install package'"
-                        ></button>
-                    </div>
-                </footer>
-            </section>
             <section
                 id="catalog-settings"
                 class="catalog-settings"
@@ -579,12 +279,37 @@
                 </p>
                 <p
                     role="status"
-                    x-show="updates.hasCatalog && !updates.availablePlugins.length && !updates.checking"
+                    x-show="updates.hasCatalog && !matches.length && !updates.checking && !updates.developmentSourceHint"
                 >
                     No plugins match this search and channel.
                 </p>
-                <div class="catalog-grid">
-                    <template x-for="entry in updates.availablePlugins" :key="entry.id">
+                <p role="status" class="field-help" x-show="updates.developmentSourceHint">
+                    Development packages are published to the CDN. Open Catalog settings and choose
+                    CDN catalog, then refresh to browse them.
+                </p>
+                <nav class="button-row" aria-label="Catalog pages" x-show="catalogPage.pages > 1">
+                    <button
+                        type="button"
+                        class="button"
+                        @click="previousPage"
+                        :disabled="catalogPage.page === 1"
+                    >
+                        Previous
+                    </button>
+                    <span
+                        x-text="catalogPage.start + '–' + catalogPage.end + ' of ' + catalogPage.total"
+                    ></span>
+                    <button
+                        type="button"
+                        class="button"
+                        @click="nextPage"
+                        :disabled="catalogPage.page === catalogPage.pages"
+                    >
+                        Next
+                    </button>
+                </nav>
+                <div class="catalog-grid" x-effect="updatePage">
+                    <template x-for="entry in catalogPage.items" :key="entry.id">
                         <article
                             class="card catalog-plugin"
                             :aria-label="entry.name"
@@ -593,8 +318,9 @@
                         >
                             <header class="card-heading">
                                 <img
+                                    data-resource-role="plugin-icon"
                                     class="catalog-plugin-icon"
-                                    :src="entry.icon"
+                                    :src="entry.icon || null"
                                     width="40"
                                     height="40"
                                     alt=""
@@ -775,17 +501,17 @@
                     <div class="download-row">
                         <div class="field-group">
                             <p x-show="job.asset_name" x-text="job.asset_name"></p>
-                            <strong x-text="job.state"></strong>
+                            <strong x-text="updates.downloadJobLabel(job)"></strong>
                             <p x-show="job.error" x-text="job.error || ''"></p>
                             <p
                                 role="status"
-                                x-show="job.state === 'running'"
+                                x-show="updates.showDownloadProgress(job)"
                                 x-text="updates.downloadProgress(job)"
                             ></p>
                             <progress
                                 :value="job.completed || 0"
                                 :max="job.total || 1"
-                                x-show="job.state === 'running'"
+                                x-show="updates.showDownloadProgress(job)"
                                 :aria-label="'Plugin download progress ' + (job.asset_name || job.id)"
                             ></progress>
                         </div>
@@ -841,5 +567,1004 @@
                 </template>
             </section>
         </div>
+    </dialog>
+    <dialog
+        x-ref="reviewDialog"
+        class="feature-dialog wide-dialog install-review-dialog"
+        aria-labelledby="install-review-title"
+        @cancel.prevent="cancel"
+        @keydown.escape.prevent.stop="cancel"
+    >
+        <section
+            role="region"
+            aria-label="Package review"
+            class="package-review"
+            :aria-busy="updates.reviewLoading ? 'true' : 'false'"
+        >
+            <header class="picker-header">
+                <div>
+                    <h2 id="install-review-title">Review installation</h2>
+                    <p x-show="updates.review" class="package-review-identity">
+                        <strong
+                            x-text="updates.review ? updates.review.manifest.name : ''"
+                        ></strong>
+                        <span
+                            x-text="updates.review ? 'v' + updates.review.package.version : ''"
+                        ></span>
+                    </p>
+                </div>
+                <button
+                    type="button"
+                    class="icon-button"
+                    aria-label="Close installation review"
+                    :disabled="updates.working"
+                    @click="close"
+                >
+                    ×
+                </button>
+            </header>
+            <div class="feature-body package-review-loading" x-show="updates.reviewLoading">
+                <span class="review-spinner" aria-hidden="true"></span>
+                <div class="field-group" role="status">
+                    <h3
+                        x-ref="reviewLoadingHeading"
+                        tabindex="-1"
+                        x-text="updates.reviewLoadingTitle"
+                    ></h3>
+                    <p class="field-help" x-text="updates.reviewLoadingDetail"></p>
+                </div>
+                <template
+                    x-if="updates.reviewDownload && updates.showDownloadProgress(updates.reviewDownload)"
+                >
+                    <div class="field-group package-review-progress">
+                        <progress
+                            :value="updates.reviewDownload.completed + ''"
+                            :max="updates.reviewDownload.total"
+                            aria-label="Package download progress"
+                        ></progress>
+                        <small x-text="updates.downloadProgress(updates.reviewDownload)"></small>
+                    </div>
+                </template>
+            </div>
+            <div
+                class="navigation-tabs catalog-tabs package-review-tabs"
+                role="tablist"
+                aria-label="Installation review details"
+                x-ref="reviewTabs"
+                x-show="updates.review"
+                @keydown="navigateReviewTabs"
+            >
+                <template x-for="tab in reviewTabs" :key="tab.id">
+                    <button
+                        type="button"
+                        role="tab"
+                        :id="'review-' + tab.id + '-tab'"
+                        :aria-controls="'review-' + tab.id + '-panel'"
+                        :aria-selected="reviewTab === tab.id"
+                        :tabindex="reviewTab === tab.id ? 0 : -1"
+                        :data-review-tab="tab.id"
+                        :aria-label="tab.id === 'permissions' && requiredPermissionCount ? pendingPermissionLabel : tab.label"
+                        @click="selectReviewTab"
+                    >
+                        <span x-text="tab.label"></span>
+                        <span
+                            class="permission-review-badge"
+                            x-show="tab.id === 'permissions' && requiredPermissionCount"
+                            x-text="requiredPermissionCount"
+                            aria-hidden="true"
+                        ></span>
+                    </button>
+                </template>
+            </div>
+            <div
+                class="feature-body package-review-content"
+                x-ref="reviewBody"
+                x-show="updates.review"
+            >
+                <p class="error" role="alert" x-show="updates.error" x-text="updates.error"></p>
+                <p
+                    class="error"
+                    role="alert"
+                    x-show="updates.review && updates.review.reason"
+                    x-text="updates.review ? updates.review.reason || '' : ''"
+                ></p>
+                <p class="danger-text" x-show="updates.review && !updates.review.can_run">
+                    The plugin will remain blocked until its runtime requirements are met. See
+                    Compatibility for details.
+                </p>
+                <section
+                    role="tabpanel"
+                    id="review-overview-panel"
+                    aria-labelledby="review-overview-tab"
+                    tabindex="0"
+                    class="package-review-panel"
+                    x-show="reviewTab === 'overview'"
+                >
+                    <div class="package-review-status">
+                        <span
+                            class="chip"
+                            x-text="updates.review && updates.review.can_import ? 'Can import' : 'Cannot import'"
+                        ></span>
+                        <span
+                            class="chip"
+                            x-text="updates.review && updates.review.can_run ? 'Runtime requirements met' : 'Runtime blocked'"
+                        ></span>
+                    </div>
+                    <p
+                        class="field-help"
+                        x-text="updates.review && updates.review.trusted ? (updates.reviewUsedCache ? 'Verified catalog package from cache. Files and capabilities have been checked.' : 'Verified catalog package. Files and capabilities have been checked.') : 'Local package: manually managed. Only install packages you trust.'"
+                    ></p>
+
+                    <p
+                        class="field-help"
+                        x-text="updates.review ? updates.review.manifest.publisher || 'Publisher not declared' : ''"
+                    ></p>
+                    <dl class="package-review-facts">
+                        <div>
+                            <dt>Actions</dt>
+                            <dd
+                                x-text="updates.review ? updates.review.manifest.action_count : ''"
+                            ></dd>
+                        </div>
+                        <div>
+                            <dt>Runtime</dt>
+                            <dd
+                                x-text="updates.review ? updates.review.manifest.runtime_kind : ''"
+                            ></dd>
+                        </div>
+                        <div>
+                            <dt>Controls</dt>
+                            <dd
+                                x-text="updates.review ? updates.review.manifest.control_types.join(', ') || 'Not declared' : ''"
+                            ></dd>
+                        </div>
+                        <div>
+                            <dt>Platforms</dt>
+                            <dd
+                                x-text="updates.review ? updates.review.manifest.platforms.join(', ') || 'Not declared' : ''"
+                            ></dd>
+                        </div>
+                        <div>
+                            <dt>Installed version</dt>
+                            <dd
+                                x-text="updates.review ? updates.review.installed_version || 'New plugin' : ''"
+                            ></dd>
+                        </div>
+                        <div>
+                            <dt>Release channel</dt>
+                            <dd x-text="updates.review ? updates.review.channel : ''"></dd>
+                        </div>
+                    </dl>
+                    <p
+                        class="field-help"
+                        x-show="updates.review && !updates.review.installed_version"
+                    >
+                        New plugins stay disabled until enabled and used by an active device
+                        profile.
+                    </p>
+                    <div class="permission-review-callout" x-show="requiredPermissionCount">
+                        <div>
+                            <strong>Required permissions need review</strong>
+                            <p class="field-help">
+                                Review and allow the required access before installing.
+                            </p>
+                        </div>
+                        <button class="button" type="button" @click="reviewRequiredPermissions">
+                            Review required permissions
+                        </button>
+                    </div>
+                </section>
+                <section
+                    role="tabpanel"
+                    id="review-compatibility-panel"
+                    aria-labelledby="review-compatibility-tab"
+                    tabindex="0"
+                    class="package-review-panel"
+                    x-show="reviewTab === 'compatibility'"
+                >
+                    <dl
+                        class="package-review-facts"
+                        x-show="updates.review && updates.review.compatibility.runtime"
+                    >
+                        <div>
+                            <dt>Declared runtime</dt>
+                            <dd
+                                x-text="updates.review && updates.review.compatibility.runtime ? updates.review.compatibility.runtime.requirement.version || 'Supported default' : ''"
+                            ></dd>
+                        </div>
+                        <div>
+                            <dt>Selected runtime</dt>
+                            <dd
+                                x-text="updates.review && updates.review.compatibility.runtime && updates.review.compatibility.runtime.selected ? updates.review.compatibility.runtime.selected.version : 'None'"
+                            ></dd>
+                        </div>
+                    </dl>
+                    <ul
+                        class="package-review-findings"
+                        x-show="updates.review && updates.review.compatibility.checks.length"
+                    >
+                        <template
+                            x-for="finding in updates.review ? updates.review.compatibility.checks : []"
+                            :key="finding.code + finding.message"
+                        >
+                            <li>
+                                <span class="chip" x-text="finding.level"></span>
+                                <div class="field-group">
+                                    <p x-text="finding.message"></p>
+                                    <p
+                                        class="field-help"
+                                        x-show="finding.remedy"
+                                        x-text="finding.remedy"
+                                    ></p>
+                                </div>
+                            </li>
+                        </template>
+                    </ul>
+                    <p
+                        class="field-help"
+                        x-show="updates.review && !updates.review.compatibility.checks.length"
+                    >
+                        No additional compatibility findings.
+                    </p>
+                </section>
+                <section
+                    role="tabpanel"
+                    id="review-package-panel"
+                    aria-labelledby="review-package-tab"
+                    tabindex="0"
+                    class="package-review-panel"
+                    x-show="reviewTab === 'package'"
+                >
+                    <dl class="package-review-facts">
+                        <div class="package-review-wide">
+                            <dt>Plugin ID</dt>
+                            <dd
+                                class="source-path"
+                                x-text="updates.review ? updates.review.package.id : ''"
+                            ></dd>
+                        </div>
+                        <div>
+                            <dt>Package type</dt>
+                            <dd
+                                x-text="updates.review ? updates.review.manifest.dialect + ' · ' + updates.review.source.format : ''"
+                            ></dd>
+                        </div>
+                        <div>
+                            <dt>Minimum Manager version</dt>
+                            <dd
+                                x-text="updates.review ? updates.review.package.minimum_manager : ''"
+                            ></dd>
+                        </div>
+                        <div>
+                            <dt>Entry point</dt>
+                            <dd
+                                class="source-path"
+                                x-text="updates.review ? updates.review.manifest.entry_point : ''"
+                            ></dd>
+                        </div>
+                        <div>
+                            <dt>Source</dt>
+                            <dd
+                                class="source-path"
+                                x-text="updates.review ? updates.review.source.filename : ''"
+                            ></dd>
+                        </div>
+                        <div class="package-review-wide">
+                            <dt>SHA-256</dt>
+                            <dd
+                                class="source-path"
+                                x-text="updates.review ? updates.review.source.sha256 : ''"
+                            ></dd>
+                        </div>
+                    </dl>
+                </section>
+                <section
+                    role="tabpanel"
+                    id="review-permissions-panel"
+                    aria-labelledby="review-permissions-tab"
+                    class="package-review-panel"
+                    x-show="reviewTab === 'permissions'"
+                    x-effect="recordRequiredPermissionReview"
+                >
+                    <div class="permission-review-toolbar">
+                        <div
+                            class="navigation-tabs catalog-tabs permission-group-tabs"
+                            role="tablist"
+                            aria-label="Permission requirements"
+                            @keydown="navigatePermissionTabs"
+                        >
+                            <template x-for="group in permissionGroups" :key="group.id">
+                                <button
+                                    type="button"
+                                    role="tab"
+                                    :id="'review-group-' + group.id"
+                                    :aria-controls="'review-list-' + group.id"
+                                    :aria-selected="permissionTab === group.id"
+                                    :tabindex="permissionTab === group.id ? 0 : -1"
+                                    :data-group="group.id"
+                                    @click="selectPermissionTab"
+                                >
+                                    <span x-text="group.label"></span>
+                                    <span class="permission-count" x-text="group.tabCount"></span>
+                                </button>
+                            </template>
+                        </div>
+                        <div
+                            class="permission-filter"
+                            x-show="updates.permissionChanges.length || updates.reviewVaultSlots.length"
+                        >
+                            <input
+                                type="search"
+                                aria-label="Filter permissions"
+                                placeholder="Search permissions"
+                                x-ref="permissionSearch"
+                                x-model="permissionQuery"
+                            />
+                            <button
+                                class="icon-button permission-search-clear"
+                                type="button"
+                                aria-label="Clear permission search"
+                                title="Clear permission search"
+                                x-show="permissionQuery"
+                                @click="clearPermissionSearch"
+                            >
+                                ×
+                            </button>
+                        </div>
+                    </div>
+                    <div
+                        class="permission-review-select-all"
+                        x-show="updates.reviewServiceSelection(permissionTab).total"
+                    >
+                        <label class="preference-toggle">
+                            <input
+                                type="checkbox"
+                                :data-review="reviewId"
+                                :data-required="permissionTab"
+                                :aria-label="'Allow all ' + permissionTab + ' action permissions'"
+                                aria-describedby="permission-review-check-all-scope"
+                                x-effect="syncPermissionGroup($el, updates.reviewServiceSelection(permissionTab).total, updates.reviewServiceSelection(permissionTab).selected)"
+                                :disabled="updates.working"
+                                @change="updates.pickAllServices"
+                            />
+                            <span>Check all</span>
+                        </label>
+                        <small class="field-help" id="permission-review-check-all-scope">
+                            This tab only, including filtered permissions. Vault entries are
+                            separate.
+                        </small>
+                        <small
+                            class="field-help permission-review-allowed"
+                            x-text="updates.reviewServiceSelection(permissionTab).selected + ' of ' + updates.reviewServiceSelection(permissionTab).total + ' allowed'"
+                        ></small>
+                    </div>
+                    <p
+                        class="field-help permission-review-required"
+                        x-show="updates.missingRequiredServiceApprovals"
+                    >
+                        Allow all required action permissions to install.
+                    </p>
+                    <template x-for="group in permissionGroups" :key="group.id">
+                        <section
+                            role="tabpanel"
+                            :id="'review-list-' + group.id"
+                            :aria-labelledby="'review-group-' + group.id"
+                            class="permission-group"
+                            x-show="permissionTab === group.id"
+                        >
+                            <p
+                                class="field-help permission-review-empty"
+                                x-show="!normalizedPermissionQuery && !group.count"
+                                x-text="group.empty"
+                            ></p>
+                            <div
+                                class="permission-review-empty"
+                                x-show="normalizedPermissionQuery && !group.matchCount"
+                            >
+                                <p class="field-help" role="status">
+                                    No matching permissions or Vault entries.
+                                </p>
+                                <button
+                                    class="button"
+                                    type="button"
+                                    :data-group="group.other.id"
+                                    x-show="group.other.matchCount"
+                                    @click="showPermissionMatches"
+                                    x-text="group.other.label"
+                                ></button>
+                            </div>
+                            <section
+                                class="permission-review-section"
+                                x-show="group.services.length"
+                            >
+                                <h3>Action permissions</h3>
+                                <div
+                                    class="runtime-table-scroll"
+                                    role="region"
+                                    :aria-label="group.label + ' action permissions'"
+                                    tabindex="0"
+                                >
+                                    <table class="runtime-table review-permission-table">
+                                        <thead>
+                                            <tr>
+                                                <th scope="col">Permission</th>
+                                                <th scope="col">Access</th>
+                                            </tr>
+                                        </thead>
+                                        <tbody>
+                                            <template
+                                                x-for="permission in group.services"
+                                                :key="permission.key"
+                                            >
+                                                <tr class="permission-review-group">
+                                                    <th scope="row">
+                                                        <div class="permission-cell">
+                                                            <strong
+                                                                class="permission-row-label"
+                                                                :class="permission.titleMatch ? 'permission-search-match' : ''"
+                                                                :title="permission.label"
+                                                                x-text="permission.label"
+                                                            ></strong>
+                                                            <small
+                                                                class="field-help permission-row-detail"
+                                                                x-show="permission.details"
+                                                                :class="permissionTextMatches(permission.details) ? 'permission-search-match' : ''"
+                                                                :title="permission.details"
+                                                                x-text="permission.details"
+                                                            ></small>
+                                                            <details
+                                                                class="permission-details"
+                                                                x-effect="syncPermissionDisclosure($el, permission.reasonMatch)"
+                                                            >
+                                                                <summary
+                                                                    x-text="'Reasons (' + permission.reasons.length + ')'"
+                                                                ></summary>
+                                                                <ul
+                                                                    class="permission-review-actions"
+                                                                >
+                                                                    <template
+                                                                        x-for="reason in permission.reasons"
+                                                                        :key="reason.key"
+                                                                    >
+                                                                        <li
+                                                                            :class="reason.match ? 'permission-reason-match' : ''"
+                                                                        >
+                                                                            <label
+                                                                                class="preference-toggle permission-reason-toggle"
+                                                                                x-show="reason.index >= 0"
+                                                                                title="Allow this reason"
+                                                                            >
+                                                                                <input
+                                                                                    type="checkbox"
+                                                                                    :data-index="reason.index"
+                                                                                    :data-review="reviewId"
+                                                                                    :aria-label="'Allow ' + permission.label + ' for ' + reason.label"
+                                                                                    x-effect="syncPermissionGroup($el, reason.total, reason.selected)"
+                                                                                    :disabled="updates.working"
+                                                                                    @change="updates.pickServiceReason"
+                                                                                />
+                                                                            </label>
+                                                                            <div
+                                                                                class="permission-reason-content"
+                                                                            >
+                                                                                <details
+                                                                                    class="permission-reason-copy"
+                                                                                >
+                                                                                    <summary
+                                                                                        :aria-label="'Read full reason: ' + reason.label"
+                                                                                    >
+                                                                                        <span
+                                                                                            class="permission-reason-preview"
+                                                                                            x-text="reason.label"
+                                                                                        ></span>
+                                                                                        <span
+                                                                                            class="permission-reason-open-label"
+                                                                                        >
+                                                                                            Full
+                                                                                            reason
+                                                                                        </span>
+                                                                                        <span
+                                                                                            class="permission-reason-chevron"
+                                                                                            aria-hidden="true"
+                                                                                        >
+                                                                                            ›
+                                                                                        </span>
+                                                                                    </summary>
+                                                                                    <p
+                                                                                        x-text="reason.label"
+                                                                                    ></p>
+                                                                                    <template
+                                                                                        x-if="reason.index >= 0 && reason.actionRows.length > 1"
+                                                                                    >
+                                                                                        <ul
+                                                                                            class="permission-action-checklist"
+                                                                                        >
+                                                                                            <template
+                                                                                                x-for="action in reason.actionRows"
+                                                                                                :key="action.key"
+                                                                                            >
+                                                                                                <li>
+                                                                                                    <label
+                                                                                                        class="preference-toggle"
+                                                                                                        x-show="action.index >= 0"
+                                                                                                    >
+                                                                                                        <input
+                                                                                                            type="checkbox"
+                                                                                                            :data-index="action.index"
+                                                                                                            :data-review="reviewId"
+                                                                                                            :aria-label="'Allow ' + permission.label + ' for action ' + action.label"
+                                                                                                            :checked="action.selected"
+                                                                                                            :disabled="updates.working"
+                                                                                                            @change="updates.pickServiceAction"
+                                                                                                        />
+                                                                                                        <span
+                                                                                                            x-text="action.label"
+                                                                                                            :title="action.label"
+                                                                                                        ></span>
+                                                                                                    </label>
+                                                                                                </li>
+                                                                                            </template>
+                                                                                        </ul>
+                                                                                    </template>
+                                                                                </details>
+                                                                                <div
+                                                                                    class="permission-reason-meta"
+                                                                                >
+                                                                                    <small
+                                                                                        class="field-help permission-reason-action-names"
+                                                                                        x-text="reason.actions"
+                                                                                    ></small>
+                                                                                    <small
+                                                                                        class="field-help"
+                                                                                        x-show="updates.review && updates.review.installed_version"
+                                                                                        x-text="reason.status"
+                                                                                    ></small>
+                                                                                </div>
+                                                                            </div>
+                                                                        </li>
+                                                                    </template>
+                                                                </ul>
+                                                            </details>
+                                                        </div>
+                                                    </th>
+                                                    <td>
+                                                        <div
+                                                            class="permission-cell permission-row-access"
+                                                        >
+                                                            <label
+                                                                class="preference-toggle"
+                                                                x-show="permission.total"
+                                                            >
+                                                                <input
+                                                                    type="checkbox"
+                                                                    :data-permission="permission.key"
+                                                                    :data-review="reviewId"
+                                                                    :aria-label="'Allow ' + permission.label + ' for all actions'"
+                                                                    x-effect="syncPermissionGroup($el, permission.total, permission.selected)"
+                                                                    :disabled="updates.working"
+                                                                    @change="updates.pickServiceGroup"
+                                                                />
+                                                                <span>Allow</span>
+                                                            </label>
+                                                            <small
+                                                                class="field-help"
+                                                                x-show="permission.total > 1"
+                                                                x-text="permission.selected + ' of ' + permission.total + ' allowed'"
+                                                            ></small>
+                                                            <span
+                                                                class="permission-row-availability"
+                                                                x-show="!permission.total"
+                                                                x-text="permission.availability"
+                                                            ></span>
+                                                        </div>
+                                                    </td>
+                                                </tr>
+                                            </template>
+                                        </tbody>
+                                    </table>
+                                </div>
+                            </section>
+                            <section class="permission-review-section" x-show="group.slots.length">
+                                <h3>Vault entries</h3>
+                                <p class="field-help">
+                                    Choose which Vault entry each action can use. Access takes
+                                    effect after installation.
+                                </p>
+                                <div
+                                    class="runtime-table-scroll"
+                                    role="region"
+                                    :aria-label="group.label + ' Vault entries'"
+                                    tabindex="0"
+                                >
+                                    <table class="runtime-table review-permission-table">
+                                        <thead>
+                                            <tr>
+                                                <th scope="col">Entry and action</th>
+                                                <th scope="col">Selection</th>
+                                            </tr>
+                                        </thead>
+                                        <tbody>
+                                            <template
+                                                x-for="slot in group.slots"
+                                                :key="slot.action + '/' + slot.id"
+                                            >
+                                                <tr>
+                                                    <th scope="row">
+                                                        <div class="permission-cell">
+                                                            <strong
+                                                                class="permission-row-label"
+                                                                :class="permissionTextMatches(slotName(slot)) ? 'permission-search-match' : ''"
+                                                                :title="slotName(slot)"
+                                                                x-text="slotName(slot)"
+                                                            ></strong>
+                                                            <span
+                                                                class="field-help"
+                                                                :class="permissionTextMatches(updates.reviewActionName(slot.action)) ? 'permission-search-match' : ''"
+                                                                x-text="updates.reviewActionName(slot.action)"
+                                                            ></span>
+                                                            <span
+                                                                class="permission-origin"
+                                                                x-show="slot.origin"
+                                                                :class="permissionTextMatches(slot.origin) ? 'permission-search-match' : ''"
+                                                                x-text="slot.origin"
+                                                            ></span>
+                                                            <small
+                                                                class="field-help permission-search-match"
+                                                                x-show="matchingSlotDetails(slot)"
+                                                                x-text="matchingSlotDetails(slot)"
+                                                            ></small>
+                                                        </div>
+                                                    </th>
+                                                    <td>
+                                                        <div class="permission-cell">
+                                                            <span
+                                                                class="permission-row-label"
+                                                                x-show="updates.selectedVaultLabel(slot.id, slot.action)"
+                                                                :title="updates.selectedVaultLabel(slot.id, slot.action)"
+                                                                x-text="updates.selectedVaultLabel(slot.id, slot.action)"
+                                                            ></span>
+                                                            <button
+                                                                type="button"
+                                                                class="button permission-vault-choose"
+                                                                :data-slot-id="slot.id"
+                                                                :data-action="slot.action"
+                                                                :aria-label="'Choose from Vault for ' + slotName(slot) + ', ' + updates.reviewActionName(slot.action)"
+                                                                :disabled="updates.working || updates.vaultReview.working"
+                                                                @click="updates.openVaultSlot($event)"
+                                                            >
+                                                                Choose entry
+                                                            </button>
+                                                        </div>
+                                                    </td>
+                                                </tr>
+                                            </template>
+                                        </tbody>
+                                    </table>
+                                </div>
+                            </section>
+                        </section>
+                    </template>
+                </section>
+            </div>
+            <footer class="feature-footer package-review-footer">
+                <div
+                    class="settings-section package-review-options"
+                    x-show="updates.forceReinstallAvailable || updates.review && (updates.review.channel_change || !updates.review.trusted && updates.review.installed_version)"
+                >
+                    <label
+                        class="preference-toggle"
+                        x-show="updates.review && updates.review.channel_change"
+                    >
+                        <input
+                            type="checkbox"
+                            x-model="updates.allowChannelChange"
+                            :disabled="updates.working"
+                        />
+                        <span>Allow changing this plugin’s release channel</span>
+                    </label>
+                    <label
+                        class="preference-toggle"
+                        x-show="updates.review && !updates.review.trusted && updates.review.installed_version"
+                    >
+                        <input
+                            type="checkbox"
+                            x-model="updates.replaceInstalled"
+                            :disabled="updates.working"
+                        />
+                        <span>
+                            Replace the installed package; preserve settings, bindings, and enabled
+                            preference, and keep a backup
+                        </span>
+                    </label>
+                    <label
+                        class="preference-toggle package-review-force"
+                        x-show="updates.forceReinstallAvailable"
+                    >
+                        <input
+                            type="checkbox"
+                            x-model="updates.forceReinstall"
+                            aria-describedby="package-review-force-hint"
+                            :disabled="updates.working"
+                        />
+                        <span>Force reinstall</span>
+                    </label>
+                    <p
+                        id="package-review-force-hint"
+                        class="field-help package-review-force-hint"
+                        x-show="updates.forceReinstallAvailable"
+                        x-text="updates.forceReinstallHint"
+                    ></p>
+                </div>
+                <div class="button-row">
+                    <button
+                        type="button"
+                        class="button"
+                        x-show="updates.review && !updates.working && reviewTab !== 'overview' && (!updates.requiredPermissionReviewComplete || !updates.requiredPermissionsReady) && (reviewTab !== 'permissions' || permissionTab !== 'required' || normalizedPermissionQuery)"
+                        @click="reviewRequiredPermissions"
+                    >
+                        Review required permissions
+                    </button>
+                    <button
+                        type="button"
+                        class="button"
+                        @click="updates.closeReview()"
+                        :disabled="updates.working"
+                        :aria-label="updates.reviewLoading ? 'Cancel review' : 'Cancel installation'"
+                    >
+                        Cancel
+                    </button>
+                    <button
+                        type="button"
+                        class="button primary"
+                        @click="updates.commit()"
+                        x-show="updates.review"
+                        :disabled="!updates.canCommit"
+                        x-text="updates.working ? 'Installing…' : 'Install package'"
+                    ></button>
+                </div>
+            </footer>
+        </section>
+    </dialog>
+    <dialog
+        x-ref="vaultPickerDialog"
+        class="feature-dialog install-vault-picker"
+        aria-labelledby="install-vault-title"
+        x-effect="syncVaultPicker"
+        @cancel.prevent="updates.vaultReview.cancelPicker()"
+        @keydown.escape.prevent.stop="updates.vaultReview.cancelPicker()"
+    >
+        <header class="picker-header">
+            <div>
+                <h2 id="install-vault-title">Choose a Vault entry</h2>
+                <p x-show="updates.vaultReview.slot" x-text="pickerContext"></p>
+            </div>
+            <button
+                type="button"
+                class="icon-button"
+                aria-label="Close Vault entry picker"
+                @click="updates.vaultReview.cancelPicker()"
+            >
+                ×
+            </button>
+        </header>
+        <div class="feature-body install-vault-body">
+            <div
+                class="install-vault-context"
+                x-show="updates.vaultReview.slot && (updates.vaultReview.slot.purpose || updates.vaultReview.slot.origin)"
+            >
+                <p
+                    class="field-help"
+                    x-show="updates.vaultReview.slot && updates.vaultReview.slot.purpose"
+                    x-text="'Purpose stated by the plugin: ' + (updates.vaultReview.slot ? updates.vaultReview.slot.purpose || '' : '')"
+                ></p>
+                <p
+                    class="field-help"
+                    x-show="updates.vaultReview.slot && updates.vaultReview.slot.origin"
+                    x-text="'Destination: ' + (updates.vaultReview.slot ? updates.vaultReview.slot.origin || '' : '')"
+                ></p>
+            </div>
+            <div class="install-vault-consent" x-show="updates.vaultReview.directRead">
+                <p x-show="updates.vaultReview.locationSlot">
+                    The action receives the saved latitude and longitude at their stored precision.
+                    Revoking access stops future reads.
+                </p>
+                <p x-show="!updates.vaultReview.locationSlot">
+                    The plugin will receive the actual secret and may store or share it. Revoking
+                    access only stops future reads.
+                </p>
+                <label
+                    class="preference-toggle"
+                    x-show="updates.vaultReview.mode === 'unlocked' || (!updates.vaultReview.mode && updates.vaultReview.working)"
+                >
+                    <input
+                        type="checkbox"
+                        :checked="updates.vaultReview.packageApproved"
+                        :disabled="updates.vaultReview.working"
+                        @change="updates.vaultReview.setPackageApproval($el.checked)"
+                    />
+                    <span
+                        x-text="updates.vaultReview.locationSlot ? 'Allow this package action to read saved coordinates' : 'Allow this package action to request direct secret access'"
+                    ></span>
+                </label>
+            </div>
+            <div
+                class="button-row"
+                x-show="updates.vaultReview.mode === 'locked' || updates.vaultReview.mode === 'uninitialized'"
+            >
+                <button
+                    type="button"
+                    class="button"
+                    x-show="updates.vaultReview.mode === 'locked'"
+                    :disabled="updates.vaultReview.working"
+                    @click="updates.vaultReview.makeVaultAvailable(false)"
+                >
+                    Unlock Vault
+                </button>
+                <button
+                    type="button"
+                    class="button"
+                    x-show="updates.vaultReview.mode === 'uninitialized'"
+                    :disabled="updates.vaultReview.working"
+                    @click="updates.vaultReview.makeVaultAvailable(true)"
+                >
+                    Create Vault
+                </button>
+            </div>
+            <div
+                class="install-vault-choice"
+                :aria-busy="updates.vaultReview.working"
+                x-show="!updates.vaultReview.creating && (!updates.vaultReview.mode || updates.vaultReview.mode === 'unlocked')"
+            >
+                <label>
+                    Entry
+                    <select
+                        :disabled="updates.vaultReview.working"
+                        x-effect="updates.syncVaultChoice($el)"
+                        @change="updates.chooseVaultEntry($event)"
+                    >
+                        <option value="">Choose an entry</option>
+                        <template x-for="entry in updates.vaultReview.entries" :key="entry.id">
+                            <option :value="entry.id" x-text="entry.label"></option>
+                        </template>
+                    </select>
+                </label>
+                <button
+                    type="button"
+                    class="button"
+                    x-show="updates.vaultReview.canShowCreate"
+                    :disabled="updates.vaultReview.working"
+                    @click="updates.vaultReview.creating = true"
+                >
+                    Create entry
+                </button>
+            </div>
+            <template x-if="updates.vaultReview.creating">
+                <form
+                    id="install-vault-entry-form"
+                    class="install-vault-entry-form"
+                    :aria-busy="updates.vaultReview.working"
+                    @submit.prevent="updates.vaultReview.createEntry($event)"
+                >
+                    <label>
+                        Name
+                        <input
+                            type="text"
+                            name="name"
+                            maxlength="128"
+                            required
+                            :disabled="updates.vaultReview.working"
+                        />
+                    </label>
+                    <template x-if="updates.vaultReview.locationSlot">
+                        <div
+                            class="install-vault-coordinates"
+                            role="group"
+                            aria-labelledby="install-vault-coordinates-title"
+                        >
+                            <div class="install-vault-coordinate-heading">
+                                <h3 id="install-vault-coordinates-title">Coordinates</h3>
+                                <button
+                                    type="button"
+                                    class="button"
+                                    x-data="locationFieldPicker"
+                                    :disabled="updates.vaultReview.working"
+                                    @click="pick"
+                                >
+                                    Find a location
+                                </button>
+                            </div>
+                            <div class="install-vault-coordinate-fields">
+                                <label>
+                                    Latitude
+                                    <input
+                                        name="latitude"
+                                        type="number"
+                                        min="-90"
+                                        max="90"
+                                        step="any"
+                                        required
+                                        :disabled="updates.vaultReview.working"
+                                    />
+                                </label>
+                                <label>
+                                    Longitude
+                                    <input
+                                        name="longitude"
+                                        type="number"
+                                        min="-180"
+                                        max="180"
+                                        step="any"
+                                        required
+                                        :disabled="updates.vaultReview.working"
+                                    />
+                                </label>
+                            </div>
+                        </div>
+                    </template>
+                    <template x-if="!updates.vaultReview.locationSlot">
+                        <label>
+                            <span
+                                x-text="updates.vaultReview.creatableSecret ? 'Secret value' : 'Value'"
+                            ></span>
+                            <input
+                                :type="updates.vaultReview.creatableSecret ? 'password' : 'text'"
+                                name="value"
+                                autocomplete="off"
+                                required
+                                :disabled="updates.vaultReview.working"
+                            />
+                        </label>
+                    </template>
+                    <label class="preference-toggle">
+                        <input
+                            type="checkbox"
+                            name="protected"
+                            :checked="updates.vaultReview.creatableSecret || updates.vaultReview.locationSlot"
+                            :disabled="updates.vaultReview.working"
+                        />
+                        <span>Protect this entry</span>
+                    </label>
+                    <div class="install-vault-context">
+                        <p
+                            class="field-help"
+                            x-show="!updates.vaultReview.creatableSecret && !updates.vaultReview.locationSlot"
+                        >
+                            If approved and installed, this new account value will belong to this
+                            plugin.
+                        </p>
+                        <p class="field-help">
+                            If you cancel installation, this remains a personal Vault entry.
+                        </p>
+                    </div>
+                </form>
+            </template>
+            <div class="install-vault-message">
+                <p class="danger-text" role="alert" x-text="updates.vaultReview.error"></p>
+                <p class="field-help" role="status" x-text="updates.vaultReview.pickerStatus"></p>
+            </div>
+        </div>
+        <footer class="feature-footer install-vault-actions">
+            <button type="button" class="button" @click="updates.vaultReview.cancelPicker()">
+                Cancel
+            </button>
+            <button
+                type="submit"
+                class="button primary"
+                form="install-vault-entry-form"
+                x-show="updates.vaultReview.creating"
+                :disabled="updates.vaultReview.working"
+            >
+                Create and select
+            </button>
+            <button
+                type="button"
+                class="button primary"
+                x-show="!updates.vaultReview.creating"
+                :disabled="updates.vaultReview.working || !updates.vaultReview.pending || (updates.vaultReview.directRead && !updates.vaultReview.packageApproved)"
+                @click="updates.confirmVaultEntry()"
+            >
+                Allow access
+            </button>
+        </footer>
     </dialog>
 </div>

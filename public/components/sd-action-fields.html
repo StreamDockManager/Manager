@@ -34,7 +34,10 @@
                 </div>
             </template>
             <template x-if="callInputs(row).length">
-                <div class="parameter-editors" aria-label="Macro call arguments">
+                <div
+                    class="parameter-editors macro-call-arguments"
+                    aria-label="Macro call arguments"
+                >
                     <template x-for="input in callInputs(row)" :key="input.name">
                         <fieldset class="parameter-editor">
                             <legend x-text="input.label"></legend>
@@ -186,13 +189,16 @@
                                 <input
                                     :id="fieldId(row.path,field.key)"
                                     :aria-label="row.action.kind === 'command' ? 'Action node program' : null"
-                                    :type="field.type === 'number' ? 'number' : field.key === 'url' ? 'url' : 'text'"
+                                    :type="field.type === 'number' ? 'number' : 'text'"
+                                    :inputmode="field.key === 'url' ? 'url' : null"
                                     :min="field.min"
                                     :max="field.max"
                                     :placeholder="field.placeholder"
                                     :value="fieldText(field)"
                                     :data-path="row.path"
                                     :data-field="field.key"
+                                    :data-vault-input="field.key"
+                                    @focus="rememberVaultField"
                                     :data-type="field.type"
                                     @input="builtinField"
                                 />
@@ -237,6 +243,8 @@
                                 :placeholder="field.placeholder"
                                 :data-path="row.path"
                                 :data-field="field.key"
+                                :data-vault-input="field.key"
+                                @focus="rememberVaultField"
                                 :data-type="field.type"
                                 @input="builtinField"
                             ></textarea>
@@ -374,6 +382,8 @@
                                                 :value="field.value.subject"
                                                 :data-path="row.path"
                                                 :data-field="field.key"
+                                                :data-vault-input="field.value.source === 'file' ? 'condition-path' : 'condition-subject'"
+                                                @focus="rememberVaultField"
                                                 data-part="subject"
                                                 @input="builtinField"
                                             />
@@ -438,6 +448,8 @@
                                                     :data-path="row.path"
                                                     :data-field="field.key"
                                                     :data-type="primitiveType(field.value.value)"
+                                                    data-vault-input="condition-value"
+                                                    @focus="rememberVaultField"
                                                     data-part="value"
                                                     @input="builtinField"
                                                 />
@@ -561,11 +573,14 @@
                 <label class="field-group">
                     <span x-text="row.valueLabel"></span>
                     <input
-                        :type="['delay','volume','brightness'].includes(row.action.kind) ? 'number' : row.action.kind === 'open_url' ? 'url' : 'text'"
+                        :type="['delay','volume','brightness'].includes(row.action.kind) ? 'number' : 'text'"
+                        :inputmode="row.action.kind === 'open_url' ? 'url' : null"
                         :min="row.action.kind === 'volume' ? -100 : 0"
                         :max="row.action.kind === 'delay' ? 60000 : 100"
                         :value="row.value"
                         :data-path="row.path"
+                        :data-vault-input="row.action.kind === 'open_url' ? 'url' : null"
+                        @focus="rememberVaultField"
                         @input="changeValue"
                     />
                 </label>
@@ -579,6 +594,52 @@
             >
                 Record key combination
             </button>
+            <template x-if="vaultFields(row).length">
+                <div class="field-group">
+                    <div class="button-row">
+                        <button
+                            type="button"
+                            class="button"
+                            :data-path="row.path"
+                            @click="loadVaultChoices"
+                        >
+                            Choose from Vault
+                        </button>
+                    </div>
+                    <p
+                        class="field-help"
+                        x-show="row.action.kind === 'open_url' || ['open_link','search_selection'].includes(row.choice)"
+                    >
+                        Use a fixed HTTP or HTTPS website. Entries can go in the path, query or
+                        fragment, and may be shared with that website.
+                    </p>
+                    <template x-if="vaultNode === row.id">
+                        <div class="field-group">
+                            <label x-show="vaultFields(row).length > 1">
+                                Insert into
+                                <select :data-path="row.path" @change="chooseVaultTarget">
+                                    <template x-for="field in vaultFields(row)" :key="field.key">
+                                        <option
+                                            :value="field.key"
+                                            :selected="field.key === vaultTarget"
+                                            x-text="field.label"
+                                        ></option>
+                                    </template>
+                                </select>
+                            </label>
+                            <label>
+                                Vault entry
+                                <select :data-path="row.path" @change="insertVaultReference">
+                                    <option value="">Choose an entry…</option>
+                                    <template x-for="entry in vaultChoices" :key="entry.id">
+                                        <option :value="entry.id" x-text="entry.label"></option>
+                                    </template>
+                                </select>
+                            </label>
+                        </div>
+                    </template>
+                </div>
+            </template>
             <template x-for="field in topLevelReferenceFields(row)" :key="field.key">
                 <label x-show="referenceOptions().length">
                     Insert reference
@@ -653,8 +714,8 @@
                         data-field="direction"
                         @change="field"
                     >
-                        <option value="previous">Previous (left)</option>
-                        <option value="next">Next (right)</option>
+                        <option value="previous">Previous</option>
+                        <option value="next">Next</option>
                     </select>
                 </label>
             </div>

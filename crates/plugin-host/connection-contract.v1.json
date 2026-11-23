@@ -10,9 +10,18 @@
         "plugin-theme-v1",
         "plugin-settings-v1",
         "plugin-storage-v1",
+        "plugin-permissions-v1",
+        "plugin-notifications-v1",
+        "plugin-http-broker-v1",
+        "plugin-vault-values-v1",
+        "plugin-vault-secret-sharing-v1",
+        "plugin-vault-writes-v1",
+        "plugin-vault-references-v1",
+        "plugin-text-references-v1",
         "desktop-input-v1",
         "action-results-v1",
         "network-payload-v1",
+        "network-demand-v1",
         "plugin-logs-v1"
     ],
     "vendors": {

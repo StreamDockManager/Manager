@@ -16,7 +16,6 @@ import {
     applyAccessibility,
     readAccessibility,
 } from './accessibility-preferences';
-import './styles.css';
 import { registerAutoScrollbars } from './scrollbars';
 registerAutoScrollbars();
 import './action-popup.css';

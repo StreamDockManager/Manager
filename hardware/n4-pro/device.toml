@@ -4,6 +4,9 @@ name = "N4 Pro"
 protocol = "crt-n4"
 status = "experimental"
 
+firmware_instructions = "https://www.vsdinside.com/blogs/tutorial/vsd-stream-dock-connection-issues"
+firmware_instructions_shared = true
+
 [capabilities]
 boot_logo = { size = [800, 480] }
 touch_panel = { gesture_control = "touch-strip", button_controls = [
@@ -46,6 +49,7 @@ rotation = 180
 [[variants]]
 id = "vsdinside"
 name = "VSDInside N4 Pro"
+firmware_instructions = "https://www.vsdinside.com/blogs/tutorial/vsd-stream-dock-connection-issues"
 
 [variants.identity]
 vendor_id = 21832
@@ -57,6 +61,7 @@ usage = 1
 [[variants]]
 id = "mirabox"
 name = "MiraBox N4 Pro"
+firmware_instructions = "https://mirabox.net/blogs/tutorial/how-to-enable-or-disable-vibration-on-streamdock"
 
 [variants.identity]
 vendor_id = 21832
@@ -68,6 +73,8 @@ usage = 1
 [[variants]]
 id = "mirabox-e"
 name = "MiraBox N4 Pro E"
+firmware_instructions = "https://mirabox.net/blogs/tutorial/beginner-s-guide-introduction-to-the-streamdock-software-interface"
+firmware_instructions_shared = true
 
 [variants.identity]
 vendor_id = 21832

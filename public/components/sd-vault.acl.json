@@ -1,0 +1,8 @@
+{
+    "version": 1,
+    "groups": ["vault"],
+    "options": { "shadow": false },
+    "metadata": {
+        "description": "First-party Vault management and scoped metadata."
+    }
+}

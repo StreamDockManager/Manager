@@ -21,6 +21,8 @@ mod browser_resource_grants;
 mod inspector_browser;
 pub use inspector_browser::InspectorBrowser;
 mod capabilities;
+mod configured_actions;
+pub use configured_actions::CONFIGURED_ACTIONS_OWNER;
 pub mod log_capture;
 pub mod manifest;
 mod manifest_schema;
@@ -28,6 +30,7 @@ mod manual_actions;
 mod monitor;
 #[cfg(test)]
 mod openaction_tests;
+mod process_exit;
 pub mod process_tree;
 mod reconciliation;
 mod reference_settings;
@@ -38,12 +41,14 @@ mod vendor_presentation;
 mod vendor_resources;
 mod vendor_system;
 pub use manual_actions::ManualActionLease;
+mod listener;
 mod server_admission;
 mod settings;
 pub use monitor::*;
 pub use reconciliation::PluginReload;
 pub use reference_settings::{preserve_references, redact_known_values};
 pub use settings::PluginConfiguration;
+pub use settings::VaultSettingsClear;
 mod theme;
 mod transport;
 pub use capabilities::{ActionCapability, Capabilities, RefreshPolicy, ThemedAsset};
@@ -60,19 +65,33 @@ mod deletion;
 mod package_export;
 pub use package_export::InstalledPackageExport;
 mod packages;
+pub use packages::prepare_dropped_folder_executables;
 mod persistence;
 pub use persistence::validate_storage_snapshot;
+pub use persistence::Work as PersistenceWork;
+pub use storage_rpc::{plugin_storage_generation, plugin_storage_purge_generation};
+pub mod permission_rpc;
+pub mod permissions;
 mod saved_settings;
 mod saved_settings_reads;
+mod settings_burst;
 mod storage_rpc;
 mod stored_data;
+pub mod text_references;
+mod vault_lifecycle;
+pub mod vault_references;
+pub mod vault_rpc;
+pub mod vault_text;
+pub mod vault_writes;
 pub use saved_settings::OwnedSettingsWrite;
 pub use stored_data::StoredPluginData;
 pub mod preflight;
 mod transactions;
 pub use packages::PackageSource;
+pub mod artwork_cache;
 mod vendor_profile_appearance;
 mod visual;
+use artwork_cache::{ArtworkCache, ArtworkFiles};
 use browser::{bootstrap, sdk_platform, serve_file};
 use serde::{Deserialize, Serialize};
 use serde_json::{json, Value};
@@ -90,6 +109,9 @@ use std::{
 };
 #[derive(Debug, Clone, Serialize, Deserialize, ts_rs::TS, schemars::JsonSchema)]
 pub struct PluginInfo {
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    #[ts(optional)]
+    pub permissions: Option<permissions::PermissionDeclaration>,
     pub id: String,
     #[serde(default)]
     #[ts(optional)]
@@ -201,6 +223,7 @@ struct Plugin {
     entry: PathBuf,
     token: String,
     child: Option<Child>,
+    exit_watch: Option<process_exit::Watch>,
     restarts: u8,
     next_restart: std::time::Instant,
     started: Option<std::time::Instant>,
@@ -251,22 +274,35 @@ pub struct ActiveAction {
 #[derive(Clone)]
 struct FileGrant {
     root: PathBuf,
+    // Bootstrap only the primary runtime document. Inspector grants retain
+    // their existing behavior across separately loaded settings documents.
+    runtime_entry: Option<PathBuf>,
     bootstrap: String,
     context: Option<String>,
     setup_runtime: bool,
 }
 #[derive(Default)]
 struct Hub {
+    persistence_sizes: Mutex<Option<persistence::Sizes>>,
+    persistence_work: Mutex<persistence::Work>,
     registration_environment: RegistrationEnvironment,
     visual_state: VisualState,
     sessions: Sessions,
     context_state: ContextState,
+    configured_actions: configured_actions::ConfiguredActions,
     storage_admission: Arc<storage_rpc::Admission>,
+    workflow: Arc<permission_rpc::Workflow>,
+    permission_sessions: HashMap<String, permission_rpc::Session>,
+    vault_budget: vault_rpc::ReadBudget,
+    vault_reader: Option<Arc<dyn vault_rpc::VaultRead>>,
+    vault_sessions: HashMap<String, vault_rpc::SessionScope>,
     settings_writer: Option<std::sync::mpsc::SyncSender<OwnedSettingsWrite>>,
     pending_settings: HashMap<String, (String, String)>,
+    settings_bursts: settings_burst::SettingsBursts,
     pending_saved_reads: VecDeque<saved_settings_reads::SavedRead>,
     logs: Option<Arc<log_capture::LogCaptureService>>,
     network_debug_plugins: HashSet<String>,
+    network_monitor_visible: bool,
     pending_inspectors: VecDeque<settings::PendingInspectorRequest>,
     global_drafts: HashMap<String, settings::GlobalDraft>,
     configuration_actions: HashMap<String, String>,
@@ -274,10 +310,11 @@ struct Hub {
     configuration_announced: HashMap<String, String>,
     location_drafts: std::collections::HashSet<String>,
     sampler_wake: Option<Arc<dyn Fn() + Send + Sync>>,
+    vendor_demand_wake: Option<Arc<dyn Fn() + Send + Sync>>,
     metadata: HashMap<String, Arc<HashMap<String, Value>>>,
     manifest_dialects: HashMap<String, String>,
     run_details: HashMap<String, (String, Option<String>)>,
-    health_dirty: bool,
+    health_dirty: std::collections::BTreeSet<String>,
     network: HashMap<String, monitor::NetworkReport>,
     action_results: HashMap<String, PendingAction>,
     telemetry_topics: HashMap<String, std::collections::BTreeSet<String>>,
@@ -294,6 +331,8 @@ struct Hub {
     manager_theme_device: String,
     system_dark: bool,
     theme_revision: u64,
+    palette_theme_preview: Option<theme::PaletteThemePreview>,
+    palette_preview_revision: u64,
     theme_observer: Arc<theme::ObserverSignal>,
     enabled: std::collections::HashSet<String>,
     sleep_when_hidden: HashMap<String, bool>,
@@ -319,11 +358,23 @@ struct PendingAction {
 }
 /// A correlated completion, independent of the host mutex while awaiting plugin work
 pub struct ActionReceipt {
+    completion_supported: bool,
     id: String,
     receiver: std::sync::mpsc::Receiver<Result<(), String>>,
     hub: Arc<Mutex<Hub>>,
 }
 impl ActionReceipt {
+    pub fn completion_supported(&self) -> bool {
+        self.completion_supported
+    }
+    /// Read an existing receipt without delaying its action lane.
+    pub fn try_completion(&self) -> Option<bool> {
+        match self.receiver.try_recv() {
+            Ok(result) => Some(result.is_ok()),
+            Err(std::sync::mpsc::TryRecvError::Empty) => None,
+            Err(std::sync::mpsc::TryRecvError::Disconnected) => Some(false),
+        }
+    }
     // Wait for the current operation
     pub fn wait(
         &self,
@@ -368,6 +419,9 @@ impl Hub {
     /// Stop/replacement revocation preserves draft inspectors and publishes release
     /// effects only after queuing disappearance/shutdown notices for the old run.
     fn revoke_plugin_sessions(&mut self, id: &str, token: &str) {
+        self.workflow.invalidate_owner(id);
+        self.permission_sessions.remove(token);
+        self.vault_sessions.remove(token);
         self.forget_manual_contexts(id);
         if !token.is_empty() {
             let mut notices = transport::Outgoing::default();
@@ -386,6 +440,7 @@ impl Hub {
                 self.sessions.shutdowns.insert(token.to_owned(), notices);
             }
             self.sessions.connected.remove(token);
+            self.notify_vendor_demand();
             self.effects
                 .push_back(HostEffect::release_session(id, token));
         }
@@ -503,6 +558,7 @@ impl Hub {
     /// Revocation is immediate. Only the authenticated plugin session may have
     /// already-sent responses ignored briefly; this never grants side effects.
     fn retire_context(&mut self, context: &str) -> Option<String> {
+        self.workflow.invalidate_context(context);
         let owner = self.context_state.retire(context)?;
         self.forget_saved_reads_for_context(context);
         self.pending_settings
@@ -551,6 +607,7 @@ impl Hub {
 }
 /// A validated, private staging directory on the destination filesystem
 pub struct PreparedPlugin {
+    service_review: Option<(permission_rpc::InstallReview, Vec<permissions::ActionScope>)>,
     inventory: std::collections::BTreeMap<String, String>,
     manifest: manifest::NormalizedManifest,
     origin: PackageSource,
@@ -599,6 +656,7 @@ impl RenderFallback {
 }
 
 pub struct RenderSurfaceSnapshot {
+    pub artwork: HashMap<String, ArtworkFiles>,
     pub generation: u64,
     pub device_palette: Value,
     pub wallpaper: Option<PaletteWallpaper>,
@@ -612,12 +670,16 @@ pub struct RenderSurfaceSnapshot {
 pub struct PluginHost {
     recovery: recovery::Recovery,
     transport_threads: Vec<std::thread::JoinHandle<()>>,
+    listener_wake: Option<Arc<mio::Waker>>,
+    exit_registry: Option<Arc<process_exit::Registry>>,
     pub logs: Arc<log_capture::LogCaptureService>,
     pub runtimes: Arc<stream_dock_manager_plugin_runtimes::RuntimeService>,
     startup: VecDeque<String>,
     visible_plugins: HashSet<String>,
     starting: HashMap<String, std::time::Instant>,
     next_start: std::time::Instant,
+    vault_locked: bool,
+    vault_setup_waiting: HashSet<String>,
     root: PathBuf,
     plugins: HashMap<String, Plugin>,
     hub: Arc<Mutex<Hub>>,
@@ -672,6 +734,17 @@ impl PluginHost {
         )?;
         Self::with_storage(root, runtimes, storage)
     }
+    pub fn artwork_cache(&self) -> Arc<ArtworkCache> {
+        let mut hub = self.hub.lock().unwrap();
+        hub.visual_state
+            .artwork_cache
+            .get_or_insert_with(|| {
+                Arc::new(ArtworkCache::new(
+                    self.storage().root().join("cached-media"),
+                ))
+            })
+            .clone()
+    }
     // Access the storage used by this subsystem
     pub fn storage(&self) -> &stream_dock_manager_storage::Storage {
         self.runtimes.storage()
@@ -692,12 +765,15 @@ impl PluginHost {
         let root = root.canonicalize().map_err(|e| e.to_string())?;
         let listener = TcpListener::bind("127.0.0.1:0").map_err(|e| e.to_string())?;
         let port = listener.local_addr().unwrap().port();
-        listener.set_nonblocking(true).map_err(|e| e.to_string())?;
+        let listener = listener::Listener::new(listener).map_err(|e| e.to_string())?;
+        let listener_wake = listener.wake.clone();
         storage.run(|connection| validate_storage_snapshot(connection))?;
         storage.add_snapshot_validator(validate_storage_snapshot)?;
         deletion::recover(&root, &storage)?;
         transactions::recover(&root, &storage)?;
         let mut initial_hub = Hub::load(&storage)?;
+        let artwork_cache = Arc::new(ArtworkCache::new(storage.root().join("cached-media")));
+        initial_hub.visual_state.artwork_cache = Some(artwork_cache);
         let logs = log_capture::LogCaptureService::with_storage(storage)?;
         initial_hub.logs = Some(logs.clone());
         initial_hub.refresh_log_secrets();
@@ -706,6 +782,7 @@ impl PluginHost {
                 initial_hub.system_dark = dark;
             }
         }
+        let recovery = recovery::Recovery::open(runtimes.storage().clone())?;
         let hub = Arc::new(Mutex::new(initial_hub));
         let stop = Arc::new(AtomicBool::new(false));
         let observer_hub = hub.clone();
@@ -716,45 +793,44 @@ impl PluginHost {
         let s = stop.clone();
         let admission = Arc::new(server_admission::Admission::default());
         let listener_thread = std::thread::spawn(move || {
-            let mut connections: Vec<std::thread::JoinHandle<()>> = vec![];
-            while !s.load(Ordering::SeqCst) {
-                let mut pending = vec![];
-                for thread in connections.drain(..) {
-                    if thread.is_finished() {
-                        let _ = thread.join();
-                    } else {
-                        pending.push(thread);
-                    }
-                }
-                connections = pending;
-                match listener.accept() {
-                    Ok((stream, _)) => {
-                        if let Some(thread) =
-                            spawn_connection(stream, h.clone(), s.clone(), admission.clone())
-                        {
-                            connections.push(thread);
-                        }
-                    }
-                    Err(e) if e.kind() == std::io::ErrorKind::WouldBlock => {
-                        std::thread::sleep(Duration::from_millis(20))
-                    }
-                    Err(_) => break,
-                }
-            }
-            for thread in connections {
-                let _ = thread.join();
-            }
+            listener.run(s.clone(), |stream, completion| {
+                spawn_connection(
+                    stream,
+                    h.clone(),
+                    s.clone(),
+                    admission.clone(),
+                    Some(completion),
+                )
+            });
         });
-        let recovery = recovery::Recovery::open(runtimes.storage().clone())?;
+        let weak_hub = Arc::downgrade(&hub);
+        let exit_observer = process_exit::Registry::new(Arc::new(move || {
+            if let Some(hub) = weak_hub.upgrade() {
+                let wake = hub.lock().unwrap().wake.clone();
+                if let Some(wake) = wake {
+                    wake();
+                }
+            }
+        }));
+        let mut transport_threads = vec![observer_thread, listener_thread];
+        let exit_registry = exit_observer.map(|(registry, thread)| {
+            transport_threads.push(thread);
+            registry
+        });
+
         let mut host = Self {
             recovery,
-            transport_threads: vec![observer_thread, listener_thread],
+            transport_threads,
+            exit_registry,
+            listener_wake: Some(listener_wake),
             logs,
             runtimes,
             startup: Default::default(),
             visible_plugins: Default::default(),
             starting: Default::default(),
             next_start: std::time::Instant::now(),
+            vault_locked: false,
+            vault_setup_waiting: Default::default(),
             root,
             plugins: HashMap::new(),
             hub,
@@ -1049,12 +1125,30 @@ impl PluginHost {
     // Find the next deadline requiring host attention
     pub fn next_deadline(&self) -> Option<std::time::Instant> {
         let now = std::time::Instant::now();
-        if !self.hub.lock().unwrap().effects.is_empty() {
+        let hub = self.hub.lock().unwrap();
+        if !hub.effects.is_empty() {
             return Some(now);
         }
+        let housekeeping = hub
+            .manual_actions
+            .next_deadline(now)
+            .into_iter()
+            .chain(hub.sessions.retired_contexts.next_deadline())
+            .chain(
+                (!hub.health_dirty.is_empty())
+                    .then_some(self.last_health_flush + Duration::from_secs(2)),
+            )
+            .min();
+        let badge_deadline = hub.visual_state.badges.values().copied().min();
+        drop(hub);
         self.plugins
             .values()
             .filter_map(|p| match p.info.runtime.state {
+                RuntimeState::Running if p.stopping.is_none() => match &p.exit_watch {
+                    Some(watch) if watch.ready() => Some(now),
+                    Some(watch) if watch.healthy() => None,
+                    _ => Some(now + Duration::from_millis(100)),
+                },
                 RuntimeState::Starting | RuntimeState::Running | RuntimeState::Stopping => {
                     Some(now + Duration::from_millis(100))
                 }
@@ -1066,15 +1160,8 @@ impl PluginHost {
                 _ if p.stopping.is_some() => Some(now + Duration::from_millis(100)),
                 _ => None,
             })
-            .chain(
-                self.hub
-                    .lock()
-                    .unwrap()
-                    .visual_state
-                    .badges
-                    .values()
-                    .copied(),
-            )
+            .chain(badge_deadline)
+            .chain(housekeeping)
             .chain((!self.startup.is_empty() && self.starting.len() < 2).then_some(self.next_start))
             .chain(
                 self.starting
@@ -1198,6 +1285,7 @@ impl PluginHost {
         let normalized = manifest::normalize(&source, &manifest)?;
         let inventory = packages::inventory(&source)?;
         Ok(PreparedPlugin {
+            service_review: None,
             inventory,
             manifest: normalized,
             origin,
@@ -1328,7 +1416,7 @@ impl PluginHost {
             } else {
                 hub.enabled.remove(id);
             }
-            if let Err(error) = hub.persist() {
+            if let Err(error) = hub.persist_installation(id) {
                 if previous {
                     hub.enabled.insert(id.into());
                 } else {
@@ -1336,6 +1424,7 @@ impl PluginHost {
                 }
                 return Err(error);
             }
+            hub.notify_vendor_demand();
             if !enabled {
                 hub.revoke_native_inspectors(id);
                 hub.revoke_setup_runtimes(id);
@@ -1344,8 +1433,7 @@ impl PluginHost {
         }
         if enabled {
             let mut hub = self.hub.lock().unwrap();
-            hub.health.entry(id.into()).or_default().blocked_reason = None;
-            hub.health_dirty = true;
+            hub.health_mut(id).blocked_reason = None;
         }
         let plugin = self.plugins.get_mut(id).unwrap();
         plugin.info.enabled = enabled;
@@ -1372,10 +1460,14 @@ impl PluginHost {
         self.plugins.get(id).ok_or("plugin not installed")?;
         {
             let mut hub = self.hub.lock().unwrap();
-            let previous = hub.sleep_when_hidden.clone();
+            let previous = hub.sleep_when_hidden.get(id).copied();
             hub.sleep_when_hidden.insert(id.into(), sleep);
-            if let Err(error) = hub.persist() {
-                hub.sleep_when_hidden = previous;
+            if let Err(error) = hub.persist_installation(id) {
+                if let Some(previous) = previous {
+                    hub.sleep_when_hidden.insert(id.into(), previous);
+                } else {
+                    hub.sleep_when_hidden.remove(id);
+                }
                 return Err(error);
             }
         }
@@ -1401,7 +1493,7 @@ impl PluginHost {
     }
     // Check whether the candidate is eligible for this operation
     fn eligible(&self, id: &str) -> bool {
-        if self.recovery.status.active {
+        if self.recovery.status.active || self.is_waiting_for_vault(id) {
             return false;
         }
         let (enabled, manual, sleep) = {
@@ -1445,7 +1537,9 @@ impl PluginHost {
             let sleeping = enabled && sleep && !self.visible_plugins.contains(&id);
             let profile_demand =
                 enabled && !sleeping && self.required.get(&id).is_some_and(|d| !d.is_empty());
+            let waiting_for_vault = self.is_waiting_for_vault(&id);
             let demanded = !self.recovery.status.active
+                && !waiting_for_vault
                 && (profile_demand || (enabled && manual) || configuring.contains(&id))
                 && !self.replacement_claims.lock().unwrap().contains(&id);
             let reason = if profile_demand {
@@ -1479,14 +1573,26 @@ impl PluginHost {
                     } else {
                         RuntimeState::Disabled
                     };
-                    plugin.info.runtime.reason = if sleeping {
+                    plugin.info.runtime.reason = if enabled && waiting_for_vault {
+                        if self.vault_locked {
+                            RuntimeReason::VaultLocked
+                        } else {
+                            RuntimeReason::VaultSetupRequired
+                        }
+                    } else if sleeping {
                         RuntimeReason::NoVisibleActions
                     } else if enabled {
                         RuntimeReason::NoActiveProfileDemand
                     } else {
                         RuntimeReason::Disabled
                     };
-                    plugin.info.status = if sleeping {
+                    plugin.info.status = if enabled && waiting_for_vault {
+                        if self.vault_locked {
+                            "Paused — unlock Vault"
+                        } else {
+                            "Paused — review required Vault setup"
+                        }
+                    } else if sleeping {
                         "Sleeping — no visible actions"
                     } else if enabled {
                         "Idle — not used by an active device profile"
@@ -1534,14 +1640,7 @@ impl PluginHost {
             return Err("Plugin is not blocked".into());
         }
         p.restarts = 0;
-        self.hub
-            .lock()
-            .unwrap()
-            .health
-            .entry(id.into())
-            .or_default()
-            .blocked_reason = None;
-        self.hub.lock().unwrap().health_dirty = true;
+        self.hub.lock().unwrap().health_mut(id).blocked_reason = None;
         p.info.runtime.state = RuntimeState::Idle;
         self.reconcile();
         Ok(())
@@ -1600,7 +1699,7 @@ impl PluginHost {
         }
         let mut hub = self.hub.lock().unwrap();
         hub.issue(id, "failed_start", error);
-        hub.health.entry(id.into()).or_default().blocked_reason = Some(format!("Blocked: {error}"));
+        hub.health_mut(id).blocked_reason = Some(format!("Blocked: {error}"));
     }
     // Launch for the current operation
     fn launch(&mut self, id: &str, start: bool, reset_budget: bool) -> Result<(), String> {
@@ -1636,6 +1735,16 @@ impl PluginHost {
                 .collect::<Vec<_>>()
                 .join("; "));
         }
+        let permission_session = start.then(|| self.permission_session(id)).flatten();
+        let declares_plugin_notifications = permission_session
+            .as_ref()
+            .is_some_and(permission_rpc::Session::declares_plugin_notifications);
+        let vault_managed = start && self.vault_managed(id);
+        let vault_scope = if vault_managed {
+            self.vault_launch_scope(id)
+        } else {
+            None
+        };
         let plugin = self.plugins.get_mut(id).ok_or("plugin not installed")?;
         {
             let mut h = self.hub.lock().unwrap();
@@ -1651,6 +1760,7 @@ impl PluginHost {
         if reset_budget {
             plugin.restarts = 0;
         }
+        plugin.exit_watch = None;
         if let Some(child) = plugin.child.take() {
             plugin.stopping = Some(process_tree::stop(child, plugin.tree.take(), true));
         }
@@ -1666,11 +1776,7 @@ impl PluginHost {
         let peak = plugin.info.runtime.resources.peak_resident_bytes;
         if had_run {
             let mut hub = self.hub.lock().unwrap();
-            hub.health
-                .entry(id.into())
-                .or_default()
-                .last_run_peak_resident_bytes = (peak > 0).then_some(peak);
-            hub.health_dirty = true;
+            hub.health_mut(id).last_run_peak_resident_bytes = (peak > 0).then_some(peak);
         }
         plugin.resource_history = Default::default();
         plugin.resource_sampled_at = None;
@@ -1723,15 +1829,80 @@ impl PluginHost {
         );
         connection_info["streamDockManager"] =
             connection_contract::manager_registration(&run_id, self.logs.debug_network(id));
+        if permission_session.is_none() {
+            if let Some(features) =
+                connection_info["streamDockManager"]["capabilities"].as_array_mut()
+            {
+                features.retain(|v| {
+                    !matches!(
+                        v.as_str(),
+                        Some(
+                            permission_rpc::PROTOCOL
+                                | permission_rpc::BROKER
+                                | vault_references::PROTOCOL
+                        )
+                    )
+                });
+            }
+        }
+        let plugin_notifications = self
+            .hub
+            .lock()
+            .unwrap()
+            .registration_environment
+            .allows_plugin_notifications(
+                plugin.info.kind == "browser",
+                declares_plugin_notifications,
+            );
+        if !plugin_notifications {
+            if let Some(features) =
+                connection_info["streamDockManager"]["capabilities"].as_array_mut()
+            {
+                features.retain(|v| v != permission_rpc::NOTIFICATIONS);
+            }
+        }
+        if permission_session
+            .as_ref()
+            .is_none_or(|s| !s.has_reference_declaration())
+        {
+            if let Some(features) =
+                connection_info["streamDockManager"]["capabilities"].as_array_mut()
+            {
+                features.retain(|v| v != vault_references::PROTOCOL);
+            }
+        }
+        if vault_scope.as_ref().is_none_or(|s| s.writers.is_empty()) {
+            if let Some(features) =
+                connection_info["streamDockManager"]["capabilities"].as_array_mut()
+            {
+                features.retain(|v| v != vault_writes::PROTOCOL);
+            }
+        }
+        if vault_scope
+            .as_ref()
+            .is_none_or(|scope| !scope.slots.iter().any(vault_text::eligible_slot))
+            || self.hub.lock().unwrap().vault_reader.is_none()
+        {
+            if let Some(features) =
+                connection_info["streamDockManager"]["capabilities"].as_array_mut()
+            {
+                features.retain(|v| v != vault_text::PROTOCOL);
+            }
+        }
+        Self::filter_vault_features(
+            &mut connection_info["streamDockManager"],
+            vault_managed
+                && plugin.info.kind != "browser"
+                && vault_scope.as_ref().is_some_and(|s| !s.slots.is_empty()),
+        );
         if plugin.info.kind == "browser" {
             let token = uuid::Uuid::new_v4().to_string();
             plugin.token = token.clone();
             let bootstrap = bootstrap(
                 self.port,
                 &token,
-                "registerPlugin",
                 &connection_info,
-                &json!({}),
+                browser::BootstrapRole::Runtime,
             );
             let mut hub = self.hub.lock().unwrap();
             hub.sessions.tokens.insert(token.clone(), id.into());
@@ -1739,6 +1910,7 @@ impl PluginHost {
                 token,
                 FileGrant {
                     root: plugin.path.clone(),
+                    runtime_entry: Some(plugin.entry.clone()),
                     bootstrap,
                     context: None,
                     setup_runtime: false,
@@ -1761,13 +1933,17 @@ impl PluginHost {
         };
         let token = uuid::Uuid::new_v4().to_string();
         plugin.token = token.clone();
-        self.hub
-            .lock()
-            .unwrap()
-            .sessions
-            .tokens
-            .insert(token.clone(), id.into());
-        self.hub.lock().unwrap().refresh_log_secrets();
+        {
+            let mut hub = self.hub.lock().unwrap();
+            hub.sessions.tokens.insert(token.clone(), id.into());
+            if let Some(s) = permission_session {
+                hub.permission_sessions.insert(token.clone(), s);
+            }
+            if let Some(scope) = vault_scope {
+                hub.vault_sessions.insert(token.clone(), scope);
+            }
+            hub.refresh_log_secrets();
+        }
         // The SDK compatibility level is separate from our application release version
         let info = connection_info.to_string();
         process_tree::configure(&mut command);
@@ -1821,6 +1997,10 @@ impl PluginHost {
                 std::thread::spawn(move || logs.drain_pipe(&id, &run, stream, pipe));
             }
         }
+        plugin.exit_watch = self
+            .exit_registry
+            .as_ref()
+            .and_then(|registry| registry.register(&child));
         plugin.child = Some(child);
         plugin.next_restart = std::time::Instant::now();
         plugin.info.status = "Starting — waiting for registration".into();
@@ -1855,6 +2035,31 @@ impl PluginHost {
         settings: &Value,
         user_desired_state: Option<u8>,
     ) -> Result<(), String> {
+        self.dispatch_with_activation(
+            id,
+            action_id,
+            device,
+            control_id,
+            scope,
+            input,
+            settings,
+            user_desired_state,
+            None,
+        )
+    }
+    #[allow(clippy::too_many_arguments)]
+    pub fn dispatch_with_activation(
+        &mut self,
+        id: &str,
+        action_id: &str,
+        device: &str,
+        control_id: &str,
+        scope: &str,
+        input: &hardware_core::Input,
+        settings: &Value,
+        user_desired_state: Option<u8>,
+        activation: Option<&str>,
+    ) -> Result<(), String> {
         self.dispatch_inner(
             id,
             action_id,
@@ -1865,6 +2070,7 @@ impl PluginHost {
             settings,
             None,
             user_desired_state,
+            activation,
         )
     }
     #[allow(clippy::too_many_arguments)]
@@ -1896,6 +2102,32 @@ impl PluginHost {
         settings: &Value,
         user_desired_state: Option<u8>,
     ) -> Result<ActionReceipt, String> {
+        self.dispatch_tracked_with_activation(
+            id,
+            action_id,
+            device,
+            control_id,
+            scope,
+            input,
+            settings,
+            user_desired_state,
+            None,
+        )
+    }
+    #[allow(clippy::too_many_arguments)]
+    pub fn dispatch_tracked_with_activation(
+        &mut self,
+        id: &str,
+        action_id: &str,
+        device: &str,
+        control_id: &str,
+        scope: &str,
+        input: &hardware_core::Input,
+        settings: &Value,
+        user_desired_state: Option<u8>,
+        activation: Option<&str>,
+    ) -> Result<ActionReceipt, String> {
+        self.check_vault_runtime(id)?;
         let request_id = uuid::Uuid::new_v4().to_string();
         let session = self
             .plugins
@@ -1918,15 +2150,16 @@ impl PluginHost {
                 sender,
             },
         );
-        let receipt = ActionReceipt {
-            id: request_id.clone(),
-            receiver,
-            hub: self.hub.clone(),
-        };
         let manager_receipts = self
             .plugins
             .get(id)
             .is_some_and(|p| p.info.capabilities.is_some());
+        let receipt = ActionReceipt {
+            completion_supported: manager_receipts,
+            id: request_id.clone(),
+            receiver,
+            hub: self.hub.clone(),
+        };
         self.dispatch_inner(
             id,
             action_id,
@@ -1937,6 +2170,7 @@ impl PluginHost {
             settings,
             Some(&request_id),
             user_desired_state,
+            activation,
         )?;
         if !manager_receipts {
             if let Some(pending) = self.hub.lock().unwrap().action_results.remove(&request_id) {
@@ -1959,7 +2193,10 @@ impl PluginHost {
         settings: &Value,
         request_id: Option<&str>,
         user_desired_state: Option<u8>,
+        activation: Option<&str>,
     ) -> Result<(), String> {
+        self.check_vault_runtime(id)?;
+        self.check_action_permissions(id, action_id)?;
         let plugin = self.plugins.get_mut(id).ok_or("plugin not installed")?;
         if !plugin.info.enabled
             || !matches!(
@@ -1992,8 +2229,9 @@ impl PluginHost {
             .and_then(|v| v["state"].as_u64())
             .unwrap_or(0);
         let fresh = !hub.context_state.contexts.contains_key(&context);
-        let durable_settings = settings;
-        let settings = hub.execution_settings(&context, settings);
+        let durable_settings = browser::vsd_action_settings(plugin, action_id, settings);
+        let settings = hub.execution_settings(&context, durable_settings.as_ref());
+        let settings = browser::vsd_action_settings(plugin, action_id, &settings);
         let encoder = hub
             .context_state
             .visible
@@ -2038,6 +2276,16 @@ impl PluginHost {
         if let Some(id) = request_id {
             surface["request_id"] = json!(id);
         }
+        if let Some(token) = activation.filter(|t| {
+            hub.workflow.deliverable(
+                t,
+                hub.sessions.storage_sessions.get(&plugin.token),
+                &context,
+                action_id,
+            )
+        }) {
+            surface["activation_token"] = json!(token);
+        }
         let resources = hub
             .context_state
             .resources
@@ -2071,7 +2319,10 @@ impl PluginHost {
         let queue = hub.sessions.queues.entry(id.into()).or_default();
         let mut messages = Vec::with_capacity(3);
         if fresh {
-            messages.push(json!({"event":"willAppear","action":action_id,"context":context,"device":device,"payload":{"settings":settings,"state":initial_state,"isInMultiAction":scope.contains('@'),"controller":if encoder {"Encoder"} else {"Keypad"},"coordinates":coordinates}}));
+            let appearance = json!({"event":"willAppear","action":action_id,"context":context,"device":device,"payload":{"settings":settings.as_ref(),"state":initial_state,"isInMultiAction":scope.contains('@'),"controller":if encoder {"Encoder"} else {"Keypad"},"coordinates":coordinates}});
+            let title = browser::vsd_initial_title(plugin, &appearance);
+            messages.push(appearance);
+            messages.extend(title);
         }
         // Touch input on an encoder context retains tap metadata on its dial pulse
         let encoder_tap = !vendor && encoder && matches!(input, hardware_core::Input::Touch { .. });
@@ -2085,7 +2336,7 @@ impl PluginHost {
             hardware_core::Input::Pulse if encoder => "dialDown",
             _ => "keyDown",
         };
-        let mut payload = json!({"settings":settings,"state":state,"isInMultiAction":scope.contains('@'),
+        let mut payload = json!({"settings":settings.as_ref(),"state":state,"isInMultiAction":scope.contains('@'),
                 "controller":if encoder {"Encoder"} else {"Keypad"},"coordinates":coordinates});
         if let Some(desired) = user_desired_state {
             payload["userDesiredState"] = json!(desired);
@@ -2152,7 +2403,7 @@ impl PluginHost {
             hub.context_state
                 .settings
                 .entry(context.clone())
-                .or_insert_with(|| durable_settings.clone());
+                .or_insert_with(|| durable_settings.into_owned());
             hub.context_state
                 .targets
                 .insert(context.clone(), (device.into(), control_id.into()));
@@ -2241,7 +2492,12 @@ impl PluginHost {
             for plugin in self.plugins.values_mut().filter(|p| {
                 p.info.runtime.state == RuntimeState::Idle
                     && p.info.enabled
-                    && p.info.runtime.reason != RuntimeReason::NoVisibleActions
+                    && !matches!(
+                        p.info.runtime.reason,
+                        RuntimeReason::NoVisibleActions
+                            | RuntimeReason::VaultLocked
+                            | RuntimeReason::VaultSetupRequired
+                    )
             }) {
                 plugin.info.runtime.reason = RuntimeReason::NoActiveDevice;
                 plugin.info.status =
@@ -2353,9 +2609,12 @@ impl PluginHost {
                 .is_some_and(|v| v["action"] == action.action_id)
             {
                 if changed {
+                    hub.workflow.invalidate_context(&context);
+                    let settings =
+                        browser::vsd_action_settings(plugin, &action.action_id, &action.settings);
                     hub.context_state
                         .settings
-                        .insert(context.clone(), action.settings.clone());
+                        .insert(context.clone(), settings.into_owned());
                     let execution = hub.execution_settings(&context, &action.settings);
                     if let Some(visible) = hub.context_state.visible.get_mut(&context) {
                         visible["payload"]["settings"] = execution.clone();
@@ -2404,6 +2663,11 @@ impl PluginHost {
             } else {
                 *settings = action.settings;
             }
+            if let std::borrow::Cow::Owned(merged) =
+                browser::vsd_action_settings(plugin, &action.action_id, settings)
+            {
+                *settings = merged;
+            }
             let settings = settings.clone();
             let settings = hub.execution_settings(&context, &settings);
             let initial_state = vendor_profile_appearance::initial_state(&hub, &context);
@@ -2423,12 +2687,24 @@ impl PluginHost {
             hub.context_state
                 .visible
                 .insert(context.clone(), event.clone());
+            let title = if hub
+                .context_state
+                .vendor_profile_appearances
+                .contains_key(&context)
+            {
+                None // Existing imported title is emitted by visual::prepare(setState).
+            } else {
+                browser::vsd_initial_title(plugin, &event)
+            };
             let queue = hub
                 .sessions
                 .queues
                 .entry(action.plugin_id.clone())
                 .or_default();
             queue.push_back(event);
+            if let Some(title) = title {
+                queue.push_back(title);
+            }
             if let Some(metadata) = plugin.metadata.get(&action.action_id) {
                 let mut messages = vec![];
                 if metadata["States"]
@@ -2555,11 +2831,7 @@ impl PluginHost {
                 p.registered = Some(now);
                 self.starting.remove(id);
                 let mut hub = self.hub.lock().unwrap();
-                hub.health
-                    .entry(id.clone())
-                    .or_default()
-                    .last_registration_ms = Some(monitor::timestamp_ms());
-                hub.health_dirty = true;
+                hub.health_mut(id).last_registration_ms = Some(monitor::timestamp_ms());
                 changed = true;
             }
             // A successful minute must not replenish crash retries indefinitely
@@ -2573,6 +2845,11 @@ impl PluginHost {
             if let Some(status) = p
                 .child
                 .as_mut()
+                .filter(|_| {
+                    !p.exit_watch
+                        .as_ref()
+                        .is_some_and(|watch| watch.healthy() && !watch.ready())
+                })
                 .and_then(|child| process_tree::poll_exit(child, p.tree.as_ref()))
             {
                 #[cfg(unix)]
@@ -2632,7 +2909,7 @@ impl PluginHost {
                 if starting { "failed_start" } else { "crash" },
                 &message,
             );
-            let health = hub.health.entry(id.clone()).or_default();
+            let health = hub.health_mut(&id);
             health.last_exit = Some(message.clone());
             health.last_exit_code = code;
             health.last_exit_signal = signal;
@@ -2658,8 +2935,7 @@ impl PluginHost {
                 p.info.runtime.reason = RuntimeReason::RepeatedFailures;
                 p.info.status =
                     "Blocked — automatic restart budget exhausted; choose Retry or disable".into();
-                hub.health.entry(id.clone()).or_default().blocked_reason =
-                    Some(p.info.status.clone());
+                hub.health_mut(&id).blocked_reason = Some(p.info.status.clone());
                 p.diagnostic(
                     manager_diagnostics::PluginEvent::Blocked,
                     Some(manager_diagnostics::classify(&message)),
@@ -2788,8 +3064,8 @@ impl PluginHost {
             root: plugin.path.clone(),
             asset: capability.icon.clone(),
             mode,
-            palette: hub.device_palette_id_for(mode, device).into(),
-            colors: hub.device_colors_for(mode, device),
+            palette: hub.plugin_palette_id_for(id, mode, device).into(),
+            colors: hub.plugin_colors_for(id, mode, device),
             title: plugin
                 .info
                 .actions
@@ -2828,6 +3104,7 @@ impl PluginHost {
         hub.visual_state.visual_shared_captures =
             hub.visual_state.visual_shared_captures.saturating_add(1);
         let mut values = HashMap::new();
+        let mut artwork = HashMap::new();
         let mut contexts = HashMap::new();
         for (control, scope) in requests {
             let selected = if software {
@@ -2867,6 +3144,9 @@ impl PluginHost {
                 })
                 .map(|(context, value)| (context.clone(), value.clone()))
             {
+                if let Some(files) = hub.visual_state.artwork(&context, software) {
+                    artwork.insert(control.clone(), files.clone());
+                }
                 contexts.insert(control.clone(), context);
                 values.insert(control.clone(), value);
             }
@@ -2875,10 +3155,14 @@ impl PluginHost {
         let mut plugin_surfaces = HashMap::new();
         for (source, plugin_id, action_id) in fallback_requests {
             let mode = hub.resolved_device_theme_for(plugin_id, device);
-            if mode != hub.device_mode_for(device) && !plugin_surfaces.contains_key(plugin_id) {
+            if (mode != hub.device_mode_for(device)
+                || (hub.palette_theme_preview.is_some()
+                    && hub.capabilities.contains_key(plugin_id)))
+                && !plugin_surfaces.contains_key(plugin_id)
+            {
                 plugin_surfaces.insert(
                     plugin_id.clone(),
-                    hub.device_colors_for(mode, device)["surface"]
+                    hub.plugin_colors_for(plugin_id, mode, device)["surface"]
                         .as_str()
                         .expect("theme surface")
                         .into(),
@@ -2894,6 +3178,7 @@ impl PluginHost {
         let extra = capture();
         (
             RenderSurfaceSnapshot {
+                artwork,
                 generation: hub.visual_state.render_generation,
                 device_palette: hub.device_colors_for(hub.device_mode_for(device), device),
                 wallpaper: hub
@@ -2911,7 +3196,8 @@ impl PluginHost {
     // Resolve the surface value for this operation
     pub fn surface(&self, device: &str, control: &str, scope: &str) -> Option<Value> {
         let hub = self.hub.lock().unwrap();
-        hub.visual_state
+        let selected = hub
+            .visual_state
             .visuals
             .iter()
             .filter(|(context, _)| {
@@ -2933,7 +3219,19 @@ impl PluginHost {
                     .copied()
                     .unwrap_or(0)
             })
-            .map(|(_, value)| value.as_ref().clone())
+            .map(|(context, value)| {
+                (
+                    value.clone(),
+                    hub.visual_state.artwork(context, false).cloned(),
+                )
+            });
+        drop(hub);
+        let (value, files) = selected?;
+        let mut value = value.as_ref().clone();
+        if let Some(files) = files {
+            files.expand(&mut value).ok()?;
+        }
+        Some(value)
     }
     /// Read an exact active action without starting or configuring a plugin
     /// Read a declared layout without registering a context or executing code
@@ -2957,8 +3255,8 @@ impl PluginHost {
             let theme = hub.resolved_device_theme_for(id, device);
             (
                 theme,
-                hub.device_palette_id_for(theme, device).to_owned(),
-                hub.device_colors_for(theme, device),
+                hub.plugin_palette_id_for(id, theme, device).to_owned(),
+                hub.plugin_colors_for(id, theme, device),
             )
         };
         let shaped = if wide && !name.ends_with("wide.json") {
@@ -3035,6 +3333,23 @@ impl PluginHost {
         settings: &Value,
         software: bool,
     ) -> Option<Value> {
+        let (visual, files) = self
+            .matching_render_surface(device, control, scope, plugin, action, settings, software)?;
+        let mut value = visual.as_ref().clone();
+        files.expand(&mut value).ok()?;
+        Some(value)
+    }
+    #[allow(clippy::too_many_arguments)]
+    pub fn matching_render_surface(
+        &self,
+        device: &str,
+        control: &str,
+        scope: &str,
+        plugin: &str,
+        action: &str,
+        settings: &Value,
+        software: bool,
+    ) -> Option<(Arc<Value>, ArtworkFiles)> {
         let hub = self.hub.lock().unwrap();
         let context = hub.lookup_binding_context(plugin, scope, device, control)?;
         if hub.context_state.contexts.get(&context).map(String::as_str) != Some(plugin)
@@ -3054,7 +3369,15 @@ impl PluginHost {
             None
         })
         .or_else(|| hub.visual_state.visuals.get(&context))
-        .map(|value| value.as_ref().clone())
+        .map(|value| {
+            (
+                value.clone(),
+                hub.visual_state
+                    .artwork(&context, software)
+                    .cloned()
+                    .unwrap_or_default(),
+            )
+        })
     }
     // Drain effects
     pub fn drain_effects(&mut self) -> Vec<HostEffect> {
@@ -3168,6 +3491,12 @@ impl PluginHost {
         let _ = self.recovery.clear();
         let _ = self.hub.lock().unwrap().flush_health();
         self.stop.store(true, Ordering::SeqCst);
+        if let Some(registry) = &self.exit_registry {
+            registry.shutdown();
+        }
+        if let Some(wake) = &self.listener_wake {
+            let _ = wake.wake();
+        }
         let mut hub = self.hub.lock().unwrap();
         hub.settings_writer = None;
         hub.pending_settings.clear();
@@ -3176,6 +3505,11 @@ impl PluginHost {
             alive.store(false, Ordering::Release);
         }
         hub.sessions.storage_sessions.clear();
+        for id in hub.installations.keys() {
+            hub.workflow.invalidate_owner(id);
+        }
+        hub.permission_sessions.clear();
+        hub.vault_sessions.clear();
         hub.theme_observer.wake();
         for queue in hub.sessions.queues.values() {
             if let Some(wake) = &queue.wake {
@@ -3256,6 +3590,13 @@ fn read_plugin_with_identity(
     let inspection = capabilities::inspect(path, &entry, &manifest)?;
     manifest_schema::validate(&manifest, id, &normalized.dialect, &inspection)?;
     let capabilities = inspection.into_manager();
+    if (normalized.setup_slots.is_some() || normalized.permissions.is_some())
+        && (kind == "browser" || capabilities.is_none())
+    {
+        return Err(
+            "Manager permissions and Vault setup require a native Manager-compatible plugin".into(),
+        );
+    }
     let elgato = capabilities.is_none()
         && matches!(normalized.dialect.as_str(), "streamdeck" | "openaction");
     let mut thumbnails = vendor_presentation::Thumbnails::new(path);
@@ -3350,6 +3691,7 @@ fn read_plugin_with_identity(
         resource_history: Default::default(),
         resource_sampled_at: None,
         info: PluginInfo {
+            permissions: normalized.permissions.clone(),
             id: id.into(),
             author: normalized.publisher.clone(),
             name: manifest["Name"].as_str().unwrap_or(id).into(),
@@ -3373,6 +3715,7 @@ fn read_plugin_with_identity(
         entry,
         token: String::new(),
         child: None,
+        exit_watch: None,
         restarts: 0,
         next_restart: std::time::Instant::now(),
         started: None,
@@ -3502,12 +3845,19 @@ fn spawn_connection(
     hub: Arc<Mutex<Hub>>,
     stop: Arc<AtomicBool>,
     admission: Arc<server_admission::Admission>,
+    completion: Option<listener::Completion>,
 ) -> Option<std::thread::JoinHandle<()>> {
-    // Reject before creating a thread, not after allocating its stack
+    // Reject before creating a thread, not after allocating its stack.
+    if stop.load(Ordering::SeqCst) {
+        return None;
+    }
     let permit = admission.handshakes.acquire()?;
     std::thread::Builder::new()
         .name("plugin-connection".into())
-        .spawn(move || serve_admitted(stream, hub, stop, admission, permit))
+        .spawn(move || {
+            let _completion = completion;
+            serve_admitted(stream, hub, stop, admission, permit);
+        })
         .ok()
 }
 
@@ -3648,6 +3998,26 @@ fn serve_admitted(
             if stop.load(Ordering::SeqCst) {
                 break;
             }
+            let notices = {
+                let h = hub.lock().unwrap();
+                if h.permission_sessions.contains_key(&registered_token) {
+                    h.sessions
+                        .storage_sessions
+                        .get(&registered_token)
+                        .map(|l| h.workflow.notices(l))
+                        .unwrap_or_default()
+                } else {
+                    Vec::new()
+                }
+            };
+            for notice in notices {
+                if ws
+                    .send(tungstenite::Message::text(notice.to_string()))
+                    .is_err()
+                {
+                    break 'connection;
+                }
+            }
             let messages = {
                 let mut hub = hub.lock().unwrap();
                 if hub.sessions.tokens.get(&registered_token) != Some(id)
@@ -3751,6 +4121,129 @@ fn serve_admitted(
                             .send(tungstenite::Message::Text(response.to_string().into()))
                             .is_err()
                         {
+                            break;
+                        }
+                        continue;
+                    }
+                    if matches!(
+                        message["protocol_id"].as_str(),
+                        Some(
+                            permission_rpc::PROTOCOL
+                                | permission_rpc::BROKER
+                                | vault_references::PROTOCOL
+                        )
+                    ) {
+                        let admitted = hub.vault_budget.admit(owner.as_deref().unwrap(), &message);
+                        let session = if inspector_context.is_none()
+                            && browser_origin.is_none()
+                            && hub.enabled.contains(owner.as_ref().unwrap())
+                        {
+                            hub.permission_sessions.get(&registered_token).cloned()
+                        } else {
+                            None
+                        };
+                        let lease = hub
+                            .sessions
+                            .storage_sessions
+                            .get(&registered_token)
+                            .cloned();
+                        let store = hub.store.clone();
+                        let workflow = hub.workflow.clone();
+                        drop(hub);
+                        if !store.is_some_and(|store| {
+                            permission_rpc::dispatch(
+                                &workflow,
+                                &store,
+                                session.as_ref(),
+                                lease.as_ref(),
+                                (&message, text.len()),
+                                admitted,
+                                |reply| {
+                                    ws.send(tungstenite::Message::text(reply.to_string()))
+                                        .is_ok()
+                                },
+                            )
+                        }) {
+                            break;
+                        }
+                        continue;
+                    }
+                    if message["protocol_id"] == vault_writes::PROTOCOL {
+                        let admitted = hub.vault_budget.admit(owner.as_deref().unwrap(), &message);
+                        let session = if inspector_context.is_none()
+                            && browser_origin.is_none()
+                            && hub.enabled.contains(owner.as_ref().unwrap())
+                        {
+                            hub.vault_sessions.get(&registered_token).cloned()
+                        } else {
+                            None
+                        };
+                        let lease = hub
+                            .sessions
+                            .storage_sessions
+                            .get(&registered_token)
+                            .cloned();
+                        let reader = hub.vault_reader.clone();
+                        drop(hub);
+                        if !vault_writes::dispatch(
+                            reader.as_deref(),
+                            session.as_ref(),
+                            lease.as_deref(),
+                            message,
+                            text.len(),
+                            admitted,
+                            |reply| {
+                                ws.send(tungstenite::Message::text(reply.to_string()))
+                                    .is_ok()
+                            },
+                        ) {
+                            break;
+                        }
+                        continue;
+                    }
+                    if matches!(
+                        message["protocol_id"].as_str(),
+                        Some(vault_rpc::VALUES | vault_rpc::SECRETS | vault_text::PROTOCOL)
+                    ) {
+                        let admitted = hub.vault_budget.admit(owner.as_deref().unwrap(), &message);
+                        let reader = hub.vault_reader.clone();
+                        let scope = if inspector_context.is_none()
+                            && browser_origin.is_none()
+                            && hub.enabled.contains(owner.as_ref().unwrap())
+                        {
+                            hub.vault_sessions.get(&registered_token).cloned()
+                        } else {
+                            None
+                        };
+                        let alive = hub
+                            .sessions
+                            .storage_sessions
+                            .get(&registered_token)
+                            .cloned();
+                        drop(hub);
+                        if message["protocol_id"] == vault_text::PROTOCOL {
+                            if !vault_text::dispatch(
+                                reader.as_deref(),
+                                scope.as_ref(),
+                                alive.as_deref(),
+                                &message,
+                                text.len(),
+                                admitted,
+                                |reply| ws.send(tungstenite::Message::Text(reply.into())).is_ok(),
+                            ) {
+                                break;
+                            }
+                            continue;
+                        }
+                        if !vault_rpc::dispatch(
+                            reader.as_deref(),
+                            scope.as_ref(),
+                            alive.as_deref(),
+                            &message,
+                            text.len(),
+                            admitted,
+                            |reply| ws.send(tungstenite::Message::Text(reply.into())).is_ok(),
+                        ) {
                             break;
                         }
                         continue;
@@ -3921,10 +4414,7 @@ fn serve_admitted(
                             message["event"].as_str().unwrap_or("unknown")
                         ),
                     );
-                    let health = hub
-                        .health
-                        .entry(owner.as_ref().unwrap().clone())
-                        .or_default();
+                    let health = hub.health_mut(owner.as_deref().unwrap());
                     if error == InboundError::UnsupportedEvent {
                         let event = message["event"]
                             .as_str()
@@ -4206,7 +4696,14 @@ fn serve_admitted(
                         let previous = hub
                             .globals
                             .insert(owner.as_ref().unwrap().clone(), message["payload"].clone());
-                        if hub.persist().is_err() {
+                        if hub
+                            .persist_scoped(persistence::Scope {
+                                globals: &[owner.as_ref().unwrap()],
+                                defaults: &[],
+                                metadata: &[],
+                            })
+                            .is_err()
+                        {
                             if let Some(previous) = previous {
                                 hub.globals
                                     .insert(owner.as_ref().unwrap().clone(), previous);
@@ -4291,10 +4788,7 @@ fn serve_admitted(
                     );
                 }
                 if message["event"] == "unsupportedFeature" {
-                    let health = hub
-                        .health
-                        .entry(owner.as_ref().unwrap().clone())
-                        .or_default();
+                    let health = hub.health_mut(owner.as_deref().unwrap());
                     let detail = message["payload"]["message"]
                         .as_str()
                         .unwrap_or("Unsupported plugin operation")
@@ -4404,6 +4898,7 @@ fn serve_admitted(
             }
             h.revoke_storage_session(&registered_token);
             h.sessions.connected.remove(&registered_token);
+            h.notify_vendor_demand();
             h.sessions.retired_contexts.clear_session(&registered_token);
             h.sessions.shutdowns.remove(&registered_token);
             if let Some(wake) = &h.sampler_wake {

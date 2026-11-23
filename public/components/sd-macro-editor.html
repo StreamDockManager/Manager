@@ -1,6 +1,7 @@
 <div
     class="macro-editor"
     x-data="macroEditor"
+    @vault-session-ended.window="clearVaultChoices"
     @keydown.window="captureKeys"
     @open-named-macro.window="openNamed"
     @open-multi-action="openEditor"

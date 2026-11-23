@@ -30,7 +30,11 @@ export function registerPluginProfileSuggestions(
             await runFeatureWork(this, work);
         },
         // Show the selected plugin profile suggestions content
+        setupMounted: false,
+        vendorMounted: false,
         show(name: string) {
+            if (name === 'pluginSetupDialog') this.setupMounted = true;
+            if (name === 'vendorProfileDialog') this.vendorMounted = true;
             showFeatureDialog(this, name);
         },
         // Release plugin profile suggestions state and associated lifecycle resources

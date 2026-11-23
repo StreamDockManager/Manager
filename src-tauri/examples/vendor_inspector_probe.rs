@@ -19,19 +19,44 @@ fn main() {
     let interactive = std::env::args().any(|argument| argument == "--interactive");
     let package = root.path().join("plugins/probe");
     std::fs::create_dir_all(&package).unwrap();
+    let (entry, inspector) = if interactive {
+        ("runtime.html", "pi.html")
+    } else {
+        ("web/index.html", "web/index.html")
+    };
     std::fs::write(package.join("manifest.json"),serde_json::json!({
         "UUID":"org.manager.disposable-probe","Name":"Disposable inspector probe","Version":"0.1.0","SDKVersion":1,
-        "CodePath":"runtime.html","StreamDockManager":{"ManifestDialect":"vsd"},
-        "Actions":[{"UUID":"org.manager.disposable-probe.action","Name":"Probe","Controllers":["Keypad"],"PropertyInspectorPath":"pi.html"}]
+        "CodePath":entry,"StreamDockManager":{"ManifestDialect":"vsd"},
+        "Actions":[{"UUID":"org.manager.disposable-probe.action","Name":"Probe","Controllers":["Keypad"],"PropertyInspectorPath":inspector}]
     }).to_string()).unwrap();
-    for file in ["runtime.html", "pi.html", "child.html"] {
+    let child = if interactive {
+        "child.html"
+    } else {
+        std::fs::create_dir_all(package.join("web")).unwrap();
         std::fs::write(
-            package.join(file),
-            "<!doctype html><html><body><h1>Disposable native inspector probe</h1><script>addEventListener('message',e=>{if(e.origin===location.origin&&e.data==='fixture-init')window.receivedFromOpener=e.source===opener;});</script></body></html>",
+            package.join("web/interval.js"),
+            "setTimeout(() => postMessage('relative-package-worker'), 10);",
         )
         .unwrap();
-    }
+        std::fs::write(
+            package.join(entry),
+            include_str!("vendor_inspector_probe/worker-entry.html"),
+        )
+        .unwrap();
+        "web/child.html"
+    };
+    std::fs::write(
+        package.join(child),
+        "<!doctype html><html><body><h1>Disposable native inspector probe</h1><script>addEventListener('message',e=>{if(e.origin===location.origin&&e.data==='fixture-init')window.receivedFromOpener=e.source===opener;});</script></body></html>",
+    )
+    .unwrap();
     if interactive {
+        // The interactive probe uses a distinct runtime placeholder and owns its inspector HTML
+        std::fs::write(
+            package.join(entry),
+            "<!doctype html><title>Probe runtime</title>",
+        )
+        .unwrap();
         interactive::prepare(root.path(), &package).expect("Disposable interactive fixtures");
     }
     let fixture_root = root.path().to_path_buf();
@@ -56,7 +81,7 @@ fn main() {
             } else {
                 tokio::time::timeout(std::time::Duration::from_secs(30),run(&handle,&host)).await
             }.unwrap_or_else(|_|Err("Probe deadline exceeded".into()));
-            match result {Ok(())=>{if interactive {println!("NATIVE_INSPECTOR_INTERACTIVE PASS: actual trusted popup activation, native Cancel/Allow, child closure, native picker Cancel/selection with generated files only, path and byte projection, immutable snapshot, unselected sibling rejection, grant revocation and clean teardown. No injected consent, user files, OS permission changes or vendor reference host.");}else{println!("NATIVE_INSPECTOR_PROBE PASS: actual WK root/children, no IPC/editor opener, nonpersistent shared-descendant store, cross-session cookie isolation, navigation rejection, bounded geometry/count/depth, subtree/session teardown. Consent and activation injected for dummy fixture only; no native permission or file-selection qualification.");}outcome.store(false,std::sync::atomic::Ordering::Release);},Err(error)=>eprintln!("NATIVE_INSPECTOR_PROBE FAIL: {error}")}
+            match result {Ok(())=>{if interactive {println!("NATIVE_INSPECTOR_INTERACTIVE PASS: actual trusted popup activation, native Cancel/Allow, child closure, native picker Cancel/selection with generated files only, path and byte projection, immutable snapshot, unselected sibling rejection, grant revocation and clean teardown. No injected consent, user files, OS permission changes or vendor reference host.");}else{println!("NATIVE_INSPECTOR_PROBE PASS: same-file runtime and inspector classic Worker, actual WK root/children, no IPC/editor opener, nonpersistent shared-descendant store, cross-session cookie isolation, navigation rejection, bounded geometry/count/depth, subtree/session teardown. Consent and activation injected for dummy fixture only; no native permission or file-selection qualification.");}outcome.store(false,std::sync::atomic::Ordering::Release);},Err(error)=>eprintln!("NATIVE_INSPECTOR_PROBE FAIL: {error}")}
             host.lock().unwrap().shutdown();
             handle.exit(if outcome.load(std::sync::atomic::Ordering::Acquire){1}else{0});
         });Ok(())
@@ -126,6 +151,11 @@ async fn run(
         }
     }
     probe::enable(app).await?;
+    let runtime_view = start_browser_runtime(app, host).await?;
+    let runtime_origin = runtime_view
+        .url()
+        .map_err(|error| error.to_string())?
+        .origin();
     for generation in 0..2 {
         let (panel, lease) = {
             let mut host = host.lock().unwrap();
@@ -139,10 +169,36 @@ async fn run(
             let lease = host.isolate_inspector("org.manager.disposable-probe", &panel)?;
             (panel, lease)
         };
+        let inspector_origin = tauri::Url::parse(lease.url())
+            .map_err(|error| error.to_string())?
+            .origin();
+        require(
+            inspector_origin != runtime_origin,
+            "Runtime and inspector share an origin",
+        )?;
         vendor_inspectors::open(app, lease.clone(), [500.0, 650.0]).await?;
         let windows = count(app, 1).await?;
         let root = windows[0]["label"].as_str().unwrap().to_owned();
         ready(app, &root).await?;
+        let mut worker_ready = false;
+        for _ in 0..100 {
+            if eval(
+                app,
+                &root,
+                "window.probeRole === 'inspector' && window.workerReply === true",
+            )
+            .await?
+                == true
+            {
+                worker_ready = true;
+                break;
+            }
+            tokio::time::sleep(std::time::Duration::from_millis(30)).await;
+        }
+        require(
+            worker_ready,
+            "Inspector did not load the relative package Worker",
+        )?;
         require(
             windows[0]["persistent"] == false,
             "Root data store must be nonpersistent",
@@ -248,8 +304,68 @@ async fn run(
         vendor_inspectors::close(app, &panel.token);
         host.lock().unwrap().close_inspector(&panel.token);
     }
+    runtime_view.destroy().map_err(|error| error.to_string())?;
     Ok(())
 }
+
+#[cfg(target_os = "macos")]
+// Open the disposable runtime like a normal hidden desktop browser plugin
+async fn start_browser_runtime(
+    app: &tauri::AppHandle,
+    host: &std::sync::Mutex<stream_dock_manager_plugin_host::PluginHost>,
+) -> Result<tauri::WebviewWindow, String> {
+    use stream_dock_manager_plugin_host::{PluginDemand, RuntimeState};
+    const ID: &str = "org.manager.disposable-probe";
+    let view = {
+        let mut host = host.lock().unwrap();
+        host.enable(ID, true)?;
+        host.set_sleep_when_hidden(ID, false)?;
+        host.reconcile_demand(std::collections::HashMap::from([(
+            ID.into(),
+            vec![PluginDemand {
+                device_id: "probe-device".into(),
+                profile_id: "probe-profile".into(),
+            }],
+        )]));
+        host.poll();
+        host.browser_view(ID)?
+            .ok_or("Fixture runtime did not start")?
+    };
+    let (send, receive) = tokio::sync::oneshot::channel();
+    let handle = app.clone();
+    let url = view
+        .url
+        .parse()
+        .map_err(|_| "Invalid fixture runtime URL")?;
+    app.run_on_main_thread(move || {
+        let result =
+            tauri::WebviewWindowBuilder::new(&handle, view.label, tauri::WebviewUrl::External(url))
+                .visible(false)
+                .incognito(true)
+                .background_throttling(tauri::utils::config::BackgroundThrottlingPolicy::Disabled)
+                .build()
+                .map_err(|error| error.to_string());
+        let _ = send.send(result);
+    })
+    .map_err(|error| error.to_string())?;
+    let window = receive.await.map_err(|error| error.to_string())??;
+    // The fixture registers only after its local Worker reports the timer result
+    for _ in 0..200 {
+        let running = {
+            let mut host = host.lock().unwrap();
+            host.poll();
+            host.list()
+                .iter()
+                .any(|plugin| plugin.id == ID && plugin.runtime.state == RuntimeState::Running)
+        };
+        if running {
+            return Ok(window);
+        }
+        tokio::time::sleep(std::time::Duration::from_millis(30)).await;
+    }
+    Err("Runtime did not register after loading its relative package Worker".into())
+}
+
 #[cfg(not(target_os = "macos"))]
 // Run this executable entry point
 fn main() {

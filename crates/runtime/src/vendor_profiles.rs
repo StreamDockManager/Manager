@@ -782,6 +782,7 @@ impl Runtime {
             bindings.insert(control.id.clone(), binding);
         }
         let profile = Profile {
+            linked_controls: Default::default(),
             id: profile_id,
             name: parsed.name,
             model_id: device.model_id.clone(),

@@ -1,0 +1,39 @@
+{
+    "group": "30a162f8-a9be-4eea-b04a-d22750a7f63b",
+    "target": "reference-second",
+    "page_name": "Référence δεύτερη",
+    "title": "Café Δοκιμή",
+    "live_label": [
+        {
+            "kind": "literal",
+            "text": "Level "
+        },
+        {
+            "kind": "parameter",
+            "name": "level",
+            "fallback": "unknown"
+        }
+    ],
+    "parameter": {
+        "name": "level",
+        "label": "Level",
+        "type": "number",
+        "required": false,
+        "default": 0
+    },
+    "action": {
+        "kind": "macro",
+        "actions": [
+            {
+                "kind": "delay",
+                "milliseconds": 60
+            },
+            {
+                "kind": "page",
+                "page_id": "reference-second"
+            }
+        ]
+    },
+    "activation_policy": "restart",
+    "png": "iVBORw0KGgoAAAANSUhEUgAAAAIAAAACCAIAAAD91JpzAAAAEElEQVR4nGM4ZOoCRAwQCgAkegTtcNxePwAAAABJRU5ErkJggg=="
+}

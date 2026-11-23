@@ -76,6 +76,112 @@ impl Drop for Shutdown {
 }
 
 #[test]
+fn live_event_test_commands_use_the_generated_editor_ipc_and_acl() {
+    let native_handler = include_str!(concat!(env!("OUT_DIR"), "/command_handler.rs"));
+    for command in [
+        "arm_control_event_test",
+        "read_control_event_test",
+        "cancel_control_event_test",
+    ] {
+        assert!(native_handler.contains(&format!("commands::{command},")));
+    }
+    let directory = tempfile::tempdir().unwrap();
+    let runtime =
+        stream_dock_manager_runtime::test_support::headless(directory.path().join("manager"))
+            .unwrap();
+    let _shutdown = Shutdown(runtime.clone());
+    let app = tauri::test::mock_builder()
+        .manage(runtime)
+        .manage(Arc::new(crate::editor_lifecycle::EditorLifecycle::default()))
+        .invoke_handler(tauri::generate_handler![
+            arm_control_event_test,
+            read_control_event_test,
+            cancel_control_event_test
+        ])
+        .build(crate::desktop_context())
+        .unwrap();
+    let main = tauri::WebviewWindowBuilder::new(&app, "main", Default::default())
+        .build()
+        .unwrap();
+    let plugin = tauri::WebviewWindowBuilder::new(&app, "pi-event-test", Default::default())
+        .build()
+        .unwrap();
+    let arm = json!({
+        "deviceId":"disconnected-test-dock", "controlId":"dial-1", "eventIndex":2,
+        "assigned":[2], "multiPressMs":300, "holdMs":600
+    });
+    let token = json!({"token":"test-token"});
+    let missing = invoke(&main, "arm_control_event_test", arm.clone()).unwrap_err();
+    assert!(
+        missing
+            .to_string()
+            .contains("Connect the selected physical device"),
+        "{missing}"
+    );
+    let stale = invoke(&main, "read_control_event_test", token.clone()).unwrap_err();
+    assert!(
+        stale.to_string().contains("Event test is no longer active"),
+        "{stale}"
+    );
+    assert_eq!(
+        invoke(&main, "cancel_control_event_test", token.clone()).unwrap(),
+        Value::Null
+    );
+    for (command, payload) in [
+        ("arm_control_event_test", arm),
+        ("read_control_event_test", token.clone()),
+        ("cancel_control_event_test", token),
+    ] {
+        let denied = invoke(&plugin, command, payload).unwrap_err();
+        assert!(
+            denied.to_string().contains("not allowed"),
+            "{command}: {denied}"
+        );
+    }
+}
+
+#[test]
+fn display_test_accepts_an_independent_background_through_desktop_ipc() {
+    let directory = tempfile::tempdir().unwrap();
+    let runtime =
+        stream_dock_manager_runtime::test_support::headless(directory.path().join("manager"))
+            .unwrap();
+    let _shutdown = Shutdown(runtime.clone());
+    let device = "simulator:n4-pro";
+    let state = runtime.simulate_device(true, device).unwrap();
+    let app = tauri::test::mock_builder()
+        .manage(runtime)
+        .manage(Arc::new(crate::editor_lifecycle::EditorLifecycle::default()))
+        .invoke_handler(tauri::generate_handler![
+            preview_on_dock,
+            cancel_hardware_preview
+        ])
+        .build(crate::desktop_context())
+        .unwrap();
+    let main = tauri::WebviewWindowBuilder::new(&app, "main", Default::default())
+        .build()
+        .unwrap();
+    let mut payload = json!({
+        "deviceId": device,
+        "expectedRevision": state.configuration_revision,
+        "draft": {
+            "bindings": {},
+            "background": null,
+            "display_test": { "pattern": "red", "frame": 0, "previous_token": null }
+        }
+    });
+    let original = invoke(&main, "preview_on_dock", payload.clone()).unwrap();
+    payload["draft"]["display_test"]["previous_token"] = original.clone();
+    payload["draft"]["display_test"]["background_color"] = json!([16, 60, 128]);
+    let colored = invoke(&main, "preview_on_dock", payload.clone()).unwrap();
+    assert_ne!(colored, original);
+    payload["draft"]["display_test"]["previous_token"] = colored.clone();
+    payload["draft"]["display_test"]["background_color"] = json!([256, 60, 128]);
+    assert!(invoke(&main, "preview_on_dock", payload).is_err());
+    invoke(&main, "cancel_hardware_preview", json!({"token": colored})).unwrap();
+}
+
+#[test]
 // Verify keyboard settings are editor only and validate real IPC payloads
 fn keyboard_settings_are_editor_only_and_validate_real_ipc_payloads() {
     let directory = tempfile::tempdir().unwrap();
@@ -97,6 +203,11 @@ fn keyboard_settings_are_editor_only_and_validate_real_ipc_payloads() {
     let plugin = tauri::WebviewWindowBuilder::new(&app, "plugin-fixture", Default::default())
         .build()
         .unwrap();
+    let display_brightness = runtime
+        .snapshot()
+        .session("simulator:k1-pro")
+        .output
+        .brightness;
     let payload = json!({
         "deviceId": "simulator:k1-pro",
         "settings": {"brightness": 70, "color": [255, 0, 32], "os_mode": "macos", "effect":1, "speed":1}
@@ -143,7 +254,7 @@ fn keyboard_settings_are_editor_only_and_validate_real_ipc_payloads() {
     assert_eq!(keyboard["os_mode"], "macos");
     assert_eq!(
         result["snapshot"]["sessions"]["simulator:k1-pro"]["output"]["brightness"],
-        65
+        display_brightness
     );
 }
 
@@ -166,6 +277,37 @@ fn manager_log_folder_is_not_available_to_plugin_or_auxiliary_windows() {
         let error = invoke(&window, "open_manager_logs", json!({})).unwrap_err();
         assert!(error.to_string().contains("not allowed"), "{error}");
     }
+}
+
+#[test]
+// Allow early trusted startup access while ignoring frontend paths and never launching the OS in tests
+fn manager_log_folder_uses_the_native_selected_directory_before_editor_admission() {
+    let root = tempfile::tempdir().unwrap();
+    let selected = root.path().join("selected logs");
+    let arbitrary = root.path().join("arbitrary logs");
+    // Deliberately make the selected path unopenable to avoid spawning Finder
+    std::fs::write(&selected, b"fixture").unwrap();
+    let app = tauri::test::mock_builder()
+        .manage(crate::manager_log::StartupLogs(selected.clone()))
+        .invoke_handler(tauri::generate_handler![open_manager_logs])
+        .build(crate::desktop_context())
+        .unwrap();
+    let main = tauri::WebviewWindowBuilder::new(&app, "main", Default::default())
+        .build()
+        .unwrap();
+    assert_eq!(
+        crate::manager_log::selected_directory(app.handle()),
+        Some(selected),
+    );
+    let error = invoke_body(
+        &main,
+        "open_manager_logs",
+        tauri::ipc::InvokeBody::Json(json!({"path":arbitrary})),
+        &[("x-stream-dock-manager-editor-generation", "0")],
+    )
+    .unwrap_err();
+    assert_eq!(error, json!("Could not open Manager logs"));
+    assert!(!arbitrary.exists());
 }
 
 #[test]
@@ -357,7 +499,7 @@ fn interface_theme_writes_are_editor_only_and_popups_can_read_the_result() {
     let before = invoke(&editor, "appearance_preferences", json!({})).unwrap();
     assert_eq!(before["style"]["textScale"], 100);
     let args = json!({
-        "style": {"lightPalette":"mist-blue", "darkPalette":"deep-teal", "font":"sans", "textScale":125}
+        "style": {"lightPalette":"mist-blue", "darkPalette":"deep-teal", "font":"sans", "textScale":125, "fontWeight":400, "fontItalic":false}
     });
     assert!(invoke(&popup, "set_appearance", args.clone()).is_err());
     invoke(&editor, "set_appearance", args.clone()).unwrap();
@@ -513,6 +655,7 @@ fn suggested_profiles_use_the_real_native_commands_and_main_window_permissions()
         stream_dock_manager_runtime::test_support::headless(directory.path().join("manager"))
             .unwrap();
     let _shutdown = Shutdown(runtime.clone());
+    runtime.simulate_device(true, "simulator:n4-pro").unwrap();
     let source = directory.path().join("org.test.ipc.sdPlugin");
     std::fs::create_dir_all(source.join("profiles")).unwrap();
     std::fs::write(
@@ -551,7 +694,7 @@ fn suggested_profiles_use_the_real_native_commands_and_main_window_permissions()
     let catalog = invoke(&main, "list_plugin_profiles", json!({"id":"org.test.ipc"})).unwrap();
     assert_eq!(pending[0], catalog);
     assert_eq!(catalog["suggestions"][0]["error"], Value::Null, "{catalog}");
-    let preview = invoke(&main, "prepare_plugin_profile_import", json!({"id":"org.test.ipc","key":"profiles/n4-pro.json","targetProfile":null,"targetPage":null})).unwrap();
+    let preview = invoke(&main, "prepare_plugin_profile_import", json!({"id":"org.test.ipc","key":"profiles/n4-pro.json","targetProfile":null,"targetPage":null,"targetDevice":"simulator:n4-pro"})).unwrap();
     assert!(preview["id"].is_string());
     runtime.cancel_profile_import(preview["id"].as_str().unwrap());
     invoke(
@@ -606,6 +749,40 @@ fn frontend_reports_are_closed_bounded_and_only_available_to_first_party_windows
             &[("x-stream-dock-manager-editor-generation", "0")],
         )
         .unwrap();
+        if label == "main" {
+            let startup = json!({"event":"startup_failed","reason":"module_load","frames":[],"startup":{"stage":"shell_mount","loader_code":"ACL_TEMPLATE_FETCH_FAILED"}});
+            invoke(&window, "report_frontend_error", json!({"report":startup})).unwrap();
+            let mut invalid = startup.clone();
+            invalid["startup"]["loader_code"] = json!("private-url-token");
+            assert!(invoke(&window, "report_frontend_error", json!({"report":invalid})).is_err());
+            let mut invalid_stage = startup;
+            invalid_stage["startup"]["stage"] = json!("module_import");
+            assert!(invoke(
+                &window,
+                "report_frontend_error",
+                json!({"report":invalid_stage})
+            )
+            .is_err());
+            let resource = json!({"event":"resource_error","reason":"resource_load","frames":[],"resource":{"route":"editor","owner":"sd-device-preview","role":"control-surface"}});
+            invoke(&window, "report_frontend_error", json!({"report":resource})).unwrap();
+            assert!(crate::manager_log::resource_reports()
+                .iter()
+                .any(|r| serde_json::to_value(r).unwrap() == resource));
+            let rows = crate::diagnostic_export::loaded_rows();
+            assert!(rows.iter().any(|row| row.category.starts_with("Frontend resource ")
+                && row.value == "Resource loading failed · Route editor · Component sd-device-preview · Role control-surface"));
+            let doc = crate::diagnostic_export::stage(json!({}), json!({})).unwrap();
+            let id = serde_json::from_str::<serde_json::Value>(&doc).unwrap()["report_id"]
+                .as_str()
+                .unwrap()
+                .to_string();
+            let review = crate::diagnostic_export::reviewed(&id).unwrap();
+            assert!(review.contains("control-surface"));
+            crate::diagnostic_export::discard(&id);
+            let mut private = resource;
+            private["resource"]["src"] = json!("https://private.example/secret");
+            assert!(invoke(&window, "report_frontend_error", json!({"report":private})).is_err());
+        }
         let mut private = report.clone();
         private["message"] = json!("Bearer private-token /Users/private");
         assert!(invoke(&window, "report_frontend_error", json!({"report":private})).is_err());
@@ -747,7 +924,7 @@ fn cache_commands_are_editor_only_and_clear_only_disposable_fixture_data() {
         .build()
         .unwrap();
     let status = invoke(&main, "cache_status", json!({})).unwrap();
-    assert_eq!(status["folders"].as_array().unwrap().len(), 3);
+    assert_eq!(status["folders"].as_array().unwrap().len(), 5);
     let cleared = invoke(&main, "clear_cache", json!({})).unwrap();
     assert_eq!(cleared["removed_entries"], 0);
     for label in [
@@ -842,4 +1019,238 @@ fn startup_permission_commands_are_main_editor_only() {
             );
         }
     }
+}
+
+#[test]
+// Keep Vault transfer and reveal out of all plugin and auxiliary windows
+fn vault_value_commands_are_main_editor_only() {
+    use crate::vault_commands::*;
+    let app = tauri::test::mock_builder()
+        .invoke_handler(tauri::generate_handler![
+            vault_reveal_entry,
+            vault_delete_settings,
+            vault_delete_plugin_settings,
+            vault_export_entries,
+            vault_prepare_entry_import,
+            vault_prepare_dropped_entry_import,
+            vault_reveal_entry_import,
+            vault_apply_entry_import,
+            vault_cancel_entry_import,
+        ])
+        .build(crate::desktop_context())
+        .unwrap();
+    for label in [
+        "plugin-vault-probe",
+        "action-popup-vault-probe",
+        "log-reader-vault-probe",
+    ] {
+        let window = tauri::WebviewWindowBuilder::new(&app, label, Default::default())
+            .build()
+            .unwrap();
+        for command in [
+            "vault_reveal_entry",
+            "vault_delete_settings",
+            "vault_delete_plugin_settings",
+            "vault_export_entries",
+            "vault_prepare_entry_import",
+            "vault_prepare_dropped_entry_import",
+            "vault_reveal_entry_import",
+            "vault_apply_entry_import",
+            "vault_cancel_entry_import",
+        ] {
+            let error = invoke(&window, command, json!({})).unwrap_err();
+            assert!(
+                error.to_string().contains("not allowed"),
+                "{command}: {error}"
+            );
+        }
+    }
+}
+
+#[test]
+fn vault_reveal_desktop_handler_returns_an_unprotected_value_only_to_current_editor() {
+    use crate::vault_commands::*;
+
+    // Wry-only commands cannot be installed in MockRuntime. Check production
+    // registration separately, then dispatch the same command under the real ACL.
+    let handler = include_str!(concat!(env!("OUT_DIR"), "/command_handler.rs"));
+    assert!(handler
+        .split(['[', ',', ']'])
+        .any(|command| command == "vault_commands::vault_reveal_entry"));
+    assert!(handler
+        .split(['[', ',', ']'])
+        .any(|command| command == "vault_commands::vault_set_entry_protection"));
+
+    let directory = tempfile::tempdir().unwrap();
+    let runtime =
+        stream_dock_manager_runtime::test_support::headless(directory.path().join("manager"))
+            .unwrap();
+    let _shutdown = Shutdown(runtime.clone());
+    let app = tauri::test::mock_builder()
+        .manage(runtime)
+        .manage(Arc::new(crate::editor_lifecycle::EditorLifecycle::default()))
+        .invoke_handler(tauri::generate_handler![
+            vault_create_with_password,
+            vault_create_entry,
+            vault_entries,
+            vault_metadata_revision,
+            vault_personal_entries,
+            vault_reveal_entry,
+            vault_set_entry_protection,
+            vault_lock,
+        ])
+        .build(crate::desktop_context())
+        .unwrap();
+    let main = tauri::WebviewWindowBuilder::new(&app, "main", Default::default())
+        .build()
+        .unwrap();
+    let password = "fixture-only master password";
+    invoke(
+        &main,
+        "vault_create_with_password",
+        json!({"password":password,"confirmation":password}),
+    )
+    .unwrap();
+    let create = |label, kind, protected, value| {
+        invoke(
+            &main,
+            "vault_create_entry",
+            json!({"input":{"label":label,"kind":kind,"protected":protected,"value":value}}),
+        )
+        .unwrap()
+    };
+    let before = invoke(&main, "vault_metadata_revision", json!({})).unwrap();
+    assert_eq!(before["state"], "unlocked");
+    assert!(before["entries_revision"].is_string());
+    let entry = create("Fixture note", "text", false, json!("synthetic text"));
+    let protected = create("Fixture key", "api-key", true, json!("synthetic key"));
+    let list = invoke(&main, "vault_entries", json!({})).unwrap();
+    let after = invoke(&main, "vault_metadata_revision", json!({})).unwrap();
+    assert_ne!(before["entries_revision"], after["entries_revision"]);
+    let personal = invoke(&main, "vault_personal_entries", json!({})).unwrap();
+    assert_eq!(personal["revision"], after["entries_revision"]);
+    assert_eq!(personal["entries"], list);
+    assert!(list.as_array().unwrap().contains(&entry));
+    assert!(list.as_array().unwrap().contains(&protected));
+    assert!(list
+        .as_array()
+        .unwrap()
+        .iter()
+        .all(|item| item.get("value").is_none()));
+
+    let arguments = |metadata: &Value| json!({"id":metadata["id"],"revision":metadata["revision"]});
+    assert_eq!(
+        invoke(&main, "vault_reveal_entry", arguments(&entry)).unwrap(),
+        json!({"kind":"text","value":"synthetic text"})
+    );
+    assert_eq!(
+        invoke(
+            &main,
+            "vault_reveal_entry",
+            json!({"id":entry["id"],"revision":entry["revision"],"password":null}),
+        )
+        .unwrap(),
+        json!({"kind":"text","value":"synthetic text"})
+    );
+    assert_eq!(
+        invoke(&main, "vault_reveal_entry", arguments(&protected)).unwrap_err(),
+        json!("password_required")
+    );
+    assert_eq!(
+        invoke(
+            &main,
+            "vault_reveal_entry",
+            json!({"id":entry["id"],"revision":"0"}),
+        )
+        .unwrap_err(),
+        json!("stale_entry_revision")
+    );
+    let protected_input = |password| json!({"id":protected["id"],"revision":protected["revision"],"password":password});
+    assert_eq!(
+        invoke(&main, "vault_reveal_entry", protected_input(password)).unwrap(),
+        json!({"kind":"api-key","value":"synthetic key"})
+    );
+    assert_eq!(
+        invoke(&main, "vault_reveal_entry", arguments(&protected)).unwrap_err(),
+        json!("password_required")
+    );
+    assert_eq!(
+        invoke(
+            &main,
+            "vault_reveal_entry",
+            protected_input("wrong fixture password")
+        )
+        .unwrap_err(),
+        json!("incorrect_password")
+    );
+    assert_eq!(
+        invoke(&main, "vault_reveal_entry", protected_input(password)).unwrap_err(),
+        json!("rate_limited")
+    );
+    assert_eq!(
+        invoke(&main, "vault_reveal_entry", arguments(&entry)).unwrap(),
+        json!({"kind":"text","value":"synthetic text"})
+    );
+    let plugin =
+        tauri::WebviewWindowBuilder::new(&app, "plugin-vault-value-fixture", Default::default())
+            .build()
+            .unwrap();
+    for command in ["vault_metadata_revision", "vault_personal_entries"] {
+        assert!(handler
+            .split(['[', ',', ']'])
+            .any(|name| name == format!("vault_commands::{command}")));
+        assert!(invoke(&plugin, command, json!({}))
+            .unwrap_err()
+            .to_string()
+            .contains("not allowed"));
+    }
+    assert!(invoke(&plugin, "vault_reveal_entry", arguments(&entry))
+        .unwrap_err()
+        .to_string()
+        .contains("not allowed"));
+
+    let protection = |metadata: &Value, protected| json!({"id":metadata["id"],"revision":metadata["revision"],"protected":protected});
+    assert!(invoke(
+        &plugin,
+        "vault_set_entry_protection",
+        protection(&entry, true)
+    )
+    .unwrap_err()
+    .to_string()
+    .contains("not allowed"));
+    let now_protected = invoke(
+        &main,
+        "vault_set_entry_protection",
+        protection(&entry, true),
+    )
+    .unwrap();
+    assert_eq!(now_protected["protected"], true);
+    assert!(now_protected.get("value").is_none());
+    assert_eq!(
+        invoke(&main, "vault_reveal_entry", arguments(&now_protected)).unwrap_err(),
+        json!("password_required")
+    );
+    assert_eq!(
+        invoke(
+            &main,
+            "vault_set_entry_protection",
+            protection(&now_protected, false)
+        )
+        .unwrap_err(),
+        json!("password_required")
+    );
+
+    invoke(&main, "vault_lock", json!({})).unwrap();
+    let locked = invoke(&main, "vault_metadata_revision", json!({})).unwrap();
+    assert_eq!(locked["state"], "locked");
+    assert!(locked["entries_revision"].is_null());
+    assert_eq!(
+        invoke(&main, "vault_personal_entries", json!({})).unwrap_err(),
+        json!("vault_locked")
+    );
+
+    assert_eq!(
+        invoke(&main, "vault_reveal_entry", arguments(&now_protected)).unwrap_err(),
+        json!("vault_locked")
+    );
 }

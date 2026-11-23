@@ -99,6 +99,30 @@ impl UpdateService {
             stream_dock_manager_downloads::Control::Pause
         }
     }
+    // Update the phase before resolving a source or sending an artifact request
+    fn mark_transfer_phase(&self, id: &str, phase: DownloadPhase) {
+        if let Some((job, _)) = self.jobs.lock().unwrap().get_mut(id) {
+            if matches!(
+                job.download_phase,
+                Some(DownloadPhase::CheckingCache | DownloadPhase::ResolvingSource)
+            ) {
+                job.download_phase = Some(phase);
+            }
+        }
+    }
+    // Only report a cache hit when no archive bytes were requested
+    fn mark_cached_download(&self, id: &str, size: u64) {
+        if let Some((job, _)) = self.jobs.lock().unwrap().get_mut(id) {
+            if matches!(
+                job.download_phase,
+                Some(DownloadPhase::CheckingCache | DownloadPhase::ResolvingSource)
+            ) {
+                job.download_phase = Some(DownloadPhase::UsingCache);
+                job.completed = size;
+                job.total = size;
+            }
+        }
+    }
     // Start a cancellable download job after rechecking the selected catalog entry
     pub(super) fn launch_download(
         self: &Arc<Self>,
@@ -166,9 +190,16 @@ impl UpdateService {
         let expected = if request.product == "manager" {
             &preferences.manager_repository
         } else {
-            &preferences.plugins_repository
+            super::plugin_catalog::catalog_repository(
+                preferences,
+                request
+                    .selection
+                    .as_ref()
+                    .map(|selection| selection.channel.as_str())
+                    .unwrap_or(&preferences.plugin_channel),
+            )
         };
-        if request.repository != *expected {
+        if request.repository != expected {
             return Err(
                 "Download source changed; review the current catalog before downloading".into(),
             );
@@ -192,38 +223,9 @@ impl UpdateService {
     ) -> Result<PathBuf, String> {
         let control = || self.download_control(id, cancel);
         let result = (|| -> Result<PathBuf, String> {
-            let mut resolved = request.clone();
             if let Some(selection) = &request.selection {
                 self.selection_current(selection)?;
-                let repository_source = format!(
-                    "https://api.github.com/repos/{}/releases",
-                    selection.repository
-                );
-                if selection.catalog_url.as_deref() == Some(repository_source.as_str())
-                    && selection.github_asset_url.is_none()
-                {
-                    let asset = self.plugin_release_asset(
-                        &selection.repository,
-                        &selection.artifact.release_tag,
-                        &selection.artifact.filename,
-                        selection.artifact.size,
-                        cancel,
-                    )?;
-                    resolved.spec.url = asset.clone();
-                    let mut selected = (**selection).clone();
-                    selected.github_asset_url = Some(asset);
-                    resolved.selection = Some(Arc::new(selected));
-                    self.download_requests
-                        .lock()
-                        .unwrap()
-                        .insert(id.into(), resolved.clone());
-                    self.selections
-                        .lock()
-                        .unwrap()
-                        .insert(id.into(), resolved.selection.as_ref().unwrap().clone());
-                }
             }
-            let request = &resolved;
             let mut directory = self.root.join("downloads");
             for component in ["", request.product.as_str(), request.spec.sha256.as_str()] {
                 if !component.is_empty() {
@@ -248,16 +250,49 @@ impl UpdateService {
             {
                 return Err("Download destination is not a regular file".into());
             }
-            if verify_file(
-                &target,
-                &request.spec.sha256,
-                request.spec.size.ok_or("Missing expected artifact size")?,
-            )
-            .is_ok()
-            {
+            // Verify retained bytes against the current catalog before trying GitHub
+            // credentials, release metadata or the artifact network
+            let size = request.spec.size.ok_or("Missing expected artifact size")?;
+            if verify_file(&target, &request.spec.sha256, size).is_ok() {
+                if control() != stream_dock_manager_downloads::Control::Continue {
+                    return Err("Download stopped before publication".into());
+                }
+                self.mark_cached_download(id, size);
                 self.record_cached_download(&target)?;
                 return Ok(target);
             }
+            let mut resolved = request.clone();
+            if let Some(selection) = &request.selection {
+                let repository_source = format!(
+                    "https://api.github.com/repos/{}/releases",
+                    selection.repository
+                );
+                if selection.catalog_url.as_deref() == Some(repository_source.as_str())
+                    && selection.github_asset_url.is_none()
+                {
+                    self.mark_transfer_phase(id, DownloadPhase::ResolvingSource);
+                    let asset = self.plugin_release_asset(
+                        &selection.repository,
+                        &selection.artifact.release_tag,
+                        &selection.artifact.filename,
+                        selection.artifact.size,
+                        cancel,
+                    )?;
+                    resolved.spec.url = asset.clone();
+                    let mut selected = (**selection).clone();
+                    selected.github_asset_url = Some(asset);
+                    resolved.selection = Some(Arc::new(selected));
+                    self.download_requests
+                        .lock()
+                        .unwrap()
+                        .insert(id.into(), resolved.clone());
+                    self.selections
+                        .lock()
+                        .unwrap()
+                        .insert(id.into(), resolved.selection.as_ref().unwrap().clone());
+                }
+            }
+            let request = &resolved;
             let policy = |url: &Url, redirect: bool| {
                 if let Some(selection) = &request.selection {
                     self.selection_current(selection)?;
@@ -281,17 +316,25 @@ impl UpdateService {
                     validate_origin(url.as_str(), &request.repository, &request.tag, redirect)
                 }
             };
-            let token = if request
+            let uses_github_asset = request
                 .selection
                 .as_ref()
-                .is_some_and(|s| s.github_asset_url.is_some())
-            {
+                .is_some_and(|s| s.github_asset_url.is_some());
+            let token = if uses_github_asset {
                 self.plugin_github_token(&request.repository)?
             } else {
                 None
             };
+            // The downloader calls this only for a real outbound request, not for
+            // a complete verified resumable entry. Preserve its prior headers
             let headers = |url: &Url| {
-                super::plugin_github::asset_headers(url, &request.spec.url, token.as_deref())
+                let result = if uses_github_asset {
+                    super::plugin_github::asset_headers(url, &request.spec.url, token.as_deref())?
+                } else {
+                    reqwest::header::HeaderMap::new()
+                };
+                self.mark_transfer_phase(id, DownloadPhase::Downloading);
+                Ok(result)
             };
             let progress = |completed: u64, total: Option<u64>| {
                 if let Some((job, _)) = self.jobs.lock().unwrap().get_mut(id) {
@@ -303,19 +346,14 @@ impl UpdateService {
             let artifact = self.downloads.download(
                 &request.spec,
                 stream_dock_manager_downloads::NetworkPolicy {
-                    headers: request
-                        .selection
-                        .as_ref()
-                        .filter(|s| s.github_asset_url.is_some())
-                        .map(|_| {
-                            &headers as &dyn Fn(&Url) -> Result<reqwest::header::HeaderMap, String>
-                        }),
+                    headers: Some(&headers),
                     validate: &policy,
                     timeout: Duration::from_secs(20),
                 },
                 &control,
                 &progress,
             )?;
+            self.mark_cached_download(id, artifact.size());
             // Final downloads retain their existing explicit user-facing paths;
             // the shared resumable cache owns only bounded retained transfer data
             let mut output =
@@ -424,6 +462,7 @@ mod tests {
             if job.state != "running" {
                 assert_eq!(job.state, "complete", "{:?}", job.error);
                 assert_eq!(job.asset_name.as_deref(), Some("manager.dmg"));
+                assert_eq!(job.download_phase, Some(DownloadPhase::UsingCache));
                 break;
             }
             assert!(
@@ -456,6 +495,13 @@ mod tests {
             .join(&request.name);
         let publication = service.cache_lease(&target).unwrap();
         let (id, cancel) = service.job("plugins", "download").unwrap();
+        {
+            let jobs = service.jobs.lock().unwrap();
+            assert_eq!(
+                jobs[&id].0.download_phase,
+                Some(DownloadPhase::CheckingCache)
+            );
+        }
         let path = service.transfer_download(&id, &request, &cancel).unwrap();
         let other = service.clone();
         assert_eq!(
@@ -487,6 +533,8 @@ mod tests {
             .contains("source changed"));
         let (check, _) = service.job("manager", "check").unwrap();
         service.finish(&check, Err("offline".into()));
+        assert_eq!(service.jobs.lock().unwrap()[&check].0.download_phase, None);
+        assert_eq!(service.jobs.lock().unwrap()[&check].0.download_phase, None);
         assert!(service.retry_download(&check).is_err());
     }
     #[test]
@@ -529,12 +577,16 @@ mod tests {
                 &|_, _| Ok(())
             )
             .is_err());
-        // The discard also removes idle scope directories rather than leaking
-        // metadata-only entries after repeated cancellation
+        // Cancellation hints are durable until the background pass reclaims the partial.
+        service.downloads.prune().unwrap();
         assert_eq!(
             std::fs::read_dir(service.root.join("partials"))
                 .unwrap()
-                .filter(|e| e.as_ref().unwrap().file_type().unwrap().is_dir())
+                .map(|entry| entry.unwrap())
+                .filter(|entry| {
+                    entry.file_type().unwrap().is_dir()
+                        && entry.file_name().to_str().is_some_and(valid_hash)
+                })
                 .count(),
             0
         );

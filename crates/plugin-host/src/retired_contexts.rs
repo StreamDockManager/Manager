@@ -27,6 +27,10 @@ pub(super) struct RetiredContexts {
     bytes: usize,
 }
 impl RetiredContexts {
+    pub(super) fn next_deadline(&self) -> Option<Instant> {
+        self.entries.front().map(|entry| entry.expires)
+    }
+
     // Remove retained entries whose deadlines have elapsed
     pub(super) fn expire(&mut self, now: Instant) {
         while self

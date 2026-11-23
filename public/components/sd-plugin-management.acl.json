@@ -1,8 +1,10 @@
 {
     "version": 1,
-    "groups": ["shell"],
+    "groups": ["plugin-management"],
     "dependencies": [],
-    "options": { "shadow": false },
+    "options": {
+        "shadow": false
+    },
     "metadata": {
         "description": "Reviewed plugin rollback and installation-local update preferences."
     }

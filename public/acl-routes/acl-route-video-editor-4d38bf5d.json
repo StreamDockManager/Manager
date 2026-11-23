@@ -1,0 +1,22 @@
+{
+  "version": 1,
+  "basePath": "..",
+  "components": {
+    "sd-video-editor": {
+      "source": "components/sd-video-editor.html",
+      "dependencies": [],
+      "options": {
+        "shadow": false,
+        "templateRevision": "sha256-lqLjschdjXaBCsch4oK7wJJJvxI9J8sfTVotb0HUK4w"
+      },
+      "metadata": {
+        "description": "Shared source-timed video clip editor with isolated drafts and contextual job feedback."
+      }
+    }
+  },
+  "groups": {
+    "video-editor": [
+      "sd-video-editor"
+    ]
+  }
+}

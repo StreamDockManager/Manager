@@ -19,7 +19,8 @@ pub fn stage(environment: Value, performance: Value) -> Result<String, String> {
     let document = serde_json::to_string_pretty(&json!({
         "schema_version": 1, "report_id": id,
         "privacy": "No raw logs, profile contents, settings, hostnames, device serials, user file paths or arbitrary environment variables are collected. Plugin identifiers and runtime versions are included; review before sharing.",
-        "environment": environment, "performance": performance
+        "environment": environment, "performance": performance,
+        "resource_errors": crate::manager_log::resource_reports()
     })).map_err(|e| e.to_string())?;
     if document.len() > LIMIT {
         return Err("Diagnostic report exceeds 8 MiB".into());
@@ -122,6 +123,31 @@ pub fn loaded_rows() -> Vec<stream_dock_manager_runtime::diagnostics::Diagnostic
             category: "GTK runtime".into(),
             value: version.into(),
             status: "ok".into(),
+        });
+    }
+    for (index, report) in crate::manager_log::resource_reports()
+        .into_iter()
+        .enumerate()
+    {
+        let failure = if matches!(
+            report.reason,
+            stream_dock_manager_plugin_host::manager_diagnostics::FailureReason::ResourceDecode
+        ) {
+            "Image decoding failed"
+        } else {
+            "Resource loading failed"
+        };
+        let context = serde_json::to_value(report.resource).unwrap_or_default();
+        let field = |key: &str| context[key].as_str().unwrap_or("unknown");
+        rows.push(stream_dock_manager_runtime::diagnostics::Diagnostic {
+            category: format!("Frontend resource {}", index + 1),
+            value: format!(
+                "{failure} · Route {} · Component {} · Role {}",
+                field("route"),
+                field("owner"),
+                field("role")
+            ),
+            status: "warning".into(),
         });
     }
     rows

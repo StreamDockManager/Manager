@@ -1,8 +1,9 @@
 //! Bounded raster rendering for the supported Stream Deck feedback layout primitives
 use crate::{render, Error, Result};
+#[cfg(test)]
 use base64::Engine;
 use font8x8::UnicodeFonts;
-use image::{DynamicImage, ImageFormat, Pixel, Rgba, RgbaImage};
+use image::{DynamicImage, Pixel, Rgba, RgbaImage};
 #[cfg(test)]
 use serde_json::json;
 use serde_json::Value;
@@ -42,6 +43,36 @@ pub fn draw_on(
     rotation: u16,
     base: Option<&[u8]>,
 ) -> Result<Vec<u8>> {
+    let canvas = draw_pixels(layout, values, width, height, &|_| Ok(None), || {
+        base.map(|base| {
+            image::load_from_memory(base)
+                .map(|image| {
+                    image
+                        .resize_exact(
+                            width.into(),
+                            height.into(),
+                            image::imageops::FilterType::Lanczos3,
+                        )
+                        .into_rgba8()
+                })
+                .map_err(|e| Error::Protocol(e.to_string()))
+        })
+        .transpose()
+    })?;
+    render::encode_pixels(
+        render::rotate_pixels(DynamicImage::ImageRgba8(canvas), rotation)?,
+        "png",
+    )
+}
+
+pub(crate) fn draw_pixels(
+    layout: &Value,
+    values: &Value,
+    width: u16,
+    height: u16,
+    resolve: &render::ArtworkResolver<'_>,
+    base: impl FnOnce() -> Result<Option<RgbaImage>>,
+) -> Result<RgbaImage> {
     let items = layout["items"]
         .as_array()
         .ok_or_else(|| Error::Protocol("layout items missing".into()))?;
@@ -49,18 +80,8 @@ pub fn draw_on(
         return Err(Error::Protocol("feedback layout exceeds limits".into()));
     }
     let background = color(layout["background"].as_str().unwrap_or("#0f141d"), 0.0);
-    let mut canvas = if let Some(base) = base {
-        image::load_from_memory(base)
-            .map_err(|e| Error::Protocol(e.to_string()))?
-            .resize_exact(
-                width.into(),
-                height.into(),
-                image::imageops::FilterType::Lanczos3,
-            )
-            .to_rgba8()
-    } else {
-        RgbaImage::from_pixel(width.into(), height.into(), Rgba(background))
-    };
+    let mut canvas = base()?
+        .unwrap_or_else(|| RgbaImage::from_pixel(width.into(), height.into(), Rgba(background)));
     let mut items = items.clone();
     items.sort_by_key(|i| i["zOrder"].as_i64().unwrap_or(0));
     for mut item in items {
@@ -113,13 +134,14 @@ pub fn draw_on(
                     other => other.to_string(),
                 };
                 if item["__vendor_title_parameters"].is_object() {
-                    let layer = crate::vendor_title::draw(
+                    if let Some(layer) = crate::vendor_title::draw(
                         &value,
                         &item["__vendor_title_parameters"],
                         w as u16,
                         h as u16,
-                    )?;
-                    image::imageops::overlay(&mut canvas, &layer, i64::from(x), i64::from(y));
+                    )? {
+                        image::imageops::overlay(&mut canvas, &layer, i64::from(x), i64::from(y));
+                    }
                     continue;
                 }
                 if item["font"]["fit"] == true {
@@ -196,19 +218,18 @@ pub fn draw_on(
                     let indicator = item["bar_h"].as_f64().unwrap_or(10.).clamp(0., 2000.);
                     let indicator_h = ((indicator * f64::from(height) / 100.) as u32).min(h);
                     let bar_h = h - indicator_h;
-                    for dy in 0..bar_h {
-                        for dx in 0..w {
-                            put(
-                                &mut canvas,
-                                x + dx,
-                                y + dy,
-                                color(
-                                    item["bar_bg_c"].as_str().unwrap_or("#303b4d"),
-                                    f64::from(dx) / f64::from(w.saturating_sub(1).max(1)),
-                                ),
-                            );
+                    let background = item["bar_bg_c"].as_str().unwrap_or("#303b4d");
+                    for dx in 0..w {
+                        let paint = color(
+                            background,
+                            f64::from(dx) / f64::from(w.saturating_sub(1).max(1)),
+                        );
+                        for dy in 0..bar_h {
+                            put(&mut canvas, x + dx, y + dy, paint);
                         }
                     }
+                    let indicator_color =
+                        color(item["bar_fill_c"].as_str().unwrap_or("white"), fraction);
                     let center = (fraction * f64::from(w - 1)).round() as i64;
                     let half_width = (indicator * f64::from(width) / 200.).min(f64::from(w));
                     for dy in 0..indicator_h {
@@ -216,30 +237,25 @@ pub fn draw_on(
                             / f64::from(indicator_h.saturating_sub(1).max(1)))
                         .round() as i64;
                         for dx in (center - half).max(0)..=(center + half).min(i64::from(w - 1)) {
-                            put(
-                                &mut canvas,
-                                x + dx as u32,
-                                y + bar_h + dy,
-                                color(item["bar_fill_c"].as_str().unwrap_or("white"), fraction),
-                            );
+                            put(&mut canvas, x + dx as u32, y + bar_h + dy, indicator_color);
                         }
                     }
                     continue;
                 }
-                for dy in 0..h {
-                    for dx in 0..w {
-                        let filled = f64::from(dx) / f64::from(w) < fraction;
-                        let paint = if filled {
-                            item["bar_fill_c"].as_str().unwrap_or("#82aef0")
+                let foreground = item["bar_fill_c"].as_str().unwrap_or("#82aef0");
+                let background = item["bar_bg_c"].as_str().unwrap_or("#303b4d");
+                for dx in 0..w {
+                    let position = f64::from(dx) / f64::from(w);
+                    let paint = color(
+                        if position < fraction {
+                            foreground
                         } else {
-                            item["bar_bg_c"].as_str().unwrap_or("#303b4d")
-                        };
-                        put(
-                            &mut canvas,
-                            x + dx,
-                            y + dy,
-                            color(paint, f64::from(dx) / f64::from(w)),
-                        );
+                            background
+                        },
+                        position,
+                    );
+                    for dy in 0..h {
+                        put(&mut canvas, x + dx, y + dy, paint);
                     }
                 }
             }
@@ -313,18 +329,12 @@ pub fn draw_on(
             }
             "pixmap" => {
                 if let Some(uri) = item["value"].as_str() {
-                    if let Some(encoded) = uri.split_once(";base64,").map(|(_, data)| data) {
-                        let bytes = base64::engine::general_purpose::STANDARD
-                            .decode(encoded)
-                            .map_err(|e| Error::Protocol(e.to_string()))?;
-                        let bytes = if item.get("__manager_style").is_some() {
-                            crate::plugin_display::contained(&bytes, w as u16, h as u16)?
+                    if let Some(bytes) = render::image_bytes(uri, resolve)? {
+                        let image = if item.get("__manager_style").is_some() {
+                            render::contained_pixels(&bytes, w as u16, h as u16)?
                         } else {
-                            render::render(&bytes, w as u16, h as u16, 0, "png")?
+                            render::render_pixels(&bytes, w as u16, h as u16)?.into_rgba8()
                         };
-                        let image = image::load_from_memory(&bytes)
-                            .map_err(|e| Error::Protocol(e.to_string()))?
-                            .to_rgba8();
                         image::imageops::overlay(&mut canvas, &image, i64::from(x), i64::from(y));
                     }
                 }
@@ -332,19 +342,7 @@ pub fn draw_on(
             other => return Err(Error::Unsupported(format!("layout item {other}"))),
         }
     }
-    let image = DynamicImage::ImageRgba8(canvas);
-    let image = match rotation {
-        0 => image,
-        180 => image.rotate180(),
-        90 => image.rotate90(),
-        270 => image.rotate270(),
-        _ => return Err(Error::Protocol("invalid layout rotation".into())),
-    };
-    let mut bytes = std::io::Cursor::new(vec![]);
-    image
-        .write_to(&mut bytes, ImageFormat::Png)
-        .map_err(|e| Error::Protocol(e.to_string()))?;
-    Ok(bytes.into_inner())
+    Ok(canvas)
 }
 // Write the value into its destination
 fn put(image: &mut RgbaImage, x: u32, y: u32, color: [u8; 4]) {

@@ -98,7 +98,7 @@ impl ConfigurationRecovery {
             .iter()
             .find(|s| s.item.id == backup_id)
             .ok_or("Unknown backup; reload the catalogue")?;
-        Ok(self.root.join("recovery").join(&source.item.label))
+        Ok(recovery_directory(&self.root).join(&source.item.label))
     }
     // Validate a full backup and stage a review before any restore is accepted
     pub fn preview_backup_restore(
@@ -192,7 +192,7 @@ impl ConfigurationRecovery {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use stream_dock_manager_storage::{Storage, DATABASE_NAME};
+    use stream_dock_manager_storage::Storage;
     // Construct an isolated full restore fixture
     fn fixture() -> tempfile::TempDir {
         let root = tempfile::tempdir().unwrap();
@@ -203,7 +203,7 @@ mod tests {
             })
             .unwrap();
         storage
-            .backup(root.path().join("recovery/full.sqlite3"))
+            .backup(recovery_directory(root.path()).join("full.sqlite3"))
             .unwrap();
         drop(storage);
         root
@@ -226,7 +226,7 @@ mod tests {
     // Verify that corrupt primary preview is readonly and restore is explicit
     fn corrupt_primary_preview_is_readonly_and_restore_is_explicit() {
         let root = fixture();
-        let path = root.path().join(DATABASE_NAME);
+        let path = database_path(root.path(), DATABASE_NAME);
         std::fs::write(&path, b"corrupt original evidence").unwrap();
         let recovery =
             ConfigurationRecovery::open(root.path().into(), "Unreadable primary".into()).unwrap();
@@ -239,19 +239,22 @@ mod tests {
         assert!(preview.valid, "{:?}", preview.issues);
         assert_eq!(preview.profile_count, 1);
         assert_eq!(std::fs::read(&path).unwrap(), b"corrupt original evidence");
-        let backup_bytes = std::fs::read(root.path().join("recovery/full.sqlite3")).unwrap();
+        let backup_bytes =
+            std::fs::read(recovery_directory(root.path()).join("full.sqlite3")).unwrap();
         let report = recovery
             .restore_backup(&id, &revision, &preview.review_token)
             .unwrap();
         assert!(report.ready, "{:?}", report.issues);
         assert!(report.primary_readable);
+        assert!(path.is_file());
+        assert!(!root.path().join(DATABASE_NAME).exists());
         let preserved = PathBuf::from(report.last_backup.unwrap());
         assert_eq!(
             std::fs::read(preserved.join(DATABASE_NAME)).unwrap(),
             b"corrupt original evidence"
         );
         assert_eq!(
-            std::fs::read(root.path().join("recovery/full.sqlite3")).unwrap(),
+            std::fs::read(recovery_directory(root.path()).join("full.sqlite3")).unwrap(),
             backup_bytes
         );
         recovery
@@ -280,7 +283,7 @@ mod tests {
         assert!(preview.valid);
         assert!(recovery.restore_backup(&id, &revision, "wrong").is_err());
         let preview = recovery.preview_backup_restore(&id, &revision).unwrap();
-        let conn = Connection::open(root.path().join("recovery/full.sqlite3")).unwrap();
+        let conn = Connection::open(recovery_directory(root.path()).join("full.sqlite3")).unwrap();
         stream_dock_manager_storage::write_json(
             &conn,
             Domain::LocalPreferences,
@@ -299,7 +302,7 @@ mod tests {
     // Verify that invalid full domain is visible but cannot be restored
     fn invalid_full_domain_is_visible_but_cannot_be_restored() {
         let root = fixture();
-        let conn = Connection::open(root.path().join("recovery/full.sqlite3")).unwrap();
+        let conn = Connection::open(recovery_directory(root.path()).join("full.sqlite3")).unwrap();
         stream_dock_manager_storage::write_json(
             &conn,
             Domain::ManagerPreferences,
@@ -324,12 +327,12 @@ mod tests {
     fn permanent_deletions_are_reconciled_before_dependency_admission() {
         let root = fixture();
         let asset = uuid::Uuid::new_v4().to_string();
-        let conn = Connection::open(root.path().join("recovery/full.sqlite3")).unwrap();
+        let conn = Connection::open(recovery_directory(root.path()).join("full.sqlite3")).unwrap();
         let mut data = crate::profile_database::load(&conn).unwrap().unwrap();
         data.profiles[0].background_asset = Some(asset.clone());
         crate::profile_database::save(&conn, &data).unwrap();
         drop(conn);
-        let conn = Connection::open(root.path().join(DATABASE_NAME)).unwrap();
+        let conn = Connection::open(database_path(root.path(), DATABASE_NAME)).unwrap();
         let deleted = crate::media_deletion::DeletedMedia {
             schema_version: 1,
             revision: 5,

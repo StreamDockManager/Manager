@@ -82,15 +82,15 @@
             <div class="download-row">
                 <div class="field-group">
                     <span x-show="job.asset_name" x-text="job.asset_name || ''"></span>
-                    <span x-text="job.state"></span>
+                    <span x-text="$store.updates.downloadJobLabel(job)"></span>
                     <span x-show="job.error" x-text="job.error || ''"></span>
                     <span
                         role="status"
-                        x-show="job.state === 'running'"
+                        x-show="$store.updates.showDownloadProgress(job)"
                         x-text="$store.updates.downloadProgress(job)"
                     ></span>
                     <progress
-                        x-show="job.state === 'running'"
+                        x-show="$store.updates.showDownloadProgress(job)"
                         :value="job.completed || 0"
                         :max="job.total || 1"
                         :aria-label="'Installer download progress ' + (job.asset_name || '')"

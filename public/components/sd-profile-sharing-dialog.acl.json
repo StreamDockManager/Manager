@@ -1,6 +1,6 @@
 {
     "version": 1,
-    "groups": ["shell"],
+    "groups": ["profile-sharing-dialog"],
     "options": {
         "shadow": false
     }

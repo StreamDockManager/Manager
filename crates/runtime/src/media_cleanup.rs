@@ -533,7 +533,7 @@ mod tests {
             .save_profile(profile, runtime.snapshot().configuration_revision)
             .unwrap();
         let before = serde_json::to_vec(&runtime.profiles.load().unwrap()).unwrap();
-        let library = runtime.media_library(1, 12, "").unwrap();
+        let library = runtime.audit_media_library(1, 12, "").unwrap();
         assert!(library.cleanup_available, "{:?}", library.scan_errors);
         let review = runtime
             .prepare_media_cleanup(&library.generation, vec![unused.clone()])
@@ -546,7 +546,7 @@ mod tests {
         assert!(runtime.profiles.asset(&unused).is_ok());
         runtime.release_media(&lease);
         runtime.discard_media_cleanup(&review.id);
-        let library = runtime.media_library(1, 12, "").unwrap();
+        let library = runtime.audit_media_library(1, 12, "").unwrap();
         let review = runtime
             .prepare_media_cleanup(&library.generation, vec![unused.clone()])
             .unwrap();
@@ -563,7 +563,7 @@ mod tests {
         assert!(runtime.commit_media_cleanup(&review.id).is_err());
         runtime.save_draft("draft", None).unwrap();
         runtime.discard_media_cleanup(&review.id);
-        let library = runtime.media_library(1, 12, "").unwrap();
+        let library = runtime.audit_media_library(1, 12, "").unwrap();
         let review = runtime
             .prepare_media_cleanup(&library.generation, vec![unused.clone()])
             .unwrap();

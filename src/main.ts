@@ -1,11 +1,23 @@
+import { suspendLiveActionForPalette } from './live-action-preview';
+import { registerPaletteBrowser } from './palette-browser';
+import { pluginPalettePreviewContext } from './plugin-palette-preview';
+import { createPalettePreviewLease, type PaletteCandidate } from './palette-dock-preview';
 import { publicPreview } from './public-preview';
-import { failBootSplash, finishBootSplash, waitForBootPreview } from './boot-splash';
+import {
+    failBootSplash,
+    finishBootSplash,
+    suspendBootSplash,
+    waitForBootPreview,
+} from './boot-splash';
 import { registerFontPicker } from './font-picker';
 import { registerStartupPermissions } from './startup-permissions';
+import { runStartupVault } from './startup-vault';
 import { registerRecovery } from './recovery';
-import { reportFrontendError } from './frontend-errors';
+import { reportFrontendError, reportStartupFailure } from './frontend-errors';
+import type { FrontendStartupStage } from '../generated/runtime';
 import { registerManagerLogs } from './manager-logs';
-import managerVersion from 'virtual:manager-build-version';
+import managerBuildVersion from 'virtual:manager-build-version';
+import { versionLabel } from './version-label';
 import Alpine from '@alpinejs/csp';
 import Loader from 'alpine-component-loader/core';
 import { registerRoute } from 'virtual:alpine-component-loader/routes';
@@ -17,9 +29,11 @@ import { AppState } from './state';
 import type { Snapshot } from './types';
 import { registerTheme } from './theme';
 import { jumpToSection, registerTooltips } from './visibility';
+import { registerLocationPicker } from './location-picker';
 import { registerPluginSettings } from './plugin-settings';
 import { registerRuntimes } from './runtimes';
 import { registerApplicationData } from './application-data';
+import { installDialogLoader } from './dialog-loader';
 import { RetryableTasks, componentReady } from './route-loading';
 import { registerUpdates } from './updates';
 import { registerToasts } from './toasts';
@@ -42,7 +56,7 @@ import { WindowCloseCoordinator } from './window-close';
 import { registerWindowCloseDialog } from './window-close-dialog';
 import { windowCloseOwners } from './window-close-owners';
 import { developmentReloadApplies, prepareDevelopmentReload } from './window-reload';
-import { drainCloseReleases } from './close-releases';
+import { drainCloseReleases, trackCloseRelease } from './close-releases';
 import { pauseWindowReaders, resumeWindowReaders } from './polling-reader';
 import type { EditorRestoreState } from '../generated/runtime';
 import {
@@ -64,7 +78,26 @@ window.Alpine = Alpine;
 const themeStore = registerTheme(Alpine, native);
 registerTooltips();
 registerPluginSettings(Alpine, bridge);
+registerLocationPicker(Alpine, bridge);
 registerStartupPermissions(Alpine, bridge);
+if (native) {
+    let lastActivity = -Infinity;
+    const recordVaultActivity = (event: Event) => {
+        if (
+            !event.isTrusted ||
+            performance.now() - lastActivity < 5000 ||
+            !(event.target instanceof Element) ||
+            !event.target.closest('sd-vault, #settings-plugin-permissions, .install-vault-picker')
+        )
+            return;
+        lastActivity = performance.now();
+        void bridge.command('vault_user_activity').catch(() => {});
+    };
+    for (const type of ['pointerdown', 'keydown']) {
+        document.addEventListener(type, recordVaultActivity, { capture: true, passive: true });
+    }
+}
+
 const state = new AppState(bridge);
 Alpine.store('app', state);
 Alpine.store('benchmarkProgress', new BenchmarkProgressStore(bridge, native, document));
@@ -86,6 +119,78 @@ registerManagerLogs(Alpine, app);
 const lifetime = new StartupLifetime();
 lifetime.own(registerAutoScrollbars());
 lifetime.own(registerFontPicker());
+let activePalette:
+    { owner: symbol; candidate: PaletteCandidate; followNavigation: boolean } | undefined;
+let paletteDraftRetirement = Promise.resolve();
+// One global candidate is applied by native code to every connected device and
+// compatible plugin. Selection and profile navigation do not retarget this lease.
+const palettePlugins = createPalettePreviewLease({
+    context: () =>
+        pluginPalettePreviewContext(native, {
+            route: app().route,
+            followNavigation: true,
+            suspended: app().windowSuspended,
+            hidden: document.hidden,
+            quiescing: windowWork.quiescing,
+            closing: windowCloseOwners.closing,
+        }),
+    start: async (_context, palette) => {
+        await paletteDraftRetirement;
+        return bridge.command('preview_plugin_palette', { palette });
+    },
+    onError: (error) =>
+        app().notify('Could not preview device and plugin themes: ' + error, 'error'),
+    cancel: (token) =>
+        trackCloseRelease('plugin-palette:' + token, () =>
+            bridge.command('cancel_plugin_palette_preview', { token }),
+        ),
+});
+themeStore.bindPalettePreviewTransport((owner, candidate, followNavigation = false) => {
+    if (candidate) {
+        activePalette = { owner, candidate, followNavigation };
+        paletteDraftRetirement = suspendLiveActionForPalette(true);
+        palettePlugins.set(owner, candidate);
+    } else {
+        if (activePalette?.owner === owner) activePalette = undefined;
+        void palettePlugins.clear(owner).then(() => {
+            if (!activePalette) void suspendLiveActionForPalette(false);
+        });
+    }
+});
+const paletteContextChanged = () => {
+    // Only window lifetime affects the global lease, never selected-device navigation.
+    void palettePlugins.contextChanged();
+    const current = activePalette;
+    if (current?.followNavigation)
+        queueMicrotask(() => {
+            if (activePalette !== current || lifetime.disposed) return;
+            palettePlugins.set(current.owner, current.candidate);
+        });
+};
+const paletteContextEffect = Alpine.effect(paletteContextChanged);
+const paletteVisibilityChanged = paletteContextChanged;
+document.addEventListener('visibilitychange', paletteVisibilityChanged);
+lifetime.own(() => document.removeEventListener('visibilitychange', paletteVisibilityChanged));
+lifetime.own(() => {
+    Alpine.release(paletteContextEffect);
+    themeStore.bindPalettePreviewTransport(undefined);
+    activePalette = undefined;
+    void palettePlugins.clear();
+});
+lifetime.own(
+    windowCloseOwners.register({
+        name: 'Palette previews',
+        state: () => 'clean',
+        discard: async () => {
+            activePalette = undefined;
+            await palettePlugins.clear();
+        },
+        release: async () => {
+            activePalette = undefined;
+            await palettePlugins.clear();
+        },
+    }),
+);
 let profileThemeSignature = '';
 let themeDevice: string | undefined;
 let contextWrite = Promise.resolve();
@@ -119,7 +224,10 @@ lifetime.own(() => Alpine.release(profileThemeEffect));
 let startupInteractive = false;
 // Block keyboard interaction before startup completes
 const startupKeyboardGuard = (event: KeyboardEvent) => {
-    if (!startupInteractive) {
+    if (
+        !startupInteractive &&
+        !(event.target as Element | null)?.closest?.('#startup-vault[open]')
+    ) {
         event.preventDefault();
         event.stopImmediatePropagation();
     }
@@ -197,11 +305,6 @@ registerApplicationData(Alpine, app);
 const loadedControllers = new RetryableTasks();
 // Load a route’s controllers before mounting its components
 async function ensureRoute(route: string) {
-    if (route === 'editor' || route === 'macros') {
-        await loadedControllers.run('action-dialogs', () =>
-            import('./action-controllers').then((module) => module.register()),
-        );
-    }
     const loaders = {
         // Load shell controllers on demand
         shell: () => import('./route-shell'),
@@ -212,11 +315,23 @@ async function ensureRoute(route: string) {
         plugins: () => import('./route-plugins'),
         // Load settings controllers on demand
         settings: () => import('./route-settings'),
+        vault: () => import('./route-vault'),
         // Load diagnostics controllers on demand
         diagnostics: () => import('./route-diagnostics'),
     };
     const load = loaders[route as keyof typeof loaders];
-    if (load) await loadedControllers.run(route, () => load().then((module) => module.register()));
+    const actions =
+        route === 'editor' || route === 'macros'
+            ? loadedControllers.run('action-dialogs', async () =>
+                  (await import('./action-controllers')).register(),
+              )
+            : undefined;
+    if (load) {
+        await loadedControllers.run(route, async () => {
+            const [module] = await Promise.all([load(), actions]);
+            module.register();
+        });
+    } else await actions;
     await registerRoute(route);
     if (route === 'editor' || route === 'macros') await mountActionDialogs();
 }
@@ -254,7 +369,21 @@ const selectedControlContext = () =>
     JSON.stringify([app().deviceId, app().profile?.id, app().page?.id, app().controlId]);
 Alpine.data('shell', () => ({
     jumpToSection,
-    managerVersion,
+    managerBuildVersion,
+    // Use native development authority rather than checkout location or dirty files
+    get managerVersion() {
+        const permissions = Alpine.store('startupPermissions') as
+            | {
+                  report?: { development_mode?: boolean } | null;
+              }
+            | undefined;
+        return versionLabel(
+            this.managerBuildVersion,
+            native,
+            permissions?.report?.development_mode,
+            import.meta.env.DEV,
+        );
+    },
     publicPreview,
     aboutError: '',
     // Open About while preserving the initiating control’s focus
@@ -324,7 +453,8 @@ Alpine.data('shell', () => ({
         return benchmarkProgress().progress.running;
     },
     // Open progress for the active benchmark
-    openBenchmarkProgress() {
+    openBenchmarkProgress(event: Event) {
+        (event.currentTarget as HTMLButtonElement).focus({ preventScroll: true });
         window.dispatchEvent(new CustomEvent('open-benchmark-progress'));
     },
     navigationRevision: 0,
@@ -380,12 +510,34 @@ Alpine.data('shell', () => ({
             return app().nativeRendering ? 'Actions enabled' : 'Preview · no host actions';
         return 'Connected';
     },
+    dialogEvents: undefined as AbortController | undefined,
+    powerTimer: 0,
     // Connect shell navigation and initialize the selected route
     async init() {
         try {
             this.sidebarCollapsed = localStorage.getItem(sidebarCollapsedKey) === 'true';
         } catch {}
         ownWindowMethods(this, 'navigation', ['navigate']);
+        this.dialogEvents = new AbortController();
+        installDialogLoader(
+            async (key) => {
+                const { dialogControllers } = await import('./route-shell');
+                await loadedControllers.run('dialog:' + key, async () => {
+                    await dialogControllers[key]?.();
+                });
+                await registerRoute(key);
+            },
+            (work) => {
+                return windowWork.run('open dialog', work).catch((error) => {
+                    app().notify(String(error), 'error');
+                });
+            },
+            this.dialogEvents.signal,
+        );
+        this.powerTimer = window.setInterval(() => {
+            if (['editor', 'settings'].includes(app().route) && !windowCloseOwners.closing)
+                void app().refreshPower();
+        }, 15000);
         benchmarkProgress().startWindow();
         (Alpine.store('pluginLogs') as import('./plugin-logs').PluginLogs).startWindow();
         // Reconcile the shell after a hash navigation event
@@ -409,13 +561,17 @@ Alpine.data('shell', () => ({
         let candidate: HTMLElement | undefined;
         let createdCandidate = false;
         try {
-            const name = location.hash.replace('#/', '') || 'editor';
+            const path = location.hash.replace('#/', '');
+            const name = /^(settings|diagnostics|vault)\?/.test(path)
+                ? path.split('?')[0]
+                : path || 'editor';
             const route = [
                 'editor',
                 'action-library',
                 'macros',
                 'plugins',
                 'settings',
+                'vault',
                 'diagnostics',
             ].includes(name)
                 ? name
@@ -452,7 +608,12 @@ Alpine.data('shell', () => ({
                 return;
             }
             app().route = route;
-            if (route !== 'editor') app().pauseSurfaces();
+            if (route === 'editor' || route === 'settings') void app().refreshPower();
+            if (route !== 'editor') {
+                app().pauseSurfaces();
+                if (actionLibrarySelection.request?.route !== 'editor')
+                    editorOutlet?.replaceChildren();
+            }
             if (route === 'editor' && native) app().requestSurfaces();
             if (outlet) {
                 for (const child of Array.from(outlet.children)) {
@@ -536,6 +697,8 @@ Alpine.data('shell', () => ({
     // Release shell navigation and layout observers
     destroy() {
         this.footerObserver?.disconnect();
+        this.dialogEvents?.abort();
+        window.clearInterval(this.powerTimer);
         ++this.navigationRevision;
         this.navigationCancellation?.abort();
         benchmarkProgress().stopWindow();
@@ -694,6 +857,8 @@ function createCloseCoordinator(generation: number, resume: () => Promise<void>)
     });
 }
 // Initialize the workspace, shell and generation-scoped window lifecycle
+let startupStage: FrontendStartupStage = 'native_handshake';
+let startupLoaderCode: unknown;
 async function start() {
     resumeArchiveDrops = await registerArchiveDrops(
         lifetime,
@@ -708,13 +873,16 @@ async function start() {
         // A recreated main document always starts with the saved Device editor state
         if (nativeWindowState.generation > 1) location.hash = '#/editor';
     }
+    startupStage = 'workspace_load';
     Loader.config({ sanitize: true, executeScripts: false });
-    await lifetime.wait(app().start());
+    await lifetime.wait(Promise.all([app().start(), app().loadFavoriteDevice()]));
     lifetime.ensureActive();
+    startupStage = 'shell_mount';
     registerUpdates(Alpine, app);
     lifetime.own(() => (Alpine.store('updates') as { destroy(): void }).destroy());
     const shell = document.querySelector<HTMLElement>('sd-app-shell')!;
     shell.inert = true;
+    registerPaletteBrowser();
     Alpine.start();
     // Remove startup permission controls during lifetime disposal
     lifetime.own(() => {
@@ -748,12 +916,9 @@ async function start() {
         // Reject shell startup with a sanitized public loader error code
         const failed = (event: Event) => {
             clear();
-            // Surface the loader's stable public error code without exposing URLs,
-            // template contents or user data in the boot screen
-            const code = (event as CustomEvent<{ error?: { code?: unknown } }>).detail?.error?.code;
-            const suffix =
-                typeof code === 'string' && /^ACL_[A-Z_]+$/.test(code) ? ` (${code})` : '';
-            reject(Error(`Shell component failed to load${suffix}`));
+            startupLoaderCode = (event as CustomEvent<{ error?: { code?: unknown } }>).detail?.error
+                ?.code;
+            reject(Error('Shell component failed to load'));
         };
         shell.addEventListener('loaded', ready, { once: true });
         shell.addEventListener('acl:error', failed, { once: true });
@@ -771,7 +936,9 @@ async function start() {
     lifetime.ensureActive();
     await lifetime.wait(loaded);
     lifetime.ensureActive();
+    startupStage = 'initial_route';
     await lifetime.wait(initialNavigation);
+    startupStage = 'editor_services';
     lifetime.ensureActive();
     // Handle global history and clipboard shortcuts outside editable fields
     const keydown = (event: KeyboardEvent) => {
@@ -799,6 +966,24 @@ async function start() {
     };
     window.addEventListener('keydown', keydown);
     lifetime.own(() => window.removeEventListener('keydown', keydown));
+    let favoriteWindowHidden = document.hidden;
+    const favoriteVisibility = (event: Event) => {
+        const visible =
+            event.type === 'visibilitychange'
+                ? !document.hidden
+                : Boolean((event as CustomEvent<boolean>).detail);
+        if (!visible) favoriteWindowHidden = true;
+        else if (favoriteWindowHidden) {
+            favoriteWindowHidden = false;
+            app().beginDeviceSession();
+        }
+    };
+    document.addEventListener('visibilitychange', favoriteVisibility);
+    window.addEventListener('editor-window-visibility', favoriteVisibility);
+    lifetime.own(() => {
+        document.removeEventListener('visibilitychange', favoriteVisibility);
+        window.removeEventListener('editor-window-visibility', favoriteVisibility);
+    });
     const generation = nativeWindowState?.generation || 1;
     const resumption = createWindowResumption(generation);
     // Resume the editor through its shared lifecycle coordinator
@@ -828,6 +1013,7 @@ async function start() {
                     windowWork.resume();
                     windowCloseOwners.setClosing(false);
                     await resume();
+                    app().beginDeviceSession();
                     app().clipboard = [];
                     app().pendingAction = null;
                     location.hash = '#/editor';
@@ -840,9 +1026,28 @@ async function start() {
     }
     await lifetime.wait(waitForBootPreview());
     lifetime.ensureActive();
+    if (native && generation === 1 && !recovery().status.active) {
+        startupStage = 'vault_unlock';
+        suspendBootSplash();
+        const dialog = document.querySelector<HTMLDialogElement>('#startup-vault');
+        if (dialog) {
+            await lifetime.wait(
+                runStartupVault(
+                    {
+                        status: () => bridge.command('vault_status'),
+                        unlockPassword: (password) =>
+                            bridge.command('vault_unlock_password', { password }),
+                    },
+                    dialog,
+                    lifetime.signal,
+                ),
+            );
+            lifetime.ensureActive();
+        }
+    }
+    finishBootSplash();
     startupInteractive = true;
     shell.inert = false;
-    finishBootSplash();
     window.dispatchEvent(new Event('startup-permissions-ready'));
     resumeArchiveDrops();
 }
@@ -851,24 +1056,9 @@ start().catch((error) => {
     const abandoned = lifetime.disposed;
     lifetime.dispose();
     if (abandoned) return;
-    reportFrontendError('startup_failed', error);
-    const boot = document.querySelector('#boot');
-    if (boot) {
-        const message = document.createElement('p');
-        message.textContent = `Unable to start Stream Dock Manager: ${error}`;
-        const retry = document.createElement('button');
-        retry.type = 'button';
-        retry.className = 'button';
-        retry.textContent = 'Retry startup';
-        retry.disabled = true;
-        // Enable startup retry only after required cleanup has settled
-        void lifetime.settled().then(() => {
-            if (!windowWork.blockedRetirements.length) retry.disabled = false;
-            else
-                message.textContent += ' Restart Manager to retry after incomplete native cleanup.';
-        });
-        retry.addEventListener('click', () => location.reload(), { once: true });
-        failBootSplash(message, retry);
-    }
-    console.error(error);
+    // Keep logs available while native resource retirement prevents immediate retry
+    failBootSplash({
+        logReady: reportStartupFailure(startupStage, error, startupLoaderCode),
+        retryReady: lifetime.settled().then(() => !windowWork.blockedRetirements.length),
+    });
 });

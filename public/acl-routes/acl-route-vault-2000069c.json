@@ -1,0 +1,22 @@
+{
+  "version": 1,
+  "basePath": "..",
+  "components": {
+    "sd-vault": {
+      "source": "components/sd-vault.html",
+      "dependencies": [],
+      "options": {
+        "shadow": false,
+        "templateRevision": "sha256-0S8D1aaX8bbfGPvYryWGe0j0UORnsJzRS9bzZTMKfjU"
+      },
+      "metadata": {
+        "description": "First-party Vault management and scoped metadata."
+      }
+    }
+  },
+  "groups": {
+    "vault": [
+      "sd-vault"
+    ]
+  }
+}

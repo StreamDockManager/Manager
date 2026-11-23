@@ -68,8 +68,15 @@ def source_timestamp(commit):
     head = subprocess.check_output(['git', 'rev-parse', 'HEAD'], cwd=ROOT, text=True).strip()
     if head != commit:
         raise ValueError('CLI release commit differs from the checked-out source')
-    if subprocess.check_output(['git', 'status', '--porcelain', '--untracked-files=normal'], cwd=ROOT, text=True).strip():
-        raise ValueError('CLI package source must be a clean checkout of the selected commit')
+    status = subprocess.check_output(
+        ['git', 'status', '--porcelain=v1', '--untracked-files=normal'], cwd=ROOT, text=True,
+    ).splitlines()
+    if status:
+        # Include bounded status records, not diffs, for failures on native build runners
+        paths = '\n'.join(status[:20])
+        if len(status) > 20:
+            paths += f'\n… and {len(status) - 20} more status entries'
+        raise ValueError('CLI package source must be a clean checkout of the selected commit\n' + paths)
     epoch = subprocess.check_output(['git', 'show', '-s', '--format=%ct', commit], cwd=ROOT, text=True).strip()
     # This schema field records the source epoch for reproducible build metadata,
     # not the time a GitHub release is published

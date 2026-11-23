@@ -1,4 +1,4 @@
-# Public defaults for standalone Make builds. Environment overrides take priority
+# Public defaults for standalone Make and npm desktop/build launchers. Environment overrides take priority
 # WORKSPACE_CONFIG can select a different configuration file
 [manager]
 release_repository = "StreamDockManager/Manager"

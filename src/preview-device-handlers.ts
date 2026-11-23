@@ -9,6 +9,7 @@ import type { Draft } from '../generated/runtime';
 import type { PreviewEvent } from './preview-workspace';
 import { defaultMedia } from './bridge';
 import type { BuiltinPreview } from './builtin-preview';
+import { controlEventRows, isSwipeStrip } from './control-events';
 
 // Create the preview device handlers
 export function createPreviewDeviceHandlers(
@@ -32,17 +33,39 @@ export function createPreviewDeviceHandlers(
         const { profile, page, binding } = previewBindingLookup(s, device, control.control_id);
         const panel = device.manifest.capabilities.touch_panel;
         builtinPreview.observe(String(args.deviceId), control.control_id, control.input);
+        const sourceControl = device.manifest.controls.find((c) => c.id === control.control_id);
+        const stripEvents =
+            control.input.kind === 'swipe' &&
+            isSwipeStrip(device.manifest, sourceControl) &&
+            binding?.action.kind === 'events';
+        const input = control.input;
+        const swipeRow =
+            stripEvents && input.kind === 'swipe'
+                ? controlEventRows(device.manifest, sourceControl).find(
+                      (row) =>
+                          row.index >= 10 && !row.reason && row.name === 'Swipe ' + input.direction,
+                  )
+                : undefined;
+        let action = binding?.disabled ? undefined : binding?.action;
+        if (stripEvents && action?.kind === 'events')
+            action = swipeRow ? action.actions[swipeRow.index] : undefined;
         if (
-            control.input.kind !== 'swipe' &&
-            binding &&
-            !binding.disabled &&
-            (control.input.kind !== 'rotate' || ['dial'].includes(binding.action.kind)) &&
-            !(control.input.kind === 'button' && !control.input.pressed) &&
-            ['builtin', 'macro', 'toggle', 'dial', 'navigate'].includes(binding.action.kind)
+            action &&
+            (stripEvents || input.kind !== 'swipe') &&
+            (input.kind !== 'rotate' || action.kind === 'dial') &&
+            !(input.kind === 'button' && !input.pressed) &&
+            [
+                'builtin',
+                'macro',
+                'toggle',
+                'dial',
+                'navigate',
+                ...(stripEvents ? ['page', 'profile', 'swipe_navigation'] : []),
+            ].includes(action.kind)
         ) {
             void builtinPreview
                 .run(
-                    structuredClone(binding.action),
+                    structuredClone(action),
                     s,
                     String(args.deviceId),
                     control.control_id,
@@ -80,10 +103,9 @@ export function createPreviewDeviceHandlers(
         }
         let navigated = false;
         if (
+            !stripEvents &&
             control.input.kind === 'swipe' &&
-            device.manifest.controls
-                .find((c) => c.id === control.control_id)
-                ?.semantics.includes('swipe') &&
+            sourceControl?.semantics.includes('swipe') &&
             profile &&
             page
         ) {
@@ -120,14 +142,11 @@ export function createPreviewDeviceHandlers(
         ];
         if (navigated)
             events.push({ kind: 'sessions', device_id: device.id, control: null, message: null });
-        publish(events);
+        // Input handling can only select a session or active profile here.
+        publish(events, false, true);
         return undefined;
     };
     const deviceHandlers = {
-        // Simulate simulator models in the browser without calling native services
-        simulator_models: (args) => {
-            return structuredClone(models);
-        },
         // Create or toggle a browser simulator and initialize a matching sample profile when needed
         simulate: (args) => {
             const id = String(args.deviceId || 'simulator:n4-pro');
@@ -261,7 +280,12 @@ export function createPreviewDeviceHandlers(
                 throw Error('Invalid device brightness or lighting');
             output.keyboard = previous.keyboard;
             sessionFor(device).output = output;
-            return commit().snapshot;
+            publish(
+                [{ kind: 'device-output', device_id: device.id, control: null, message: null }],
+                true,
+                true,
+            );
+            return structuredClone(s);
         },
         // Simulate save automation configuration in the browser without calling native services
         save_automation_configuration: (args) => {

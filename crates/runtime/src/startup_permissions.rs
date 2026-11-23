@@ -17,6 +17,9 @@ pub struct StartupPermission {
 pub struct StartupPermissionReport {
     pub platform: String,
     pub ready: bool,
+    pub setup_ready: bool,
+    pub development_mode: bool,
+    pub skipped_permissions: Vec<String>,
     pub device_connections_enabled: bool,
     pub permissions: Vec<StartupPermission>,
 }
@@ -65,6 +68,9 @@ fn report(
     StartupPermissionReport {
         platform: platform.into(),
         ready,
+        setup_ready: ready,
+        development_mode: false,
+        skipped_permissions: Vec::new(),
         device_connections_enabled: false,
         permissions,
     }
@@ -105,14 +111,34 @@ pub fn settings_url(id: &str) -> Result<&'static str, String> {
         _ => Err("Unknown startup permission".into()),
     }
 }
+// Only the explicitly acknowledged macOS input check may be omitted from HID admission
+fn hid_eligible(report: &StartupPermissionReport, skip_input_monitoring: bool) -> bool {
+    report.permissions.iter().all(|permission| {
+        !permission.required
+            || permission.status == "granted"
+            || (report.platform == "macos"
+                && skip_input_monitoring
+                && permission.id == "input_monitoring")
+    })
+}
+
 impl Runtime {
     // Refresh startup permission admission and wake device processing when connections become enabled
     pub fn startup_permissions(&self, complete: bool) -> StartupPermissionReport {
+        self.startup_permissions_with_input_monitoring_skip(complete, false)
+    }
+    // Allow a trusted desktop development acknowledgement to attempt HID without granting OS access
+    pub fn startup_permissions_with_input_monitoring_skip(
+        &self,
+        complete: bool,
+        skip_input_monitoring: bool,
+    ) -> StartupPermissionReport {
         let mut report = check();
+        let eligible = hid_eligible(&report, skip_input_monitoring);
         let previously_enabled = self.device_admission.enabled();
-        self.device_admission.update(report.ready, complete);
+        self.device_admission.update(eligible, complete);
         report.device_connections_enabled = self.device_admission.enabled();
-        if report.device_connections_enabled != previously_enabled || (complete && report.ready) {
+        if report.device_connections_enabled != previously_enabled || (complete && eligible) {
             let _ = self.device_commands.send(crate::devices::Request::Wake);
         }
         report
@@ -147,6 +173,31 @@ mod tests {
         gate.update(false, false);
         assert!(!gate.enabled());
         gate.update(true, false);
+        assert!(!gate.enabled());
+    }
+    #[test]
+    // A development input acknowledgement changes only HID eligibility and preserves every other blocker
+    fn input_skip_is_narrow_and_does_not_grant_capabilities() {
+        let missing_input = report("macos", false, true, false);
+        assert!(!missing_input.ready);
+        assert!(!hid_eligible(&missing_input, false));
+        assert!(hid_eligible(&missing_input, true));
+        assert_eq!(missing_input.permissions[0].status, "missing");
+        assert!(!hid_eligible(&report("macos", false, false, true), true));
+        let mut other_platform = missing_input.clone();
+        other_platform.platform = "windows".into();
+        assert!(!hid_eligible(&other_platform, true));
+        let gate = DeviceAdmission::new(false);
+        gate.update(hid_eligible(&missing_input, true), false);
+        assert!(!gate.enabled());
+        gate.update(hid_eligible(&missing_input, true), true);
+        assert!(gate.enabled());
+        gate.update(hid_eligible(&missing_input, true), false);
+        assert!(gate.enabled());
+        gate.update(
+            hid_eligible(&report("macos", false, false, true), true),
+            false,
+        );
         assert!(!gate.enabled());
     }
     #[test]

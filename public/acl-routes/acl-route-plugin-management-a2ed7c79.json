@@ -1,0 +1,22 @@
+{
+  "version": 1,
+  "basePath": "..",
+  "components": {
+    "sd-plugin-management": {
+      "source": "components/sd-plugin-management.html",
+      "dependencies": [],
+      "options": {
+        "shadow": false,
+        "templateRevision": "sha256-wRsi7GeY48ENvou-d3tTSDtlDQoSyXj0uywhBpZpcqY"
+      },
+      "metadata": {
+        "description": "Reviewed plugin rollback and installation-local update preferences."
+      }
+    }
+  },
+  "groups": {
+    "plugin-management": [
+      "sd-plugin-management"
+    ]
+  }
+}

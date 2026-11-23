@@ -45,12 +45,17 @@ pub fn icon_signature(binding: &crate::Binding) -> Option<u64> {
 // Request icon signature
 pub fn request_icon_signature(runtime: &Runtime, r: &Request) -> Option<u64> {
     let snapshot = runtime.snapshot();
-    let (profile, page) = r.binding_scope.split_once(':')?;
+    let scope = if r.event_slot.is_some() {
+        crate::event_bindings::strip_event_scope(&r.binding_scope).unwrap_or(&r.binding_scope)
+    } else {
+        &r.binding_scope
+    };
+    let (profile, page) = scope.split_once(':')?;
     let binding = snapshot
         .binding_overrides
         .get(&r.device_id)
         .and_then(|values| values.get(&r.control_id))
-        .filter(|value| value.scope == r.binding_scope)
+        .filter(|value| value.scope == scope)
         .map(|value| &value.binding)
         .or_else(|| {
             snapshot
@@ -108,7 +113,13 @@ pub fn icon_succeeded(runtime: &Runtime, r: &Request) {
         return;
     }
     let mut feedback = runtime.feedback_state.lock().unwrap();
-    let state = feedback.icons.entry(key(r)).or_insert_with(|| IconState {
+    let scope = if r.event_slot.is_some() {
+        crate::event_bindings::strip_event_scope(&r.binding_scope).unwrap_or(&r.binding_scope)
+    } else {
+        &r.binding_scope
+    };
+    let key = format!("{}:{scope}:{}", r.device_id, r.control_id);
+    let state = feedback.icons.entry(key).or_insert_with(|| IconState {
         signature: *signature,
         connection_epoch: epoch,
         toggled: false,
@@ -137,6 +148,7 @@ pub fn running(runtime: &Runtime, r: &Request) {
 }
 // Publish the action’s final feedback state and whether execution actually started
 pub fn finished(runtime: &Runtime, r: &Request, state: &str, started: bool) {
+    runtime.input_trace.record(r.trace.as_deref(), state, true);
     change(runtime, r, state, started);
 }
 // Apply the requested feedback change

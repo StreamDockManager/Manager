@@ -1,10 +1,38 @@
-<div x-data="mediaOptions" class="media-options" x-show="asset">
+<div
+    x-data="mediaOptions"
+    class="media-options"
+    :class="inBackgroundEditor && kind === 'photo' ? 'modern-photo-editor' : ''"
+    x-show="asset"
+>
+    <div
+        class="button-row photo-view-tabs"
+        role="group"
+        aria-label="Image preview view"
+        x-show="inBackgroundEditor && kind === 'photo'"
+    >
+        <button
+            type="button"
+            class="button"
+            data-view="device"
+            @click="changePhotoView"
+            :aria-pressed="photoView === 'device'"
+        >
+            Device preview
+        </button>
+        <button
+            type="button"
+            class="button"
+            data-view="source"
+            @click="changePhotoView"
+            :aria-pressed="photoView === 'source'"
+        >
+            Source
+        </button>
+    </div>
     <div :class="layoutClass">
-        <div class="video-media-summary" x-show="kind === 'clip'">
-            <strong x-text="sourceFormat === 'gif' ? 'GIF clip' : 'Video clip'"></strong>
-            <small
-                x-text="(duration / 1000).toFixed(2) + ' s · ' + sourceFps.toFixed(2) + ' source FPS'"
-            ></small>
+        <div class="video-media-summary" x-show="kind === 'clip' && !inBackgroundEditor">
+            <strong x-text="clipType"></strong>
+            <small x-text="clipMetadata"></small>
             <button
                 type="button"
                 class="button"
@@ -15,26 +43,57 @@
                 Scrub, choose a section, and adjust framing and playback in the shared clip editor.
             </p>
         </div>
-        <div class="photo-source" x-show="sourceImage || sourceError">
+        <div
+            class="photo-source"
+            x-show="(sourceImage || sourceError) && (!inBackgroundEditor || photoView === 'source')"
+        >
             <div class="photo-source-panel" x-show="sourceImage">
                 <strong>Crop image</strong>
                 <p class="field-help">Drag the box to move it. Drag a corner to resize.</p>
                 <div class="photo-source-frame" x-ref="photoFrame" :style="sourceStyle">
-                    <img :src="sourceImage" alt="Original image for cropping" draggable="false" />
+                    <img
+                        data-resource-role="media-preview"
+                        :src="sourceImage || null"
+                        alt="Original image for cropping"
+                        draggable="false"
+                    />
                     <div
                         class="photo-crop-box"
                         :style="cropStyle"
-                        aria-hidden="true"
+                        role="group"
+                        tabindex="0"
+                        aria-label="Image crop region"
+                        @keydown="photoKey"
                         @pointerdown="startCrop"
                         @pointermove="moveCrop"
                         @pointerup="endCrop"
-                        @pointercancel="endCrop"
+                        @pointercancel="cancelCrop"
                         @lostpointercapture="endCrop"
                     >
-                        <span class="photo-crop-handle" data-crop-edge="nw"></span>
-                        <span class="photo-crop-handle" data-crop-edge="ne"></span>
-                        <span class="photo-crop-handle" data-crop-edge="sw"></span>
-                        <span class="photo-crop-handle" data-crop-edge="se"></span>
+                        <button
+                            type="button"
+                            class="photo-crop-handle"
+                            data-crop-edge="nw"
+                            aria-label="Resize image crop nw"
+                        ></button>
+                        <button
+                            type="button"
+                            class="photo-crop-handle"
+                            data-crop-edge="ne"
+                            aria-label="Resize image crop ne"
+                        ></button>
+                        <button
+                            type="button"
+                            class="photo-crop-handle"
+                            data-crop-edge="sw"
+                            aria-label="Resize image crop sw"
+                        ></button>
+                        <button
+                            type="button"
+                            class="photo-crop-handle"
+                            data-crop-edge="se"
+                            aria-label="Resize image crop se"
+                        ></button>
                     </div>
                 </div>
             </div>
@@ -45,10 +104,66 @@
                 </button>
             </div>
         </div>
-        <div class="media-preview-panel">
+        <div
+            class="media-preview-panel"
+            x-show="!inBackgroundEditor || kind !== 'photo' || photoView === 'device'"
+        >
             <figure class="media-device-preview" x-show="image">
                 <figcaption>Device preview</figcaption>
-                <img class="media-edit-preview" :src="image" alt="Edited media preview" />
+                <div
+                    class="photo-destination-frame"
+                    x-ref="destinationFrame"
+                    :style="inBackgroundEditor && kind === 'photo' ? destinationStyle : {}"
+                >
+                    <img
+                        data-resource-role="media-preview"
+                        class="media-edit-preview"
+                        :src="image || null"
+                        alt="Edited media preview"
+                        draggable="false"
+                    />
+                    <div
+                        x-show="inBackgroundEditor && kind === 'photo' && sourceImage"
+                        class="video-device-pan"
+                        role="group"
+                        tabindex="0"
+                        aria-label="Pan background preview"
+                        @pointerdown="startPan"
+                        @pointermove="moveCrop"
+                        @pointerup="endCrop"
+                        @pointercancel="cancelCrop"
+                        @lostpointercapture="endCrop"
+                        @keydown="photoKey"
+                    ></div>
+                </div>
+                <div class="photo-pan-controls" x-show="inBackgroundEditor && kind === 'photo'">
+                    <p class="field-help">Drag to position. Arrow keys move the image.</p>
+                    <div class="button-row">
+                        <button
+                            type="button"
+                            class="button"
+                            data-zoom="0.8"
+                            @click="zoomPhoto"
+                            :disabled="!sourceImage || !image"
+                            aria-label="Zoom out background"
+                        >
+                            −
+                        </button>
+                        <button
+                            type="button"
+                            class="button"
+                            data-zoom="1.25"
+                            @click="zoomPhoto"
+                            :disabled="!sourceImage || !image"
+                            aria-label="Zoom in background"
+                        >
+                            +
+                        </button>
+                        <button type="button" class="text-button" @click="resetPhoto">
+                            Reset framing
+                        </button>
+                    </div>
+                </div>
             </figure>
             <p class="field-help" x-show="!image && !desktopPreview && !error">
                 Image preview is available in the desktop application.
@@ -56,11 +171,13 @@
             <p class="field-help" role="status" x-show="!image && desktopPreview && !error">
                 Loading media preview…
             </p>
-            <p
-                class="field-help"
-                x-show="kind === 'clip'"
-                x-text="'Requested animation cadence: ' + requested + ' updates/s. Actual delivery depends on device throughput. Source duration: ' + duration + ' ms.'"
-            ></p>
+            <div class="clip-details" x-show="kind === 'clip'">
+                <div class="clip-source-details" x-show="inBackgroundEditor">
+                    <strong x-text="clipType"></strong>
+                    <span x-text="clipMetadata"></span>
+                </div>
+                <p class="field-help" x-text="cadenceDescription"></p>
+            </div>
             <p class="danger-text" role="alert" x-show="error" x-text="error"></p>
             <button type="button" class="button" x-show="error" @click="preview">
                 Retry device preview

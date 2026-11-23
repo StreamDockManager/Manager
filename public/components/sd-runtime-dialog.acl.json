@@ -1,6 +1,6 @@
 {
     "version": 1,
-    "groups": ["shell"],
+    "groups": ["runtime-dialog"],
     "options": {
         "shadow": false
     }

@@ -18,6 +18,44 @@
                 </span>
                 <span class="configuration-recovery-badge">Recovery</span>
             </header>
+            <section
+                class="card settings-card"
+                id="incompatible-data"
+                hidden
+                aria-labelledby="incompatible-heading"
+            >
+                <h1 id="incompatible-heading">
+                    This version of Manager can’t open your saved data
+                </h1>
+                <p>
+                    To start fresh, you’ll need to clear your Stream Dock Manager data folder. This
+                    removes all local data in that folder, including your profiles, installed
+                    plugins, settings, and Vault entries.
+                </p>
+                <ol>
+                    <li>
+                        Select
+                        <strong>Open data folder.</strong>
+                        Leave the folder open in your file manager.
+                    </li>
+                    <li>
+                        Quit Stream Dock Manager completely. If Manager is running in the system
+                        tray or menu bar, quit it there too.
+                    </li>
+                    <li>
+                        In the folder you opened, delete all its contents, including hidden items.
+                        Keep the folder itself.
+                    </li>
+                    <li>Start Stream Dock Manager again. It will create fresh data files.</li>
+                </ol>
+                <div class="button-row">
+                    <button type="button" class="button primary" id="incompatible-open">
+                        Open data folder
+                    </button>
+                    <code id="incompatible-path"></code>
+                </div>
+                <p id="incompatible-error" role="alert" hidden></p>
+            </section>
             <section class="card configuration-recovery-intro" aria-labelledby="recovery-heading">
                 <div class="configuration-recovery-heading">
                     <div>
@@ -50,6 +88,56 @@
             >
                 <h2 id="recovery-global-heading">Remaining issues</h2>
                 <ol id="recovery-global-list" class="recovery-issue-list"></ol>
+            </section>
+            <section
+                class="card settings-card configuration-recovery-keystore"
+                id="recovery-keystore"
+                aria-labelledby="recovery-keystore-heading"
+                hidden
+            >
+                <h2 id="recovery-keystore-heading">Plugin settings keystore</h2>
+                <p id="recovery-keystore-status" role="status"></p>
+                <p id="recovery-keystore-details" class="field-help" hidden></p>
+                <div class="button-row">
+                    <button type="button" class="button" id="recovery-keystore-retry" disabled>
+                        Retry keystore
+                    </button>
+                    <button
+                        type="button"
+                        class="button"
+                        id="recovery-keystore-create"
+                        hidden
+                        disabled
+                    >
+                        Review create…
+                    </button>
+                    <button
+                        type="button"
+                        class="button danger"
+                        id="recovery-keystore-reset"
+                        disabled
+                    >
+                        Review reset…
+                    </button>
+                </div>
+                <section aria-labelledby="recovery-keystore-backups-heading">
+                    <h3 id="recovery-keystore-backups-heading">Encrypted backups</h3>
+                    <p id="recovery-keystore-backups-empty" class="field-help">
+                        No encrypted backups are available.
+                    </p>
+                    <div class="field-group" id="recovery-keystore-backup-choice" hidden>
+                        <label for="recovery-keystore-backup-select">Keystore backup</label>
+                        <select id="recovery-keystore-backup-select" disabled>
+                            <option value="">Choose an encrypted backup…</option>
+                        </select>
+                    </div>
+                    <p id="recovery-keystore-backup-details" class="field-help" hidden></p>
+                    <button type="button" class="button" id="recovery-keystore-restore" disabled>
+                        Review restore…
+                    </button>
+                </section>
+                <p id="recovery-keystore-notice" role="status" hidden></p>
+                <p id="recovery-keystore-error" class="danger-text" role="alert" hidden></p>
             </section>
             <section
                 class="card configuration-recovery-backups"
@@ -261,7 +349,10 @@
             aria-labelledby="recovery-confirm-heading"
         >
             <header class="picker-header"><h2 id="recovery-confirm-heading"></h2></header>
-            <div class="feature-body"><p id="recovery-confirm-message"></p></div>
+            <div class="feature-body">
+                <p id="recovery-confirm-message"></p>
+                <ul id="recovery-confirm-warnings" class="recovery-issue-list" hidden></ul>
+            </div>
             <footer class="feature-footer">
                 <button class="button" id="recovery-confirm-cancel">Cancel</button>
                 <button class="button danger" id="recovery-confirm-accept"></button>
@@ -286,6 +377,7 @@
             </div>
             <footer class="feature-footer">
                 <button class="button" id="recovery-leave-cancel">Cancel</button>
+                <button class="button danger" id="recovery-leave-quit">Quit Application</button>
                 <button class="button" id="recovery-leave-paused">Continue in recovery mode</button>
                 <button class="button primary" id="recovery-leave-normal">Restart normally</button>
             </footer>

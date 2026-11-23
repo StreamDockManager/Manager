@@ -298,6 +298,25 @@ export async function registerNativeWindowEvents(
                 });
         }),
     );
+    await lifetime.listen(() =>
+        nativeListen<unknown>('plugin-notification', ({ payload }) => {
+            if (lifetime.disposed || !payload || typeof payload !== 'object') return;
+            const { plugin, level, message } = payload as Record<string, unknown>;
+            if (
+                typeof plugin !== 'string' ||
+                !plugin.length ||
+                typeof message !== 'string' ||
+                !message.trim() ||
+                (level !== 'info' &&
+                    level !== 'success' &&
+                    level !== 'warning' &&
+                    level !== 'error')
+            )
+                return;
+            const source = plugin.replace(/^app\.streamdockmanager\.plugins\./, '');
+            app().notify(`${source}: ${message}`, level);
+        }),
+    );
     lifetime.ensureActive();
     await lifetime.wait(
         app().bridge.command('frontend_ready', { generation: options?.generation || 1 }),

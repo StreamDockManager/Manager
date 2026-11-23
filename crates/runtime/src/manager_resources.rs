@@ -1,5 +1,8 @@
 //! On-demand, bounded Manager measurements. No polling when Diagnostics is closed
+mod accounting;
+mod footprint;
 mod gpu;
+pub use accounting::{MemoryAccounting, MemoryGroup, MemoryProcess};
 mod webkit;
 use crate::process_resources::Snapshot;
 use serde::{Deserialize, Serialize};
@@ -23,6 +26,7 @@ pub struct ManagerResourceSample {
 }
 #[derive(Debug, Clone, Serialize, Deserialize, ts_rs::TS)]
 pub struct ManagerResourceReport {
+    pub memory: MemoryAccounting,
     pub process_count: usize,
     pub process_note: String,
     pub cpu_state: MeasurementState,
@@ -37,6 +41,7 @@ pub(crate) struct Sampler {
     manager: Scope,
     combined: Scope,
     plugin_identities: HashMap<String, (u32, u64)>,
+    webkit: webkit::Cache,
     last: Option<Instant>,
     report: Option<(ManagerResourceReport, ManagerResourceReport)>,
 }
@@ -171,6 +176,7 @@ impl Scope {
         self.previous_processes = identities;
         self.previous_observation = system.map(|snapshot| snapshot.at);
         ManagerResourceReport {
+            memory: MemoryAccounting::default(),
             process_count: owned.len(),
             process_note: String::new(),
             cpu_state: if !complete || owned.is_empty() {
@@ -232,6 +238,7 @@ impl Sampler {
             Ok(snapshot) => snapshot,
             Err(error) => {
                 self.plugin_identities.clear();
+                self.webkit.invalidate();
                 let mut result = (
                     self.manager
                         .measure(None, &BTreeSet::new(), now, self.last, false),
@@ -253,7 +260,7 @@ impl Sampler {
             .iter()
             .map(|(pid, p)| (*pid, (p.parent, p.created)))
             .collect();
-        let helpers = webkit::discover(std::process::id(), &system);
+        let helpers = self.webkit.discover(std::process::id(), &system, now);
         let mut excluded = HashSet::new();
         let mut combined = manager_scope(
             std::process::id(),
@@ -297,6 +304,10 @@ impl Sampler {
                 &gpu,
             ),
         );
+        // One attributed native pass supplies both scopes without changing historical RSS
+        let memory = accounting::collect(&system, &combined, &manager, &helpers, complete);
+        result.0.memory = memory.0;
+        result.1.memory = memory.1;
         result.0.process_note = helpers.note.into();
         result.1.process_note = helpers.note.into();
         self.last = Some(now);
@@ -305,6 +316,12 @@ impl Sampler {
     }
 }
 impl crate::Runtime {
+    /// Retire ownership proof after a known webview lifecycle change; no OS work here.
+    pub fn invalidate_resource_attribution(&self) {
+        self.resource_attribution_invalidated
+            .store(true, std::sync::atomic::Ordering::Release);
+    }
+
     // Sample Manager resources separately from native plugin process ownership
     pub fn resource_usage(&self) -> (ManagerResourceReport, ManagerResourceReport) {
         let plugins = self
@@ -317,7 +334,16 @@ impl crate::Runtime {
             .filter_map(|t| t.root_pid.map(|pid| (t.run_id, pid, t.started_at_ms)))
             .collect::<Vec<_>>();
         // OS queries run without plugin, configuration, or device locks
-        self.manager_resources.lock().unwrap().sample(&plugins)
+        let mut sampler = self.manager_resources.lock().unwrap();
+        if self
+            .resource_attribution_invalidated
+            .swap(false, std::sync::atomic::Ordering::AcqRel)
+        {
+            sampler.webkit.invalidate();
+            sampler.last = None;
+            sampler.report = None;
+        }
+        sampler.sample(&plugins)
     }
 }
 #[cfg(test)]

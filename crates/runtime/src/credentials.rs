@@ -133,7 +133,7 @@ impl Credentials {
         }
     }
     // Redact text
-    fn redact_text(&self, value: String) -> String {
+    pub(crate) fn redact_text(&self, value: String) -> String {
         stream_dock_manager_plugin_host::redact_known_values(
             &value,
             &self.redactions.lock().unwrap(),

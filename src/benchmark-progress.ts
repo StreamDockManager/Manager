@@ -67,14 +67,13 @@ export class BenchmarkProgressStore {
         };
     }
     // Choose polling cadence from the current benchmark state
+    private idleRepeats = 0;
     get cadence() {
         return this.progress.running
             ? this.visibility?.hidden
                 ? 1000
                 : 500
-            : this.visibility?.hidden
-              ? 5000
-              : 2000;
+            : Math.min(15000, (this.visibility?.hidden ? 5000 : 2000) * 2 ** this.idleRepeats);
     }
     // Start progress monitoring for an active editor window
     startWindow() {
@@ -131,6 +130,10 @@ export class BenchmarkProgressStore {
                 const next = await this.bridge.command('benchmark_progress');
                 if (generation !== this.generation || !this.active) return;
                 this.progressError = '';
+                this.idleRepeats =
+                    !next.running && next.revision === this.progress.revision
+                        ? Math.min(3, this.idleRepeats + 1)
+                        : 0;
                 this.accept(next);
             } catch (error) {
                 if (generation === this.generation && this.active)

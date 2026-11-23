@@ -74,7 +74,12 @@ fn svg(
             ));
         }
     }
-    (format!("<svg xmlns=\"http://www.w3.org/2000/svg\" width=\"{width}\" height=\"{height}\">{body}</svg>"), db)
+    (
+        format!(
+            "<svg xmlns=\"http://www.w3.org/2000/svg\" width=\"{width}\" height=\"{height}\">{body}</svg>"
+        ),
+        db,
+    )
 }
 
 // Draw for the current operation
@@ -83,9 +88,12 @@ pub(crate) fn draw(
     parameters: &Value,
     width: u16,
     height: u16,
-) -> Result<image::RgbaImage> {
+) -> Result<Option<image::RgbaImage>> {
     if width == 0 || height == 0 || width > 1024 || height > 1024 {
         return Err(Error::Protocol("invalid title surface dimensions".into()));
+    }
+    if title.is_empty() || parameters["showTitle"] == false {
+        return Ok(None);
     }
     let (svg, fontdb) = svg(title, parameters, width, height);
     let mut options = resvg::usvg::Options {
@@ -114,12 +122,7 @@ pub(crate) fn draw(
         resvg::tiny_skia::Transform::identity(),
         &mut pixels.as_mut(),
     );
-    let bytes = pixels
-        .encode_png()
-        .map_err(|error| Error::Protocol(error.to_string()))?;
-    image::load_from_memory(&bytes)
-        .map(|image| image.into_rgba8())
-        .map_err(|error| Error::Protocol(error.to_string()))
+    crate::render::pixmap_rgba(pixels).map(Some)
 }
 
 #[cfg(test)]
@@ -130,7 +133,7 @@ mod tests {
     #[test]
     // Verify vendor title defaults control visibility alignment color and font attributes
     fn vendor_title_defaults_control_visibility_alignment_color_and_font_attributes() {
-        let mut parameters = json!({"fontFamily":"Noto Sans", "fontSize":12, "fontStyle":"Bold Italic", "fontUnderline":true,"titleColor":"#ff0000", "titleAlignment":"top"});
+        let mut parameters = json!({"fontFamily":"Inter", "fontSize":12, "fontStyle":"Bold Italic", "fontUnderline":true,"titleColor":"#ff0000", "titleAlignment":"top"});
         let (source, _) = svg("A<&", &parameters, 72, 72);
         assert!(source.contains("font-weight=\"bold\""));
         assert!(source.contains("font-style=\"italic\""));
@@ -144,17 +147,16 @@ mod tests {
                 .map(|(_, y, _)| y)
                 .fold((u32::MAX, 0), |(min, max), y| (min.min(y), max.max(y)))
         };
-        let top = draw("Title", &parameters, 72, 72).unwrap();
+        let top = draw("Title", &parameters, 72, 72).unwrap().unwrap();
         assert!(top
             .pixels()
             .any(|p| p[3] > 0 && p[0] > 0 && p[1] == 0 && p[2] == 0));
         parameters["titleAlignment"] = json!("bottom");
-        let bottom = draw("Title", &parameters, 72, 72).unwrap();
+        let bottom = draw("Title", &parameters, 72, 72).unwrap().unwrap();
         assert!(bounds(&bottom).0 > bounds(&top).1);
         parameters["showTitle"] = json!(false);
-        assert!(draw("Title", &parameters, 72, 72)
-            .unwrap()
-            .pixels()
-            .all(|p| p[3] == 0));
+        assert!(draw("Title", &parameters, 72, 72).unwrap().is_none());
+        assert!(draw("", &json!({}), 72, 72).unwrap().is_none());
+        assert!(draw("", &parameters, 1025, 72).is_err());
     }
 }

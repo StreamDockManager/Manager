@@ -1,3 +1,12 @@
+import { reportDecodeFailure } from './frontend-errors';
+import {
+    containRect,
+    destinationCrop,
+    panDestination,
+    zoomDestination,
+    transformCrop,
+    type CropHandle,
+} from './video-crop';
 import { decodeMediaImages } from './media-decode';
 import { cloneJson } from './json-clone';
 import type AlpineType from '@alpinejs/csp';
@@ -26,6 +35,9 @@ type Drag = {
     height: number;
     edge: string;
     crop: Crop;
+    device?: boolean;
+    original?: Crop;
+    moved?: boolean;
 };
 const minimum = 0.01;
 // Clamp a numeric value to the permitted inclusive range
@@ -95,7 +107,12 @@ export function registerMediaOptions(Alpine: typeof AlpineType, app: () => AppSt
                     async (url) => {
                         image.decoding = 'async';
                         image.src = url;
-                        await image.decode();
+                        try {
+                            await image.decode();
+                        } catch (error) {
+                            reportDecodeFailure('sd-media-options', 'media-preview');
+                            throw error;
+                        }
                     },
                 );
                 return { ...result, aspect: image.naturalWidth / image.naturalHeight };
@@ -113,6 +130,153 @@ export function registerMediaOptions(Alpine: typeof AlpineType, app: () => AppSt
             image: '',
             sourceImage: '',
             sourceAspect: 1,
+            get targetAspect() {
+                const manifest = app().device?.manifest;
+                const control = manifest?.controls.find((c) => c.id === this.controlId);
+                const size = control
+                    ? [control.image_width || 0, control.image_height || 0]
+                    : manifest?.capabilities.background_size;
+                return size && size[0] > 0 && size[1] > 0 ? size[0] / size[1] : 1;
+            },
+            photoView: 'device',
+            inBackgroundEditor: false,
+            changePhotoView(event: Event) {
+                this.cancelCrop();
+                this.photoView = (event.currentTarget as HTMLElement).dataset.view || 'device';
+            },
+            get destinationStyle() {
+                return {
+                    aspectRatio: `${this.targetAspect}`,
+                    maxWidth: `${260 * this.targetAspect}px`,
+                };
+            },
+            destinationCrop() {
+                return destinationCrop(
+                    this.options.crop,
+                    this.sourceAspect,
+                    1,
+                    this.targetAspect,
+                    1,
+                    this.options.fit,
+                );
+            },
+            zoomPhoto(event: Event) {
+                if (!this.image || !this.sourceImage || this.$el.closest('fieldset:disabled'))
+                    return;
+                this.cancelCrop();
+                this.update({
+                    ...this.options,
+                    crop: zoomDestination(
+                        this.destinationCrop(),
+                        Number((event.currentTarget as HTMLElement).dataset.zoom),
+                    ),
+                });
+            },
+            resetPhoto() {
+                this.cancelCrop();
+                this.update({ ...this.options, crop: [0, 0, 1, 1] });
+            },
+            startPan(event: PointerEvent) {
+                if (
+                    drag ||
+                    event.button !== 0 ||
+                    !event.isPrimary ||
+                    !this.image ||
+                    !this.sourceImage ||
+                    this.$el.closest('fieldset:disabled')
+                )
+                    return;
+                const frame = this.$refs.destinationFrame as HTMLElement;
+                const rect = frame.getBoundingClientRect();
+                const crop = this.destinationCrop();
+                const image = containRect(rect.width, rect.height, this.targetAspect, 1);
+                const px = event.clientX - rect.left - image.x,
+                    py = event.clientY - rect.top - image.y;
+                const content = containRect(
+                    image.width,
+                    image.height,
+                    crop[2] * this.sourceAspect,
+                    crop[3],
+                );
+                if (
+                    px < 0 ||
+                    py < 0 ||
+                    px > image.width ||
+                    py > image.height ||
+                    (this.options.fit === 'fit' &&
+                        (px < content.x ||
+                            py < content.y ||
+                            px > content.x + content.width ||
+                            py > content.y + content.height))
+                )
+                    return;
+                event.preventDefault();
+                (event.currentTarget as HTMLElement).focus();
+                (event.currentTarget as HTMLElement).setPointerCapture(event.pointerId);
+                drag = {
+                    pointer: event.pointerId,
+                    x: event.clientX,
+                    y: event.clientY,
+                    width: image.width,
+                    height: image.height,
+                    edge: 'move',
+                    crop,
+                    original: [...this.options.crop],
+                    device: true,
+                };
+            },
+            cancelCrop(event?: PointerEvent) {
+                if (!drag || (event && drag.pointer !== event.pointerId)) return;
+                const original = drag.original || drag.crop;
+                drag = undefined;
+                this.update({ ...this.options, crop: original });
+            },
+            photoKey(event: KeyboardEvent) {
+                if (this.$el.closest('fieldset:disabled')) return;
+                if (event.key === 'Escape' && drag) {
+                    event.preventDefault();
+                    event.stopPropagation();
+                    this.cancelCrop();
+                    return;
+                }
+                const keys: Record<string, number[]> = {
+                    ArrowLeft: [-1, 0],
+                    ArrowRight: [1, 0],
+                    ArrowUp: [0, -1],
+                    ArrowDown: [0, 1],
+                };
+                const delta = keys[event.key];
+                if (!delta) return;
+                event.preventDefault();
+                event.stopPropagation();
+                let crop: Crop;
+                if (this.inBackgroundEditor && this.photoView === 'device') {
+                    const rect = (
+                        this.$refs.destinationFrame as HTMLElement
+                    ).getBoundingClientRect();
+                    const b = containRect(rect.width, rect.height, this.targetAspect, 1);
+                    const step = event.shiftKey ? 25 : 5;
+                    crop = panDestination(
+                        this.destinationCrop(),
+                        delta[0] * step,
+                        delta[1] * step,
+                        this.sourceAspect,
+                        1,
+                        b.width,
+                        b.height,
+                        this.options.fit,
+                    );
+                } else {
+                    const step = event.shiftKey ? 0.05 : 0.01;
+                    crop = transformCrop(
+                        this.options.crop,
+                        delta[0] * step,
+                        delta[1] * step,
+                        ((event.target as HTMLElement).dataset.cropEdge || 'move') as CropHandle,
+                    );
+                }
+                this.update({ ...this.options, crop });
+            },
             error: '',
             sourceError: '',
             kind: '' as '' | 'photo' | 'clip',
@@ -123,16 +287,33 @@ export function registerMediaOptions(Alpine: typeof AlpineType, app: () => AppSt
             desktopPreview: native,
             // Return layout class for the current media options view
             get layoutClass() {
-                return this.kind === 'photo' ? 'photo-layout' : '';
+                return this.kind ? `${this.kind}-layout` : '';
+            },
+            get clipType() {
+                return this.sourceFormat === 'gif' ? 'GIF clip' : 'Video clip';
+            },
+            get clipMetadata() {
+                return `${(this.duration / 1000).toFixed(2)} s · ${this.sourceFps.toFixed(2)} source FPS`;
+            },
+            get cadenceDescription() {
+                const cadence = `Requested animation cadence: ${this.requested} updates/s. Actual delivery depends on device throughput.`;
+                return this.inBackgroundEditor
+                    ? cadence
+                    : `${cadence} Source duration: ${this.duration} ms.`;
             },
             // Return source style for the current media options view
             get sourceStyle() {
-                return `--photo-width:${260 * this.sourceAspect}px`;
+                return { '--photo-width': `${260 * this.sourceAspect}px` };
             },
             // Return crop style for the current media options view
             get cropStyle() {
                 const [x, y, width, height] = this.options.crop;
-                return `left:${x * 100}%;top:${y * 100}%;width:${width * 100}%;height:${height * 100}%`;
+                return {
+                    left: `${x * 100}%`,
+                    top: `${y * 100}%`,
+                    width: `${width * 100}%`,
+                    height: `${height * 100}%`,
+                };
             },
             // Return crop x for the current media options view
             get cropX() {
@@ -152,6 +333,7 @@ export function registerMediaOptions(Alpine: typeof AlpineType, app: () => AppSt
             },
             // Attach media options listeners and register owned draft resources
             init() {
+                this.inBackgroundEditor = Boolean(this.$el.closest('.background-editor-dialog'));
                 const host = this.$el.closest('sd-media-options');
                 if (!host) return;
                 const dialog = this.$el.closest('dialog');
@@ -191,8 +373,25 @@ export function registerMediaOptions(Alpine: typeof AlpineType, app: () => AppSt
                         this.image = result.image;
                         requestAnimationFrame(() => releaseMediaPreview(previous));
                         const first = !this.kind;
-                        this.kind = result.animated ? 'clip' : 'photo';
-                        this.sourceFormat = result.format || '';
+                        const kind = result.animated ? 'clip' : 'photo';
+                        const format = result.format || '';
+                        if (
+                            this.inBackgroundEditor &&
+                            (this.kind !== kind || this.sourceFormat !== format)
+                        ) {
+                            this.$dispatch(
+                                'media-clip-editor',
+                                kind === 'clip'
+                                    ? {
+                                          asset: this.asset,
+                                          label: format === 'gif' ? 'Edit GIF' : 'Edit video',
+                                          open: () => this.editVideo(),
+                                      }
+                                    : null,
+                            );
+                        }
+                        this.kind = kind;
+                        this.sourceFormat = format;
                         this.sourceFps = result.source_fps || 24;
                         this.requested = Number(result.requested_tps.toFixed(1));
                         this.duration = result.duration_ms;
@@ -324,7 +523,10 @@ export function registerMediaOptions(Alpine: typeof AlpineType, app: () => AppSt
                 this.sourceImage = '';
                 this.error = '';
                 this.sourceError = '';
+                if (this.inBackgroundEditor && this.kind === 'clip')
+                    this.$dispatch('media-clip-editor', null);
                 this.kind = '';
+                this.photoView = 'device';
             },
             // Schedule the next debug poll for the current run generation
             schedule(delay: number) {
@@ -370,6 +572,7 @@ export function registerMediaOptions(Alpine: typeof AlpineType, app: () => AppSt
                 const { width, height } = frame.getBoundingClientRect();
                 if (!width || !height) return;
                 event.preventDefault();
+                (event.target as HTMLElement).focus();
                 (event.currentTarget as HTMLElement).setPointerCapture(event.pointerId);
                 drag = {
                     pointer: event.pointerId,
@@ -385,6 +588,27 @@ export function registerMediaOptions(Alpine: typeof AlpineType, app: () => AppSt
             moveCrop(event: PointerEvent) {
                 if (drag?.pointer !== event.pointerId || this.$el.closest('fieldset:disabled'))
                     return;
+                if (drag.device) {
+                    const distance =
+                        Math.abs(event.clientX - drag.x) + Math.abs(event.clientY - drag.y);
+                    if (!drag.moved && distance < 2) return;
+                    drag.moved = true;
+                    const crop =
+                        distance < 2
+                            ? drag.original!
+                            : panDestination(
+                                  drag.crop,
+                                  event.clientX - drag.x,
+                                  event.clientY - drag.y,
+                                  this.sourceAspect,
+                                  1,
+                                  drag.width,
+                                  drag.height,
+                                  this.options.fit,
+                              );
+                    this.update({ ...this.options, crop });
+                    return;
+                }
                 this.update({ ...this.options, crop: resizedCrop(drag, event) });
             },
             // Finish crop dragging and release pointer capture
@@ -394,6 +618,7 @@ export function registerMediaOptions(Alpine: typeof AlpineType, app: () => AppSt
             // Transfer the chosen media options to the requesting editor
             update(options: MediaOptions, asset?: string) {
                 assertCurrentMediaOptions(options);
+                device?.invalidate();
                 this.options = options;
                 this.$el.dispatchEvent(
                     new CustomEvent('media-change', {

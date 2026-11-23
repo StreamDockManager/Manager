@@ -11,57 +11,84 @@ use std::{
     time::Duration,
 };
 
+#[derive(PartialEq, Eq)]
+pub(crate) struct PreviewRevisions {
+    state: u64,
+    configuration: u64,
+    layers: u64,
+    plugins: u64,
+    fonts: u64,
+    vault: Option<(uuid::Uuid, uuid::Uuid)>,
+    draft: Option<String>,
+    contract: String,
+}
 pub(crate) struct RenderSceneContext {
     pub draft: Option<crate::hardware_preview::HardwareDraft>,
     pub preview_token: Option<String>,
     pub(crate) clips: crate::profiles::ClipCycle,
     pub device: String,
+    pub software: bool,
+    pub gif_surfaces: HashMap<String, [u16; 2]>,
     pub scope: String,
     pub keyboard_navigation: bool,
     pub wallpaper: String,
     pub theme_wallpaper: Option<(String, crate::media::MediaOptions)>,
     pub device_theme: stream_dock_manager_plugin_host::DeviceThemePreferences,
     pub device_surface: String,
+    pub surface_wallpaper: bool,
     pub device_ink: String,
     pub plugin_surfaces: HashMap<String, String>,
     pub page: Option<Page>,
     pub media_elapsed: Duration,
     pub formats: Vec<String>,
+    pub compact_plugin_keys: bool,
+    pub wallpaper_target: crate::encoding::AnimationTarget,
     pub contract_identity: String,
     pub overrides: BTreeMap<String, EffectiveBinding>,
+    pub artwork: HashMap<String, stream_dock_manager_plugin_host::artwork_cache::ArtworkFiles>,
     pub visuals: HashMap<String, std::sync::Arc<serde_json::Value>>,
     pub fallbacks: HashMap<String, serde_json::Value>,
     pub visual_contexts: HashMap<String, String>,
     pub feedback: RenderFeedback,
+    pub label_parameters: HashMap<(String, String), String>,
     state_revision: u64,
     configuration_revision: u64,
     layer_revision: u64,
     plugin_generation: u64,
     font_generation: u64,
+    vault_presentation: Option<Option<(uuid::Uuid, uuid::Uuid)>>,
 }
 impl RenderSceneContext {
-    /// Temporary visual bindings own their output surface while the lease lives
-    /// Saved touch/display precedence is restored as soon as the draft expires
+    /// Drafts follow the same surface ownership as saved bindings. In particular,
+    /// a dial draft cannot replace an independently editable touch/display binding.
     pub(crate) fn surface_source<'a>(
         &self,
         manifest: &'a hardware_core::ModelManifest,
         surface: &'a str,
     ) -> &'a str {
-        if let Some(draft) = &self.draft {
-            if draft.bindings.contains_key(surface) {
-                return surface;
-            }
-            if let Some(source) = manifest.controls.iter().find(|source| {
-                source.feedback_surface.as_deref() == Some(surface)
-                    && draft.bindings.contains_key(&source.id)
-            }) {
-                return &source.id;
-            }
+        if self
+            .draft
+            .as_ref()
+            .is_some_and(|draft| draft.bindings.contains_key(surface))
+        {
+            return surface;
         }
         self.page
             .as_ref()
             .map(|page| page.surface_source(manifest, surface))
             .unwrap_or(surface)
+    }
+    pub(crate) fn preview_revisions(&self) -> PreviewRevisions {
+        PreviewRevisions {
+            state: self.state_revision,
+            configuration: self.configuration_revision,
+            layers: self.layer_revision,
+            plugins: self.plugin_generation,
+            fonts: self.font_generation,
+            vault: self.vault_presentation.flatten(),
+            draft: self.preview_token.clone(),
+            contract: self.contract_identity.clone(),
+        }
     }
     // Report the draft owns surface condition for render scene
     pub(crate) fn draft_owns_surface(
@@ -70,9 +97,9 @@ impl RenderSceneContext {
         surface: &str,
     ) -> bool {
         let source = self.surface_source(manifest, surface);
-        self.draft
-            .as_ref()
-            .is_some_and(|draft| draft.bindings.contains_key(source))
+        self.draft.as_ref().is_some_and(|draft| {
+            draft.display_test.is_some() || draft.bindings.contains_key(source)
+        })
     }
 
     // Resolve draft or saved background media with theme wallpaper as the fallback
@@ -112,17 +139,29 @@ impl RenderSceneContext {
     // Check for matching snapshot
     pub(crate) fn matches_snapshot(&self, snapshot: &crate::Snapshot) -> bool {
         let session = snapshot.session(&self.device);
-        self.contract_identity
-            == snapshot
-                .devices
-                .iter()
-                .find(|d| d.id == self.device)
-                .and_then(|d| crate::device_contract::resolve(d).ok())
-                .map(|c| c.identity())
-                .unwrap_or_default()
-            && self.state_revision == snapshot.revision
-            && self.configuration_revision == snapshot.configuration_revision
-            && self.scope == format!("{}:{}", session.profile_id, session.page_id)
+        self.matches_inputs(
+            snapshot.revision,
+            snapshot.configuration_revision,
+            &format!("{}:{}", session.profile_id, session.page_id),
+            snapshot.devices.iter().find(|d| d.id == self.device),
+        )
+    }
+
+    pub(crate) fn matches_inputs(
+        &self,
+        revision: u64,
+        configuration_revision: u64,
+        scope: &str,
+        device: Option<&crate::DeviceInfo>,
+    ) -> bool {
+        self.state_revision == revision
+            && self.configuration_revision == configuration_revision
+            && self.scope == scope
+            && self.contract_identity
+                == device
+                    .and_then(|d| crate::device_contract::resolve(d).ok())
+                    .map(|c| c.identity())
+                    .unwrap_or_default()
     }
     // Check permission for transient
     pub(crate) fn permits_transient(&self, source: &str, context: &str, generation: u64) -> bool {
@@ -134,21 +173,7 @@ impl RenderSceneContext {
     }
     // Return the current render scene value
     pub(crate) fn current(&self, runtime: &Runtime) -> bool {
-        let valid_state = {
-            let state = runtime.state.lock().unwrap();
-            let session = state.session(&self.device);
-            self.contract_identity
-                == state
-                    .devices
-                    .iter()
-                    .find(|d| d.id == self.device)
-                    .and_then(|d| crate::device_contract::resolve(d).ok())
-                    .map(|c| c.identity())
-                    .unwrap_or_default()
-                && state.revision == self.state_revision
-                && state.configuration_revision == self.configuration_revision
-                && format!("{}:{}", session.profile_id, session.page_id) == self.scope
-        };
+        let valid_state = self.matches_snapshot(&runtime.state.lock().unwrap());
         let layer_revision = runtime.builtin_state.layer_revision();
         let plugin_generation = runtime.plugins.lock().unwrap().render_generation();
         valid_state
@@ -157,6 +182,9 @@ impl RenderSceneContext {
             && plugin_generation == self.plugin_generation
             && hardware_core::fonts::generation() == self.font_generation
             && self.feedback.connected(runtime, &self.device)
+            && self
+                .vault_presentation
+                .is_none_or(|revision| runtime.vault.presentation_revision() == revision)
     }
 }
 impl Runtime {
@@ -168,9 +196,15 @@ impl Runtime {
         wallpaper: &str,
     ) -> Result<crate::media::SharedBytes, String> {
         self.cached_render(
-            format!("wallpaper:{width}:{height}:{rotation}:{wallpaper}"),
+            crate::media::RenderKey::from_inputs(&(
+                "wallpaper",
+                width,
+                height,
+                rotation,
+                wallpaper,
+            ))?,
             || {
-                hardware_core::render::render(wallpaper.as_bytes(), width, height, rotation, "png")
+                hardware_core::render::render_palette_wallpaper(wallpaper, width, height, rotation)
                     .map(crate::media::shared_bytes)
                     .map_err(|error| error.to_string())
             },
@@ -186,14 +220,19 @@ impl Runtime {
         rotation: u16,
         formats: &[String],
     ) -> Result<crate::media::SharedBytes, String> {
+        if let Some(test) = scene.draft.as_ref().and_then(|d| d.display_test.as_ref()) {
+            return self.test_pixels(test, size, rotation, None, &scene.device, formats);
+        }
         if let Some((asset, options)) = scene.background_media(profile) {
-            if let Ok(data) = self.render_media_frame_shared(
+            if let Ok(data) = self.render_media_frame_in_cycle(
                 asset,
                 scene.media_elapsed,
                 size,
                 rotation,
                 options,
                 formats,
+                scene.wallpaper_target,
+                &scene.clips,
             ) {
                 return Ok(data);
             }
@@ -221,6 +260,9 @@ impl Runtime {
                 keyboard_navigation,
                 page,
                 formats,
+                compact_plugin_keys,
+                wallpaper_target,
+                surface_wallpaper,
                 contract_identity,
                 layer_revision,
                 overrides,
@@ -230,17 +272,13 @@ impl Runtime {
                 let profile = state.profiles.iter().find(|p| p.id == session.profile_id);
                 let page = profile
                     .and_then(|p| p.pages.iter().find(|p| p.id == session.page_id))
-                    .cloned();
-                let formats = state
-                    .devices
-                    .iter()
-                    .find(|d| d.id == device)
+                    .cloned()
+                    .or_else(|| crate::keyboard_navigation::fallback_page(&state, device));
+                let info = state.devices.iter().find(|d| d.id == device);
+                let formats = info
                     .map(|d| d.manifest.capabilities.image_formats.clone())
                     .unwrap_or_else(|| vec!["png".into()]);
-                let contract_identity = state
-                    .devices
-                    .iter()
-                    .find(|d| d.id == device)
+                let contract_identity = info
                     .and_then(|d| crate::device_contract::resolve(d).ok())
                     .map(|c| c.identity())
                     .unwrap_or_default();
@@ -250,10 +288,22 @@ impl Runtime {
                     state.revision,
                     state.configuration_revision,
                     format!("{}:{}", session.profile_id, session.page_id),
-                    profile.is_some_and(|p| crate::keyboard_navigation::supported(&p.model_id))
-                        && session.page_id == crate::keyboard_navigation::PAGE_ID,
+                    page.as_ref()
+                        .is_some_and(|p| p.id == crate::keyboard_navigation::PAGE_ID)
+                        && state.devices.iter().any(|d| {
+                            d.id == device && crate::keyboard_navigation::supported(&d.model_id)
+                        }),
                     page,
                     formats,
+                    info.is_some_and(|d| d.model_id == "n4-pro"),
+                    info.map_or(crate::encoding::AnimationTarget::Standard, |d| {
+                        crate::encoding::AnimationTarget::for_wallpaper(&d.model_id, &d.variant_id)
+                    }),
+                    state
+                        .devices
+                        .iter()
+                        .find(|d| d.id == device)
+                        .is_some_and(|d| !d.manifest.capabilities.background),
                     contract_identity,
                     layer_revision,
                     overrides,
@@ -277,6 +327,51 @@ impl Runtime {
                 requests.insert(source.clone(), scope.clone());
             }
             let requests: Vec<_> = requests.into_iter().collect();
+            let mut label_parameters = HashMap::new();
+            let mut needs_vault = false;
+            let mut needed = std::collections::BTreeSet::new();
+            for (source, scope) in &requests {
+                let binding = draft
+                    .and_then(|d| d.bindings.get(source))
+                    .or_else(|| overrides.get(source).map(|o| &o.binding))
+                    .or_else(|| page.as_ref()?.bindings.get(source));
+                needs_vault |= binding.is_some_and(crate::live_label::has_vault_text);
+                for segment in binding.into_iter().flat_map(|b| &b.live_label) {
+                    if let crate::live_label::LabelSegment::Parameter { name, .. } = segment {
+                        needed.insert((source.clone(), scope.clone(), name.clone()));
+                    }
+                }
+            }
+            let vault_presentation = needs_vault.then(|| self.vault.presentation_revision());
+            if !needed.is_empty() {
+                let overrides = self.label_overrides(configuration_revision)?;
+                let state = self.state.lock().unwrap();
+                let manifest = state
+                    .devices
+                    .iter()
+                    .find(|d| d.id == device)
+                    .map(|d| &d.manifest);
+                for (source, scope, name) in needed {
+                    if manifest.is_some_and(|m| {
+                        !m.control(&source)
+                            .is_ok_and(|c| c.image_slot.is_some() || c.feedback_surface.is_some())
+                    }) {
+                        continue;
+                    }
+                    let value = state
+                        .profiles
+                        .iter()
+                        .find(|p| {
+                            p.pages
+                                .iter()
+                                .any(|page| format!("{}:{}", p.id, page.id) == scope)
+                        })
+                        .and_then(|p| crate::live_label::parameter(p, &overrides, device, &name));
+                    if let Some(value) = value {
+                        label_parameters.insert((scope, name), value);
+                    }
+                }
+            }
             let fallback_requests: Vec<_> = requests
                 .iter()
                 .filter_map(|(source, _)| {
@@ -332,12 +427,50 @@ impl Runtime {
             }
             let font_generation = hardware_core::fonts::generation();
             let metadata = RenderFeedback::metadata(self, device);
+            // Every event has its own plugin context, but one qualified lane
+            // owns the physical/preview display for the control
+            let advanced_scopes = {
+                let advanced: Vec<_> = requests
+                    .iter()
+                    .filter_map(|(source, scope)| {
+                        let binding = overrides
+                            .get(source)
+                            .map(|value| &value.binding)
+                            .or_else(|| page.as_ref()?.bindings.get(source))?;
+                        if let crate::actions::Action::Events { actions, .. } = &binding.action {
+                            Some((source, scope, actions))
+                        } else {
+                            None
+                        }
+                    })
+                    .collect();
+                let mut scopes = BTreeMap::new();
+                if !advanced.is_empty() {
+                    let state = self.state.lock().unwrap();
+                    for (source, scope, actions) in advanced {
+                        let mask =
+                            crate::event_bindings::active_slots(&state, device, source, actions);
+                        let slot = crate::event_bindings::display_slot(mask);
+                        scopes.insert(
+                            source.as_str(),
+                            slot.map(|slot| crate::event_bindings::event_scope(scope, slot)),
+                        );
+                    }
+                }
+                scopes
+            };
             let live_requests: Vec<_> = requests
                 .iter()
                 .filter(|(source, _)| {
                     draft.is_none_or(|draft| !draft.bindings.contains_key(source))
                 })
-                .cloned()
+                .filter_map(|(source, scope)| {
+                    let scope = match advanced_scopes.get(source.as_str()) {
+                        Some(slot_scope) => slot_scope.as_ref()?,
+                        None => scope,
+                    };
+                    Some((source.clone(), scope.clone()))
+                })
                 .collect();
             let (mut plugin_snapshot, feedback) =
                 self.plugins.lock().unwrap().render_surfaces_for_target(
@@ -352,6 +485,7 @@ impl Runtime {
             // existing action/settings match; otherwise show its declared artwork
             for (source, binding) in draft.into_iter().flat_map(|draft| &draft.bindings) {
                 plugin_snapshot.values.remove(source);
+                plugin_snapshot.artwork.remove(source);
                 plugin_snapshot.contexts.remove(source);
                 if binding.disabled {
                     continue;
@@ -391,9 +525,15 @@ impl Runtime {
                     };
                     let host = self.plugins.lock().unwrap();
                     let visual = host
-                        .matching_surface_for_target(
+                        .matching_render_surface(
                             device, source, &scope, plugin_id, action_id, settings, software,
                         )
+                        .map(|(visual, files)| {
+                            if !files.is_empty() {
+                                plugin_snapshot.artwork.insert(source.clone(), files);
+                            }
+                            visual.as_ref().clone()
+                        })
                         .or_else(|| host.declared_surface(device, plugin_id, action_id, wide));
                     if let Some(mut visual) = visual {
                         if let Some(state) =
@@ -414,11 +554,51 @@ impl Runtime {
                 }
             }
             let media_elapsed = self.media_elapsed();
+            // One binding can drive a dial's feedback screen or several physical surfaces.
+            // Collect dimensions only for active GIFs, before their URI becomes a selected frame.
+            let mut gif_surfaces = HashMap::new();
+            for (source, visual) in &plugin_snapshot.values {
+                if !visual["image"]
+                    .as_str()
+                    .is_some_and(|uri| uri.starts_with("data:image/gif;base64,"))
+                {
+                    continue;
+                }
+                let state = self.state.lock().unwrap();
+                let size = state
+                    .devices
+                    .iter()
+                    .find(|d| d.id == device)
+                    .and_then(|d| {
+                        d.manifest
+                            .controls
+                            .iter()
+                            .filter(|control| {
+                                control.id == *source
+                                    || page.as_ref().is_some_and(|page| {
+                                        page.surface_source(&d.manifest, &control.id) == source
+                                    })
+                                    || d.manifest
+                                        .control(source)
+                                        .ok()
+                                        .and_then(|c| c.feedback_surface.as_ref())
+                                        == Some(&control.id)
+                            })
+                            .filter_map(|control| {
+                                Some([control.image_width?, control.image_height?])
+                            })
+                            .reduce(|a, b| [a[0].max(b[0]), a[1].max(b[1])])
+                    })
+                    .unwrap_or([512, 512]);
+                gif_surfaces.insert(source.clone(), size);
+            }
             let animation_errors = self.vendor_animations.lock().unwrap().prepare(
                 &self.profiles,
                 (device, software),
                 &plugin_snapshot.contexts,
                 &mut plugin_snapshot.values,
+                &plugin_snapshot.artwork,
+                &gif_surfaces,
                 media_elapsed,
                 &|| {
                     self.state.lock().unwrap().revision != state_revision
@@ -434,11 +614,20 @@ impl Runtime {
                     Some(format!("{control}: {error}")),
                 );
             }
+            if let Some(palette) = draft.and_then(|draft| draft.palette.as_ref()) {
+                let (colors, wallpaper) = self.resolve_preview_palette(palette)?;
+                plugin_snapshot.device_palette = colors;
+                plugin_snapshot.wallpaper = wallpaper;
+                plugin_snapshot.device_theme.sync = true;
+            }
             let context = RenderSceneContext {
                 preview_token: preview.as_ref().map(|value| value.0.clone()),
                 draft: preview.map(|value| value.1),
+                label_parameters,
                 clips: Default::default(),
                 device: device.into(),
+                software,
+                gif_surfaces,
                 wallpaper: plugin_snapshot.device_palette["wallpaper"]
                     .as_str()
                     .expect("theme wallpaper")
@@ -454,6 +643,7 @@ impl Runtime {
                     .as_str()
                     .expect("theme ink")
                     .into(),
+                surface_wallpaper,
                 device_surface: plugin_snapshot.device_palette["surface"]
                     .as_str()
                     .expect("theme surface")
@@ -462,9 +652,12 @@ impl Runtime {
                 keyboard_navigation,
                 page,
                 formats,
+                compact_plugin_keys,
+                wallpaper_target,
                 contract_identity,
                 overrides,
                 visuals: plugin_snapshot.values,
+                artwork: plugin_snapshot.artwork,
                 fallbacks: plugin_snapshot
                     .fallbacks
                     .into_iter()
@@ -480,6 +673,7 @@ impl Runtime {
                 layer_revision,
                 plugin_generation: plugin_snapshot.generation,
                 font_generation,
+                vault_presentation,
             };
             // Plugin visuals (including themed fallback icons) were copied under
             // one hub lock. Soft revisions need no retry: a newer immutable visual
@@ -514,6 +708,7 @@ pub(crate) fn install_burst_fixture(runtime: &Runtime) {
             (
                 format!("key-{index}"),
                 crate::Binding {
+                    live_label: Vec::new(),
                     dial_response: None,
                     activation_policy: Default::default(),
                     title: format!("Fixture key-{index}"),
@@ -551,6 +746,103 @@ mod tests {
         let runtime = Runtime::build(root.path().join("app"), false).unwrap();
         (root, runtime)
     }
+    #[test]
+    fn live_label_demand_follows_page_switches_and_equal_overrides_do_not_wake() {
+        use crate::live_label::LabelSegment;
+        use serde_json::json;
+        let (_root, rt) = runtime();
+        let device = "simulator:n4-pro:labels";
+        rt.simulate_device(true, device).unwrap();
+        install_burst_fixture(&rt);
+        {
+            let mut state = rt.state.lock().unwrap();
+            let p = &mut state.profiles[0];
+            p.parameters = vec![serde_json::from_value(json!({"name":"level","label":"Level","type":"number","default":0,"required":false})).unwrap()];
+            let mut hidden = p.pages[0].clone();
+            hidden.id = "other".into();
+            p.pages.push(hidden);
+            p.pages[0].bindings.get_mut("key-1").unwrap().live_label =
+                vec![LabelSegment::Parameter {
+                    name: "level".into(),
+                    fallback: "?".into(),
+                }];
+        }
+        let before = rt.snapshot();
+        let saved = rt
+            .save_profile(before.profiles[0].clone(), before.configuration_revision)
+            .unwrap();
+        {
+            let mut state = rt.state.lock().unwrap();
+            let mut session = state.session(device);
+            session.profile_id = "fixture-profile".into();
+            session.page_id = "fixture-page".into();
+            state.sessions.insert(device.into(), session);
+        }
+        let rev = saved.configuration_revision;
+        let first = rt.label_overrides(rev).unwrap();
+        assert!(std::sync::Arc::ptr_eq(
+            &first,
+            &rt.label_overrides(rev).unwrap()
+        ));
+        let events = rt.subscribe();
+        let mut overrides = crate::parameters::ParameterOverrides::default();
+        overrides
+            .installation
+            .entry("fixture-profile".into())
+            .or_default()
+            .insert("level".into(), json!(3));
+        rt.save_parameter_overrides(overrides.clone()).unwrap();
+        assert_eq!(
+            events
+                .try_iter()
+                .filter(|e| e.kind == "live-feedback" && e.device_id.as_deref() == Some(device))
+                .count(),
+            1
+        );
+        for _ in 0..32 {
+            rt.save_parameter_overrides(overrides.clone()).unwrap();
+        }
+        assert_eq!(
+            events
+                .try_iter()
+                .filter(|e| e.kind == "live-feedback")
+                .count(),
+            0
+        );
+        for id in ["fixture-page", "other", "fixture-page", "other"] {
+            {
+                let mut state = rt.state.lock().unwrap();
+                let mut session = state.session(device);
+                session.page_id = id.into();
+                state.sessions.insert(device.into(), session);
+            }
+            let hardware = rt.render_scene_for_target(device, false).unwrap();
+            let editor = rt.render_scene_for_target(device, true).unwrap();
+            assert_eq!(hardware.label_parameters, editor.label_parameters);
+            assert_eq!(
+                hardware.label_parameters.len(),
+                usize::from(id == "fixture-page")
+            );
+            if id == "fixture-page" {
+                assert_eq!(hardware.label_parameters.values().next().unwrap(), "3");
+            }
+        }
+        overrides
+            .installation
+            .get_mut("fixture-profile")
+            .unwrap()
+            .insert("level".into(), json!(4));
+        rt.save_parameter_overrides(overrides).unwrap();
+        assert_eq!(
+            events
+                .try_iter()
+                .filter(|e| e.kind == "live-feedback")
+                .count(),
+            0
+        );
+        rt.shutdown();
+    }
+
     #[test]
     // Verify that cached render shares misses hits and preview allocations
     fn cached_render_shares_misses_hits_and_preview_allocations() {
@@ -591,6 +883,57 @@ mod tests {
                 .unwrap()
                 .resident_bytes(),
             0
+        );
+        runtime.shutdown();
+    }
+    #[test]
+    fn visual_cache_retains_only_surface_sized_output_and_fixed_keys() {
+        use base64::Engine;
+
+        let (_root, runtime) = runtime();
+        let art = image::RgbImage::from_fn(256, 256, |x, y| {
+            image::Rgb([x as u8, y as u8, (x * y) as u8])
+        });
+        let png = hardware_core::render::encode_pixels(art.into(), "png").unwrap();
+        let uri = format!(
+            "data:image/png;base64,{}",
+            base64::engine::general_purpose::STANDARD.encode(png)
+        );
+        let visual = serde_json::json!({ "image": uri, "title": "A" });
+        let mut cached_payload = 0;
+        let mut entries = 0;
+        for (w, h, rotation) in [(112, 112, 0), (176, 112, 0), (176, 112, 90)] {
+            let frame = runtime.render_visual(&visual, w, h, rotation).unwrap();
+            let hit = runtime.render_visual(&visual, w, h, rotation).unwrap();
+            assert!(std::sync::Arc::ptr_eq(&frame, &hit));
+            let expected = hardware_core::render::visual(&visual, w, h, rotation).unwrap();
+            assert_eq!(&frame[..], expected);
+            let dimensions = image::load_from_memory(&frame).unwrap();
+            let (width, height) = if rotation == 90 { (h, w) } else { (w, h) };
+            assert_eq!(
+                (dimensions.width(), dimensions.height()),
+                (width.into(), height.into())
+            );
+            cached_payload += frame.len();
+            entries += 1;
+            let cache = runtime.profiles.render_cache.lock().unwrap();
+            assert_eq!(cache.bytes, cached_payload + entries * 2 * 32);
+        }
+        let first = runtime.render_visual(&visual, 112, 112, 0).unwrap();
+        let mut changed = visual.clone();
+        changed["title"] = "B".into();
+        assert_ne!(first, runtime.render_visual(&changed, 112, 112, 0).unwrap());
+
+        let mut other_art = visual;
+        let png = hardware_core::render::tile(16, 16, [255, 0, 0], "", 0, "png").unwrap();
+        other_art["image"] = format!(
+            "data:image/png;base64,{}",
+            base64::engine::general_purpose::STANDARD.encode(png)
+        )
+        .into();
+        assert_ne!(
+            first,
+            runtime.render_visual(&other_art, 112, 112, 0).unwrap()
         );
         runtime.shutdown();
     }
@@ -716,6 +1059,59 @@ mod tests {
         runtime.shutdown();
     }
     #[test]
+    // Every independent LCD receives a saved-theme fallback without replacing authored pixels
+    fn disjoint_lcd_theme_fallback_preserves_custom_surfaces() {
+        let (_root, runtime) = runtime();
+        let mut scene = runtime.render_scene("fixture").unwrap();
+        scene.surface_wallpaper = true;
+        scene.wallpaper = "<svg xmlns='http://www.w3.org/2000/svg' width='10' height='10'><rect width='10' height='10' fill='#123456'/></svg>".into();
+        for manifest in hardware_registry::manifests()
+            .into_iter()
+            .filter(|m| !m.capabilities.background)
+        {
+            for control in manifest.controls.iter().filter(|c| {
+                c.image_slot.is_some()
+                    && c.image_width.is_some()
+                    && c.image_height.is_some()
+                    && matches!(c.kind.as_str(), "button" | "touch" | "display")
+            }) {
+                let render = |binding: Option<&crate::Binding>, scene: &RenderSceneContext| {
+                    runtime
+                        .render_bound_surface_in_scene(
+                            control,
+                            binding,
+                            manifest.layout.rotation,
+                            &scene.scope,
+                            &control.id,
+                            scene,
+                        )
+                        .unwrap()
+                };
+                let blank = render(None, &scene);
+                let pixels = image::load_from_memory(&blank).unwrap().to_rgba8();
+                assert_eq!(
+                    pixels.get_pixel(0, 0).0,
+                    [18, 52, 86, 255],
+                    "{}:{}",
+                    manifest.model_id,
+                    control.id
+                );
+                let mut custom: crate::Binding = serde_json::from_value(
+                    serde_json::json!({"title":"", "color":"#00000000", "action":{"kind":"none"}}),
+                )
+                .unwrap();
+                custom.custom_background = true;
+                custom.color = "#991122".into();
+                let themed = render(Some(&custom), &scene);
+                scene.surface_wallpaper = false;
+                assert_eq!(themed, render(Some(&custom), &scene));
+                scene.surface_wallpaper = true;
+            }
+        }
+        runtime.shutdown();
+    }
+
+    #[test]
     // Verify that navigation render defaults are centered themed and customizable
     fn navigation_render_defaults_are_centered_themed_and_customizable() {
         let (_root, runtime) = runtime();
@@ -768,7 +1164,7 @@ mod tests {
         assert!(*text_rows.first().unwrap() > default.height() / 3);
         assert!(*text_rows.last().unwrap() < default.height() * 2 / 3);
         let mut composed = page.bindings["key-1"].clone();
-        composed.composition = Some(Box::new(Default::default()));
+        composed.composition = Some(Box::default());
         assert_eq!(render(&composed, &scene), background);
         let mut custom = page.bindings["key-1"].clone();
         custom.background_source = Some(crate::profiles::BackgroundSource::Custom);
@@ -808,6 +1204,54 @@ mod tests {
         runtime.shutdown();
     }
     #[test]
+    fn standalone_image_cache_tracks_painted_fields_and_ignores_source_references() {
+        use base64::Engine;
+        use serde_json::json;
+        let (_root, runtime) = runtime();
+        install_burst_fixture(&runtime);
+        let mut scene = runtime.render_scene("fixture").unwrap();
+        let manifest = hardware_registry::manifests()
+            .into_iter()
+            .find(|m| m.model_id == "n4-pro")
+            .unwrap();
+        let control = manifest.control("key-1").unwrap();
+        let png = hardware_core::render::solid_rgba(8, 8, [20, 40, 60, 255]).unwrap();
+        let uri = format!(
+            "data:image/png;base64,{}",
+            base64::engine::general_purpose::STANDARD.encode(png)
+        );
+        let mut render = |value| {
+            scene
+                .visuals
+                .insert("key-1".into(), std::sync::Arc::new(value));
+            runtime
+                .render_bound_surface_in_scene(
+                    control,
+                    scene.page.as_ref().unwrap().bindings.get("key-1"),
+                    180,
+                    &scene.scope,
+                    "key-1",
+                    &scene,
+                )
+                .unwrap()
+        };
+        let mut value = json!({"image":uri, "title":"A"});
+        let first = render(value.clone());
+        value["imageReference"] = json!("previous.png");
+        value["stateOverrides"] = json!({"1":{"image":"inactive.png"}});
+        assert!(std::sync::Arc::ptr_eq(&first, &render(value.clone())));
+        value["title"] = json!("B");
+        let title = render(value.clone());
+        assert_ne!(first, title);
+        value["titleParameters"] = json!({"showTitle":false});
+        let hidden = render(value.clone());
+        assert_ne!(hidden, title);
+        value["badge"] = json!("OK");
+        assert_ne!(hidden, render(value));
+        runtime.shutdown();
+    }
+
+    #[test]
     // Verify that hardware and software visuals do not share the wrong rendered frame
     fn hardware_and_software_visuals_do_not_share_the_wrong_rendered_frame() {
         let (_root, runtime) = runtime();
@@ -844,6 +1288,46 @@ mod tests {
         assert_ne!(first_hardware, first_software);
         assert_eq!(first_hardware, render(&hardware));
         assert_eq!(first_software, render(&software));
+        let slots = || {
+            runtime.profiles.media_budget.stats()["cache_slots"]
+                .as_u64()
+                .unwrap()
+        };
+        let initial_slots = slots();
+        for revision in 0..32 {
+            hardware.visuals.insert(
+                "key-1".into(),
+                std::sync::Arc::new(serde_json::json!({
+                    "title": format!("Tick {revision}"), "background": "#ff0000"
+                })),
+            );
+            let current = render(&hardware);
+            assert!(std::sync::Arc::ptr_eq(&current, &render(&hardware)));
+        }
+        assert_eq!(
+            slots(),
+            initial_slots,
+            "superseded frames or intermediate PNGs stayed cached"
+        );
+        assert!(std::sync::Arc::ptr_eq(&first_software, &render(&software)));
+        assert_ne!(first_hardware, render(&hardware));
+        software.visuals.clone_from(&hardware.visuals);
+        let shared = render(&hardware);
+        assert!(std::sync::Arc::ptr_eq(&shared, &render(&software)));
+        let upright = |bytes| {
+            runtime
+                .preview_image_for_surface(bytes, 180, Some(("fixture", "key-1")), false)
+                .unwrap()
+        };
+        let upright_shared = upright(shared.clone());
+        assert!(std::sync::Arc::ptr_eq(&upright_shared, &upright(shared)));
+        let slots_before_rotation = slots();
+        assert_ne!(upright(first_hardware), upright_shared);
+        assert_eq!(
+            slots_before_rotation,
+            slots(),
+            "Only the latest upright animation frame is retained"
+        );
         runtime.shutdown();
     }
     #[test]

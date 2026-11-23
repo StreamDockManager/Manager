@@ -1,0 +1,22 @@
+{
+  "version": 1,
+  "basePath": "..",
+  "components": {
+    "sd-macro-sharing": {
+      "source": "components/sd-macro-sharing.html",
+      "dependencies": [],
+      "options": {
+        "shadow": false,
+        "templateRevision": "sha256-uiPqrEbfrOupB6xki9OtHmHZWuyBMK17EC7P2Yg4g7Y"
+      },
+      "metadata": {
+        "description": "Portable macro sharing with explicit privacy consent and import review."
+      }
+    }
+  },
+  "groups": {
+    "macro-sharing": [
+      "sd-macro-sharing"
+    ]
+  }
+}

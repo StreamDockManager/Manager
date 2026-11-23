@@ -33,7 +33,8 @@ impl DeletedMedia {
         Ok(value)
     }
     // Detach the owned media deletion resource
-    pub(crate) fn detach(&self, data: &mut ProfileData) {
+    pub(crate) fn detach(&self, data: &mut ProfileData) -> bool {
+        let mut changed = data.configuration_revision < self.revision;
         data.configuration_revision = data.configuration_revision.max(self.revision);
         for profile in &mut data.profiles {
             if profile
@@ -41,6 +42,7 @@ impl DeletedMedia {
                 .as_ref()
                 .is_some_and(|id| self.assets.contains(id))
             {
+                changed = true;
                 profile.background_asset = None;
                 profile.background_media = Default::default();
             }
@@ -54,11 +56,13 @@ impl DeletedMedia {
                     .as_ref()
                     .is_some_and(|id| self.assets.contains(id))
                 {
+                    changed = true;
                     binding.asset = None;
                     binding.media = Default::default();
                 }
             }
         }
+        changed
     }
     // Detach draft
     pub(crate) fn detach_draft(&self, draft: &mut Draft) {
@@ -116,8 +120,8 @@ impl DeletedMedia {
 }
 impl ProfileStore {
     // Detach deleted media
-    pub(crate) fn detach_deleted_media(&self, data: &mut ProfileData) {
-        self.deleted_media.lock().unwrap().detach(data);
+    pub(crate) fn detach_deleted_media(&self, data: &mut ProfileData) -> bool {
+        self.deleted_media.lock().unwrap().detach(data)
     }
     // Detach deleted draft
     pub(crate) fn detach_deleted_draft(&self, draft: &mut Draft) {
@@ -174,8 +178,8 @@ impl Runtime {
         let mut stages = self.media_deletions.lock().unwrap();
         stages.check_capacity()?;
         let _transaction = self.profiles.transaction.lock().unwrap();
-        let _media = self.profiles.media_gate.exclusive()?;
-        let pins = self.profiles.asset_leases.lock();
+        // Review reads immutable assets only; decoder exclusion belongs to the confirmed commit
+        let pins = self.profiles.asset_leases.lock().clone();
         let scan = self.profiles.scan_media(&pins);
         if !scan.errors.is_empty() {
             return Err(format!(
@@ -262,6 +266,14 @@ impl Runtime {
     pub fn discard_media_deletion(&self, id: &str) {
         self.media_deletions.lock().unwrap().remove(id);
     }
+    // Publish durable deletion after all storage guards release without rolling back newer edits
+    fn publish_media_deletion(&self, data: ProfileData) {
+        let mut state = self.state.lock().unwrap();
+        if state.configuration_revision < data.configuration_revision {
+            Self::apply_data(&mut state, data);
+        }
+    }
+
     // Commit media deletion
     pub fn commit_media_deletion(&self, id: &str) -> Result<MediaDeletionResult, String> {
         let mut stages = self.media_deletions.lock().unwrap();
@@ -270,11 +282,17 @@ impl Runtime {
             "Media deletion review expired",
             "Media deletion review expired. Review it again.",
         )?;
-        let mut state = self.state.lock().unwrap();
+        // Disk validation and durable publication must not stop device snapshots or input
+        // Publish to runtime state only after releasing workspace guards to preserve lock order
         let _transaction = self.profiles.transaction.lock().unwrap();
         let _media = self.profiles.media_gate.exclusive()?;
+        let observed_pins = self.profiles.asset_leases.lock().clone();
+        let scan = self.profiles.scan_media(&observed_pins);
         let mut pins = self.profiles.asset_leases.lock();
-        let scan = self.profiles.scan_media(&pins);
+        // Readers may acquire pins during inspection; never commit against stale ownership
+        if pins.generation != observed_pins.generation || pins.live != observed_pins.live {
+            return Err("Media ownership changed. Cancel and review the deletion again.".into());
+        }
         if !scan.errors.is_empty() || scan.generation != stage.generation {
             return Err("Media usage changed. Cancel and review the deletion again.".into());
         }
@@ -355,12 +373,13 @@ impl Runtime {
         }
         pins.generation = pins.generation.wrapping_add(1);
         let selected = BTreeSet::from([asset.clone()]);
-        if let Err(e) = self
-            .profiles
-            .deleted_media
-            .lock()
-            .unwrap()
-            .purge(&self.profiles.root)
+        // Restart recovery retries older tombstones; an interactive removal visits only its asset
+        if let Err(e) = (DeletedMedia {
+            schema_version: 1,
+            revision,
+            assets: selected.clone(),
+        })
+        .purge(&self.profiles.root)
         {
             warnings.push(format!(
                 "Media unassigned; file removal will retry after restart: {e}"
@@ -369,13 +388,12 @@ impl Runtime {
         if let Err(e) = self.profiles.finish_media_removal(&selected, &scan) {
             warnings.push(format!("Media deleted; cache index update failed: {e}"));
         }
-        Self::apply_data(&mut state, data);
         stages.remove(id);
         drop(pins);
         drop(_media);
         drop(_transaction);
-        drop(state);
         drop(stages);
+        self.publish_media_deletion(data);
         self.emit("profiles", None, None, None);
         self.emit("media-deleted", None, None, Some(asset.clone()));
         let _ = self.device_commands.send(crate::devices::Request::Restore);
@@ -422,6 +440,78 @@ mod tests {
         (root, runtime, asset, other)
     }
     #[test]
+    // Delayed durable publication preserves newer configuration and unrelated session state
+    fn delayed_deletion_publication_is_monotonic_and_preserves_sessions() {
+        let (_root, runtime, _, _) = fixture();
+        let mut data = runtime.profiles.load().unwrap();
+        data.configuration_revision += 1;
+        let device = runtime.snapshot().devices[0].clone();
+        {
+            let mut state = runtime.state.lock().unwrap();
+            let mut session = state.session(&device.id);
+            session.automation_paused = true;
+            state
+                .sessions
+                .insert(device.persistence_key.clone(), session);
+        }
+        runtime.publish_media_deletion(data.clone());
+        assert!(runtime.snapshot().session(&device.id).automation_paused);
+        {
+            let mut state = runtime.state.lock().unwrap();
+            state.configuration_revision += 1;
+            state.profiles[0].name = "Newer committed edit".into();
+        }
+        runtime.publish_media_deletion(data);
+        assert_eq!(runtime.snapshot().profiles[0].name, "Newer committed edit");
+        runtime.shutdown();
+    }
+
+    #[test]
+    // Slow deletion inspection leaves snapshots and unrelated live state available
+    fn slow_deletion_does_not_hold_runtime_state() {
+        use std::sync::mpsc;
+        use std::time::Duration;
+        let (_root, runtime, asset, _) = fixture();
+        let review = runtime.prepare_media_deletion(&asset).unwrap();
+        let (entered, ready) = mpsc::channel();
+        let (release, wait) = mpsc::channel();
+        let storage_runtime = runtime.clone();
+        let storage = std::thread::spawn(move || {
+            storage_runtime.profiles.storage.run(move |_| {
+                entered.send(()).unwrap();
+                wait.recv().unwrap();
+                Ok(())
+            })
+        });
+        ready.recv_timeout(Duration::from_secs(5)).unwrap();
+        let deleting_runtime = runtime.clone();
+        let deleting =
+            std::thread::spawn(move || deleting_runtime.commit_media_deletion(&review.id));
+        let deadline = Instant::now() + Duration::from_secs(5);
+        while runtime.profiles.transaction.try_lock().is_ok() && Instant::now() < deadline {
+            std::thread::yield_now();
+        }
+        let reached_storage = runtime.profiles.transaction.try_lock().is_err();
+        let probe_runtime = runtime.clone();
+        let (sent, received) = mpsc::channel();
+        let probe = std::thread::spawn(move || sent.send(probe_runtime.snapshot()).unwrap());
+        let responsive = received.recv_timeout(Duration::from_secs(1));
+        release.send(()).unwrap();
+        storage.join().unwrap().unwrap();
+        assert!(
+            reached_storage,
+            "Worker did not reach the deliberately paused storage"
+        );
+        deleting.join().unwrap().unwrap();
+        probe.join().unwrap();
+        assert!(
+            responsive.is_ok(),
+            "Slow storage held the runtime state lock"
+        );
+        runtime.shutdown();
+    }
+
+    #[test]
     // Verify that deleting used media does not block later deletions or cleanup after restart
     fn deleting_used_media_does_not_block_later_deletions_or_cleanup_after_restart() {
         let (root, runtime, asset, other) = fixture();
@@ -438,14 +528,19 @@ mod tests {
             .save_profile(profile, runtime.snapshot().configuration_revision)
             .unwrap();
         // Populate the history proof cache with the original reference
-        assert!(runtime.media_library(1, 12, "").unwrap().cleanup_available);
+        assert!(
+            runtime
+                .audit_media_library(1, 12, "")
+                .unwrap()
+                .cleanup_available
+        );
         let review = runtime.prepare_media_deletion(&asset).unwrap();
         runtime.commit_media_deletion(&review.id).unwrap();
-        let page = runtime.media_library(1, 12, "").unwrap();
+        let page = runtime.audit_media_library(1, 12, "").unwrap();
         assert!(page.cleanup_available, "{:?}", page.scan_errors);
         let review = runtime.prepare_media_deletion(&other).unwrap();
         runtime.commit_media_deletion(&review.id).unwrap();
-        let page = runtime.media_library(1, 12, "").unwrap();
+        let page = runtime.audit_media_library(1, 12, "").unwrap();
         assert!(page.cleanup_available, "{:?}", page.scan_errors);
         runtime.shutdown();
         let retired = std::sync::Arc::downgrade(&runtime);
@@ -460,7 +555,7 @@ mod tests {
             "Runtime must release its configuration before reopening"
         );
         let runtime = Runtime::build(root.path().join("app"), false).unwrap();
-        let page = runtime.media_library(1, 12, "").unwrap();
+        let page = runtime.audit_media_library(1, 12, "").unwrap();
         assert!(page.cleanup_available, "{:?}", page.scan_errors);
         // A genuinely missing file must still block destructive operations
         let missing = runtime
@@ -479,7 +574,7 @@ mod tests {
                 .join(format!("{missing}.png")),
         )
         .unwrap();
-        let page = runtime.media_library(1, 12, "").unwrap();
+        let page = runtime.audit_media_library(1, 12, "").unwrap();
         assert!(!page.cleanup_available);
         assert!(page
             .scan_errors
@@ -613,7 +708,7 @@ mod tests {
             "Snapshot history retains the old reference; tombstones prevent its resurrection"
         );
         assert!(!runtime
-            .media_library(1, 12, "")
+            .audit_media_library(1, 12, "")
             .unwrap()
             .entries
             .iter()

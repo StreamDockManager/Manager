@@ -15,7 +15,7 @@
             "reflect": true
           }
         },
-        "templateRevision": "sha256--afvzZY3Ne-b_XmagiBpOM9_SbsUjNFXoY759ij1GZQ"
+        "templateRevision": "sha256-zt5ZuwtRDHF_q3L9xschwyc_5FfIGvh82mzCYHDN1rQ"
       },
       "metadata": {
         "description": "Ordered macro actions with stable draft IDs and explicit teardown of the prop observer."
@@ -26,7 +26,7 @@
       "dependencies": [],
       "options": {
         "shadow": false,
-        "templateRevision": "sha256-57rYJ3oFcoNiVc3766bL2Pgq6gX7cUnhDSQURna0Ibg"
+        "templateRevision": "sha256-XQN899dYp4aU_AMT9gQl2MRfO1VGsl6XZd7CyoRqq6s"
       }
     },
     "sd-action-library": {
@@ -34,7 +34,7 @@
       "dependencies": [],
       "options": {
         "shadow": false,
-        "templateRevision": "sha256-3U2guPDRzedwRINx-1RB64dihUcLnKICtJnl2sWYN8k"
+        "templateRevision": "sha256-_qOZIdR9cafWCs89qMqLNsHzHFCp_-R1sOSMvjwike4"
       },
       "metadata": {
         "description": "First-party sd-action-library component. Controllers are registered by the trusted application bootstrap."
@@ -49,7 +49,7 @@
       ],
       "options": {
         "shadow": false,
-        "templateRevision": "sha256-LgHr-xeMp5pet7MHKSYg97Qc9MSlyw7NQmxXxfSvYz4"
+        "templateRevision": "sha256-OBWuWnY13xt21eNTwi2FMKW7jBYxnuJ6TLqtq_c0EU8"
       },
       "metadata": {
         "description": "Shared action and macro workspace; the parent adapter owns content, events, and lifetime."
@@ -58,25 +58,14 @@
     "sd-app-shell": {
       "source": "components/sd-app-shell.html",
       "dependencies": [
-        "sd-application-data",
-        "sd-background-editor",
         "sd-benchmark-progress",
-        "sd-export-review",
         "sd-feature-dialogs",
-        "sd-keyboard-macro-editor",
-        "sd-library-organization",
-        "sd-macro-sharing",
-        "sd-media-library",
         "sd-plugin-logs",
-        "sd-plugin-management",
-        "sd-profile-conversion",
-        "sd-profile-versions",
-        "sd-toasts",
-        "sd-video-editor"
+        "sd-toasts"
       ],
       "options": {
         "shadow": false,
-        "templateRevision": "sha256-cNJpz54UOJ1NORZZUtfc9vH8IxVOYBEd70CK7ao3B3s"
+        "templateRevision": "sha256-uvMBDNzGnfYGGh23A_BdFp2UyBN8olFTO9-J3kPPfbY"
       },
       "metadata": {
         "description": "First-party sd-app-shell component. Controllers are registered by the trusted application bootstrap."
@@ -98,7 +87,7 @@
       "dependencies": [],
       "options": {
         "shadow": false,
-        "templateRevision": "sha256-Y8IjtqsD4Ns5QynCSYE4VhmUikN4Uu8pW5bWcp3pcys"
+        "templateRevision": "sha256-yR03PoeZOXcaJG4oEVJ0lZV7Ex88xrHcAWvm3_8HVzw"
       }
     },
     "sd-background-editor": {
@@ -108,7 +97,7 @@
       ],
       "options": {
         "shadow": false,
-        "templateRevision": "sha256-d6f1zVzfm9fBezWsQA6bdLxaIjFVsFlUYykV0rmYTiY"
+        "templateRevision": "sha256-mPXbhl0dlbGsOFiBStCmFDFzfCsinZRVqxFEESXGzL8"
       },
       "metadata": {
         "description": "Shared, isolated device background editing dialog."
@@ -125,12 +114,20 @@
         "description": "Shared benchmark progress, cancellation and device restoration dialog."
       }
     },
+    "sd-device-output-dialog": {
+      "source": "components/sd-device-output-dialog.html",
+      "dependencies": [],
+      "options": {
+        "shadow": false,
+        "templateRevision": "sha256-0YLt5C1jOEmhhldaNahxPeyENdRQM5NpxDCl9rTRznI"
+      }
+    },
     "sd-device-preview": {
       "source": "components/sd-device-preview.html",
       "dependencies": [],
       "options": {
         "shadow": false,
-        "templateRevision": "sha256-p0YihesvQ4IIOVqV47IIo6ykIxkoxUZtybBAfwevKiY"
+        "templateRevision": "sha256-A6W_IRczxGWvI7biMnxVK-ZTk7gGQ-Dul0E5x6VHzgU"
       },
       "metadata": {
         "description": "First-party sd-device-preview component. Controllers are registered by the trusted application bootstrap."
@@ -141,7 +138,7 @@
       "dependencies": [],
       "options": {
         "shadow": false,
-        "templateRevision": "sha256-cIwzDofkpElgTLwTYGlb9q6ehoPZMBcSGV4Qp0j0xWg"
+        "templateRevision": "sha256-Cv8BM_FUL1V2_93AN2Gkj2nLZxXypeDrbfkt5rcNnmw"
       },
       "metadata": {
         "description": "Tabbed device settings for display, lighting, behavior and firmware."
@@ -152,7 +149,7 @@
       "dependencies": [],
       "options": {
         "shadow": false,
-        "templateRevision": "sha256-VhPstAA6IR3CJxUGs46N2ZqCEQ1NPfNbEkB3LVh0vxE"
+        "templateRevision": "sha256-vRe3f9yYGBlCMJWz1khEpw1jp-t94CetHTI-ggzoqyA"
       },
       "metadata": {
         "description": "First-party sd-diagnostics component. Controllers are registered by the trusted application bootstrap."
@@ -168,7 +165,7 @@
       ],
       "options": {
         "shadow": false,
-        "templateRevision": "sha256-AmnbCVvKb3BrHer740q5I0_YEYG_N7Tfd-kb0g3LZtg"
+        "templateRevision": "sha256-tS8KugTit8Hv0dKZDOkmjckl7EMtYGSvkPrK00DPoOI"
       },
       "metadata": {
         "description": "First-party sd-editor component. Controllers are registered by the trusted application bootstrap."
@@ -179,7 +176,7 @@
       "dependencies": [],
       "options": {
         "shadow": false,
-        "templateRevision": "sha256-ezc9-Yc5hZ62ZPpsM1mUa9C9eLu6ydwhPwZyBX16sSw"
+        "templateRevision": "sha256-FYap3k7cwygc7XBfK9T6_sjCdQjkbt7Wc1n7i3J1Fks"
       },
       "metadata": {
         "description": "Immutable profile and macro export review with draft field changes."
@@ -188,18 +185,13 @@
     "sd-feature-dialogs": {
       "source": "components/sd-feature-dialogs.html",
       "dependencies": [
-        "sd-plugin-catalog-dialog",
-        "sd-plugin-folder-import",
-        "sd-plugin-preflight",
         "sd-plugin-profile-suggestions",
         "sd-profile-archive-import",
-        "sd-profile-sharing-dialog",
-        "sd-runtime-dialog",
         "sd-setup-dialog"
       ],
       "options": {
         "shadow": false,
-        "templateRevision": "sha256-kpLSrO7w6poHk4BJuLKteq_h0J0CD98Y8Sq1rTZaMak"
+        "templateRevision": "sha256-GjUDz0soGGTO14cO_y8UA8PlB-qAqwGB8dJPVRDlIqk"
       },
       "metadata": {
         "description": "Setup, plugin compatibility and staged import dialogs."
@@ -214,7 +206,7 @@
       ],
       "options": {
         "shadow": false,
-        "templateRevision": "sha256-c__aYEVP3_d7lcNXcnPZVn_PFuYdQs5ofXLizmO8bQs"
+        "templateRevision": "sha256-qTqpA6FIbO-Ovy2Lg0Ml90AWmJQfvaxstlYokX9uEuI"
       },
       "metadata": {
         "description": "First-party sd-inspector component. Controllers are registered by the trusted application bootstrap."
@@ -225,7 +217,7 @@
       "dependencies": [],
       "options": {
         "shadow": false,
-        "templateRevision": "sha256-PBrOO5pFwR4iODt4jFLIE6I1i7qEnLjsEdw8JBrKVOs"
+        "templateRevision": "sha256-EevorLQa2rv-wqJxtKFytDUoQReXH66GJXjg_v3ACsU"
       },
       "metadata": {
         "description": "Trusted, isolated keyboard recording draft with explicit Apply/Cancel."
@@ -278,7 +270,7 @@
             "reflect": true
           }
         },
-        "templateRevision": "sha256-lamGd_m4Gbf86IgxJXqBOYzdV9y0equrFeev7xGZOog"
+        "templateRevision": "sha256-WmpuiAggdULr8MY3cJIEGMVLB2ZGV2PKrP4ZXOwZ3OI"
       },
       "metadata": {
         "description": "Ordered macro actions with stable draft IDs and explicit teardown of the prop observer."
@@ -314,7 +306,7 @@
       ],
       "options": {
         "shadow": false,
-        "templateRevision": "sha256-pDcCZQ0H3ElaliSzguju-9t1RvgXxfcODbUYbnWkZXo"
+        "templateRevision": "sha256-2KSGW0s-5p6YQLsdtSqd5y0r55DyU5hzjSUM-rN1KMo"
       },
       "metadata": {
         "description": "Saved macro library and management page."
@@ -325,7 +317,7 @@
       "dependencies": [],
       "options": {
         "shadow": false,
-        "templateRevision": "sha256-pS3Z4Dp0cOXOGpQxbVXM2W3VUUYKe6zIzzadWQFPMhM"
+        "templateRevision": "sha256-1P4YPIZKMcG0FuoNOoHzDMOL_dwqW-WaIuk8b8d3U5g"
       },
       "metadata": {
         "description": "Managed media reuse and reviewed retention-safe cleanup."
@@ -351,7 +343,7 @@
             "reflect": true
           }
         },
-        "templateRevision": "sha256--hdvv70XeBgMt6lAOGqNaufo7WyP9WwEmlGWfqYe4AM"
+        "templateRevision": "sha256-7LBwN1T_cxbrXKdF0CWWaff4DzoZC51wDN5ZBWgrof0"
       },
       "metadata": {
         "description": "Non-destructive media transforms shared with Rust playback."
@@ -361,7 +353,8 @@
       "source": "components/sd-plugin-action-group.html",
       "dependencies": [],
       "options": {
-        "templateRevision": "sha256-AfofLSKanzXnYXgS-55ODQi1j0cdQN2K0v7RBQPHRPU"
+        "shadow": false,
+        "templateRevision": "sha256-G8CjDHVGMA4IT1WGQGPNEWHAhhajHR0qwx-8IMwsV7k"
       }
     },
     "sd-plugin-catalog-dialog": {
@@ -369,7 +362,7 @@
       "dependencies": [],
       "options": {
         "shadow": false,
-        "templateRevision": "sha256-ZmEbmLFDoNNQmtaA190XmIDtcjzYjHZ3f9IHpgM2TDc"
+        "templateRevision": "sha256-h19YzuDnNk0hvyUZRLFLXLeMC_zOTHtnBVfIn-KIlgA"
       }
     },
     "sd-plugin-folder-import": {
@@ -385,7 +378,7 @@
       "dependencies": [],
       "options": {
         "shadow": false,
-        "templateRevision": "sha256-in03RWTTKaqpADFpCraIXM8AqXeO36H0qNcc7dnK8Ps"
+        "templateRevision": "sha256-BUxVTJNbI68CJ1ebVFK2bogFwrLimY6ol1cAnW5p9rA"
       },
       "metadata": {
         "description": "Persistent nonmodal plugin capture reader."
@@ -396,7 +389,7 @@
       "dependencies": [],
       "options": {
         "shadow": false,
-        "templateRevision": "sha256-gKLwNh9DUaNuCCAqRxpCcI_-FpI4ykS_Fv08FPt9mUY"
+        "templateRevision": "sha256-wRsi7GeY48ENvou-d3tTSDtlDQoSyXj0uywhBpZpcqY"
       },
       "metadata": {
         "description": "Reviewed plugin rollback and installation-local update preferences."
@@ -415,18 +408,17 @@
       "dependencies": [],
       "options": {
         "shadow": false,
-        "templateRevision": "sha256-4nLy_CdekT8XG0jgqvTVdW2a45rwYGUaDV0MNrbfjOY"
+        "templateRevision": "sha256-fGFvm7Wgdf3syAKrYds5HhdRrEtPe_d4IR70NF7ggDg"
       }
     },
     "sd-plugins": {
       "source": "components/sd-plugins.html",
       "dependencies": [
-        "sd-plugin-action-group",
-        "sd-updates"
+        "sd-plugin-action-group"
       ],
       "options": {
         "shadow": false,
-        "templateRevision": "sha256-9kzBxYNs8y4phWNkYJx2B-PolGqh35imruSHQMoLmPk"
+        "templateRevision": "sha256-60l0936W_9Vie-_Z_YgN8AcR9FFTeZf_yzfoBPC2IP0"
       },
       "metadata": {
         "description": "First-party sd-plugins component. Controllers are registered by the trusted application bootstrap."
@@ -437,7 +429,7 @@
       "dependencies": [],
       "options": {
         "shadow": false,
-        "templateRevision": "sha256-jZmbAyBKTTweoQ1ngd-pKtgsLqFfj6OSmueHC0RjBUg"
+        "templateRevision": "sha256-_q6KpwLnEzg7s_H9v8FrZgg50QX8eyaL_3WwXhpPXZI"
       }
     },
     "sd-profile-conversion": {
@@ -475,7 +467,7 @@
       "dependencies": [],
       "options": {
         "shadow": false,
-        "templateRevision": "sha256-hf3V0NRyE_ZDUFUyL2fHjD0yaaa0XrhRdneYjshGy3Y"
+        "templateRevision": "sha256-Upde0vaB7UmkfOCxoDwX0vS8d4VcU9MCANFrubK-RP8"
       }
     },
     "sd-settings": {
@@ -486,7 +478,7 @@
       ],
       "options": {
         "shadow": false,
-        "templateRevision": "sha256-IbfXzxahwPOKchcqpi9yfS8ckGpOnjyRNghWKO4HjV4"
+        "templateRevision": "sha256-n4esfCV7-DlFLD7TyZ-feYQUEZsGB0sPqMx0sSWlmHA"
       },
       "metadata": {
         "description": "First-party sd-settings component. Controllers are registered by the trusted application bootstrap."
@@ -497,7 +489,7 @@
       "dependencies": [],
       "options": {
         "shadow": false,
-        "templateRevision": "sha256-2L-__fo28OWvha5eInGceq2WwtAoGTurt6c6q1F0J5A"
+        "templateRevision": "sha256-mJKnvtMVOJin3VPsRfQIW4meFx4jtaV1Z3heYVqIc6U"
       }
     },
     "sd-toasts": {
@@ -516,10 +508,21 @@
       "dependencies": [],
       "options": {
         "shadow": false,
-        "templateRevision": "sha256-EcVagNzGxzYiPmoWE_93B2pAIMHCiqAXWiCz0spdzz4"
+        "templateRevision": "sha256-z1SETs0uu35fUS0BrhJGmOfu_SvgsMNiMOMnge7ndgM"
       },
       "metadata": {
         "description": "First-party update management; plugin inspectors have no access."
+      }
+    },
+    "sd-vault": {
+      "source": "components/sd-vault.html",
+      "dependencies": [],
+      "options": {
+        "shadow": false,
+        "templateRevision": "sha256-0S8D1aaX8bbfGPvYryWGe0j0UORnsJzRS9bzZTMKfjU"
+      },
+      "metadata": {
+        "description": "First-party Vault management and scoped metadata."
       }
     },
     "sd-video-editor": {
@@ -527,7 +530,7 @@
       "dependencies": [],
       "options": {
         "shadow": false,
-        "templateRevision": "sha256-FcldwgLAER0E1_k2pFlYr1v1lTZZcJmNCwk0fRZjMjs"
+        "templateRevision": "sha256-lqLjschdjXaBCsch4oK7wJJJvxI9J8sfTVotb0HUK4w"
       },
       "metadata": {
         "description": "Shared source-timed video clip editor with isolated drafts and contextual job feedback."
@@ -554,29 +557,13 @@
     ],
     "shell": [
       "sd-app-shell",
-      "sd-application-data",
-      "sd-background-editor",
       "sd-benchmark-progress",
-      "sd-export-review",
       "sd-feature-dialogs",
-      "sd-keyboard-macro-editor",
-      "sd-library-organization",
-      "sd-macro-sharing",
-      "sd-media-library",
-      "sd-plugin-catalog-dialog",
-      "sd-plugin-folder-import",
       "sd-plugin-logs",
-      "sd-plugin-management",
-      "sd-plugin-preflight",
       "sd-plugin-profile-suggestions",
       "sd-profile-archive-import",
-      "sd-profile-conversion",
-      "sd-profile-sharing-dialog",
-      "sd-profile-versions",
-      "sd-runtime-dialog",
       "sd-setup-dialog",
-      "sd-toasts",
-      "sd-video-editor"
+      "sd-toasts"
     ],
     "settings": [
       "sd-device-settings",
@@ -595,8 +582,62 @@
       "sd-toasts"
     ],
     "plugins": [
-      "sd-plugins",
-      "sd-updates"
+      "sd-plugin-action-group",
+      "sd-plugins"
+    ],
+    "application-data": [
+      "sd-application-data"
+    ],
+    "background-editor": [
+      "sd-background-editor"
+    ],
+    "device-output-dialog": [
+      "sd-device-output-dialog"
+    ],
+    "export-review": [
+      "sd-export-review"
+    ],
+    "keyboard-macro-editor": [
+      "sd-keyboard-macro-editor"
+    ],
+    "library-organization": [
+      "sd-library-organization"
+    ],
+    "macro-sharing": [
+      "sd-macro-sharing"
+    ],
+    "media-library": [
+      "sd-media-library"
+    ],
+    "plugin-catalog-dialog": [
+      "sd-plugin-catalog-dialog"
+    ],
+    "plugin-folder-import": [
+      "sd-plugin-folder-import"
+    ],
+    "plugin-management": [
+      "sd-plugin-management"
+    ],
+    "plugin-preflight": [
+      "sd-plugin-preflight"
+    ],
+    "profile-conversion": [
+      "sd-profile-conversion"
+    ],
+    "profile-sharing-dialog": [
+      "sd-profile-sharing-dialog"
+    ],
+    "profile-versions": [
+      "sd-profile-versions"
+    ],
+    "runtime-dialog": [
+      "sd-runtime-dialog"
+    ],
+    "video-editor": [
+      "sd-video-editor"
+    ],
+    "vault": [
+      "sd-vault"
     ]
   }
 }

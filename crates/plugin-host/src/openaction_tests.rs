@@ -123,7 +123,7 @@ fn openaction_settings_interface_requires_connected_enabled_opt_in() {
 #[test]
 // Verify openaction browser callback is available without elgato alias
 fn openaction_browser_callback_is_available_without_elgato_alias() {
-    let bootstrap = browser::bootstrap(1234, "token", "registerPlugin", &json!({}), &json!({}));
+    let bootstrap = browser::bootstrap(1234, "token", &json!({}), browser::BootstrapRole::Runtime);
     assert!(
         bootstrap.contains("window.connectOpenActionSocket||window.connectElgatoStreamDeckSocket")
     );

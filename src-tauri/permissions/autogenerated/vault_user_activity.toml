@@ -1,0 +1,11 @@
+# Automatically generated - DO NOT EDIT!
+
+[[permission]]
+identifier = "allow-vault-user-activity"
+description = "Enables the vault_user_activity command without any pre-configured scope."
+commands.allow = ["vault_user_activity"]
+
+[[permission]]
+identifier = "deny-vault-user-activity"
+description = "Denies the vault_user_activity command without any pre-configured scope."
+commands.deny = ["vault_user_activity"]

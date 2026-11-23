@@ -20,13 +20,12 @@ pub enum Domain {
     PluginGlobals,
     PluginDefaults,
     PluginMetadata,
-    PluginHealth,
     LoggingPreferences,
     RuntimeState,
 }
 
 impl Domain {
-    pub const ALL: [Self; 16] = [
+    pub const ALL: [Self; 15] = [
         Self::Workspace,
         Self::Profiles,
         Self::SavedMacros,
@@ -40,7 +39,6 @@ impl Domain {
         Self::PluginGlobals,
         Self::PluginDefaults,
         Self::PluginMetadata,
-        Self::PluginHealth,
         Self::LoggingPreferences,
         Self::RuntimeState,
     ];
@@ -61,7 +59,6 @@ impl Domain {
             Self::PluginGlobals => "plugin_globals",
             Self::PluginDefaults => "plugin_defaults",
             Self::PluginMetadata => "plugin_metadata",
-            Self::PluginHealth => "plugin_health",
             Self::LoggingPreferences => "logging_preferences",
             Self::RuntimeState => "runtime_state",
         }
@@ -124,10 +121,16 @@ pub(crate) fn read_text(
         return Ok(None);
     };
     let bytes: i64 = row.get(0).map_err(|e| e.to_string())?;
-    if bytes < 0 || bytes as u64 > max_bytes.min(MAX_RECORD_BYTES) as u64 {
+    let read_limit = if crate::plugin_settings::supports(domain, key) {
+        MAX_RECORD_BYTES
+    } else {
+        max_bytes.min(MAX_RECORD_BYTES)
+    };
+    if bytes < 0 || bytes as u64 > read_limit as u64 {
         return Err("Stored record exceeds size limit".into());
     }
-    row.get(1).map(Some).map_err(|e| e.to_string())
+    let text = row.get(1).map_err(|e| e.to_string())?;
+    crate::plugin_settings::hydrate(conn, domain, key, text, max_bytes).map(Some)
 }
 
 // Read JSON
@@ -154,6 +157,14 @@ pub(crate) fn write_text(
     check_key(key)?;
     if payload.len() > MAX_RECORD_BYTES {
         return Err("Storage record exceeds size limit".into());
+    }
+    if crate::plugin_settings::supports(domain, key) {
+        if conn.is_autocommit() {
+            let tx = conn.unchecked_transaction().map_err(|e| e.to_string())?;
+            crate::plugin_settings::write(&tx, domain, key, payload)?;
+            return tx.commit().map_err(|e| e.to_string());
+        }
+        return crate::plugin_settings::write(conn, domain, key, payload);
     }
     let sql = format!("INSERT INTO {}(key,payload,revision) VALUES(?1,?2,1) ON CONFLICT(key) DO UPDATE SET payload=excluded.payload,revision=revision+1", domain.table());
     conn.execute(&sql, (key, payload))
@@ -189,6 +200,15 @@ impl EncodedJson {
         key: &str,
     ) -> Result<(), String> {
         check_key(key)?;
+        if crate::plugin_settings::supports(domain, key) {
+            if read_text(conn, domain, key, MAX_RECORD_BYTES)?.is_some_and(|s| {
+                serde_json::from_str::<serde_json::Value>(&s).ok()
+                    == serde_json::from_str(&self.0).ok()
+            }) {
+                return Ok(());
+            }
+            return self.write(conn, domain, key);
+        }
         let unchanged: Option<bool> = conn
             .query_row(
                 &format!("SELECT payload=?2 FROM {} WHERE key=?1", domain.table()),
@@ -218,6 +238,12 @@ pub fn write_json<T: Serialize + ?Sized>(
 // Delete for the current operation
 pub fn delete(conn: &Connection, domain: Domain, key: &str) -> Result<(), String> {
     check_key(key)?;
+    if crate::plugin_settings::supports(domain, key) && conn.is_autocommit() {
+        let tx = conn.unchecked_transaction().map_err(|e| e.to_string())?;
+        delete(&tx, domain, key)?;
+        return tx.commit().map_err(|e| e.to_string());
+    }
+    crate::plugin_settings::remove(conn, domain, key)?;
     conn.execute(
         &format!("DELETE FROM {} WHERE key=?1", domain.table()),
         [key],
@@ -263,14 +289,24 @@ pub(crate) fn list_text(
         let size = key_bytes
             .checked_add(value_bytes)
             .ok_or("Stored collection exceeds size limit")?;
-        if size > remaining || value_bytes > MAX_RECORD_BYTES || key_bytes > MAX_KEY_BYTES {
+        if key_bytes > remaining || value_bytes > MAX_RECORD_BYTES || key_bytes > MAX_KEY_BYTES {
             return Err("Stored collection exceeds size limit".into());
         }
-        remaining -= size;
-        result.push((
-            row.get(2).map_err(|e| e.to_string())?,
+        let key: String = row.get(2).map_err(|e| e.to_string())?;
+        if size > remaining && !crate::plugin_settings::supports(domain, &key) {
+            return Err("Stored collection exceeds size limit".into());
+        }
+        let payload = crate::plugin_settings::hydrate(
+            conn,
+            domain,
+            &key,
             row.get(3).map_err(|e| e.to_string())?,
-        ));
+            remaining - key_bytes,
+        )?;
+        remaining = remaining
+            .checked_sub(key_bytes + payload.len())
+            .ok_or("Stored collection exceeds size limit")?;
+        result.push((key, payload));
     }
     Ok(result)
 }
@@ -353,6 +389,7 @@ mod prepared_tests {
             "CREATE TABLE profiles(key TEXT PRIMARY KEY,payload TEXT,revision INTEGER)",
         )
         .unwrap();
+        crate::plugin_settings::initialize(&conn).unwrap();
         encoded
             .write_changed(&conn, Domain::Profiles, "id")
             .unwrap();

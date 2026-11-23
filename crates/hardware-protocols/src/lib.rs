@@ -22,6 +22,7 @@ pub fn transfer(
     if data.is_empty() || data.len() > 16 * 1024 * 1024 {
         return Err(Error::Protocol("invalid image size".into()));
     }
+    let started = std::time::Instant::now();
     let report_count = data.len().div_ceil(PAYLOAD_SIZE) + 1 + usize::from(commit);
     let mut reports = Vec::with_capacity(report_count);
     reports.push(command(header)?);
@@ -33,6 +34,7 @@ pub fn transfer(
     if commit {
         reports.push(command(b"STP")?);
     }
+    hardware_core::AdapterWork::framed(started, data.len());
     Ok(DeviceTransaction {
         reports,
         coalesce_key: Some(key),

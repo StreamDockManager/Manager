@@ -27,6 +27,8 @@ impl PluginHost {
         let mut host = Self {
             recovery: recovery::Recovery::open(storage.clone())?,
             transport_threads: vec![],
+            listener_wake: None,
+            exit_registry: None,
             logs,
             runtimes: stream_dock_manager_plugin_runtimes::RuntimeService::open_shared(
                 root.parent().unwrap_or(&root).join("runtimes"),
@@ -36,6 +38,8 @@ impl PluginHost {
             visible_plugins: Default::default(),
             starting: Default::default(),
             next_start: std::time::Instant::now(),
+            vault_locked: false,
+            vault_setup_waiting: Default::default(),
             hub: Arc::new(Mutex::new(Hub::load(&storage)?)),
             root,
             plugins: HashMap::new(),

@@ -4,9 +4,18 @@ name = "N4"
 protocol = "vendor-crt-1"
 status = "experimental"
 
+firmware_instructions = "https://www.vsdinside.com/blogs/tutorial/vsd-stream-dock-connection-issues"
+firmware_instructions_shared = true
+
 [capabilities]
 firmware_query = true
 boot_logo = { size = [800, 480] }
+touch_panel = { gesture_control = "touch-strip", button_controls = [
+  "aux-key-1",
+  "aux-key-2",
+  "aux-key-3",
+  "aux-key-4",
+], swipe_directions = ["left", "right"] }
 sleep = true
 brightness = true
 lighting = false
@@ -176,6 +185,7 @@ image_height = 112
 
 [[controls]]
 id = "dial-1"
+feedback_surface = "aux-key-1"
 label = "Dial 1"
 kind = "encoder"
 x = 92
@@ -186,6 +196,7 @@ semantics = ["press", "release", "pulse", "rotate"]
 
 [[controls]]
 id = "dial-2"
+feedback_surface = "aux-key-2"
 label = "Dial 2"
 kind = "encoder"
 x = 272
@@ -196,6 +207,7 @@ semantics = ["press", "release", "pulse", "rotate"]
 
 [[controls]]
 id = "dial-3"
+feedback_surface = "aux-key-3"
 label = "Dial 3"
 kind = "encoder"
 x = 452
@@ -206,6 +218,7 @@ semantics = ["press", "release", "pulse", "rotate"]
 
 [[controls]]
 id = "dial-4"
+feedback_surface = "aux-key-4"
 label = "Dial 4"
 kind = "encoder"
 x = 632
@@ -272,7 +285,7 @@ image_height = 112
 
 [[controls]]
 id = "touch-strip"
-label = "Swipe strip"
+label = "Touch strip"
 kind = "touch"
 x = 40
 y = 340

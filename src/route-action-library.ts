@@ -119,8 +119,14 @@ export function register() {
                 ),
             ];
         },
-        // Derive items from the current action library state
-        get items(): LibraryAction[] {
+        // These route-owned values are replaced by dependency-tracked derivations.
+        // Alpine tracks fields inside reconciled objects, not just array identity/length.
+        items: [] as LibraryAction[],
+        searchIndex: [] as { item: LibraryAction; text: string; favorite: boolean }[],
+        results: { filtered: [] as LibraryAction[] },
+        releaseDerivations: [] as (() => void)[],
+        // Project only when fields actually consumed by the catalog change.
+        projectItems(): LibraryAction[] {
             const builtins: LibraryAction[] = builtinCatalog
                 .filter((item) => item.id !== 'swipe_navigation')
                 // Convert each entry into the representation required by action library
@@ -156,7 +162,7 @@ export function register() {
                             plugin_id: plugin.id,
                             action_id: action.id,
                         };
-                        const types = action.control_types ?? ['button'];
+                        const types = [...(action.control_types ?? ['button'])];
                         const controls = controlGroups
                             .filter((group) => types.includes(group.id))
                             .map((group) => group.label)
@@ -218,31 +224,78 @@ export function register() {
                 : [];
             return [...builtins, ...plugins, ...special];
         },
-        // Derive filtered from the current action library state
         get filtered() {
+            return this.results.filtered;
+        },
+        actionPage: paginate<LibraryAction>([], 1, 12),
+        updatePage() {
+            this.actionPage = paginate(
+                this.results.filtered,
+                this.filters.page,
+                Number(this.filters.pageSize),
+            );
+        },
+        deriveResults() {
             const terms = this.filters.search
                 .trim()
                 .toLocaleLowerCase()
                 .split(/\s+/)
                 .filter(Boolean);
-            return this.items.filter(
-                (item) =>
-                    this.matchesSource(item) &&
-                    (this.filters.category === 'all' || this.filters.category === item.category) &&
-                    (!this.filters.favoritesOnly || this.itemFavorite(item)) &&
-                    terms.every((term) =>
-                        `${item.name} ${item.description} ${item.category} ${item.source} ${item.keywords} ${this.organization.tags(item.identity).join(' ')}`
-                            .toLocaleLowerCase()
-                            .includes(term),
-                    ),
-            );
-        },
-        // Derive action page from the current action library state
-        get actionPage() {
-            return paginate(this.filtered, this.filters.page, Number(this.filters.pageSize));
+            const filtered = this.searchIndex
+                .filter(
+                    ({ item, text, favorite }) =>
+                        this.matchesSource(item) &&
+                        (this.filters.category === 'all' ||
+                            this.filters.category === item.category) &&
+                        (!this.filters.favoritesOnly || favorite) &&
+                        terms.every((term) => text.includes(term)),
+                )
+                .map((entry) => entry.item);
+            return {
+                filtered,
+            };
         },
         // Initialize action library state and its required lifecycle hooks
         init() {
+            const derive = (work: () => void) => {
+                let active = true;
+                const effect = Alpine.effect(() => {
+                    if (active) work();
+                });
+                this.releaseDerivations.push(() => {
+                    active = false;
+                    Alpine.release(effect);
+                });
+            };
+            derive(() => {
+                this.items = this.projectItems();
+            });
+            derive(() => {
+                this.searchIndex = this.items.map((item) => ({
+                    item,
+                    favorite: this.organization.favorite(item.identity),
+                    text: `${item.name} ${item.description} ${item.category} ${item.source} ${item.keywords} ${this.organization.tags(item.identity).join(' ')}`.toLocaleLowerCase(),
+                }));
+            });
+            derive(() => this.updatePage());
+            let resultQueued = false,
+                active = true;
+            this.releaseDerivations.push(() => {
+                active = false;
+            });
+            derive(() => {
+                // Alpine's scheduler can visit a downstream effect before a catalog
+                // projection queued in the same turn. Publish once after that batch,
+                // not a stale intermediate result which the scheduler deduplicates.
+                const f = this.filters;
+                void [this.searchIndex, f.search, f.source, f.category, f.favoritesOnly];
+                if (resultQueued) return;
+                resultQueued = true;
+                queueMicrotask(() => {
+                    resultQueued = false;
+                    if (active) this.results = this.deriveResults();
+                });
+            });
             ownWindowMethods(this, 'action library', ['pick']);
             swallow(windowWork.run('action library startup', () => this.organization.load()));
             for (const key of ['favoritesOnly', 'search', 'category', 'pageSize'])
@@ -257,6 +310,10 @@ export function register() {
         },
         // Release action library state and associated lifecycle resources
         destroy() {
+            this.releaseDerivations.splice(0).forEach((release) => release());
+            this.items = [];
+            this.searchIndex = [];
+            this.results = { filtered: [] };
             this.selectionGeneration++;
         },
         // Change the action page
@@ -276,6 +333,12 @@ export function register() {
             if (item.builtin) {
                 if (
                     item.builtin.release &&
+                    this.selection.choosing &&
+                    this.selection.request?.independentEvent
+                )
+                    return 'Requires a continuous physical press and release, not independent events';
+                if (
+                    item.builtin.release &&
                     !standalone &&
                     !app().control?.semantics.includes('release')
                 )
@@ -284,11 +347,23 @@ export function register() {
             }
             const plugin = app().snapshot.plugins.find((plugin) => plugin.id === item.pluginId);
             if (!plugin?.enabled) return 'Enable this plugin in Plugins to use its actions';
+            // Recheck the current catalog at use time, including the interval before
+            // scheduled reactive derivations publish a newly reconciled catalog.
+            const current = plugin.actions.find((action) => action.id === item.id);
+            if (!current || current.visible_in_actions_list === false)
+                return 'This action is no longer available';
+            if (
+                this.selection.choosing &&
+                this.selection.request?.multiAction &&
+                !this.selection.request?.keyLogic &&
+                current.supported_in_multi_actions === false
+            )
+                return 'This action is not supported in multi-actions';
             if (this.selection.choosing && this.selection.request?.keyLogic) {
                 const reason = keyLogicPluginReason(plugin, item.id);
                 if (reason) return reason;
             }
-            if (!standalone && !item.controlTypes?.includes(app().control!.kind))
+            if (!standalone && !(current.control_types ?? ['button']).includes(app().control!.kind))
                 return `Select a matching control: ${item.description}`;
             return '';
         },

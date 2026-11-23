@@ -201,6 +201,7 @@ fn document_bytes(
     plugin: &PluginInfo,
 ) -> Result<(ProfileData, Option<PluginConfiguration>, Vec<String>), String> {
     let mut value: Value = serde_json::from_slice(bytes).map_err(|e| e.to_string())?;
+    crate::vault::detach_portable_references(&mut value);
     let object = value
         .as_object_mut()
         .ok_or("Profile document must be an object")?;
@@ -737,7 +738,7 @@ impl Runtime {
             writer.write_all(&bytes).map_err(|e| e.to_string())?;
         }
         writer.finish().map_err(|e| e.to_string())?;
-        let store = ProfileStore::open(directory.path().join("staged"))?;
+        let store = ProfileStore::staging(&directory)?;
         let mut source = store.import_for_repair(&archive)?;
         for asset in crate::profiles::referenced_assets(&source) {
             let bytes = store.asset(&asset)?;

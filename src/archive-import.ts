@@ -5,6 +5,14 @@ import type { StartupLifetime } from './window-startup';
 import { windowInvoke } from './window-native';
 import { windowCloseOwners } from './window-close-owners';
 import { windowWork } from './window-work';
+import { ensureDialog } from './dialog-loader';
+import {
+    captureDroppedSources,
+    isDroppedDirectory,
+    isPluginFolder,
+    stagePluginFolder,
+    type DroppedDirectory,
+} from './plugin-folder-drop';
 
 const maxPending = 16;
 const chunkSize = 1024 * 1024;
@@ -32,8 +40,11 @@ export function registerArchiveReviewer(
 // objects expose bytes here, while auxiliary windows can supply native paths
 async function stageFile(file: File, signal: AbortSignal) {
     if (file.size < 22 || file.size > maxSize) throw Error('Choose a ZIP archive up to 288 MiB.');
-    const signature = new Uint8Array(await file.slice(0, 2).arrayBuffer());
-    if (signature[0] !== 0x50 || signature[1] !== 0x4b)
+    const signature = new Uint8Array(await file.slice(0, 8).arrayBuffer());
+    if (
+        (signature[0] !== 0x50 || signature[1] !== 0x4b) &&
+        !['SDMPROF1', 'SDMMACR1'].includes(new TextDecoder().decode(signature))
+    )
         throw Error('Choose a plugin, profile or macro ZIP archive.');
     const name = btoa(String.fromCharCode(...new TextEncoder().encode(file.name)));
     for (let offset = 0; offset < file.size; offset += chunkSize) {
@@ -50,6 +61,17 @@ async function stageFile(file: File, signal: AbortSignal) {
     }
 }
 
+// Isolate Vault file drops from all ZIP and media review paths
+export function vaultDropDisposition(
+    files: Pick<File, 'name'>[],
+    eligible: boolean,
+    itemCount = files.length,
+) {
+    if (!files.some((file) => /\.sdmvault$/i.test(file.name))) return 'other';
+    if (itemCount !== 1) return 'multiple';
+    return eligible ? 'review' : 'outside';
+}
+
 // Connect native and browser archive drops to serialized review
 export async function registerArchiveDrops(
     lifetime: StartupLifetime,
@@ -58,7 +80,7 @@ export async function registerArchiveDrops(
     settleReactive: () => Promise<void>,
     nativeListen?: typeof listen,
 ) {
-    const queue: (File | string)[] = [];
+    const queue: (File | DroppedDirectory | string)[] = [];
     let nativePending = false;
     let running = false;
     // Check whether the editor is ready to review a queued archive
@@ -67,7 +89,8 @@ export async function registerArchiveDrops(
         interactive() &&
         !windowCloseOwners.closing &&
         !windowWork.quiescing &&
-        reviewers.size === 3 &&
+        reviewers.has('plugin') &&
+        reviewers.has('profiles') &&
         !modalOpen();
     // Drain queued archives while the current window can review them
     const drain = async () => {
@@ -91,14 +114,21 @@ export async function registerArchiveDrops(
                     // Review one dropped archive inside the window-work lifetime
                     const handled = await windowWork.run('dropped archive review', async () => {
                         try {
-                            if (typeof source !== 'string')
-                                await stageFile(source, lifetime.signal);
+                            if (typeof source !== 'string') {
+                                if (isDroppedDirectory(source))
+                                    await stagePluginFolder(source, lifetime.signal);
+                                else await stageFile(source, lifetime.signal);
+                            }
                             const [reviewPath, kind] = await app().bridge.command(
                                 'inspect_archive_drop',
                                 { path },
                             );
                             // A dialog may have opened while the file was being read
                             if (!ready()) return false;
+                            if (kind === 'macros' && !reviewers.has(kind)) {
+                                await ensureDialog('macro-sharing');
+                                if (!ready()) return false;
+                            }
                             const review = reviewers.get(kind);
                             if (!review) throw Error('Archive review is unavailable.');
                             await review(reviewPath);
@@ -144,25 +174,79 @@ export async function registerArchiveDrops(
         if (!isFileDrag(event)) return;
         event.preventDefault();
         event.stopPropagation();
-        const files = Array.from(event.dataTransfer?.files || []);
-        if (!files.length) return;
+        if (!event.dataTransfer) return;
+        const sources = captureDroppedSources(event.dataTransfer);
+        if (!sources.length) return;
         if (!nativeListen) {
             app().notify('Import dropped archives in the desktop application.', 'warning');
             return;
         }
-        const dialog =
-            event.target instanceof Element ? event.target.closest('dialog:modal') : null;
-        if (dialog?.hasAttribute('data-media-drop-target')) {
-            const archives = files.filter((file) => /\.zip$/i.test(file.name));
-            const media = files.filter((file) => !archives.includes(file));
-            if (media.length)
-                dialog.dispatchEvent(new CustomEvent('media-file-drop', { detail: media }));
-            files.splice(0, files.length, ...archives);
+        const files = sources.filter((source): source is File => !isDroppedDirectory(source));
+        const vaultDialog = document.querySelector<HTMLElement>(
+            'dialog.vault-transfer-dialog:modal[data-vault-drop-ready="true"]',
+        );
+        const vaultTrigger = document.querySelector<HTMLButtonElement>(
+            '[data-vault-entry-drop-trigger]',
+        );
+        const disposition = vaultDropDisposition(
+            files,
+            app().route === 'vault' &&
+                (!!vaultDialog ||
+                    (!modalOpen() &&
+                        !!vaultTrigger?.getClientRects().length &&
+                        !vaultTrigger.disabled)),
+            sources.length,
+        );
+        if (disposition !== 'other') {
+            if (disposition === 'review')
+                window.dispatchEvent(new CustomEvent('vault-transfer-drop', { detail: files[0] }));
+            else
+                app().notify(
+                    disposition === 'multiple'
+                        ? 'Drop one Vault transfer file at a time.'
+                        : 'Open unlocked Vault Entries, then drop the Vault transfer file there.',
+                    'warning',
+                );
+            return;
         }
-        if (!files.length) return;
+        const isArchive = (source: File | DroppedDirectory) =>
+            isDroppedDirectory(source) ? isPluginFolder(source.name) : /\.zip$/i.test(source.name);
+        const archives = sources.filter(isArchive);
+        const media = files.filter((file) => /\.(png|jpe?g|svg|gif|mp4)$/i.test(file.name));
+        const unsupported = sources.some(
+            (source) =>
+                !isArchive(source) && (isDroppedDirectory(source) || !media.includes(source)),
+        );
+        // WebKit may retarget a desktop file drop to the document/body. Resolve
+        // the accepting modal under the drop point, never an unrelated editor.
+        const target = event.target instanceof Element ? event.target : null;
+        let dialog = target?.closest('dialog:modal') || null;
+        if (!dialog && (!target || target === document.body || target === document.documentElement))
+            dialog =
+                document
+                    .elementsFromPoint(event.clientX, event.clientY)
+                    .map((element) => element.closest('dialog:modal'))
+                    .find((element) => element !== null) || null;
+        if (media.length) {
+            if (dialog?.hasAttribute('data-media-drop-target'))
+                dialog.dispatchEvent(new CustomEvent('media-file-drop', { detail: media }));
+            else
+                app().notify(
+                    'Open Device background, the media library, or a palette wallpaper editor, then drop the image or video there.',
+                    'warning',
+                );
+        }
+        if (unsupported)
+            app().notify(
+                files.some((file) => isPluginFolder(file.name))
+                    ? 'This window could not open the dropped plugin folder. Use Choose plugin folder in Plugins instead.'
+                    : 'Unsupported dropped file. Choose an image, video, .sdPlugin folder, or plugin, profile or macro ZIP archive.',
+                'warning',
+            );
+        if (!archives.length) return;
         const available = Math.max(0, maxPending - queue.length);
-        queue.push(...files.slice(0, available));
-        if (files.length > available)
+        queue.push(...archives.slice(0, available));
+        if (archives.length > available)
             app().notify(
                 'The archive import queue is full. Drop the remaining files again after review.',
                 'warning',

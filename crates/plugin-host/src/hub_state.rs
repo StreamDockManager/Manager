@@ -42,6 +42,7 @@ pub(super) struct Sessions {
 }
 #[derive(Default)]
 pub(super) struct VisualState {
+    pub(super) artwork_cache: Option<Arc<ArtworkCache>>,
     pub(super) visuals: HashMap<String, Arc<Value>>,
     pub(super) software_visuals: HashMap<String, Arc<Value>>,
     pub(super) software_sources: HashMap<String, visual::Sources>,
@@ -117,6 +118,29 @@ impl Sessions {
     }
 }
 impl VisualState {
+    pub(super) fn artwork(&self, context: &str, software: bool) -> Option<&ArtworkFiles> {
+        let sources = if software && self.software_visuals.contains_key(context) {
+            &self.software_sources
+        } else {
+            &self.visual_sources
+        };
+        sources
+            .get(context)
+            .map(|s| &s.artwork)
+            .filter(|a| !a.is_empty())
+    }
+    pub(super) fn compact_artwork(&mut self, context: &str) {
+        let Some(cache) = self.artwork_cache.as_ref() else {
+            return;
+        };
+        if let Some(value) = self.visuals.get_mut(context) {
+            self.visual_sources
+                .entry(context.to_owned())
+                .or_default()
+                .artwork
+                .compact(cache, Arc::make_mut(value));
+        }
+    }
     // Record update
     pub(super) fn record_update(&mut self, context: &str, message: &Value) {
         let event = message["event"].as_str().unwrap_or("");
@@ -213,6 +237,7 @@ mod tests {
             "inspector".into(),
             FileGrant {
                 root: PathBuf::new(),
+                runtime_entry: None,
                 bootstrap: String::new(),
                 context: Some("context".into()),
                 setup_runtime: false,

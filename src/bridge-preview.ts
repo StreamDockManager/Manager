@@ -1,8 +1,9 @@
+import { ensureKeyboardNavigation } from './keyboard-navigation';
 import { createKeyboardMacroPreview } from './keyboard-macro-preview';
-import type { CommandName, CommandParameters, CommandResult } from '../generated/commands';
+import type { CommandName, CommandParameters } from '../generated/commands';
 import { dispatchPreview, composePreviewHandlers, type PreviewHandlers } from './preview-handlers';
 import { createPowerPreview } from './power-preview';
-import { workspaceDifference } from './workspace-stream';
+import { workspaceDifference, workspaceSnapshot } from './workspace-stream';
 import { createRuntimePreview } from './runtime-preview';
 import { BuiltinPreview } from './builtin-preview';
 import { createFeaturePreview } from './feature-preview';
@@ -22,7 +23,7 @@ export function createPreviewBridge(): Bridge {
     const keyboardMacro = createKeyboardMacroPreview();
     const settings = createPreviewSettingsHandlers();
     const powerHandlers = createPowerPreview();
-    const featureHandlers = createFeaturePreview();
+    const featureHandlers = createFeaturePreview(() => settings.handlers.parameter_overrides({}));
     const logs = createPluginLogPreview();
     const runtimeHandlers = createRuntimePreview(initial);
     let state: Snapshot | undefined;
@@ -49,21 +50,42 @@ export function createPreviewBridge(): Bridge {
         changes,
     });
     // Publish a changed preview workspace to its listeners
-    const publishWorkspace = (snapshot: Snapshot) => {
+    const publishWorkspace = (snapshot: Snapshot, sessionsOnly = false) => {
         workspaceSequence++;
         const batch = workspaceFrame(
             snapshot,
             null,
-            workspaceDifference(publishedWorkspace || snapshot, snapshot),
+            workspaceDifference(
+                publishedWorkspace || snapshot,
+                sessionsOnly && publishedWorkspace
+                    ? {
+                          ...publishedWorkspace,
+                          active_profile: snapshot.active_profile,
+                          sessions: snapshot.sessions,
+                      }
+                    : snapshot,
+            ),
         );
-        publishedWorkspace = structuredClone(snapshot);
+        publishedWorkspace = publishedWorkspace
+            ? {
+                  ...workspaceSnapshot(publishedWorkspace, structuredClone(batch.changes)),
+                  revision: snapshot.revision,
+                  configuration_revision: snapshot.configuration_revision,
+              }
+            : structuredClone(snapshot);
         workspaceListeners.forEach((listener) => listener(structuredClone(batch)));
         return batch;
     };
     let models: Manifest[] = [];
     // Load the initial browser-preview workspace fixtures
-    async function initial() {
-        if (state) return state;
+    let initializing: Promise<Snapshot> | undefined;
+    function initial(): Promise<Snapshot> {
+        if (state) return Promise.resolve(state);
+        return (initializing ??= loadInitial().finally(() => {
+            initializing = undefined;
+        }));
+    }
+    async function loadInitial() {
         const manifests: Manifest[] = await fetch(import.meta.env.BASE_URL + 'hardware.json').then(
             // Decode the fetched hardware descriptor fixture
             (r) => {
@@ -147,9 +169,11 @@ export function createPreviewBridge(): Bridge {
                 },
             ],
         };
+        state.profiles.forEach(ensureKeyboardNavigation);
         simulator = structuredClone(state.devices[0]);
         return state;
     }
+    let independent: PreviewHandlers | undefined;
     return {
         surfaceRendering: 'local',
         // Dispatch typed commands to the browser-only simulation
@@ -164,6 +188,44 @@ export function createPreviewBridge(): Bridge {
                 ['open_settings_panel', 'run_action', 'test_action'].includes(command)
             )
                 throw Error('Plugin execution is paused in recovery mode');
+            independent ??= composePreviewHandlers(
+                {
+                    snapshot: () => structuredClone(s),
+                    simulator_models: () => structuredClone(models),
+                    // Return simulated startup permission requirements
+                    startup_permissions: () => ({
+                        platform: 'preview',
+                        development_mode: import.meta.env.DEV,
+                        setup_ready: true,
+                        skipped_permissions: [],
+                        ready: true,
+                        device_connections_enabled: true,
+                        permissions: [],
+                    }),
+                    // Return the simulated completed startup permission state
+                    complete_startup_permissions: () => ({
+                        platform: 'preview',
+                        development_mode: import.meta.env.DEV,
+                        setup_ready: true,
+                        skipped_permissions: [],
+                        ready: true,
+                        device_connections_enabled: true,
+                        permissions: [],
+                    }),
+                    // Keep startup permission settings simulated in browser preview
+                    open_startup_permission_settings: () => {
+                        throw Error(
+                            'System permissions are only available in the desktop application.',
+                        );
+                    },
+                } satisfies PreviewHandlers,
+                settings.handlers,
+                keyboardMacro,
+                logs.handlers(s),
+                runtimeHandlers,
+            );
+            if (Object.hasOwn(independent, command))
+                return dispatchPreview(independent, command, ...parameters);
             const workspace = createPreviewWorkspace(s, {
                 description: String(args.description || command.replaceAll('_', ' ')),
                 history,
@@ -218,28 +280,6 @@ export function createPreviewBridge(): Bridge {
             );
             const plugins = createPreviewPluginHandlers(workspace, history);
             const handlers = composePreviewHandlers(
-                {
-                    // Return simulated startup permission requirements
-                    startup_permissions: () => ({
-                        platform: 'preview',
-                        ready: true,
-                        device_connections_enabled: true,
-                        permissions: [],
-                    }),
-                    // Return the simulated completed startup permission state
-                    complete_startup_permissions: () => ({
-                        platform: 'preview',
-                        ready: true,
-                        device_connections_enabled: true,
-                        permissions: [],
-                    }),
-                    // Keep startup permission settings simulated in browser preview
-                    open_startup_permission_settings: () => {
-                        throw Error(
-                            'System permissions are only available in the desktop application.',
-                        );
-                    },
-                } satisfies PreviewHandlers,
                 createPreviewWorkspaceHandlers(workspace, drafts, history, features.media_details!),
                 {
                     ...devices,
@@ -262,11 +302,7 @@ export function createPreviewBridge(): Bridge {
                         return plugins.delete_plugin(args);
                     },
                 },
-                settings.handlers,
-                keyboardMacro,
-                logs.handlers(s),
                 powerHandlers(workspace),
-                runtimeHandlers,
                 features,
             );
             return dispatchPreview(handlers, command, ...parameters);
@@ -275,7 +311,7 @@ export function createPreviewBridge(): Bridge {
         async subscribeWorkspace(listener) {
             const s = await initial();
             workspaceListeners.add(listener);
-            publishedWorkspace = structuredClone(s);
+            publishedWorkspace ??= structuredClone(s);
             listener(workspaceFrame(s, structuredClone(s), workspaceDifference(s, s)));
             // Remove the workspace listener when its subscription ends
             return () => {

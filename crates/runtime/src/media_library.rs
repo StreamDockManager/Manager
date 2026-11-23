@@ -35,6 +35,7 @@ pub struct MediaLibraryEntry {
 }
 #[derive(Debug, Clone, Serialize, Deserialize, ts_rs::TS, schemars::JsonSchema)]
 pub struct MediaLibraryPage {
+    pub retention_checked: bool,
     pub generation: String,
     pub page: usize,
     pub page_size: usize,
@@ -122,13 +123,9 @@ pub(crate) struct BrowseCache {
     clip_reads: u64,
     metadata_reads: u64,
 }
-// Compute the standard bounded media-file stamp for browse caching
-fn browse_file_stamp(path: &Path) -> Result<String, String> {
-    browse_file_stamp_with_limit(path, crate::media::MAX_ASSET)
-}
 // Build a source stamp with platform-specific evidence needed to detect replacement
 fn browse_file_stamp_with_limit(path: &Path, _limit: usize) -> Result<String, String> {
-    let stamp = crate::profiles::SourceStamp::read(path)?;
+    let stamp = crate::profiles::SourceStamp::read_bounded(path, _limit as u64)?;
     #[cfg(unix)]
     {
         Ok(format!("{stamp:?}"))
@@ -142,6 +139,91 @@ fn browse_file_stamp_with_limit(path: &Path, _limit: usize) -> Result<String, St
     }
 }
 impl ProfileStore {
+    // Enumerate bounded managed files without opening recovery databases or reading their contents
+    fn browse_inventory(&self) -> Result<MediaScan, String> {
+        if crate::media_cleanup::pending(&self.root)? {
+            return Err("Media cleanup recovery is pending; restart Manager".into());
+        }
+        let deleted_assets = self.deleted_media.lock().unwrap().assets.clone();
+        let mut files = BTreeMap::new();
+        let dir = self.root.join("assets");
+        let meta = dir.symlink_metadata().map_err(|e| e.to_string())?;
+        if !meta.is_dir() || meta.file_type().is_symlink() {
+            return Err("Media directory must be a regular managed directory".into());
+        }
+        for entry in std::fs::read_dir(&dir).map_err(|e| e.to_string())? {
+            let entry = entry.map_err(|e| e.to_string())?;
+            if files.len() >= 8192 {
+                return Err("Media inventory exceeds 8,192 assets".into());
+            }
+            let path = entry.path();
+            let name = path
+                .file_name()
+                .and_then(|s| s.to_str())
+                .ok_or("Invalid media filename")?;
+            // Finder/Explorer metadata is not managed media. Leave it alone
+            // instead of letting it invalidate the asset inventory
+            if matches!(name, ".DS_Store" | "Thumbs.db" | "desktop.ini") || name.starts_with("._") {
+                continue;
+            }
+            let (id, extension) = name
+                .rsplit_once('.')
+                .ok_or("Unrecognized file in managed media")?;
+            crate::profiles::validate_asset_id(id)?;
+            if !crate::media::ASSET_EXTENSIONS.contains(&extension) {
+                return Err("Unrecognized file in managed media".into());
+            }
+            if deleted_assets.contains(id) {
+                continue;
+            }
+            let meta = path.symlink_metadata().map_err(|e| e.to_string())?;
+            if !meta.is_file()
+                || meta.file_type().is_symlink()
+                || meta.len() > crate::media::MAX_ASSET as u64
+            {
+                return Err("Media inventory contains an unsafe or oversized file".into());
+            }
+            let modified = meta
+                .modified()
+                .map_err(|e| e.to_string())?
+                .duration_since(std::time::UNIX_EPOCH)
+                .map_err(|e| e.to_string())?
+                .as_nanos();
+            #[cfg(unix)]
+            let (identity, links, allocated) = {
+                use std::os::unix::fs::MetadataExt;
+                (
+                    format!("{}:{}", meta.dev(), meta.ino()),
+                    Some(meta.nlink()),
+                    meta.blocks().saturating_mul(512),
+                )
+            };
+            #[cfg(not(unix))]
+            let (identity, links, allocated) = (id.to_string(), None, meta.len());
+            let file = MediaFile {
+                id: id.into(),
+                extension: extension.into(),
+                path: path.clone(),
+                bytes: meta.len(),
+                modified,
+                identity,
+                links,
+                allocated,
+            };
+            if files.insert(id.to_owned(), file).is_some() {
+                return Err("Ambiguous media ID has multiple representations".into());
+            }
+        }
+
+        Ok(MediaScan {
+            generation: String::new(),
+            files,
+            uses: BTreeMap::new(),
+            protection: BTreeMap::new(),
+            errors: Vec::new(),
+        })
+    }
+
     // Fingerprint library records, source stamps and asset-pin state for inventory reuse
     fn browse_key(&self, pins: &AssetPins) -> Result<String, String> {
         let mut sources = BTreeMap::new();
@@ -223,14 +305,20 @@ impl ProfileStore {
         if file.extension != "sdmedia" {
             return None;
         }
-        let stamp = browse_file_stamp(&file.path).ok()?;
+        let stamp = format!("{:?}", crate::profiles::SourceStamp::read(&file.path).ok()?);
+        #[cfg(unix)]
         if let Some((saved, info)) = self.media_browse_cache.lock().unwrap().clips.get(&file.id) {
             if saved == &stamp {
                 return info.clone();
             }
         }
         let info = crate::media::clip_info_archive(std::fs::File::open(&file.path).ok()?).ok()?;
-        if browse_file_stamp(&file.path).ok().as_ref() == Some(&stamp) {
+        if crate::profiles::SourceStamp::read(&file.path)
+            .ok()
+            .map(|s| format!("{s:?}"))
+            .as_ref()
+            == Some(&stamp)
+        {
             let mut cache = self.media_browse_cache.lock().unwrap();
             cache.clip_reads += 1;
             if cache.clips.len() >= 8192 {
@@ -242,7 +330,8 @@ impl ProfileStore {
     }
     // Reuse parsed media metadata only for an unchanged source stamp
     fn browse_metadata(&self, file: &MediaFile) -> Result<MediaMetadata, String> {
-        let stamp = browse_file_stamp(&file.path)?;
+        let stamp = format!("{:?}", crate::profiles::SourceStamp::read(&file.path)?);
+        #[cfg(unix)]
         if let Some((saved, metadata)) = self
             .media_browse_cache
             .lock()
@@ -255,7 +344,7 @@ impl ProfileStore {
             }
         }
         let metadata = self.media_metadata(file)?;
-        if browse_file_stamp(&file.path)? != stamp {
+        if format!("{:?}", crate::profiles::SourceStamp::read(&file.path)?) != stamp {
             return Err("Media changed during inspection; refresh the library".into());
         }
         let mut cache = self.media_browse_cache.lock().unwrap();
@@ -660,10 +749,10 @@ impl Runtime {
                     return Err("Media changed during thumbnail read; refresh the library".into());
                 }
                 self.cached_render(
-                    format!(
-                        "media-first-frame-v1:{}",
-                        hex::encode(Sha256::digest(&preview.frame))
-                    ),
+                    crate::media::RenderKey::from_inputs(&(
+                        "media-first-frame-v1",
+                        hex::encode(Sha256::digest(&preview.frame)),
+                    ))?,
                     || {
                         hardware_core::render::render(&preview.frame, 96, 96, 0, "png")
                             .map(crate::media::shared_bytes)
@@ -676,7 +765,14 @@ impl Runtime {
             // its exact content hash still shares the rendered thumbnail
             #[cfg(unix)]
             {
-                self.cached_render(format!("media-thumbnail-v1:{asset}:{stamp:?}"), render)?
+                self.cached_render(
+                    crate::media::RenderKey::from_inputs(&(
+                        "media-thumbnail-v1",
+                        asset,
+                        format!("{stamp:?}"),
+                    ))?,
+                    render,
+                )?
             }
             #[cfg(not(unix))]
             {
@@ -724,22 +820,43 @@ impl Runtime {
     pub fn release_media(&self, id: &str) {
         self.media_selections.lock().unwrap().remove(id);
     }
-    // Validate the browse request and return a filtered page of media-library entries
+    // Return ordinary inventory without a retention audit or destructive eligibility claim
     pub fn media_library(
         &self,
         page: usize,
         page_size: usize,
         query: &str,
     ) -> Result<MediaLibraryPage, String> {
+        self.media_library_page(page, page_size, query, false)
+    }
+    // Explicitly audit retention before offering unused-media cleanup
+    pub fn audit_media_library(
+        &self,
+        page: usize,
+        page_size: usize,
+        query: &str,
+    ) -> Result<MediaLibraryPage, String> {
+        self.media_library_page(page, page_size, query, true)
+    }
+    // Build only requested page metadata after selecting the inventory or authoritative audit
+    fn media_library_page(
+        &self,
+        page: usize,
+        page_size: usize,
+        query: &str,
+        audit: bool,
+    ) -> Result<MediaLibraryPage, String> {
         if query.len() > 512 || ![12, 24, 48].contains(&page_size) {
             return Err("Invalid media library page".into());
         }
-        let _transaction = self.profiles.transaction.lock().unwrap();
-        let _media = self.profiles.media_gate.exclusive()?;
-        let pins = self.profiles.asset_leases.lock();
-        let scan = self.profiles.browse_scan(&pins);
-        drop(pins);
-        let cleanup_available = scan.errors.is_empty();
+        let _transaction = audit.then(|| self.profiles.transaction.lock().unwrap());
+        let scan = if audit {
+            let pins = self.profiles.asset_leases.lock().clone();
+            self.profiles.browse_scan(&pins)
+        } else {
+            std::sync::Arc::new(self.profiles.browse_inventory()?)
+        };
+        let cleanup_available = audit && scan.errors.is_empty();
         let logical_bytes = scan.files.values().map(|f| f.bytes).sum();
         let unused = scan
             .files
@@ -747,7 +864,11 @@ impl Runtime {
             .filter(|id| !scan.protection.contains_key(*id))
             .cloned()
             .collect();
-        let (estimated_reclaimable_bytes, storage_estimate_available) = scan.reclaimable(&unused);
+        let (estimated_reclaimable_bytes, storage_estimate_available) = if audit {
+            scan.reclaimable(&unused)
+        } else {
+            (0, false)
+        };
         let query = query.trim().to_lowercase();
         let mut filtered: Vec<_> = scan
             .files
@@ -786,9 +907,8 @@ impl Runtime {
             visible.iter().map(|file| file.id.clone()),
             "Media library inspection",
         )?;
-        // Reachability/generation are frozen; slow image header work must not
-        // hold the workspace transaction or exclusive import/deletion gate
-        drop(_media);
+        // Page assets are pinned; slow headers never hold the audit transaction
+        // Ordinary browsing has no authoritative reachability or cleanup generation
         drop(_transaction);
         let mut entries = vec![];
         for file in visible {
@@ -802,7 +922,7 @@ impl Runtime {
                 id: file.id.clone(),
                 format: file.extension.clone(),
                 logical_bytes: file.bytes,
-                estimated_reclaimable_bytes: if scan.protection.contains_key(&file.id) {
+                estimated_reclaimable_bytes: if !audit || scan.protection.contains_key(&file.id) {
                     0
                 } else {
                     scan.reclaimable(&BTreeSet::from([file.id.clone()])).0
@@ -835,7 +955,11 @@ impl Runtime {
             }
             entries.push(entry);
         }
+        let deleted = self.profiles.deleted_media.lock().unwrap();
+        entries.retain(|entry| !deleted.assets.contains(&entry.id));
+        drop(deleted);
         Ok(MediaLibraryPage {
+            retention_checked: audit,
             generation: scan.generation.clone(),
             page,
             page_size,
@@ -854,6 +978,71 @@ impl Runtime {
 mod tests {
     use super::*;
     use crate::workspace::{Draft, Edit};
+    #[test]
+    // Slow database inspection must not reserve render permits or live asset ownership
+    fn slow_inventory_keeps_snapshot_and_render_admission_responsive() {
+        use std::sync::mpsc;
+        use std::time::Duration;
+        let root = tempfile::tempdir().unwrap();
+        let runtime = Runtime::build(root.path().join("app"), false).unwrap();
+        let source = root.path().join("one.png");
+        image::RgbaImage::from_pixel(2, 2, image::Rgba([20, 40, 60, 255]))
+            .save(&source)
+            .unwrap();
+        runtime.profiles.import_asset(&source).unwrap();
+        let (entered, ready) = mpsc::channel();
+        let (release, wait) = mpsc::channel();
+        let storage_runtime = runtime.clone();
+        let storage = std::thread::spawn(move || {
+            storage_runtime.profiles.storage.run(move |_| {
+                entered.send(()).unwrap();
+                wait.recv().unwrap();
+                Ok(())
+            })
+        });
+        ready.recv_timeout(Duration::from_secs(5)).unwrap();
+        let browse_runtime = runtime.clone();
+        let (listed, listing_ready) = mpsc::channel();
+        let browse = std::thread::spawn(move || {
+            listed
+                .send(browse_runtime.media_library(1, 12, ""))
+                .unwrap()
+        });
+        let listed_without_storage = listing_ready.recv_timeout(Duration::from_secs(1));
+        let admitted = runtime.profiles.media_gate.try_lock().is_ok();
+        let probe_runtime = runtime.clone();
+        let (sent, received) = mpsc::channel();
+        let probe = std::thread::spawn(move || {
+            let snapshot = probe_runtime.snapshot();
+            let lease = probe_runtime
+                .profiles
+                .asset_leases
+                .pin([], "Unrelated renderer")
+                .unwrap();
+            sent.send(snapshot.configuration_revision).unwrap();
+            drop(lease);
+        });
+        let responsive = received.recv_timeout(Duration::from_secs(1));
+        release.send(()).unwrap();
+        storage.join().unwrap().unwrap();
+        browse.join().unwrap();
+        assert_eq!(
+            listed_without_storage
+                .expect("Listing waited for storage")
+                .unwrap()
+                .entries
+                .len(),
+            1
+        );
+        probe.join().unwrap();
+        assert!(admitted, "Read-only inventory blocked a device decoder");
+        assert!(
+            responsive.is_ok(),
+            "Read-only inventory blocked a snapshot or asset pin"
+        );
+        runtime.shutdown();
+    }
+
     #[test]
     #[ignore = "Controlled release-mode media browsing comparison; owned fixtures, never HID"]
     // Verify that patch browse profile
@@ -878,7 +1067,8 @@ mod tests {
                 let page = runtime.media_library(1, 24, "absent-search-value").unwrap();
                 assert_eq!(page.generation, cold.generation);
                 assert_eq!(page.total, 0);
-                assert!(page.cleanup_available);
+                assert!(!page.retention_checked);
+                assert!(!page.cleanup_available);
             }
             let warm_mean_us = started.elapsed().as_secs_f64() * 100_000.0;
             let warm_work = LIBRARY_WORK.with(|counts| counts.get());
@@ -889,6 +1079,74 @@ mod tests {
             "PATCH_BROWSE_PROFILE={}",
             serde_json::to_string(&runs).unwrap()
         );
+    }
+    #[test]
+    // Corrupt recovery evidence blocks destructive review but never ordinary inventory
+    fn one_item_browse_skips_corrupt_recovery_audit() {
+        let root = tempfile::tempdir().unwrap();
+        let runtime = Runtime::build(root.path().join("app"), false).unwrap();
+        let source = root.path().join("one.png");
+        image::RgbaImage::from_pixel(2, 2, image::Rgba([20, 40, 60, 255]))
+            .save(&source)
+            .unwrap();
+        let asset = runtime.profiles.import_asset(&source).unwrap();
+        runtime.profiles.storage.backup_recovery().unwrap();
+        for path in runtime.profiles.storage.backup_paths().unwrap() {
+            std::fs::write(path, b"deliberately corrupt owned fixture").unwrap();
+        }
+        LIBRARY_WORK.with(|counts| counts.set([0; 3]));
+        let started = std::time::Instant::now();
+        let page = runtime.media_library(1, 12, "png").unwrap();
+        eprintln!("MEDIA_ONE_ITEM_WITH_CORRUPT_BACKUP={:?}", started.elapsed());
+        assert_eq!(page.entries.len(), 1);
+        assert!(!page.retention_checked);
+        assert!(!page.cleanup_available);
+        assert!(!page.entries[0].can_delete);
+        assert_eq!(LIBRARY_WORK.with(|counts| counts.get()[0]), 0);
+        assert!(runtime.prepare_media_deletion(&asset).is_err());
+        let audit = runtime.audit_media_library(1, 12, "").unwrap();
+        assert!(audit.retention_checked);
+        assert!(!audit.cleanup_available);
+        assert!(!audit.scan_errors.is_empty());
+        runtime.shutdown();
+    }
+
+    #[test]
+    // Bound first-page inspection independently of the total animated media inventory
+    fn first_page_inspection_is_bounded_and_warm_reopen_reuses_metadata() {
+        let root = tempfile::tempdir().unwrap();
+        let runtime = Runtime::build(root.path().join("app"), false).unwrap();
+        let source = root.path().join("sample.gif");
+        std::fs::write(&source, crate::media::tests::sample_gif()).unwrap();
+        for _ in 0..120 {
+            runtime.profiles.import_asset(&source).unwrap();
+        }
+        LIBRARY_WORK.with(|counts| counts.set([0; 3]));
+        let started = std::time::Instant::now();
+        let first = runtime.media_library(1, 12, "").unwrap();
+        let cold = started.elapsed();
+        let work = LIBRARY_WORK.with(|counts| counts.replace([0; 3]));
+        assert_eq!(first.total, 120);
+        assert_eq!(first.entries.len(), 12);
+        assert_eq!(work[0], 0, "Browsing must not run retention scans");
+        assert_eq!(work[1], 12);
+        assert_eq!(
+            runtime.profiles.source_work_stats()["clip_archive_reads"],
+            0
+        );
+        let started = std::time::Instant::now();
+        let again = runtime.media_library(1, 12, "").unwrap();
+        eprintln!(
+            "MEDIA_FIRST_PAGE cold={cold:?} warm={:?} work={work:?}",
+            started.elapsed()
+        );
+        assert_eq!(first.generation, again.generation);
+        assert_eq!(
+            first.entries.iter().map(|e| &e.id).collect::<Vec<_>>(),
+            again.entries.iter().map(|e| &e.id).collect::<Vec<_>>()
+        );
+        assert_eq!(LIBRARY_WORK.with(|counts| counts.get()), [0; 3]);
+        runtime.shutdown();
     }
     #[test]
     // Verify that browse inventory reuses parsing and invalidates files drafts and leases
@@ -1032,7 +1290,7 @@ mod tests {
         let bytes = clip.archive(&gif).unwrap();
         let mut zip = zip::ZipArchive::new(Cursor::new(bytes)).unwrap();
         let mut writer = zip::ZipWriter::new(Cursor::new(vec![]));
-        let second = format!("frames/{}.image", clip.frame_digests[1]);
+        let second = format!("frames/{}.image", hex::encode(clip.frame_digests[1]));
         for i in 0..zip.len() {
             let mut entry = zip.by_index(i).unwrap();
             let mut data = vec![];

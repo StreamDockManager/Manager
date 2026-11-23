@@ -122,6 +122,69 @@ fn static_scene_has_no_plugin_wait_and_no_partial_images_during_preparation() {
     runtime.shutdown();
 }
 #[test]
+fn navigation_trace_only_counts_completed_revisions_from_its_input() {
+    for supersede in [false, true] {
+        let (_root, runtime, mut c, _) = fixture();
+        let token = runtime.arm_input_trace(&c.device_id).unwrap().token;
+        let event = ControlEvent {
+            control_id: "key-1".into(),
+            input: Input::Button { pressed: true },
+        };
+        assert_eq!(
+            runtime
+                .input_trace
+                .ingress_at(
+                    &c.device_id,
+                    c.epoch,
+                    &event,
+                    Instant::now() - Duration::from_millis(10)
+                )
+                .as_ref(),
+            Some(&token)
+        );
+        runtime
+            .select_device_profile_checked(
+                &c.device_id,
+                "fixture-profile",
+                Some("b"),
+                false,
+                None,
+                None,
+                None,
+                None,
+                Some(&token),
+            )
+            .unwrap();
+        runtime
+            .input_trace
+            .record(Some(&token), "Action complete", true);
+        assert!(runtime.read_input_trace(&token).unwrap().outcome.is_none());
+        if supersede {
+            runtime
+                .select_device_profile(&c.device_id, "fixture-profile", Some("fixture-page"), true)
+                .unwrap();
+        }
+        restore(&runtime, &mut c);
+        finish(&runtime, &mut c);
+        c.collect_outcomes(&runtime);
+        let trace = runtime.read_input_trace(&token).unwrap();
+        let measured = runtime
+            .metrics
+            .snapshot()
+            .into_iter()
+            .find(|m| m.name == "input_to_final_write_ms");
+        if supersede {
+            assert!(measured.is_none());
+        } else {
+            assert!(measured.unwrap().p50.unwrap() >= 10.);
+            assert!(trace.steps.iter().any(|s| s.contains("write completed")));
+            assert_eq!(trace.outcome.as_deref(), Some("Action complete"));
+        }
+        runtime.shutdown();
+    }
+}
+
+#[test]
 // Verify that rapid navigation replaces prepared scene even when returning to same page
 fn rapid_navigation_replaces_prepared_scene_even_when_returning_to_same_page() {
     let (_root, runtime, mut c, reports) = fixture();
@@ -431,7 +494,7 @@ fn every_hardware_module_preserves_its_transition_commit_boundaries() {
                 expected.extend(commit.reports);
             }
         }
-        let receipt = submit(&mut c, commands).unwrap();
+        let receipt = submit(&mut c, commands, None).unwrap();
         assert_eq!(
             receipt.recv_timeout(Duration::from_secs(3)).unwrap(),
             OutputStatus::Completed,
@@ -580,7 +643,7 @@ fn navigation_gate_prevents_updates_before_the_actor_begins_preparation() {
         },
     )
     .unwrap();
-    assert!(!refresh_display_theme(&runtime, &mut c));
+    assert!(!refresh_display_theme(&runtime, &mut c, true));
     assert!(c.worker.wait_idle(Duration::from_secs(2)));
     assert!(reports.lock().unwrap().is_empty());
     restore(&runtime, &mut c);
@@ -629,16 +692,7 @@ fn physical_profile_transition_recording() {
     let root = tempfile::tempdir().unwrap();
     let runtime = Runtime::build(root.path().into(), false).unwrap();
     let manifest = module.manifest();
-    let mut profile = runtime
-        .snapshot()
-        .profiles
-        .into_iter()
-        .find(|p| p.model_id == manifest.model_id)
-        .unwrap();
-    profile.id = "physical-transition-probe".into();
-    profile.name = "Action-free transition recording".into();
-    let template = profile.pages[0].bindings.values().next().unwrap().clone();
-    profile.pages = [
+    let pages = [
         ("a", "A", "#2457b2"),
         ("b", "B", "#b23938"),
         ("c", "C", "#287c4b"),
@@ -650,16 +704,13 @@ fn physical_profile_transition_recording() {
             .iter()
             .filter(|c| c.image_slot.is_some())
             .map(|control| {
-                let mut binding = template.clone();
-                binding.title = format!("{title} {}", control.id);
-                binding.color = color.into();
-                binding.custom_background = true;
-                binding.action = crate::actions::Action::None;
-                binding.asset = None;
-                binding.appearance = None;
-                binding.plugin_appearance = None;
-                binding.composition = None;
-                binding.feedback = None;
+                let binding = serde_json::from_value(serde_json::json!({
+                    "title": format!("{title} {}", control.id),
+                    "color": color,
+                    "custom_background": true,
+                    "action": {"kind": "none"}
+                }))
+                .unwrap();
                 (control.id.clone(), binding)
             })
             .collect();
@@ -670,8 +721,18 @@ fn physical_profile_transition_recording() {
         }
     })
     .collect();
-    profile.active_page = "a".into();
-    profile.background_asset = None;
+    let profile = crate::profiles::Profile {
+        id: "physical-transition-probe".into(),
+        name: "Action-free transition recording".into(),
+        model_id: manifest.model_id.clone(),
+        active_page: "a".into(),
+        pages,
+        background_asset: None,
+        background_media: Default::default(),
+        palette: None,
+        parameters: Vec::new(),
+        linked_controls: Default::default(),
+    };
     profile.validate().unwrap();
     {
         let mut state = runtime.state.lock().unwrap();

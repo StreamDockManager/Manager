@@ -15,9 +15,14 @@ impl std::io::Write for HashWriter {
 }
 // Hash the canonical JSON representation using SHA-256
 pub fn sha256(value: &(impl Serialize + ?Sized)) -> Result<String, String> {
+    sha256_bytes(value).map(hex::encode)
+}
+
+/// Stream compact JSON directly into the digest without retaining a serialized copy.
+pub fn sha256_bytes(value: &(impl Serialize + ?Sized)) -> Result<[u8; 32], String> {
     let mut writer = HashWriter(Sha256::new());
     serde_json::to_writer(&mut writer, value).map_err(|e| e.to_string())?;
-    Ok(hex::encode(writer.0.finalize()))
+    Ok(writer.0.finalize().into())
 }
 #[cfg(test)]
 mod tests {

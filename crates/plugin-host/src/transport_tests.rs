@@ -132,6 +132,7 @@ fn retired_context_history_never_authorizes_unknown_or_replacement_sessions() {
         "old".into(),
         FileGrant {
             root: PathBuf::new(),
+            runtime_entry: None,
             bootstrap: String::new(),
             context: None,
             setup_runtime: false,
@@ -145,6 +146,7 @@ fn retired_context_history_never_authorizes_unknown_or_replacement_sessions() {
         "inspector".into(),
         FileGrant {
             root: PathBuf::new(),
+            runtime_entry: None,
             bootstrap: String::new(),
             context: Some("known".into()),
             setup_runtime: false,
@@ -327,6 +329,7 @@ fn trickled_websocket_headers_cannot_hold_admission_past_the_handshake_deadline(
         Arc::new(Mutex::new(Hub::default())),
         Arc::new(AtomicBool::new(false)),
         admission.clone(),
+        None,
     )
     .unwrap();
     peer.write_all(b"GET / HTTP/1.1\r\nX-Slow: ").unwrap();
@@ -714,6 +717,7 @@ fn duplicate_inspector_registration_keeps_original_queue_owner() {
         "panel".into(),
         FileGrant {
             root: PathBuf::new(),
+            runtime_entry: None,
             bootstrap: String::new(),
             context: Some("context".into()),
             setup_runtime: false,
@@ -749,6 +753,7 @@ fn connection_flood_is_admitted_before_thread_creation_and_retires() {
                 hub.clone(),
                 stop.clone(),
                 admission.clone(),
+                None,
             ) {
                 threads.push(thread);
             }
@@ -787,6 +792,7 @@ fn saturated_file_transfers_do_not_consume_registered_session_capacity() {
             server_hub,
             Arc::new(AtomicBool::new(false)),
             server_admission,
+            None,
         )
         .unwrap()
         .join()

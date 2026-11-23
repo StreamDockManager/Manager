@@ -1,0 +1,11 @@
+# Automatically generated - DO NOT EDIT!
+
+[[permission]]
+identifier = "allow-read-control-event-test"
+description = "Enables the read_control_event_test command without any pre-configured scope."
+commands.allow = ["read_control_event_test"]
+
+[[permission]]
+identifier = "deny-read-control-event-test"
+description = "Denies the read_control_event_test command without any pre-configured scope."
+commands.deny = ["read_control_event_test"]

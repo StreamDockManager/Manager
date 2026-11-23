@@ -1,0 +1,19 @@
+{
+  "version": 1,
+  "basePath": "..",
+  "components": {
+    "sd-plugin-folder-import": {
+      "source": "components/sd-plugin-folder-import.html",
+      "dependencies": [],
+      "options": {
+        "shadow": false,
+        "templateRevision": "sha256-i7lEhnfp-FG1wOUejSMTOOScIZPIYswZcrAgnIQZKX4"
+      }
+    }
+  },
+  "groups": {
+    "plugin-folder-import": [
+      "sd-plugin-folder-import"
+    ]
+  }
+}

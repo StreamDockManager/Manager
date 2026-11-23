@@ -1,0 +1,11 @@
+# Automatically generated - DO NOT EDIT!
+
+[[permission]]
+identifier = "allow-vault-metadata-revision"
+description = "Enables the vault_metadata_revision command without any pre-configured scope."
+commands.allow = ["vault_metadata_revision"]
+
+[[permission]]
+identifier = "deny-vault-metadata-revision"
+description = "Denies the vault_metadata_revision command without any pre-configured scope."
+commands.deny = ["vault_metadata_revision"]

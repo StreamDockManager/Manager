@@ -1,0 +1,45 @@
+<!doctype html>
+<html lang="en">
+    <head>
+        <meta charset="UTF-8" />
+        <meta name="viewport" content="width=device-width,initial-scale=1" />
+        <title>Stream Dock Manager</title>
+    </head>
+    <body class="action-popup">
+        <main>
+            <header class="picker-header">
+                <div>
+                    <h1 id="title">Stream Dock Manager</h1>
+                    <p id="identity"></p>
+                </div>
+            </header>
+            <div class="feature-body">
+                <p id="details"></p>
+                <ul id="scopes" hidden></ul>
+                <label id="field" hidden>
+                    <span id="label"></span>
+                    <textarea id="text" rows="9" spellcheck="false" autocomplete="off"></textarea>
+                </label>
+                <section class="feature-fields" id="picker" hidden>
+                    <label>
+                        Vault entry
+                        <select id="entry"></select>
+                    </label>
+                    <div class="button-row">
+                        <button class="button" id="previous">Previous entries</button>
+                        <button class="button" id="next">More entries</button>
+                    </div>
+                </section>
+                <p id="status" role="status"></p>
+                <p role="alert" class="danger-text" id="error"></p>
+            </div>
+            <footer class="feature-footer">
+                <div class="button-row">
+                    <button class="button primary" id="confirm" hidden></button>
+                    <button class="button" id="close">Close</button>
+                </div>
+            </footer>
+        </main>
+        <script type="module" src="/src/permission-popup.ts"></script>
+    </body>
+</html>

@@ -45,11 +45,11 @@ fn defaults_disabled_and_policy_output_never_overwrites_the_manual_baseline() {
         now,
     );
     assert_eq!(dim.effective.brightness, 20);
-    assert_eq!(baseline.brightness, 65);
+    assert_eq!(baseline.brightness, 50);
     let sleep = state.evaluate(&enabled(), &baseline, &caps(), &sample, 0, 0, now);
     assert!(sleep.automatic_sleeping);
     assert!(!sleep.dimmed);
-    assert_eq!(sleep.effective.brightness, 65);
+    assert_eq!(sleep.effective.brightness, 50);
     let mut manual = baseline.clone();
     manual.sleeping = true;
     state.wake(now);

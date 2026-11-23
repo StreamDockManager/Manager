@@ -3,13 +3,18 @@ import { listen } from '@tauri-apps/api/event';
 import type { CommandName, CommandParameters, CommandResult } from '../generated/commands';
 import type { ConfigurationRecoveryItem } from '../generated/runtime';
 import { ConfigurationRecoveryController } from './config-recovery-controller';
+import {
+    ConfigurationRecoveryKeystore,
+    keystoreBackupLabel,
+    keystoreRecoveryAdvice,
+    type ConfigurationRecoveryKeystoreApi,
+} from './config-recovery-keystore';
 import { applyTheme, readAppearance } from './theme-style';
 import { applyAccessibility, readAccessibility } from './accessibility-preferences';
 import { RecoveryToasts } from './recovery-toasts';
 import { RecoveryVersionViewer } from './recovery-versions';
 import { RecoveryJsonEditor } from './recovery-json-editor';
 import { locateDiagnostics } from './recovery-json-locations';
-import './styles.css';
 import './config-recovery.css';
 
 // This shell has no running workspace or editor-generation lease. Only the explicitly
@@ -68,6 +73,31 @@ const controller = new ConfigurationRecoveryController(
     render,
     (message, level) => toasts.notify(message, level),
 );
+// Recovery is a separate window with no live editor, plugin, or Vault IPC.
+const keystoreApi: ConfigurationRecoveryKeystoreApi = {
+    status: () => command('configuration_recovery_keystore_status'),
+    retry: (revision) => command('configuration_recovery_retry_keystore', { revision }),
+    review: (revision, operation, backupId) =>
+        command('configuration_recovery_review_keystore', { revision, operation, backupId }),
+    apply: (revision, reviewToken) =>
+        command('configuration_recovery_apply_keystore', { revision, reviewToken }),
+};
+const keystore = new ConfigurationRecoveryKeystore(keystoreApi, {
+    blocked: () =>
+        controller.busy || controller.dirty || !!controller.report?.incompatible_data_folder,
+    perform: (operation) => controller.perform(operation),
+    confirm,
+    invalidateRecovery: () => {
+        controller.report = null;
+    },
+    refreshRecovery: () => controller.refresh(),
+});
+// Refresh ordinary and keystore evidence without starting Manager.
+async function refreshRecovery() {
+    if (controller.busy) return;
+    await controller.refresh();
+    if (controller.report && !controller.report.incompatible_data_folder) await keystore.refresh();
+}
 const versionViewer = new RecoveryVersionViewer(
     {
         // List saved versions of the current recovery document
@@ -98,11 +128,18 @@ applyAccessibility(
 );
 let confirmResult: ((accepted: boolean) => void) | null = null;
 // Ask for explicit confirmation of a recovery operation
-function confirm(title: string, message: string, action: string): Promise<boolean> {
+function confirm(
+    title: string,
+    message: string,
+    action: string,
+    warnings: string[] = [],
+): Promise<boolean> {
     if (confirmResult) return Promise.resolve(false);
     element('recovery-confirm-heading').textContent = title;
     element('recovery-confirm-message').textContent = message;
     element('recovery-confirm-accept').textContent = action;
+    list('recovery-confirm-warnings', warnings);
+    element('recovery-confirm-warnings').hidden = !warnings.length;
     // Wait for the user’s response to the confirmation dialog
     const result = new Promise<boolean>((resolve) => {
         confirmResult = resolve;
@@ -192,6 +229,64 @@ function renderItems(items: ConfigurationRecoveryItem[]) {
         .forEach((button) => {
             button.disabled = controller.busy;
         });
+}
+let renderedKeystoreBackups = '';
+// Render current diagnostics and encrypted-backup metadata without paths or secrets.
+function renderKeystore() {
+    const report = keystore.status;
+    const section = element('recovery-keystore');
+    section.hidden =
+        !!controller.report?.incompatible_data_folder ||
+        (!controller.report && !report && !keystore.error);
+    section.setAttribute('aria-busy', String(controller.busy));
+    const status =
+        report?.state === 'ready'
+            ? 'The plugin settings keystore is ready.'
+            : report?.state === 'unavailable'
+              ? 'The plugin settings keystore is unavailable.'
+              : report?.state === 'missing'
+                ? keystore.creationInterrupted
+                    ? 'Plugin settings keystore creation was interrupted.'
+                    : 'The plugin settings keystore is missing.'
+                : 'The plugin settings keystore status is unknown.';
+    text('recovery-keystore-status', status);
+    text('recovery-keystore-details', keystoreRecoveryAdvice(report?.reason), true);
+    text('recovery-keystore-notice', keystore.notice, true);
+    text('recovery-keystore-error', keystore.error, true);
+
+    const select = element<HTMLSelectElement>('recovery-keystore-backup-select');
+    const backups = report?.backups ?? [];
+    const signature = JSON.stringify(backups);
+    if (signature !== renderedKeystoreBackups) {
+        renderedKeystoreBackups = signature;
+        select.replaceChildren(
+            new Option('Choose an encrypted backup…', ''),
+            ...backups.map(
+                (backup, index) => new Option(keystoreBackupLabel(backup, index), backup.id),
+            ),
+        );
+    }
+    select.value = keystore.backupId;
+    select.disabled = !keystore.canRetry;
+    element('recovery-keystore-backup-choice').hidden = !backups.length;
+    element('recovery-keystore-backups-empty').hidden = !report || !!backups.length;
+    const backup = keystore.backup;
+    text(
+        'recovery-keystore-backup-details',
+        backup
+            ? `${new Intl.NumberFormat().format(backup.bytes)} bytes · For this installation only`
+            : '',
+        true,
+    );
+    element<HTMLButtonElement>('recovery-keystore-retry').disabled = !keystore.canRetry;
+    const create = element<HTMLButtonElement>('recovery-keystore-create');
+    const reset = element<HTMLButtonElement>('recovery-keystore-reset');
+    create.textContent = keystore.creationInterrupted ? 'Resume creation…' : 'Review create…';
+    create.hidden = report?.state !== 'missing';
+    create.disabled = !keystore.canCreate;
+    reset.hidden = report?.state === 'missing';
+    reset.disabled = !keystore.canReset;
+    element<HTMLButtonElement>('recovery-keystore-restore').disabled = !keystore.canRestore;
 }
 let renderedBackups = '';
 let renderedBackupProfiles = '';
@@ -325,14 +420,21 @@ async function transferBackupProfiles() {
         await controller.transferBackupProfiles();
 }
 // Refresh recovery controls from the controller’s current state
-function render() {
+function render(editorOnly = false) {
+    if (editorOnly) return renderEditor();
     renderBackups();
+    renderKeystore();
     const report = controller.report;
+    const folder = report?.incompatible_data_folder;
+    document.body.classList.toggle('incompatible-format', Boolean(folder));
+    element('incompatible-data').hidden = !folder;
+    text('incompatible-path', folder || '');
     editor.setAttribute('aria-busy', String(controller.busy));
     element('recovery-leave-blocker').hidden = controller.report?.ready === true;
     for (const id of ['recovery-leave-paused', 'recovery-leave-normal'])
         element<HTMLButtonElement>(id).disabled = controller.busy || !controller.report?.ready;
     element<HTMLButtonElement>('recovery-leave-cancel').disabled = controller.busy;
+    element<HTMLButtonElement>('recovery-leave-quit').disabled = controller.busy || !isTauri();
     element<HTMLButtonElement>('recovery-open-data').disabled = controller.busy;
     text('recovery-startup-error', report?.startup_error || '');
     element('recovery-startup-details').hidden = !report?.startup_error;
@@ -343,6 +445,10 @@ function render() {
     element('recovery-empty').hidden = !report || report.items.length > 0 || report.ready;
     element<HTMLButtonElement>('recovery-refresh').disabled = controller.busy;
     element<HTMLButtonElement>('recovery-retry').disabled = controller.busy || !report?.ready;
+    renderEditor();
+}
+
+function renderEditor() {
     input.readOnly = controller.busy;
     for (const id of [
         'recovery-validate',
@@ -515,6 +621,14 @@ async function finishRecovery(recovery: boolean) {
         await command('configuration_recovery_leave', { recovery });
     });
 }
+element('incompatible-open').addEventListener('click', async () => {
+    text('incompatible-error', '', true);
+    try {
+        await command('configuration_recovery_open_data');
+    } catch (error) {
+        text('incompatible-error', String(error), true);
+    }
+});
 element('recovery-open-data').addEventListener(
     'click',
     () =>
@@ -526,6 +640,7 @@ element('recovery-open-data').addEventListener(
 element('recovery-leave-cancel').addEventListener('click', () => leave.close());
 element('recovery-leave-paused').addEventListener('click', () => void finishRecovery(true));
 element('recovery-leave-normal').addEventListener('click', () => void finishRecovery(false));
+element('recovery-leave-quit').addEventListener('click', () => void requestQuit());
 // Prevent native dialog cancellation from bypassing the recovery exit flow
 leave.addEventListener('cancel', (event) => {
     if (controller.busy) event.preventDefault();
@@ -533,7 +648,7 @@ leave.addEventListener('cancel', (event) => {
 let quitPending = false;
 // Confirm unsaved recovery edits before quitting Manager
 async function requestQuit() {
-    if (controller.busy || quitPending || confirmation.open) return;
+    if (!isTauri() || controller.busy || quitPending || confirmation.open) return;
     quitPending = true;
     try {
         if (
@@ -576,7 +691,18 @@ element('recovery-preview-restore').addEventListener(
 );
 element('recovery-restore-backup').addEventListener('click', () => void restoreBackup());
 element('recovery-backup-transfer').addEventListener('click', () => void transferBackupProfiles());
-element('recovery-refresh').addEventListener('click', () => void controller.refresh());
+element('recovery-keystore-backup-select').addEventListener('change', (event) => {
+    keystore.select((event.currentTarget as HTMLSelectElement).value);
+    renderKeystore();
+});
+element('recovery-keystore-retry').addEventListener('click', () => void keystore.retry());
+element('recovery-keystore-create').addEventListener('click', () => void keystore.change('create'));
+element('recovery-keystore-reset').addEventListener('click', () => void keystore.change('reset'));
+element('recovery-keystore-restore').addEventListener(
+    'click',
+    () => void keystore.change('restore'),
+);
+element('recovery-refresh').addEventListener('click', () => void refreshRecovery());
 element('recovery-retry').addEventListener('click', () => void controller.retry());
 // Open comparison of the edited document with its saved history
 element('recovery-compare').addEventListener('click', () => {
@@ -612,4 +738,4 @@ window.addEventListener('beforeunload', (event) => {
         event.returnValue = '';
     }
 });
-void controller.refresh();
+void refreshRecovery();

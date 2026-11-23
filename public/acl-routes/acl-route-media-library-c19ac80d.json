@@ -1,0 +1,22 @@
+{
+  "version": 1,
+  "basePath": "..",
+  "components": {
+    "sd-media-library": {
+      "source": "components/sd-media-library.html",
+      "dependencies": [],
+      "options": {
+        "shadow": false,
+        "templateRevision": "sha256-1P4YPIZKMcG0FuoNOoHzDMOL_dwqW-WaIuk8b8d3U5g"
+      },
+      "metadata": {
+        "description": "Managed media reuse and reviewed retention-safe cleanup."
+      }
+    }
+  },
+  "groups": {
+    "media-library": [
+      "sd-media-library"
+    ]
+  }
+}

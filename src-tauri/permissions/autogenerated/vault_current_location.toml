@@ -1,0 +1,11 @@
+# Automatically generated - DO NOT EDIT!
+
+[[permission]]
+identifier = "allow-vault-current-location"
+description = "Enables the vault_current_location command without any pre-configured scope."
+commands.allow = ["vault_current_location"]
+
+[[permission]]
+identifier = "deny-vault-current-location"
+description = "Denies the vault_current_location command without any pre-configured scope."
+commands.deny = ["vault_current_location"]

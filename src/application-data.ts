@@ -36,9 +36,13 @@ export function registerApplicationData(Alpine: typeof AlpineType, app: () => Ap
             });
         },
         // Open application data review and load current usage
-        async open() {
+        async open(event?: Event) {
             const dialog = this.$refs.dialog as HTMLDialogElement;
-            if (!dialog.open) dialog.showModal();
+            if (!dialog.open) {
+                if (event?.target instanceof HTMLButtonElement)
+                    event.target.focus({ preventScroll: true });
+                dialog.showModal();
+            }
             await this.load();
         },
         // Close application data review

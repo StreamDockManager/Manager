@@ -144,7 +144,7 @@ fn direct_prepared_validation_retains_archive_integrity_and_cancellation_checks(
     let mut clip = fixture();
     assert!(clip.validate_prepared(b"not a GIF", &control).is_err());
     assert!(clip.validate_prepared(&[], &control).is_err());
-    clip.frame_digests[0] = "0".repeat(64);
+    clip.frame_digests[0] = [0; 32];
     assert!(clip
         .validate_prepared(&source, &control)
         .unwrap_err()

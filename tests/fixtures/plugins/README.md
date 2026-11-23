@@ -1,6 +1,6 @@
 # Plugin acceptance fixtures
 
-Test Manager's plugin host without installing a real third-party plugin into your normal configuration.
+Use these fixtures to test Manager's plugin host in a disposable configuration. For everyday installation, see the [Manager guide](../../../README.md#add-plugins-and-nodejs).
 
 ## Choose a starting point
 
@@ -18,9 +18,7 @@ The probes run executable test code. Provision only the pinned dependencies and 
 
 ## Run the local Counter check
 
-Use an absolute path to a **Node.js 24** executable, Rust/Cargo, and the [Manager contributor prerequisites](../../../CONTRIBUTING.md). From the **Manager repository root**:
-
-Prepare the [pinned native dependencies](../../../CONTRIBUTING.md#prepare-patched-rust-dependencies) before running raw Cargo commands in a fresh checkout:
+Install the [Manager build prerequisites](../../../CONTRIBUTING.md) and locate a Node.js 24 executable. Run from the **Manager repository root**, replacing the example Node path:
 
 ```sh
 python3 scripts/prepare_patched_deps.py
@@ -56,16 +54,9 @@ No proprietary plugin binaries are included here. Sample acceptance does not est
 
 ## Current vendor contract work
 
-The sections below are a contributor reference and qualification record, not additional installation steps. Recorded test counts and artifact paths describe their named runs; they do not mean the current checkout has just been tested, and local artifact folders may have been cleaned up.
+Use the [compatibility matrix](compatibility-matrix.json) to see what is verified. The [pinned source inventory](vendor-sources.json) lists each upstream revision, license and hash. Open the reference sections below for exact test boundaries and historical runs; artifact paths may no longer exist.
 
-| Topic                                        | Reference                                                                                         |
-| -------------------------------------------- | ------------------------------------------------------------------------------------------------- |
-| Source provenance and supported behavior     | [Pinned source inventory](vendor-sources.json), [compatibility matrix](compatibility-matrix.json) |
-| Bundled profiles and remaining qualification | [Profile evidence](#profile-qualification-evidence-still-required)                                |
-| Manifest rules                               | [Elgato manifest validation](#source-backed-elgato-manifest-validation)                           |
-| Tap, double-tap and hold behavior            | [Manager key logic](#manager-key-logic)                                                           |
-| Inspector windows and limits                 | [Isolated vendor inspectors](#isolated-vendor-inspector-windows)                                  |
-| Historical production SDK run                | [7.1 subset evidence](#direct-production-71-subset-evidence)                                      |
+Jump to [profile evidence](#profile-qualification-evidence-still-required), [manifest validation](#source-backed-elgato-manifest-validation), [key logic](#manager-key-logic), [isolated inspectors](#isolated-vendor-inspector-windows) or the [historical 7.1 run](#direct-production-71-subset-evidence).
 
 `vendor-sources.json` pins the source revisions, versions, licenses and SHA-256 of
 all checked-in upstream files. `vendor/vsd/` contains the untouched official VSD
@@ -102,6 +93,9 @@ updates, refresh this inventory and matrix, and rerun conformance before increas
 advertised support. Do not automatically run newly downloaded vendor plugins.
 
 ### OS events and optional links
+
+<details>
+<summary>Reference details</summary>
 
 macOS application launch/termination and system wake use NSWorkspace notifications.
 Windows application transitions use one-second executable snapshots and native power
@@ -156,7 +150,12 @@ source review, GNU test linking and Clippy, and MSVC all-target source check pas
 no native Windows reader tests were executed. No official sample executable was run,
 and its SDK 3 / minimum 7.1 manifest remains unchanged. Production now declares the explicitly partial 7.1 subset.
 
+</details>
+
 ### Profile qualification evidence still required
+
+<details>
+<summary>Reference details</summary>
 
 The [official profile guide](https://docs.elgato.com/streamdeck/sdk/guides/profiles/)
 specifies manifest-relative archive paths and installation prompts, including deferred
@@ -198,7 +197,12 @@ No reference application or installed plugin was launched to obtain these missin
 observations during this task. The bounded V2 implementation is tested; general
 profile compatibility and reference-host parity remain unqualified.
 
+</details>
+
 ### VSD documentation and reusable SDK inventory
+
+<details>
+<summary>Reference details</summary>
 
 The VSD baseline now includes byte-identical MIT C++ plugin SDK definitions,
 connection dispatch and action/plugin interfaces at the recorded repository
@@ -226,7 +230,12 @@ application-version feed; its official download page requires manual review befo
 release. Source/schema/app version observations do not change Manager's embedded
 compatibility contract or establish reference-host support.
 
+</details>
+
 ### Registration language and display context
+
+<details>
+<summary>Reference details</summary>
 
 `application.language` describes Manager's actual UI language, not the operating
 system locale or the inspector browser's preference. It is derived from the
@@ -252,7 +261,12 @@ prevents registration instead of emitting a malformed required field. This does
 not describe a Stream Dock device's hardware DPI. Mixed-monitor native behavior
 and reference-vendor display semantics still require native qualification.
 
+</details>
+
 ### Manifest GIF playback
+
+<details>
+<summary>Reference details</summary>
 
 Manifest state GIFs use transient content-addressed clips and the existing native
 media clock, memory budget, output scheduler, adaptive rate, and delivery tracking.
@@ -269,7 +283,12 @@ not constitute reference-host or physical-display qualification. Standard
 `setImage` GIF input is explicitly unsupported; reset the image to its declared
 manifest state to use animation.
 
+</details>
+
 ### Source-backed Elgato manifest validation
+
+<details>
+<summary>Reference details</summary>
 
 `vendor/elgato/manifest-schema/manifest.json` is the byte-identical Draft 7 schema
 exported by the published `@elgato/schemas` 0.6.0 package. The registry tarball,
@@ -339,7 +358,12 @@ not executable validators (see its retained README). Existing bounded path,
 package identity, executable, runtime and reference checks remain separate; full
 reference/image-dimension and reference-host qualification is not claimed.
 
+</details>
+
 ### Dial actions
+
+<details>
+<summary>Reference details</summary>
 
 Manager assigns turn-left, turn-right and press actions independently. Linked turns
 use one editor configuration for both directions, with direction-aware defaults;
@@ -352,7 +376,12 @@ icon as the whole physical dial, nor applies these metadata semantics to VSD.
 Vendor encoder background metadata is accepted by the manifest schema but has
 no Manager rendering behavior.
 
+</details>
+
 ### Explicit browser resource selections
+
+<details>
+<summary>Reference details</summary>
 
 The macOS isolated native inspector wraps the public `WKUIDelegate` file-panel
 callback. Only a completed native file selection can create an external-resource
@@ -388,7 +417,12 @@ does not invent or invoke that callback; VSD-specific picker behavior remains
 unqualified. Existing browser resource access without native selection remains
 limited to package files and already-owned action resources.
 
+</details>
+
 ## Manager key logic
+
+<details>
+<summary>Reference details</summary>
 
 The existing strict `Gesture` action is available as **Key logic (Manager)**. Its
 three branches and configurable timing fields are edited in the ordinary action
@@ -414,7 +448,12 @@ Shared macro graphs have memoized, depth-aware traversal and a 10,000-node work
 bound in native admission and the editor. Synthetic tests do not qualify exact
 Stream Deck Key Logic wire semantics or physical timing.
 
+</details>
+
 ### Isolated vendor inspector windows
+
+<details>
+<summary>Reference details</summary>
 
 On macOS, vendor inspectors run in raw Wry views hosted by native windows, not
 Tauri webviews. No Tauri IPC handler, initialization or application protocol is
@@ -481,7 +520,12 @@ native file panels, clipboard/geolocation and vendor reference-host behavior rem
 unqualified. The optional feature alone does not enable the probe or expose any
 IPC command. Normal production popup consent and activation behavior is unchanged.
 
+</details>
+
 ## Direct production 7.1 subset evidence
+
+<details>
+<summary>Reference details</summary>
 
 The checked-in production declaration and implementation registry were then
 qualified directly with unmodified SDK 3.0.4: **7 host tests and 3 real Runtime
@@ -496,8 +540,10 @@ The separate older-manifest probe also passed: SDK default mode rejects its 6.9
 manifest minimum even on host 7.1, while explicit legacy mode works with the
 acknowledged Node 20-to-24 override. Its assertion was corrected after the ten-test
 run; production code and those ten test sources did not change. Evidence prose
-was updated afterward. The full-compatibility gate remains false; the application
-release remains 0.1.0, with reference-host, physical hardware, general profile
+was updated afterward. The full-compatibility gate remains false; the tested application
+release was 0.1.0, with reference-host, physical hardware, general profile
 formats and native interaction/platform qualification still separate.
+
+</details>
 
 [Manager setup](../../../README.md) · [Contributing](../../../CONTRIBUTING.md)

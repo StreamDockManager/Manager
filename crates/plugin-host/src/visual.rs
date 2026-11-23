@@ -6,9 +6,24 @@ use sha2::{Digest, Sha256};
 mod tests;
 #[derive(Default, Clone)]
 pub(super) struct Sources {
+    pub(super) artwork: ArtworkFiles,
     image: Option<[u8; 32]>,
     layout: Option<String>,
     feedback: HashMap<String, ([u8; 32], bool)>,
+}
+impl Sources {
+    fn resolve_image(
+        &mut self,
+        cache: Option<&ArtworkCache>,
+        root: &Path,
+        source: &str,
+        colors: &Value,
+    ) -> Result<Value, String> {
+        if let Some(value) = cache.and_then(|cache| self.artwork.inbound_raster(cache, source)) {
+            return Ok(value);
+        }
+        image_with_theme(root, source, colors)
+    }
 }
 // Read the byte charge of retained data
 fn bytes(root: &Path, source: &str) -> Result<Vec<u8>, String> {
@@ -72,7 +87,14 @@ pub(super) fn image_with_theme(root: &Path, source: &str, colors: &Value) -> Res
     if source.is_empty() {
         return Ok(Value::Null);
     }
-    Ok(image_value(bytes(root, source)?, source, colors))
+    let data = bytes(root, source)?;
+    // Canonical inline rasters have already passed the bounded base64 decoder.
+    if (source.starts_with("data:image/png;base64,") && data.starts_with(b"\x89PNG\r\n\x1a\n"))
+        || (source.starts_with("data:image/jpeg;base64,") && data.starts_with(&[0xff, 0xd8, 0xff]))
+    {
+        return Ok(Value::String(source.to_owned()));
+    }
+    Ok(image_value(data, source, colors))
 }
 // Decode the image value from the plugin payload
 fn image_value(mut bytes: Vec<u8>, source: &str, colors: &Value) -> Value {
@@ -386,7 +408,7 @@ pub(super) fn prepare(hub: &mut Hub, owner: &str, message: &mut Value) -> Result
                     root,
                     source,
                     theme,
-                    hub.device_palette_id_for(theme, device),
+                    hub.plugin_palette_id_for(owner, theme, device),
                 );
                 let fingerprint: [u8; 32] = Sha256::digest(source.as_bytes()).into();
                 let context = message["context"].as_str().unwrap_or("");
@@ -533,8 +555,25 @@ fn swap_target(hub: &mut Hub) {
     std::mem::swap(&mut state.visuals, &mut state.software_visuals);
     std::mem::swap(&mut state.visual_sources, &mut state.software_sources);
 }
-// Prepare target
 fn prepare_target(
+    hub: &mut Hub,
+    owner: &str,
+    message: &mut Value,
+    software: bool,
+) -> Result<(), String> {
+    let result = update_target(hub, owner, message, software);
+    if matches!(
+        message["event"].as_str(),
+        Some("setImage" | "setState" | "setFeedback" | "setFeedbackLayout")
+    ) {
+        if let Some(context) = message["context"].as_str() {
+            hub.visual_state.compact_artwork(context);
+        }
+    }
+    result
+}
+// Prepare target
+fn update_target(
     hub: &mut Hub,
     owner: &str,
     message: &mut Value,
@@ -591,9 +630,10 @@ fn prepare_target(
         .map(|(device, _)| device.as_str())
         .unwrap_or("");
     let theme = hub.resolved_device_theme_for(owner, device);
-    let palette = hub.device_palette_id_for(theme, device).to_owned();
-    let colors = hub.device_colors_for(theme, device);
+    let palette = hub.plugin_palette_id_for(owner, theme, device).to_owned();
+    let colors = hub.plugin_colors_for(owner, theme, device);
     let multi_action_image = software && elgato_multi_context(hub, owner, &context);
+    let artwork_cache = hub.visual_state.artwork_cache.as_deref();
     let sources = hub
         .visual_state
         .visual_sources
@@ -730,7 +770,7 @@ fn prepare_target(
             let source = themed_source(&root, &source, theme, &palette);
             let fingerprint: [u8; 32] = Sha256::digest(source.as_bytes()).into();
             if disable_image_cache || sources.image != Some(fingerprint) {
-                visual["image"] = image_with_theme(&root, &source, &colors)?;
+                visual["image"] = sources.resolve_image(artwork_cache, &root, &source, &colors)?;
                 sources.image = Some(fingerprint);
             }
         }
@@ -794,9 +834,14 @@ fn prepare_target(
             if let Some(source) = reference.as_str().or_else(|| reference[theme].as_str()) {
                 let source = openaction_image_source(&root, source, openaction);
                 let source = themed_source(&root, &source, theme, &palette);
-                let fingerprint: [u8; 32] = Sha256::digest(source.as_bytes()).into();
+                let fingerprint: [u8; 32] = sources
+                    .artwork
+                    .stored_digest(&source)
+                    .unwrap_or_else(|| Sha256::digest(source.as_bytes()).into());
                 if disable_image_cache || sources.image != Some(fingerprint) {
-                    visual["image"] = image_with_theme(&root, &source, &colors)?;
+                    let source = sources.artwork.source(&source)?;
+                    visual["image"] =
+                        sources.resolve_image(artwork_cache, &root, &source, &colors)?;
                     sources.image = Some(fingerprint);
                 }
             } else {
@@ -863,7 +908,7 @@ fn prepare_target(
                                 visual["feedback"][&key].take()
                             }
                         } else {
-                            image_with_theme(&root, &source, &colors)?
+                            sources.resolve_image(artwork_cache, &root, &source, &colors)?
                         };
                         sources.feedback.insert(key.clone(), (fingerprint, nested));
                         visual["feedback"][&key] = value.clone();
@@ -961,6 +1006,10 @@ pub(super) fn encoder_defaults(
             });
             Arc::make_mut(visual)["encoderBackground"] = background.clone();
         }
+        hub.visual_state.compact_artwork(context);
+        swap_target(hub);
+        hub.visual_state.compact_artwork(context);
+        swap_target(hub);
     }
     if let Some(layout) = encoder["layout"].as_str() {
         messages.push(
@@ -994,7 +1043,11 @@ pub(super) fn refresh_themes(hub: &mut Hub) {
 // Refresh target themes
 fn refresh_target_themes(hub: &mut Hub) {
     hub.visual_state.visual_generation = hub.visual_state.visual_generation.wrapping_add(1);
-    hub.visual_state.visual_sources.clear();
+    for sources in hub.visual_state.visual_sources.values_mut() {
+        sources.image = None;
+        sources.layout = None;
+        sources.feedback.clear();
+    }
     let contexts: Vec<_> = hub.visual_state.visuals.keys().cloned().collect();
     for context in contexts {
         let Some(owner) = hub.context_state.contexts.get(&context).cloned() else {
@@ -1010,8 +1063,8 @@ fn refresh_target_themes(hub: &mut Hub) {
             .map(|(device, _)| device.as_str())
             .unwrap_or("");
         let theme = hub.resolved_device_theme_for(&owner, device);
-        let palette = hub.device_palette_id_for(theme, device);
-        let colors = hub.device_colors_for(theme, device);
+        let palette = hub.plugin_palette_id_for(&owner, theme, device);
+        let colors = hub.plugin_colors_for(&owner, theme, device);
         let Some(root) = hub.roots.get(&owner) else {
             continue;
         };
@@ -1022,7 +1075,12 @@ fn refresh_target_themes(hub: &mut Hub) {
             if reference.is_string() && (source.contains(':') || !source.ends_with(".svg")) {
                 return None;
             }
-            image_with_theme(root, &themed_source(root, source, theme, palette), &colors).ok()
+            let files = hub.visual_state.artwork(&context, false);
+            let source = match files {
+                Some(files) => files.source(source).ok()?,
+                None => std::borrow::Cow::Borrowed(source),
+            };
+            image_with_theme(root, &themed_source(root, &source, theme, palette), &colors).ok()
         };
         let layout = value["layoutReference"]
             .as_str()
@@ -1072,6 +1130,7 @@ fn refresh_target_themes(hub: &mut Hub) {
                 visual["feedback"][key] = image;
             }
         }
+        hub.visual_state.compact_artwork(&context);
         if changed && hub.context_state.targets.contains_key(&context) && hub.effects.len() < 512 {
             let effect = hub.feedback_effect(FeedbackKind::Image, &context, None);
             hub.effects.push_back(effect);

@@ -20,9 +20,10 @@
                     @click="useAction"
                 >
                     <img
+                        data-resource-role="plugin-icon"
                         class="plugin-action-icon"
                         x-show="choice.icon"
-                        :src="choice.icon"
+                        :src="choice.icon || null"
                         alt=""
                     />
                     <span x-text="choice.name"></span>

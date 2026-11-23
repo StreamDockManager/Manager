@@ -14,11 +14,14 @@ pub mod benchmark;
 pub mod boot_logo;
 pub mod builtins;
 pub mod cache;
+pub mod clipboard;
 #[cfg(test)]
 mod codec_compatibility_tests;
 pub mod configuration_recovery;
 #[cfg(test)]
 mod configuration_tests;
+pub mod control_event_test;
+mod control_events;
 #[cfg(target_os = "macos")]
 mod core_audio;
 pub mod credentials;
@@ -32,11 +35,13 @@ pub mod dial_response;
 mod discovery_readiness;
 mod editor_retirement;
 pub mod encoding;
+mod event_bindings;
 pub mod export_review;
 #[cfg(test)]
 mod feature_tests;
 pub mod feedback;
 pub mod firmware;
+pub mod firmware_catalog;
 pub mod hardware_preview;
 pub mod history_compare;
 #[cfg(test)]
@@ -44,6 +49,7 @@ mod icon_toggle_tests;
 pub mod icons;
 pub mod import_recipes;
 pub mod importing;
+pub mod input_trace;
 pub mod keyboard;
 pub mod keyboard_device;
 mod keyboard_layout;
@@ -53,7 +59,10 @@ pub mod keyboard_preview;
 #[cfg(test)]
 mod layered_composition_probe;
 pub mod library_organization;
+mod linked_controls;
+pub mod live_label;
 mod locate;
+pub mod location_search;
 pub mod macro_debug;
 pub mod macro_inputs;
 #[cfg(test)]
@@ -73,10 +82,12 @@ pub mod metrics;
 mod native_pool;
 mod native_process;
 pub mod onboarding;
+mod palette_preview;
 pub mod parameter_credentials;
 #[cfg(test)]
 mod parameter_credentials_tests;
 pub mod parameters;
+pub mod permission_broker;
 mod plugin_monitor;
 pub mod plugin_packages;
 pub mod plugin_policy;
@@ -115,6 +126,7 @@ mod transfer_receipt;
 mod transition_input;
 pub mod updates;
 pub mod validation;
+pub mod vault;
 mod vendor_animation;
 mod vendor_os_events;
 mod vendor_profile_archive;
@@ -126,6 +138,8 @@ pub mod video_recordings;
 #[cfg(target_os = "linux")]
 pub mod wayland;
 pub mod workspace;
+#[cfg(test)]
+mod workspace_layout_tests;
 pub mod workspace_stream;
 use hardware_core::{ControlEvent, ModelManifest};
 pub use profiles::*;
@@ -206,19 +220,27 @@ pub struct Runtime {
     discovery_readiness: discovery_readiness::Readiness,
     profile_theme_sync: Mutex<()>,
     hardware_previews: Mutex<hardware_preview::Previews>,
+    plugin_palette_preview: Mutex<palette_preview::Previews>,
     keyboard_previews: Mutex<keyboard_preview::Previews>,
     keyboard_observations: keyboard_device::Observations,
+    input_trace: input_trace::Tracer,
+    control_event_test: control_event_test::Listener,
     locate: Mutex<locate::Locate>,
+    pub location_search: location_search::LocationSearch,
     dial_responses: Mutex<dial_response::Responses>,
     pub(crate) settings_writer: Mutex<Option<std::thread::JoinHandle<()>>>,
     manager_resources: Mutex<manager_resources::Sampler>,
+    resource_attribution_invalidated: std::sync::atomic::AtomicBool,
     process_resources: Arc<Mutex<process_resources::Sampler>>,
     pub plugin_logs: Arc<stream_dock_manager_plugin_host::log_capture::LogCaptureService>,
     boot_logos: boot_logo::BootLogos,
     pub(crate) benchmark: benchmark::BenchmarkService,
     pub(crate) setup_capabilities: setup_capabilities::SetupCapabilities,
     pub(crate) credentials: credentials::Credentials,
+    pub vault: Arc<vault::Vault>,
     sampling_signal: Arc<sampler::Signal>,
+    vendor_signal: Arc<vendor_os_events::Signal>,
+    pub(crate) automation_signal: Arc<automation::ObservationSignal>,
     preparations: preparation::Preparations,
     pub(crate) video: video::VideoService,
     telemetry: Mutex<telemetry::TelemetrySnapshot>,
@@ -253,6 +275,8 @@ pub struct Runtime {
     event_sequence: std::sync::atomic::AtomicU64,
     next_simulator_epoch: std::sync::atomic::AtomicU64,
     pub(crate) firmware: firmware::Firmware,
+    pub(crate) firmware_catalog: firmware_catalog::CatalogService,
+    pub(crate) event_bindings: Arc<event_bindings::EventBindings>,
     pub(crate) transition_inputs: Mutex<transition_input::Transitions>,
     pub(crate) connection_epochs: Mutex<std::collections::HashMap<String, u64>>,
     pub(crate) state: Mutex<Snapshot>,
@@ -267,9 +291,11 @@ pub struct Runtime {
     media_deletions: Mutex<review_store::ReviewStore<media_deletion::StagedMediaDeletion>>,
     pub metrics: metrics::Metrics,
     pub preview_subscriptions: preview_subscriptions::PreviewSubscriptions,
+    label_overrides: std::sync::Mutex<Option<live_label::CachedOverrides>>,
     pub drafts: Mutex<std::collections::BTreeMap<String, workspace::Draft>>,
     pub automation_status: Mutex<automation::AutomationStatus>,
     pub(crate) device_admission: startup_permissions::DeviceAdmission,
+    pub(crate) vault_surface_revision: std::sync::atomic::AtomicU64,
     pub(crate) device_wake_pending: Arc<std::sync::atomic::AtomicBool>,
     pub(crate) stopping: std::sync::atomic::AtomicBool,
     pub(crate) device_commands: device_mailbox::Sender,
@@ -338,8 +364,8 @@ impl Runtime {
         recovery: bool,
         registration_environment: Option<stream_dock_manager_plugin_host::RegistrationEnvironment>,
     ) -> Result<Arc<Self>, String> {
-        let require_permission_setup =
-            cfg!(target_os = "macos") && registration_environment.is_some();
+        let desktop_startup = registration_environment.is_some();
+        let require_permission_setup = cfg!(target_os = "macos") && desktop_startup;
         let storage = stream_dock_manager_storage::Storage::open_validated(
             root.clone(),
             crate::application_data::validate_snapshot,
@@ -354,7 +380,8 @@ impl Runtime {
                 16 * 1024 * 1024,
             )?
             .is_none();
-        let profiles = ProfileStore::with_storage(root.join("profiles"), storage.clone())?;
+        let profiles =
+            ProfileStore::with_validated_storage(root.join("profiles"), storage.clone())?;
         let data = profiles.load()?;
         let sessions = profiles
             .read_preference(crate::profile_database::LocalPreference::Sessions)?
@@ -378,6 +405,10 @@ impl Runtime {
             runtimes.clone(),
             storage.clone(),
         )?;
+        plugins.set_configured_actions(
+            data.configuration_revision,
+            devices::configured_plugin_actions(&data.profiles, &data.saved_macros),
+        );
         plugins.set_registration_environment(match registration_environment {
             Some(environment) => environment,
             None => stream_dock_manager_plugin_host::RegistrationEnvironment::new(
@@ -388,6 +419,15 @@ impl Runtime {
         if requested.unwrap_or(recovery) {
             plugins.enter_recovery();
         }
+        let vault = Arc::new(vault::Vault::new(
+            root.clone(),
+            credentials.provider.clone(),
+            storage.clone(),
+        ));
+        plugins.set_vault_reader(vault.clone());
+        plugins.set_vault_locked(
+            vault.startup_locked(desktop_startup && !recovery && !requested.unwrap_or(false)),
+        );
         let plugin_logs = plugins.logs.clone();
         let mut desktop_settings = desktop::SETTINGS_RECORD.read(&storage)?.unwrap_or_default();
         desktop_settings
@@ -412,6 +452,7 @@ impl Runtime {
             settings_writer: Default::default(),
             boot_logos: Default::default(),
             benchmark: Default::default(),
+            vault,
             credentials,
             plugin_logs,
             library_preferences: Default::default(),
@@ -421,6 +462,9 @@ impl Runtime {
             )?),
             repair_preferences: Default::default(),
             sampling_signal: Default::default(),
+            vendor_signal: Default::default(),
+            automation_signal: Default::default(),
+            resource_attribution_invalidated: std::sync::atomic::AtomicBool::new(false),
             manager_resources: Mutex::new(manager_resources::Sampler::new(
                 process_resources.clone(),
             )),
@@ -431,12 +475,16 @@ impl Runtime {
             telemetry: Default::default(),
             builtin_state: builtins::State::with_storage(storage.clone())?,
             updates,
-            cache_maintenance: cache::Maintenance::new(downloads),
+            cache_maintenance: cache::Maintenance::new(downloads, plugins.artwork_cache()),
             plugin_packages: Default::default(),
             plugin_rollbacks: Default::default(),
             hardware_previews: Mutex::new(Default::default()),
+            plugin_palette_preview: Default::default(),
             keyboard_previews: Default::default(),
+            input_trace: Default::default(),
+            control_event_test: Default::default(),
             locate: Mutex::new(Default::default()),
+            location_search: Default::default(),
             dial_responses: Mutex::new(Default::default()),
             media_start: std::time::Instant::now(),
             vendor_animations: Default::default(),
@@ -463,7 +511,9 @@ impl Runtime {
             event_sequence: std::sync::atomic::AtomicU64::new(0),
             next_simulator_epoch: std::sync::atomic::AtomicU64::new(1),
             firmware: Default::default(),
+            firmware_catalog: firmware_catalog::CatalogService::new(storage.root()),
             keyboard_observations: Default::default(),
+            event_bindings: Default::default(),
             transition_inputs: Default::default(),
             connection_epochs: Mutex::new(std::collections::HashMap::new()),
             state: Mutex::new(Snapshot {
@@ -489,8 +539,10 @@ impl Runtime {
             profiles,
             metrics: Default::default(),
             preview_subscriptions: Default::default(),
+            label_overrides: Default::default(),
             automation_status: Mutex::new(automation::status()),
             device_admission: startup_permissions::DeviceAdmission::new(!require_permission_setup),
+            vault_surface_revision: std::sync::atomic::AtomicU64::new(0),
             device_wake_pending: Arc::new(std::sync::atomic::AtomicBool::new(false)),
             stopping: std::sync::atomic::AtomicBool::new(false),
             device_commands,
@@ -505,6 +557,7 @@ impl Runtime {
         runtime.refresh_profile_palettes();
         let signal = runtime.sampling_signal.clone();
         Self::start_settings_writer(&runtime);
+        runtime.event_bindings.start(Arc::downgrade(&runtime));
         let audio_signal = runtime.audio_signal.clone();
         runtime
             .plugins
@@ -514,6 +567,12 @@ impl Runtime {
                 signal.notify();
                 audio_signal.demand_changed();
             }));
+        let vendor_signal = runtime.vendor_signal.clone();
+        runtime
+            .plugins
+            .lock()
+            .unwrap()
+            .set_vendor_demand_waker(Arc::new(move || vendor_signal.notify()));
         let sender = runtime.device_commands.clone();
         let pending = runtime.device_wake_pending.clone();
         runtime.plugins.lock().unwrap().set_waker(Arc::new(move || {
@@ -521,8 +580,9 @@ impl Runtime {
                 let _ = sender.send(devices::Request::Wake);
             }
         }));
+        cache::start(&runtime, hardware)?;
         if hardware {
-            cache::start(Arc::downgrade(&runtime));
+            vault::Vault::start_idle_monitor(&runtime);
             plugin_monitor::start(Arc::downgrade(&runtime));
             automation::start(Arc::downgrade(&runtime));
             vendor_os_events::start(Arc::downgrade(&runtime));
@@ -884,26 +944,45 @@ impl Runtime {
     // Look up cached render
     fn cached_render(
         &self,
-        key: String,
+        key: media::RenderKey,
         render: impl FnOnce() -> Result<media::SharedBytes, String>,
     ) -> Result<media::SharedBytes, String> {
-        if let Some(bytes) = self.profiles.render_cache.lock().unwrap().get_shared(&key) {
+        self.cached_surface_render(key, &[], render)
+    }
+
+    fn cached_surface_render(
+        &self,
+        key: media::RenderKey,
+        slots: &[media::RenderKey],
+        render: impl FnOnce() -> Result<media::SharedBytes, String>,
+    ) -> Result<media::SharedBytes, String> {
+        if let Some(bytes) = self
+            .profiles
+            .render_cache
+            .lock()
+            .unwrap()
+            .get_render(key, slots)
+        {
+            #[cfg(all(test, target_os = "macos"))]
+            devices::palette_profile::record_render_cache(true);
             return Ok(bytes);
         }
+        #[cfg(all(test, target_os = "macos"))]
+        devices::palette_profile::record_render_cache(false);
         let start = std::time::Instant::now();
         let result = render();
         self.metrics
             .record("render_ms", start.elapsed().as_secs_f64() * 1000.0);
         if let Ok(bytes) = &result {
-            self.profiles
-                .render_cache
-                .lock()
-                .unwrap()
-                .insert_frame(key, bytes.clone())?;
+            self.profiles.render_cache.lock().unwrap().insert_render(
+                key,
+                slots.first().copied(),
+                bytes.clone(),
+            )?;
         }
         result
     }
-    // Render visual
+    #[cfg(test)]
     pub(crate) fn render_visual(
         &self,
         visual: &serde_json::Value,
@@ -911,16 +990,40 @@ impl Runtime {
         height: u16,
         rotation: u16,
     ) -> Result<media::SharedBytes, String> {
+        self.render_visual_with_artwork(visual, width, height, rotation, None, true)
+    }
+    // Render visual
+    fn render_visual_with_artwork(
+        &self,
+        visual: &serde_json::Value,
+        width: u16,
+        height: u16,
+        rotation: u16,
+        artwork: Option<&stream_dock_manager_plugin_host::artwork_cache::ArtworkFiles>,
+        cache_intermediates: bool,
+    ) -> Result<media::SharedBytes, String> {
+        let render = || {
+            hardware_core::render::visual_resolved(visual, width, height, rotation, &|uri| {
+                artwork
+                    .map_or(Ok(None), |files| files.image_bytes(uri))
+                    .map_err(hardware_core::Error::Protocol)
+            })
+            .map(media::shared_bytes)
+            .map_err(|e| e.to_string())
+        };
+        if !cache_intermediates {
+            return render();
+        }
         self.cached_render(
-            format!(
-                "visual:{}:{width}:{height}:{rotation}:{visual}",
-                hardware_core::fonts::generation()
-            ),
-            || {
-                hardware_core::render::visual(visual, width, height, rotation)
-                    .map(media::shared_bytes)
-                    .map_err(|e| e.to_string())
-            },
+            media::RenderKey::from_inputs(&(
+                "visual",
+                hardware_core::fonts::generation(),
+                width,
+                height,
+                rotation,
+                visual,
+            ))?,
+            render,
         )
     }
     // Refresh profile palettes
@@ -996,6 +1099,7 @@ impl Runtime {
             kind,
             "profiles" | "devices" | "sessions" | "workspace-reset"
         ) {
+            self.automation_signal.wake();
             self.refresh_profile_palettes();
         }
         if matches!(
@@ -1029,6 +1133,9 @@ impl Runtime {
         ) {
             self.power.signal.notify();
         }
+        // Publish scene readiness only after palettes and transient overrides are invalidated
+        self.preview_subscriptions
+            .scene_changed(kind, device_id.as_deref());
         let event = RuntimeEvent {
             timestamp_ms: Some(event_timestamp_ms()),
             sequence: self
@@ -1255,6 +1362,8 @@ impl Runtime {
             // action graph; keep ordinary frozen macro execution unchanged
             self.builtin_state.cancel_key_logic(None);
         }
+        self.event_bindings.cancel(None);
+        self.control_event_test.cancel_for(None);
         Self::apply_data(&mut state, data);
         state.revision += 1;
         let batch = self.edited_workspace(&mut state, &stream_edits);
@@ -1263,34 +1372,44 @@ impl Runtime {
         if destructive || disabled_now || retired {
             self.cancel_macros();
         }
+        self.publish_configured_plugin_actions();
         self.notify("profiles", None, None, None, batch.revision);
         let _ = self.device_commands.send(devices::Request::Restore);
         Ok(batch)
     }
     // Validate workspace
     fn validate_workspace(&self, data: &ProfileData) -> Result<(), String> {
+        self.validate_workspace_with_layouts(data, hardware_registry::manifests)
+    }
+
+    fn validate_workspace_with_layouts(
+        &self,
+        data: &ProfileData,
+        layouts: impl FnOnce() -> Vec<hardware_core::ModelManifest>,
+    ) -> Result<(), String> {
         let plugins = self.plugins.lock().unwrap().list();
+        let find_macro = |id: &str| {
+            data.saved_macros
+                .iter()
+                .find(|saved| saved.id == id)
+                .map(|saved| &saved.action)
+        };
         for action in data.saved_macros.iter().map(|saved| &saved.action).chain(
             data.profiles
                 .iter()
                 .flat_map(|profile| &profile.pages)
                 .flat_map(|page| page.bindings.values())
-                .filter(|binding| !binding.disabled)
+                .filter(|binding| {
+                    !binding.disabled && !matches!(binding.action, actions::Action::Events { .. })
+                })
                 .map(|binding| &binding.action),
         ) {
-            builtins::validate_key_logic_plugins(
-                action,
-                |id| {
-                    data.saved_macros
-                        .iter()
-                        .find(|saved| saved.id == id)
-                        .map(|saved| &saved.action)
-                },
-                &plugins,
-            )?;
+            builtins::validate_key_logic_plugins(action, find_macro, &plugins)?;
         }
+        // Invocation-local and lazy: earlier validation errors and empty workspaces
+        // never construct layouts; every profile shares the same immutable set.
+        let manifests = std::cell::LazyCell::new(layouts);
         for profile in &data.profiles {
-            let manifests = hardware_registry::manifests();
             let manifest = manifests
                 .iter()
                 .find(|m| m.model_id == profile.model_id)
@@ -1305,12 +1424,21 @@ impl Runtime {
                         profile.model_id, binding.0
                     )
                 })?;
-                self.validate_binding(binding.1, control).map_err(|error| {
-                    format!(
-                        "Invalid profile control {}/{}: {error}",
-                        profile.model_id, binding.0
-                    )
-                })?;
+                if matches!(binding.1.action, actions::Action::Events { .. }) {
+                    builtins::validate_key_logic_event_plugins(
+                        &binding.1.action,
+                        find_macro,
+                        &plugins,
+                        Some(crate::control_events::supported(manifest, binding.0)),
+                    )?;
+                }
+                self.validate_binding(binding.1, manifest, control)
+                    .map_err(|error| {
+                        format!(
+                            "Invalid profile control {}/{}: {error}",
+                            profile.model_id, binding.0
+                        )
+                    })?;
                 if let Some(id) = &binding.1.asset {
                     if let Some(clip) = self.profiles.clip(id)? {
                         if binding.1.media.trim_start_ms >= clip.duration_ms
@@ -1367,6 +1495,7 @@ impl Runtime {
     fn validate_binding(
         &self,
         binding: &Binding,
+        manifest: &hardware_core::ModelManifest,
         control: &hardware_core::Control,
     ) -> Result<(), String> {
         if binding.disabled {
@@ -1438,11 +1567,23 @@ impl Runtime {
             }
             Ok(())
         }
-        check(
-            &binding.action,
-            control,
-            &self.plugins.lock().unwrap().list(),
-        )
+        let plugins = self.plugins.lock().unwrap().list();
+        if let actions::Action::Events { actions, .. } = &binding.action {
+            let supported = crate::control_events::supported(manifest, &control.id);
+            // Event slots are independent activations and do not receive a paired release
+            let mut lane_control = control.clone();
+            lane_control
+                .semantics
+                .retain(|semantic| semantic != "release");
+            for (action, slot) in actions.iter().zip(actions::EventSlot::ALL) {
+                if supported & slot.bit() != 0 {
+                    check(action, &lane_control, &plugins)?;
+                }
+            }
+            Ok(())
+        } else {
+            check(&binding.action, control, &plugins)
+        }
     }
     // Apply data
     fn apply_data(state: &mut Snapshot, data: ProfileData) {
@@ -1466,10 +1607,27 @@ impl Runtime {
             state.sessions.insert(key, session);
         }
     }
+    // Publish only from committed workspace state and release the state lock before
+    // acquiring the plugin host; a late older snapshot cannot replace a newer one.
+    fn publish_configured_plugin_actions(&self) {
+        let (revision, actions) = {
+            let state = self.state.lock().unwrap();
+            (
+                state.configuration_revision,
+                devices::configured_plugin_actions(&state.profiles, &state.saved_macros),
+            )
+        };
+        self.plugins
+            .lock()
+            .unwrap()
+            .set_configured_actions(revision, actions);
+    }
+
     // Called only after the durable transaction and all mutation guards are released
     // Keep cancellation before publication and device restoration in this order
     fn finish_workspace_commit(&self) {
         self.cancel_macros();
+        self.publish_configured_plugin_actions();
         self.emit("profiles", None, None, None);
         let _ = self.device_commands.send(devices::Request::Restore);
     }
@@ -1545,6 +1703,16 @@ impl Runtime {
                         capture(action, child, host, base, device, control);
                     }
                 }
+                actions::Action::Events {
+                    actions: children, ..
+                } => {
+                    for (slot, action) in
+                        actions::EventSlot::ALL.into_iter().zip(children.iter_mut())
+                    {
+                        let scope = crate::event_bindings::event_scope(base, slot);
+                        capture(action, vec![], host, &scope, device, control);
+                    }
+                }
                 actions::Action::Toggle { on, off } => {
                     let mut left = path.clone();
                     left.push(0);
@@ -1584,7 +1752,9 @@ impl Runtime {
         page_id: Option<&str>,
         manual: bool,
     ) -> Result<Snapshot, String> {
-        self.select_device_profile_checked(device_id, id, page_id, manual, None, None, None)
+        self.select_device_profile_checked(
+            device_id, id, page_id, manual, None, None, None, None, None,
+        )
     }
     // Read the current connection epoch used to reject stale device operations
     pub fn connection_generation(&self, device_id: &str) -> Option<u64> {
@@ -1610,6 +1780,8 @@ impl Runtime {
             Some(epoch),
             None,
             None,
+            None,
+            None,
         )
     }
     // Select vendor profile
@@ -1627,6 +1799,8 @@ impl Runtime {
             false,
             None,
             Some(proof),
+            None,
+            None,
             None,
         )
     }
@@ -1648,6 +1822,8 @@ impl Runtime {
             None,
             None,
             Some((matched, expected_revision, expected_session)),
+            None,
+            None,
         )
     }
     #[allow(clippy::too_many_arguments)]
@@ -1661,6 +1837,8 @@ impl Runtime {
         expected_epoch: Option<u64>,
         vendor: Option<&vendor_profiles::Navigation>,
         automatic: Option<(bool, u64, &workspace::DeviceSession)>,
+        keyboard_fallback: Option<(u64, &str, &str)>,
+        trace: Option<&str>,
     ) -> Result<Snapshot, String> {
         let epochs = Some(self.connection_epochs.lock().unwrap());
         if expected_epoch
@@ -1669,6 +1847,14 @@ impl Runtime {
             return Err("Device connection changed. Reopen the tray menu.".into());
         }
         let mut state = self.state.lock().unwrap();
+        if let Some((revision, profile, page)) = keyboard_fallback {
+            if state.revision != revision
+                || keyboard_navigation::blank_target(&state, device_id).as_ref()
+                    != Some(&(profile.into(), page.into()))
+            {
+                return Ok(state.clone());
+            }
+        }
         if let Some((_, expected_revision, expected_session)) = automatic {
             let session = state.session(device_id);
             if state.configuration_revision != expected_revision
@@ -1731,11 +1917,7 @@ impl Runtime {
             session.automation_origin = None;
         }
         session.profile_id = profile.id.clone();
-        session.page_id = page_id
-            .map(String::from)
-            .or_else(|| session.remembered_pages.get(id).cloned())
-            .filter(|id| profile.pages.iter().any(|p| &p.id == id))
-            .unwrap_or_else(|| profile.active_page.clone());
+        session.page_id = session.destination_page(profile, page_id);
         session
             .remembered_pages
             .insert(id.into(), session.page_id.clone());
@@ -1793,15 +1975,18 @@ impl Runtime {
                 .as_ref()
                 .and_then(|epochs| epochs.get(device_id).copied());
             if let Some(epoch) = epoch {
+                let origin = self.input_trace.origin(trace, device_id, epoch);
                 self.transition_inputs
                     .lock()
                     .unwrap()
-                    .begin(device_id, epoch);
+                    .begin_from(device_id, epoch, origin);
             }
         }
         // Simulator mappings change without the physical transfer gate, but
         // a pending gesture still belongs to the old page/profile
         self.builtin_state.cancel_key_logic(Some(device_id));
+        self.event_bindings.cancel(Some(device_id));
+        self.control_event_test.cancel_for(Some(device_id));
         state.sessions = sessions;
         if device_id.is_empty() {
             state.active_profile = id.into();
@@ -2026,6 +2211,7 @@ impl Runtime {
             {
                 let page_id = uuid::Uuid::new_v4().to_string();
                 let mut profile = Profile {
+                    linked_controls: Default::default(),
                     palette: None,
                     parameters: vec![],
                     id: uuid::Uuid::new_v4().to_string(),
@@ -2116,6 +2302,8 @@ impl Runtime {
         drop(epochs);
         if !enabled {
             self.builtin_state.cleanup(Some(id));
+            self.event_bindings.cancel(Some(id));
+            self.control_event_test.cancel_for(Some(id));
         }
         self.emit("devices", None, None, None);
         Ok(self.snapshot())
@@ -2192,6 +2380,8 @@ impl Runtime {
         drop(state);
         drop(epochs);
         self.builtin_state.cleanup(Some(id));
+        self.event_bindings.cancel(Some(id));
+        self.control_event_test.cancel_for(Some(id));
         self.emit("devices", Some(id.into()), None, None);
         let _ = self.device_commands.send(devices::Request::Restore);
         Ok(self.snapshot())
@@ -2339,7 +2529,10 @@ impl Runtime {
             |_| Err("Manual macro inputs must be literal values".into()),
         )?;
         self.queue_action(actions::Request {
+            event_slot: None,
+            physical_activation: None,
             manual: true,
+            trace: None,
             activation_policy: Default::default(),
             icon_signature: None,
             pressed: None,
@@ -2378,7 +2571,10 @@ impl Runtime {
     /// Change sleep state while retaining the latest brightness and lighting settings
     pub fn set_device_sleep(&self, device_id: &str, sleeping: bool) -> Result<Snapshot, String> {
         let snapshot = self.update_device_output(device_id, |output| output.sleeping = sleeping)?;
-        if !sleeping {
+        if sleeping {
+            self.event_bindings.cancel(Some(device_id));
+            self.control_event_test.cancel_for(Some(device_id));
+        } else {
             self.power_wake(device_id);
         }
         Ok(snapshot)
@@ -2790,10 +2986,14 @@ impl Runtime {
                 .map_err(|error| error.to_string());
         }
         self.cached_render(
-            format!(
-                "tile:{width}:{height}:{rotation}:{color}:{}",
-                binding.map(|b| b.title.as_str()).unwrap_or("")
-            ),
+            media::RenderKey::from_inputs(&(
+                "tile",
+                width,
+                height,
+                rotation,
+                color,
+                binding.map(|b| b.title.as_str()).unwrap_or(""),
+            ))?,
             || {
                 hardware_core::render::tile_rgba(
                     width,
@@ -2850,8 +3050,16 @@ impl Runtime {
             live_fallback,
             None,
             None,
+            None,
+            true,
         )
     }
+    fn plain_plugin_image(visual: &serde_json::Value, binding: Option<&Binding>) -> bool {
+        visual["image"].is_string()
+            && visual["layout"].is_null()
+            && binding.is_none_or(|b| b.composition.is_none() && b.plugin_appearance.is_none())
+    }
+
     #[allow(clippy::too_many_arguments)]
     // Render binding in cycle
     fn render_binding_in_cycle(
@@ -2865,6 +3073,8 @@ impl Runtime {
         live_fallback: bool,
         clips: Option<&profiles::ClipCycle>,
         navigation_ink: Option<&str>,
+        artwork: Option<&stream_dock_manager_plugin_host::artwork_cache::ArtworkFiles>,
+        cache_intermediates: bool,
     ) -> Result<media::SharedBytes, String> {
         let width = control.image_width.ok_or("No display surface")?;
         let height = control.image_height.ok_or("No display surface")?;
@@ -2894,17 +3104,23 @@ impl Runtime {
         } else {
             None
         };
-        let mut visual = visual.or(fallback.as_ref()).cloned();
-        if let Some(visual) = &mut visual {
+        let mut visual = visual.or(fallback.as_ref()).map(std::borrow::Cow::Borrowed);
+        // A top-level image supplies its entire base. Its background field and
+        // layout layers are only relevant when a style or composition projects it.
+        if let Some(visual) = visual
+            .as_mut()
+            .filter(|v| !Self::plain_plugin_image(v, binding))
+        {
             let replace_background = binding.is_some_and(Self::has_background_override);
             if replace_background || visual["paletteTile"] != true && rgba[3] < 255 {
+                let visual = visual.to_mut();
                 visual["background"] = serde_json::json!("#00000000");
                 if visual["layout"].is_object() {
                     visual["layout"]["background"] = serde_json::json!("#00000000");
                 }
             }
             if replace_background {
-                hardware_core::plugin_display::remove_background_layers(visual);
+                hardware_core::plugin_display::remove_background_layers(visual.to_mut());
             }
         }
         if let Some(composition) = composition {
@@ -2912,7 +3128,7 @@ impl Runtime {
                 control,
                 binding.unwrap(),
                 feedback,
-                visual.as_ref(),
+                visual.as_deref(),
                 media_elapsed,
                 false,
             )?;
@@ -2929,7 +3145,14 @@ impl Runtime {
                     .map(|s| s as u32),
             )?;
             if let Some(ink) = navigation_ink {
-                let foreground = self.render_visual(&composed, width, height, 0)?;
+                let foreground = self.render_visual_with_artwork(
+                    &composed,
+                    width,
+                    height,
+                    0,
+                    artwork,
+                    cache_intermediates,
+                )?;
                 let foreground = hardware_core::render::layer_pixels(&foreground, width, height)
                     .map_err(|e| e.to_string())?;
                 let pixels = hardware_core::render::over_image_rgba(
@@ -2949,7 +3172,14 @@ impl Runtime {
                     .map(media::shared_bytes)
                     .map_err(|e| e.to_string());
             }
-            return self.render_visual(&composed, width, height, rotation);
+            return self.render_visual_with_artwork(
+                &composed,
+                width,
+                height,
+                rotation,
+                artwork,
+                cache_intermediates,
+            );
         }
         let has_media = binding.and_then(|b| b.asset.as_ref()).is_some_and(|asset| {
             !binding.is_some_and(|b| b.disabled) || self.profiles.asset(asset).is_ok()
@@ -2983,18 +3213,43 @@ impl Runtime {
             if visual["layout"]["id"] == "palette-fallback"
                 && u32::from(width) * 10 > u32::from(height) * 13
             {
+                let visual = visual.to_mut();
                 let icon = u32::from(height) * 7 / 10;
                 visual["layout"]["items"][0]["rect"] =
                     serde_json::json!([4, 15, icon * 200 / u32::from(width), 70]);
                 visual["layout"]["items"][1]["rect"] = serde_json::json!([76, 10, 120, 80]);
             }
             if let Some(style) = binding.and_then(|b| b.plugin_appearance.as_ref()) {
-                visual = hardware_core::plugin_display::styled_visual(&visual, style)
-                    .map_err(|e| e.to_string())?;
+                visual = std::borrow::Cow::Owned(
+                    hardware_core::plugin_display::styled_visual(&visual, style)
+                        .map_err(|e| e.to_string())?,
+                );
             }
-            let bytes = self.render_visual(&visual, width, height, 0)?;
-            let pixels = hardware_core::render::layer_pixels(&bytes, width, height)
-                .map_err(|e| e.to_string())?;
+            let resolve = |uri: &str| {
+                artwork
+                    .map_or(Ok(None), |files| files.image_bytes(uri))
+                    .map_err(hardware_core::Error::Protocol)
+            };
+            if !cache_intermediates && !has_media && !overlays {
+                return hardware_core::render::visual_surface_resolved(
+                    &visual,
+                    width,
+                    height,
+                    rotation,
+                    &resolve,
+                    Some(rgba),
+                )
+                .map(media::shared_bytes)
+                .map_err(|e| e.to_string());
+            }
+            let pixels = if cache_intermediates {
+                let bytes =
+                    self.render_visual_with_artwork(&visual, width, height, 0, artwork, true)?;
+                hardware_core::render::layer_pixels(&bytes, width, height)
+            } else {
+                hardware_core::render::visual_pixels_resolved(&visual, width, height, &resolve)
+            }
+            .map_err(|e| e.to_string())?;
             if has_media {
                 hardware_core::render::over_image_rgba(media_pixels()?, &pixels)
                     .map_err(|error| error.to_string())?
@@ -3025,18 +3280,10 @@ impl Runtime {
             .and_then(|b| b.appearance.clone())
             .unwrap_or_default();
         let title = binding.map(|b| b.title.as_str()).unwrap_or("");
-        let cache_key = format!(
-            "composed-pixels-v1:{width}:{height}:{rotation}:{}:{title}:{feedback}:{}:{}",
-            serde_json::to_string(&appearance).unwrap_or_default(),
-            {
-                use std::hash::{Hash, Hasher};
-                let mut hash = std::collections::hash_map::DefaultHasher::new();
-                base.as_raw().hash(&mut hash);
-                hash.finish()
-            },
-            hardware_core::fonts::generation()
-        );
-        self.cached_render(cache_key, || {
+        use sha2::{Digest, Sha256};
+        let pixel_digest =
+            cache_intermediates.then(|| <[u8; 32]>::from(Sha256::digest(base.as_raw())));
+        let compose = || {
             let pixels = hardware_core::appearance::compose_pixels(
                 base,
                 width,
@@ -3050,7 +3297,22 @@ impl Runtime {
             hardware_core::render::encode_pixels(pixels, "png")
                 .map(media::shared_bytes)
                 .map_err(|e| e.to_string())
-        })
+        };
+        let Some(pixel_digest) = pixel_digest else {
+            return compose();
+        };
+        let cache_key = media::RenderKey::from_inputs(&(
+            "composed-pixels-v1",
+            width,
+            height,
+            rotation,
+            &appearance,
+            title,
+            feedback,
+            pixel_digest,
+            hardware_core::fonts::generation(),
+        ))?;
+        self.cached_render(cache_key, compose)
     }
     #[cfg(test)]
     // Render bound surface
@@ -3076,6 +3338,34 @@ impl Runtime {
         source: &str,
         context: &render_scene::RenderSceneContext,
     ) -> Result<media::SharedBytes, String> {
+        self.render_bound_surface_output(control, binding, rotation, scope, source, context)
+            .map(|(bytes, _)| bytes)
+    }
+
+    fn render_bound_surface_output(
+        &self,
+        control: &hardware_core::Control,
+        binding: Option<&Binding>,
+        rotation: u16,
+        scope: &str,
+        source: &str,
+        context: &render_scene::RenderSceneContext,
+    ) -> Result<(media::SharedBytes, bool), String> {
+        if let Some(test) = context.draft.as_ref().and_then(|d| d.display_test.as_ref()) {
+            return self
+                .test_pixels(
+                    test,
+                    [
+                        control.image_width.ok_or("No display surface")?,
+                        control.image_height.ok_or("No display surface")?,
+                    ],
+                    rotation,
+                    Some(control),
+                    &context.device,
+                    &context.formats,
+                )
+                .map(|bytes| (bytes, false));
+        }
         let draft = context
             .draft
             .as_ref()
@@ -3173,6 +3463,24 @@ impl Runtime {
                 binding
             });
         let rendered_binding = alternate.as_ref().or(binding);
+        let live = rendered_binding.and_then(|b| {
+            self.display_label_binding(
+                b,
+                |name| {
+                    context
+                        .label_parameters
+                        .get(&(scope.into(), name.into()))
+                        .cloned()
+                },
+                || {
+                    context
+                        .feedback
+                        .text("macro", &context.device, scope, source)
+                },
+                if dynamic_visual { visual } else { None },
+            )
+        });
+        let rendered_binding = live.as_ref().or(rendered_binding);
         if let Some(binding) = rendered_binding.filter(|binding| {
             !binding.disabled
                 && binding.title.is_empty()
@@ -3183,21 +3491,25 @@ impl Runtime {
         }) {
             if let Some(asset) = binding.asset.as_deref() {
                 if let Some(clip) = context.clips.get(&self.profiles, asset)? {
-                    return self.render_animation_frame_shared(
-                        &clip,
-                        binding.media.frame_index(&clip, context.media_elapsed),
-                        [
-                            control.image_width.ok_or("No display surface")?,
-                            control.image_height.ok_or("No display surface")?,
-                        ],
-                        rotation,
-                        &binding.media,
-                        &context.formats,
-                        Some(
-                            hardware_core::appearance::background_color(&binding.color)
-                                .ok_or("Invalid background color")?,
-                        ),
-                    );
+                    return self
+                        .render_animation_frame_in_cycle(
+                            &clip,
+                            binding.media.frame_index(&clip, context.media_elapsed),
+                            [
+                                control.image_width.ok_or("No display surface")?,
+                                control.image_height.ok_or("No display surface")?,
+                            ],
+                            rotation,
+                            &binding.media,
+                            &context.formats,
+                            Some(
+                                hardware_core::appearance::background_color(&binding.color)
+                                    .ok_or("Invalid background color")?,
+                            ),
+                            encoding::AnimationTarget::Standard,
+                            &context.clips,
+                        )
+                        .map(|bytes| (bytes, false));
                 }
             }
         }
@@ -3224,30 +3536,108 @@ impl Runtime {
             binding.media.trim_start_ms = 0;
             binding.media.trim_end_ms = None;
         }
-        use sha2::{Digest, Sha256};
-        let key = format!(
-            "surface-v1:{}",
-            hex::encode(Sha256::digest(
-                serde_json::to_vec(&serde_json::json!([
-                    control.image_width,
-                    control.image_height,
-                    rotation,
-                    pixels,
-                    text,
-                    visual,
-                    dynamic_visual,
-                    context.formats,
-                    context.contract_identity,
-                    "static-render-source-v1",
-                    navigation_ink,
-                    hardware_core::fonts::generation()
-                ]))
-                .map_err(|e| e.to_string())?
-            ))
-        );
-        self.cached_render(key, || {
+        // Devices without a shared background plane need the default wallpaper in each LCD
+        // Explicit user media/fills remain authoritative; opaque plugin pixels remain untouched
+        let surface_wallpaper = context.surface_wallpaper
+            && control.image_slot.is_some()
+            && matches!(control.kind.as_str(), "button" | "touch" | "display")
+            && !saved_binding.is_some_and(Self::has_background_override);
+        let wallpaper_identity = if surface_wallpaper {
+            context
+                .theme_wallpaper
+                .as_ref()
+                .map(|(asset, options)| {
+                    self.profiles.media_pixel_identity_in_cycle(
+                        asset,
+                        options,
+                        context.media_elapsed,
+                        Some(&context.clips),
+                    )
+                })
+                .transpose()?
+        } else {
+            None
+        };
+        // The host also retains imageReference and each state's original data URI.
+        // Hash only the inputs consumed by the standalone image painter on this path.
+        let plain = visual.filter(|v| Self::plain_plugin_image(v, rendered_binding));
+        let image_inputs =
+            plain.map(|v| (&v["image"], &v["title"], &v["titleParameters"], &v["badge"]));
+        let compact_visual = plain.filter(|_| {
+            context.compact_plugin_keys
+                && !surface_wallpaper
+                && navigation_ink.is_none()
+                && dynamic_visual
+                && control.kind == "button"
+                && text.is_empty()
+                && !context.gif_surfaces.contains_key(source)
+                && rendered_binding.is_some_and(|b| {
+                    b.has_content()
+                        && b.asset.is_none()
+                        && b.appearance.is_none()
+                        && b.composition.is_none()
+                        && b.plugin_appearance.is_none()
+                        && matches!(b.media.encoding.as_str(), "png" | "auto")
+                })
+        });
+        let key = media::RenderKey::from_inputs(&(
+            ("surface-v1", compact_visual.is_some()),
+            control.image_width,
+            control.image_height,
+            rotation,
+            &pixels,
+            &text,
+            (image_inputs, visual.filter(|_| plain.is_none())),
+            dynamic_visual,
+            &context.formats,
+            &context.contract_identity,
+            "static-render-source-v1",
+            surface_wallpaper.then_some((&context.wallpaper, wallpaper_identity)),
+            navigation_ink,
+            hardware_core::fonts::generation(),
+        ))?;
+        let live =
+            (dynamic_visual || !text.is_empty()) && !context.gif_surfaces.contains_key(source);
+        let slots;
+        let live_slots: &[media::RenderKey] = if live {
+            let slot = |software: bool| {
+                media::RenderKey::from_inputs(&(
+                    "latest-surface-v1",
+                    &context.device,
+                    &control.id,
+                    software,
+                ))
+            };
+            slots = [slot(context.software)?, slot(!context.software)?];
+            &slots
+        } else {
+            &[]
+        };
+        self.cached_surface_render(key, live_slots, || {
             self.metrics.record("surface_render_invocations", 1.0);
-            let bytes = self.render_binding_in_cycle(
+            if let Some(visual) = compact_visual {
+                let color =
+                    hardware_core::appearance::background_color(&rendered_binding.unwrap().color)
+                        .ok_or("Invalid background color")?;
+                let resolve = |uri: &str| {
+                    context
+                        .artwork
+                        .get(source)
+                        .map_or(Ok(None), |files| files.image_bytes(uri))
+                        .map_err(hardware_core::Error::Protocol)
+                };
+                return hardware_core::render::compact_plugin_key(
+                    visual,
+                    control.image_width.ok_or("No display surface")?,
+                    control.image_height.ok_or("No display surface")?,
+                    rotation,
+                    &resolve,
+                    color,
+                )
+                .map(media::shared_bytes)
+                .map_err(|e| e.to_string());
+            }
+            let mut bytes = self.render_binding_in_cycle(
                 control,
                 rendered_binding,
                 rotation,
@@ -3257,19 +3647,53 @@ impl Runtime {
                 false,
                 Some(&context.clips),
                 navigation_ink,
+                context.artwork.get(source),
+                !live,
             )?;
-            self.encode_surface_validated_png(
+            if surface_wallpaper {
+                let foreground = image::load_from_memory(&bytes)
+                    .map_err(|e| e.to_string())?
+                    .to_rgba8();
+                // Keep authored opaque artwork byte-identical and skip needless wallpaper work
+                if foreground.pixels().any(|pixel| pixel[3] < 255) {
+                    let wallpaper = self.render_scene_wallpaper(
+                        context,
+                        None,
+                        [
+                            control.image_width.ok_or("No display surface")?,
+                            control.image_height.ok_or("No display surface")?,
+                        ],
+                        rotation,
+                        &context.formats,
+                    )?;
+                    let background = image::load_from_memory(&wallpaper)
+                        .map_err(|e| e.to_string())?
+                        .to_rgba8();
+                    let composed = hardware_core::render::over_image_rgba(background, &foreground)
+                        .map_err(|e| e.to_string())?;
+                    bytes = hardware_core::render::encode_pixels(
+                        image::DynamicImage::ImageRgba8(composed),
+                        "png",
+                    )
+                    .map(media::shared_bytes)
+                    .map_err(|e| e.to_string())?;
+                }
+            }
+            self.encode_surface_with_cache(
                 bytes,
                 binding,
                 &context.formats,
                 dynamic_visual || !text.is_empty(),
+                true,
+                !live,
             )
         })
+        .map(|bytes| (bytes, compact_visual.is_some()))
     }
     // Preview surfaces using the current src state
     pub fn preview_surfaces(&self, device_id: Option<&str>) -> Result<SurfacePreview, String> {
         use base64::Engine;
-        self.preview_surfaces_encoded(device_id, |bytes| {
+        self.preview_surfaces_encoded(&self.preview_target(device_id), false, None, |bytes| {
             format!(
                 "data:{};base64,{}",
                 encoding::mime(&bytes),
@@ -3282,59 +3706,85 @@ impl Runtime {
         &self,
         device_id: &str,
     ) -> Result<(SurfacePreview, std::collections::BTreeMap<String, Vec<u8>>), String> {
+        let (preview, frames) =
+            self.preview_shared_frames(&self.preview_target(Some(device_id)), false, None)?;
+        Ok((
+            preview,
+            frames
+                .into_iter()
+                .map(|(key, bytes)| (key, self.owned_render_bytes(bytes)))
+                .collect(),
+        ))
+    }
+
+    fn preview_shared_frames(
+        &self,
+        target: &preview::PreviewTarget,
+        browser: bool,
+        sample: Option<&mut preview::Sample<'_>>,
+    ) -> Result<
+        (
+            SurfacePreview,
+            std::collections::BTreeMap<String, media::SharedBytes>,
+        ),
+        String,
+    > {
         use sha2::{Digest, Sha256};
         let mut frames = std::collections::BTreeMap::new();
-        let preview = self.preview_surfaces_encoded(Some(device_id), |bytes| {
+        let preview = self.preview_surfaces_encoded(target, browser, sample, |bytes| {
             let id = hex::encode(Sha256::digest(&**bytes));
-            frames
-                .entry(id.clone())
-                .or_insert_with(|| self.owned_render_bytes(bytes));
+            frames.entry(id.clone()).or_insert(bytes);
             id
         })?;
         Ok((preview, frames))
     }
-    // Preview surfaces encoded using the current src state
+
     fn preview_surfaces_encoded(
         &self,
-        device_id: Option<&str>,
+        target: &preview::PreviewTarget,
+        browser: bool,
+        mut sample: Option<&mut preview::Sample<'_>>,
         mut encode: impl FnMut(media::SharedBytes) -> String,
     ) -> Result<SurfacePreview, String> {
-        let state = self.snapshot();
-        let session = state.session(device_id.unwrap_or(""));
-        let Some(profile) = state.profiles.iter().find(|p| p.id == session.profile_id) else {
+        let Some(profile) = &target.profile else {
             return Ok(SurfacePreview {
-                configuration_revision: state.configuration_revision,
+                configuration_revision: target.configuration_revision,
                 surfaces: Default::default(),
                 trigger_descriptions: Default::default(),
                 background: None,
                 animated: false,
             });
         };
-        let manifests = hardware_registry::manifests();
-        let manifest = state
-            .devices
-            .iter()
-            .find(|device| device_id.is_some_and(|id| device.id == id))
-            .map(|device| &device.manifest)
-            .or_else(|| manifests.iter().find(|m| m.model_id == profile.model_id))
-            .ok_or("unsupported model")?;
+        let fallback;
+        let manifest =
+            if let Some(device) = target.device.as_ref().filter(|_| target.explicit_device) {
+                &device.manifest
+            } else {
+                fallback = hardware_registry::manifests()
+                    .into_iter()
+                    .find(|m| m.model_id == profile.model_id)
+                    .ok_or("unsupported model")?;
+                &fallback
+            };
         let page = profile
             .pages
             .iter()
-            .find(|p| p.id == session.page_id)
+            .find(|p| p.id == target.page_id)
             .ok_or("active page missing")?;
-        let device = state
-            .devices
-            .iter()
-            .find(|device| {
-                device_id.map_or(device.model_id == profile.model_id, |id| device.id == id)
-            })
-            .map(|d| d.id.as_str())
-            .unwrap_or("");
+        let device = target.device.as_ref().map_or("", |d| d.id.as_str());
         let context = self.render_scene_for_target(device, true)?;
-        if !context.matches_snapshot(&state) {
+        if !context.matches_inputs(
+            target.revision,
+            target.configuration_revision,
+            &target.device_scope,
+            target.device.as_ref(),
+        ) {
             return Err("Render scene changed during capture".into());
         }
+        if let Some(s) = sample.as_deref_mut() {
+            s.scene(&context);
+        }
+        let scope = format!("{}:{}", profile.id, page.id);
         let mut output = std::collections::BTreeMap::new();
         let mut animated = !self
             .vendor_animations
@@ -3348,43 +3798,77 @@ impl Runtime {
             }
             let source = context.surface_source(manifest, &control.id);
             let binding = page.bindings.get(source);
-            if let Some(asset) = binding.and_then(|b| b.asset.as_ref()).filter(|asset| {
+            let asset = binding.and_then(|b| b.asset.as_ref()).filter(|asset| {
                 !binding.is_some_and(|b| b.disabled) || self.profiles.asset(asset).is_ok()
-            }) {
-                animated |= self
-                    .profiles
-                    .clip(asset)?
-                    .is_some_and(|clip| clip.frames.len() > 1);
+            });
+            let clip = asset
+                .map(|id| context.clips.get(&self.profiles, id))
+                .transpose()?
+                .flatten();
+            animated |= clip.as_ref().is_some_and(|clip| clip.frames.len() > 1);
+            if let Some(sample) = sample.as_deref_mut() {
+                let eligible = context.draft.is_none()
+                    && !context.overrides.contains_key(source)
+                    && !context.visuals.contains_key(source)
+                    && !context.gif_surfaces.contains_key(source)
+                    && !context.surface_wallpaper
+                    && binding.is_some_and(|b| {
+                        b.feedback.as_deref().unwrap_or("off") == "off"
+                            && b.live_label.is_empty()
+                            && b.composition.is_none()
+                            && b.appearance.is_none()
+                            && !matches!(b.action, actions::Action::Plugin { .. })
+                    });
+                if let Some(id) = sample.prior(&control.id, clip.as_ref().filter(|_| eligible)) {
+                    output.insert(control.id.clone(), id);
+                    continue;
+                }
             }
             let bytes = self.render_bound_surface_in_scene(
                 control,
                 binding,
                 manifest.layout.rotation,
-                &format!("{}:{}", profile.id, page.id),
+                &scope,
                 source,
                 &context,
             )?;
-            let bytes = self.preview_image(bytes, manifest.layout.rotation)?;
+            let live_surface =
+                context.visuals.contains_key(source) && !context.gif_surfaces.contains_key(source);
+            let bytes = self.preview_image_for_surface(
+                bytes,
+                manifest.layout.rotation,
+                live_surface.then_some((device, control.id.as_str())),
+                browser,
+            )?;
             output.insert(control.id.clone(), encode(bytes));
         }
         let background = if let Some(size) = manifest.capabilities.background_size {
-            let bytes = self.render_scene_wallpaper(
-                &context,
-                Some(profile),
-                size,
-                manifest.layout.rotation,
-                &manifest.capabilities.image_formats,
-            )?;
-            animated |= context
+            let clip = context
                 .background_media(Some(profile))
-                .is_some_and(|(asset, _)| {
-                    self.profiles
-                        .clip(asset)
-                        .ok()
-                        .flatten()
-                        .is_some_and(|clip| clip.frames.len() > 1)
-                });
-            Some(encode(self.preview_image(bytes, manifest.layout.rotation)?))
+                .and_then(|(asset, _)| context.clips.get(&self.profiles, asset).ok().flatten());
+            animated |= clip.as_ref().is_some_and(|c| c.frames.len() > 1);
+            if let Some(prior) = sample.and_then(|s| {
+                s.prior(
+                    "@background",
+                    clip.as_ref().filter(|_| context.draft.is_none()),
+                )
+            }) {
+                Some(prior)
+            } else {
+                let bytes = self.render_scene_wallpaper(
+                    &context,
+                    Some(profile),
+                    size,
+                    manifest.layout.rotation,
+                    &manifest.capabilities.image_formats,
+                )?;
+                Some(encode(self.preview_image_for_surface(
+                    bytes,
+                    manifest.layout.rotation,
+                    None,
+                    browser,
+                )?))
+            }
         } else {
             None
         };
@@ -3392,7 +3876,7 @@ impl Runtime {
             return Err("Render scene changed during rendering".into());
         }
         Ok(SurfacePreview {
-            configuration_revision: state.configuration_revision,
+            configuration_revision: target.configuration_revision,
             surfaces: output,
             trigger_descriptions: context
                 .visuals
@@ -3413,6 +3897,8 @@ impl Runtime {
     pub fn cancel_macros(&self) {
         keyboard_macro::test_session::cancel_all();
         self.builtin_state.cleanup(None);
+        self.event_bindings.cancel(None);
+        self.control_event_test.cancel_for(None);
         self.emit("sessions", None, None, None);
         let _ = self.device_commands.send(devices::Request::Restore);
         self.cancellation
@@ -3420,6 +3906,7 @@ impl Runtime {
     }
     // Shut down the src worker
     pub fn shutdown(&self) {
+        self.vault.stop();
         keyboard_macro::recorder::cancel_all();
         keyboard_macro::test_session::cancel_all();
         self.cancel_all_keyboard_previews();
@@ -3427,6 +3914,7 @@ impl Runtime {
         self.audio_signal.stop();
         self.setup_capabilities.cancel_all();
         self.sampling_signal.stop();
+        self.vendor_signal.stop();
         self.preparations.cancel_all();
         desktop_input::shutdown();
         if self
@@ -3435,6 +3923,10 @@ impl Runtime {
         {
             return;
         }
+        self.cancel_plugin_palette_preview(None);
+        self.automation_signal.wake();
+        self.preview_subscriptions.cancel_all();
+        self.event_bindings.shutdown();
         // The actor remains alive until benchmark cancellation has requested
         // restoration. A stuck OS HID write cannot be preempted portably
         if !self.benchmark_shutdown(std::time::Duration::from_secs(3)) {
@@ -3474,8 +3966,54 @@ impl Runtime {
             }
         }
     }
+    // Resolve the live effective owner for physical dispatch and delayed events
+    pub(crate) fn resolve_input_binding(
+        &self,
+        state: &Snapshot,
+        device_id: &str,
+        control: &str,
+    ) -> Option<builtins::EffectiveBinding> {
+        let session = state.session(device_id);
+        self.builtin_state
+            .effective_binding(device_id, control, state)
+            .or_else(|| {
+                state
+                    .binding_overrides
+                    .get(device_id)
+                    .and_then(|values| values.get(control))
+                    .cloned()
+            })
+            .or_else(|| {
+                state
+                    .profiles
+                    .iter()
+                    .find(|p| p.id == session.profile_id)
+                    .and_then(|p| p.pages.iter().find(|p| p.id == session.page_id))
+                    .and_then(|p| p.bindings.get(control))
+                    .map(|binding| builtins::EffectiveBinding {
+                        profile_id: session.profile_id.clone(),
+                        page_id: session.page_id.clone(),
+                        scope: format!("{}:{}", session.profile_id, session.page_id),
+                        binding: binding.clone(),
+                    })
+            })
+            .or_else(|| keyboard_navigation::fallback_binding(state, device_id, control))
+    }
+
     // Dispatch the src request
     pub(crate) fn dispatch(&self, device_id: &str, event: &ControlEvent) {
+        self.dispatch_observed(device_id, event, None);
+    }
+    fn dispatch_observed(&self, device_id: &str, event: &ControlEvent, trace: Option<String>) {
+        self.dispatch_input(device_id, event, trace, None);
+    }
+    fn dispatch_input(
+        &self,
+        device_id: &str,
+        event: &ControlEvent,
+        trace: Option<String>,
+        physical_epoch: Option<(u64, &Arc<std::sync::atomic::AtomicBool>)>,
+    ) {
         let Some(connection_epoch) = self
             .connection_epochs
             .lock()
@@ -3483,6 +4021,8 @@ impl Runtime {
             .get(device_id)
             .copied()
         else {
+            self.input_trace
+                .record(trace.as_deref(), "Device disconnected", true);
             return;
         };
         if self
@@ -3492,13 +4032,14 @@ impl Runtime {
             .discard(device_id, connection_epoch, event)
         {
             self.metrics.record("transition_inputs_discarded", 1.0);
+            self.input_trace
+                .record(trace.as_deref(), "Transition consumed input", true);
             return;
         }
         let admitted_at = std::time::Instant::now();
         if self.locate_input(device_id, connection_epoch, event) {
-            return;
-        }
-        if self.handle_panel_gesture(device_id, event) {
+            self.input_trace
+                .record(trace.as_deref(), "Locate consumed input", true);
             return;
         }
         let key = format!("{device_id}|{}", event.control_id);
@@ -3510,6 +4051,8 @@ impl Runtime {
             .and_then(|device| device.manifest.control(&event.control_id).ok())
             .is_none_or(|control| control.kind == "display")
         {
+            self.input_trace
+                .record(trace.as_deref(), "Control has no input binding", true);
             return;
         }
         let session = state.session(device_id);
@@ -3518,32 +4061,21 @@ impl Runtime {
             .effective(device_id, connection_epoch, &session.output)
             .sleeping
         {
+            self.input_trace
+                .record(trace.as_deref(), "Device sleeping", true);
             return;
         }
-        let effective = self
-            .builtin_state
-            .effective_binding(device_id, &event.control_id, &state)
-            .or_else(|| {
-                state
-                    .binding_overrides
-                    .get(device_id)
-                    .and_then(|values| values.get(&event.control_id))
-                    .cloned()
-            })
-            .or_else(|| {
-                state
-                    .profiles
-                    .iter()
-                    .find(|p| p.id == session.profile_id)
-                    .and_then(|p| p.pages.iter().find(|p| p.id == session.page_id))
-                    .and_then(|p| p.bindings.get(&event.control_id))
-                    .map(|binding| builtins::EffectiveBinding {
-                        profile_id: session.profile_id.clone(),
-                        page_id: session.page_id.clone(),
-                        scope: format!("{}:{}", session.profile_id, session.page_id),
-                        binding: binding.clone(),
-                    })
-            });
+        if physical_epoch.is_some_and(|(epoch, stop)| {
+            epoch == connection_epoch && !stop.load(std::sync::atomic::Ordering::Acquire)
+        }) && self
+            .control_event_test
+            .observe(device_id, connection_epoch, &state, event)
+        {
+            self.input_trace
+                .record(trace.as_deref(), "Event test consumed input", true);
+            return;
+        }
+        let effective = self.resolve_input_binding(&state, device_id, &event.control_id);
         let input = self.dial_responses.lock().unwrap().transform(
             device_id,
             &event.control_id,
@@ -3555,16 +4087,33 @@ impl Runtime {
             &event.input,
             std::time::Instant::now(),
         );
-        let mut resolved = effective.as_ref().map(|value| {
-            (
-                if value.binding.disabled {
-                    actions::Action::None
-                } else {
-                    value.binding.action.clone()
-                },
-                value.scope.clone(),
-            )
-        });
+        if physical_epoch.is_some_and(|(epoch, stop)| {
+            epoch != connection_epoch || stop.load(std::sync::atomic::Ordering::Acquire)
+        }) {
+            return;
+        }
+        if self.route_bound_events(
+            &state,
+            effective.as_ref(),
+            device_id,
+            event,
+            &input,
+            connection_epoch,
+            admitted_at,
+            trace.clone(),
+            physical_epoch.map(|(_, stop)| stop.clone()),
+        ) {
+            return;
+        }
+        if self.handle_panel_gesture(device_id, event) {
+            self.input_trace
+                .record(trace.as_deref(), "Panel gesture handled", true);
+            return;
+        }
+        let mut resolved = effective
+            .as_ref()
+            .filter(|value| !value.binding.disabled)
+            .map(|value| (value.binding.action.clone(), value.scope.clone()));
         let (action, scope) =
             if matches!(event.input, hardware_core::Input::Button { pressed: false }) {
                 let capture = self.builtin_state.captures.lock().unwrap().remove(&key);
@@ -3573,9 +4122,13 @@ impl Runtime {
                     if matches!(c.action, actions::Action::Plugin { .. }) {
                         (c.action, c.scope)
                     } else {
+                        self.input_trace
+                            .record(trace.as_deref(), "Released held action", true);
                         return;
                     }
                 } else {
+                    self.input_trace
+                        .record(trace.as_deref(), "No held action to release", true);
                     return;
                 }
             } else {
@@ -3583,6 +4136,8 @@ impl Runtime {
                     let paused = self.builtin_state.paused.lock().unwrap();
                     if let Some(unlock) = paused.get(device_id) {
                         if unlock != &event.control_id {
+                            self.input_trace
+                                .record(trace.as_deref(), "Bindings paused", true);
                             return;
                         }
                         resolved = Some((
@@ -3596,6 +4151,8 @@ impl Runtime {
                     }
                 }
                 let Some((action, scope)) = resolved else {
+                    self.input_trace
+                        .record(trace.as_deref(), "No binding assigned", true);
                     return;
                 };
                 if matches!(event.input, hardware_core::Input::Button { pressed: true }) {
@@ -3607,6 +4164,8 @@ impl Runtime {
                         .get(&key)
                         .is_some_and(|c| c.pressed.load(std::sync::atomic::Ordering::SeqCst))
                     {
+                        self.input_trace
+                            .record(trace.as_deref(), "Duplicate press", true);
                         return;
                     }
                     self.builtin_state.captures.lock().unwrap().insert(
@@ -3621,6 +4180,8 @@ impl Runtime {
                 (action, scope)
             };
         if matches!(&event.input,hardware_core::Input::Touch{phase,..}if phase!="end") {
+            self.input_trace
+                .record(trace.as_deref(), "Waiting for touch end", true);
             return;
         }
         let pressed = self
@@ -3634,7 +4195,49 @@ impl Runtime {
             .as_ref()
             .map(|value| value.binding.activation_policy)
             .unwrap_or_default();
+        if let Some(token) = trace.as_deref() {
+            self.input_trace.record(
+                Some(token),
+                &format!("Binding {scope} / {}", event.control_id),
+                false,
+            );
+        }
+        if physical_epoch.is_some_and(|(epoch, stop)| {
+            epoch != connection_epoch || stop.load(std::sync::atomic::Ordering::Acquire)
+        }) {
+            return;
+        }
+        let physical_activation = physical_epoch.and_then(|(_, stop)| {
+            if (matches!(
+                &event.input,
+                hardware_core::Input::Pulse | hardware_core::Input::Button { pressed: true }
+            ) || matches!(&event.input,hardware_core::Input::Touch{phase,..} if phase=="end"))
+            {
+                if let actions::Action::Plugin {
+                    plugin_id,
+                    action_id,
+                    ..
+                } = &action
+                {
+                    self.plugins.lock().unwrap().begin_physical_permission(
+                        plugin_id,
+                        action_id,
+                        device_id,
+                        &event.control_id,
+                        &scope,
+                        stop.clone(),
+                    )
+                } else {
+                    None
+                }
+            } else {
+                None
+            }
+        });
         let mut request = actions::Request {
+            trace,
+            event_slot: None,
+            physical_activation,
             manual: false,
             activation_policy,
             icon_signature: None,
@@ -3670,7 +4273,10 @@ impl Runtime {
                 ..
             } = &request.action
             {
-                let result = self.plugins.lock().unwrap().dispatch_with_state(
+                let result = self.input_trace.dispatch_plugin(
+                    &mut self.plugins.lock().unwrap(),
+                    request.trace.as_deref(),
+                    None,
                     plugin_id,
                     action_id,
                     device_id,
@@ -3680,13 +4286,25 @@ impl Runtime {
                     settings,
                     *user_desired_state,
                 );
+                self.input_trace.record(
+                    request.trace.as_deref(),
+                    if result.is_ok() {
+                        "Plugin release dispatched"
+                    } else {
+                        "Plugin release failed"
+                    },
+                    true,
+                );
                 if let Err(error) = result {
                     self.emit("action-error", Some(device_id.into()), None, Some(error));
                 }
                 return;
             }
         }
+        let trace = request.trace.clone();
         if let Err(error) = self.queue_action(request) {
+            self.input_trace
+                .record(trace.as_deref(), "Action was not admitted", true);
             self.emit("action-error", Some(device_id.into()), None, Some(error));
         }
     }
@@ -3730,9 +4348,13 @@ impl Runtime {
 impl Drop for Runtime {
     // Release this src owner when it leaves scope
     fn drop(&mut self) {
+        self.event_bindings.shutdown();
+        self.vault.stop();
         self.power.stop();
         self.audio_signal.stop();
         self.sampling_signal.stop();
+        self.vendor_signal.stop();
+        self.automation_signal.wake();
     }
 }
 
@@ -3755,6 +4377,32 @@ fn take_restart_recovery_request(
             stream_dock_manager_storage::delete(tx, record.domain, record.key)?;
         }
         Ok(requested)
+    })
+}
+
+/// A soft, rounded keycap without a hard outline, derived from the current palette
+fn navigation_background(width: u16, height: u16, surface: [u8; 4], ink: &str) -> image::RgbaImage {
+    let ink = hardware_core::appearance::background_color(ink).unwrap_or([255, 255, 255, 255]);
+    let edge = f32::from(width.min(height));
+    let inset = (edge * 0.045).max(1.0);
+    let radius = edge * 0.14;
+    let half_width = f32::from(width) / 2.0;
+    let half_height = f32::from(height) / 2.0;
+    image::RgbaImage::from_fn(width.into(), height.into(), |x, y| {
+        // Signed distance gives smooth rounded edges at any LCD resolution
+        let qx = (x as f32 + 0.5 - half_width).abs() - (half_width - inset - radius);
+        let qy = (y as f32 + 0.5 - half_height).abs() - (half_height - inset - radius);
+        let distance = qx.max(0.0).hypot(qy.max(0.0)) + qx.max(qy).min(0.0) - radius;
+        let coverage = (0.5 - distance).clamp(0.0, 1.0);
+        let diagonal = (x as f32 / width.max(1) as f32 + y as f32 / height.max(1) as f32) / 2.0;
+        let amount = coverage * (0.035 + 0.065 * (1.0 - diagonal));
+        let mut pixel = surface;
+        for channel in 0..3 {
+            pixel[channel] = (surface[channel] as f32 * (1.0 - amount)
+                + ink[channel] as f32 * amount)
+                .round() as u8;
+        }
+        image::Rgba(pixel)
     })
 }
 
@@ -3795,28 +4443,5 @@ mod restart_key_tests {
     }
 }
 
-/// A soft, rounded keycap without a hard outline, derived from the current palette
-fn navigation_background(width: u16, height: u16, surface: [u8; 4], ink: &str) -> image::RgbaImage {
-    let ink = hardware_core::appearance::background_color(ink).unwrap_or([255, 255, 255, 255]);
-    let edge = f32::from(width.min(height));
-    let inset = (edge * 0.045).max(1.0);
-    let radius = edge * 0.14;
-    let half_width = f32::from(width) / 2.0;
-    let half_height = f32::from(height) / 2.0;
-    image::RgbaImage::from_fn(width.into(), height.into(), |x, y| {
-        // Signed distance gives smooth rounded edges at any LCD resolution
-        let qx = (x as f32 + 0.5 - half_width).abs() - (half_width - inset - radius);
-        let qy = (y as f32 + 0.5 - half_height).abs() - (half_height - inset - radius);
-        let distance = qx.max(0.0).hypot(qy.max(0.0)) + qx.max(qy).min(0.0) - radius;
-        let coverage = (0.5 - distance).clamp(0.0, 1.0);
-        let diagonal = (x as f32 / width.max(1) as f32 + y as f32 / height.max(1) as f32) / 2.0;
-        let amount = coverage * (0.035 + 0.065 * (1.0 - diagonal));
-        let mut pixel = surface;
-        for channel in 0..3 {
-            pixel[channel] = (surface[channel] as f32 * (1.0 - amount)
-                + ink[channel] as f32 * amount)
-                .round() as u8;
-        }
-        image::Rgba(pixel)
-    })
-}
+#[cfg(test)]
+mod storage_benchmark;

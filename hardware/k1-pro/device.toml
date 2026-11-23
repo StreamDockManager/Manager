@@ -4,6 +4,9 @@ name = "K1 Pro"
 protocol = "vendor-crt-1"
 status = "experimental"
 
+firmware_instructions = "https://www.vsdinside.com/blogs/tutorial/vsd-stream-dock-connection-issues"
+firmware_instructions_shared = true
+
 [capabilities]
 firmware_query = true
 firmware_report = { kind = "input", report_id = 4, length = 513, windows_supported = true }

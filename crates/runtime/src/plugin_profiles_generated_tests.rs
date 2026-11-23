@@ -18,24 +18,7 @@ struct CorpusPackage {
     archive: Option<String>,
 }
 
-// Open disposable
-fn open_disposable(root: PathBuf) -> std::sync::Arc<Runtime> {
-    let deadline = std::time::Instant::now() + std::time::Duration::from_secs(5);
-    loop {
-        match Runtime::build(root.clone(), false) {
-            Ok(runtime) => return runtime,
-            // Shutdown workers may briefly retain the storage Arc. Only that
-            // known lock may be retried; validation failures remain fatal
-            Err(error)
-                if error.contains("Another Stream Dock Manager process")
-                    && std::time::Instant::now() < deadline =>
-            {
-                std::thread::sleep(std::time::Duration::from_millis(10));
-            }
-            Err(error) => panic!("Cannot reopen disposable workspace: {error}"),
-        }
-    }
-}
+use crate::test_support::open_disposable;
 
 // Assert inactive
 fn assert_inactive(runtime: &Runtime) {
@@ -174,17 +157,39 @@ fn generated_suggestions_import_cancel_and_reopen() {
                 before,
                 "{context}: placement wrote workspace"
             );
-            let previous_count = runtime.snapshot().profiles.len();
+            let previous_profiles = runtime.snapshot().profiles;
+            let previous_count = previous_profiles.len();
             let imported = runtime
                 .commit_profile_import(&prepared.id, prepared.expected_revision)
                 .unwrap_or_else(|error| panic!("{context} commit: {error}"));
             assert_eq!(imported.profiles.len(), previous_count + 1, "{context}");
-            let profile = imported.profiles.last().unwrap();
+            let profile = imported
+                .profiles
+                .iter()
+                .find(|p| !previous_profiles.iter().any(|existing| existing.id == p.id))
+                .unwrap();
             assert_eq!(profile.model_id, suggestion.model_id, "{context}");
-            assert_eq!(profile.pages.len(), suggestion.page_count, "{context}");
+            // K1 Pro always carries its host-owned Navigation page in addition
+            // to the producer's layout. Check its identity and content separately.
+            let (navigation, imported_pages): (Vec<_>, Vec<_>) = profile
+                .pages
+                .iter()
+                .partition(|p| p.id == crate::keyboard_navigation::PAGE_ID);
             assert_eq!(
-                profile
-                    .pages
+                navigation.len(),
+                usize::from(crate::keyboard_navigation::supported(&profile.model_id)),
+                "{context}"
+            );
+            if let Some(page) = navigation.first() {
+                assert_eq!(
+                    serde_json::to_value(page).unwrap(),
+                    serde_json::to_value(crate::keyboard_navigation::page()).unwrap(),
+                    "{context}"
+                );
+            }
+            assert_eq!(imported_pages.len(), suggestion.page_count, "{context}");
+            assert_eq!(
+                imported_pages
                     .iter()
                     .map(|page| page.bindings.len())
                     .sum::<usize>(),

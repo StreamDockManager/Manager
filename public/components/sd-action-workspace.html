@@ -1,4 +1,9 @@
-<button type="button" class="button" x-show="dialogMode && !namedMode" @click="openEditor">
+<button
+    type="button"
+    class="button macro-workspace-trigger"
+    x-show="dialogMode && !namedMode"
+    @click="openEditor"
+>
     <span x-text="editorTitle"></span>
     <small x-text="editorSummary"></small>
 </button>
@@ -13,7 +18,12 @@
         <header class="picker-header macro-editor-header">
             <div class="macro-editor-heading">
                 <span class="macro-heading-icon" aria-hidden="true">
-                    <img class="action-icon" src="/appearance/icons/zap.svg" alt="" />
+                    <img
+                        data-resource-role="interface-icon"
+                        class="action-icon"
+                        src="/appearance/icons/zap.svg"
+                        alt=""
+                    />
                 </span>
                 <div>
                     <h2 :id="'macro-title-' + editorId" x-text="editorTitle"></h2>
@@ -70,7 +80,7 @@
                             <div
                                 class="macro-tree-row"
                                 :class="{active: row.id === selectedId}"
-                                :style="'margin-left:' + (row.depth * 16) + 'px'"
+                                :style="{marginLeft: (row.depth * 16) + 'px'}"
                                 :data-node="row.id"
                                 :draggable="isSequenceChild(row.path)"
                                 @dragstart="dragStart"
@@ -87,6 +97,7 @@
                                 >
                                     <span class="macro-step-icon" aria-hidden="true">
                                         <img
+                                            data-resource-role="media-preview"
                                             class="action-icon"
                                             :src="row.image || '/appearance/icons/' + row.icon + '.svg'"
                                             :class="{ 'macro-plugin-image': row.image }"
@@ -234,7 +245,12 @@
                     </div>
                     <div class="macro-editor-empty" x-show="!rows.length">
                         <span class="macro-empty-icon" aria-hidden="true">
-                            <img class="action-icon" src="/appearance/icons/zap.svg" alt="" />
+                            <img
+                                data-resource-role="interface-icon"
+                                class="action-icon"
+                                src="/appearance/icons/zap.svg"
+                                alt=""
+                            />
                         </span>
                         <h3>Start your macro</h3>
                         <p>Add an action, then build a sequence that works for you.</p>

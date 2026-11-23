@@ -90,7 +90,8 @@ export function capabilityReason(
 }
 // Expose the immediate child actions of a composite action
 export function actionChildren(action: Action): Action[] {
-    if (action.kind === 'macro' || action.kind === 'dial') return action.actions;
+    if (action.kind === 'macro' || action.kind === 'dial' || action.kind === 'events')
+        return action.actions;
     if (action.kind === 'toggle') return [action.on, action.off];
     if (action.kind === 'builtin' && 'children' in action.action) return action.action.children;
     return [];

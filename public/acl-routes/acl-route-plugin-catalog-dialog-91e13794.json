@@ -1,0 +1,19 @@
+{
+  "version": 1,
+  "basePath": "..",
+  "components": {
+    "sd-plugin-catalog-dialog": {
+      "source": "components/sd-plugin-catalog-dialog.html",
+      "dependencies": [],
+      "options": {
+        "shadow": false,
+        "templateRevision": "sha256-h19YzuDnNk0hvyUZRLFLXLeMC_zOTHtnBVfIn-KIlgA"
+      }
+    }
+  },
+  "groups": {
+    "plugin-catalog-dialog": [
+      "sd-plugin-catalog-dialog"
+    ]
+  }
+}

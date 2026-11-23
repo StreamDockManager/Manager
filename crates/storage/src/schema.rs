@@ -2,24 +2,24 @@ use crate::records::Domain;
 use rusqlite::{Connection, OpenFlags};
 use std::{fs, path::Path, time::Duration};
 
-pub const SCHEMA_VERSION: i64 = 1;
+pub const SCHEMA_VERSION: i64 = 3;
 pub const APPLICATION_ID: i64 = 0x53444d31;
 pub const DATABASE_NAME: &str = "manager.sqlite3";
-pub(crate) const INITIALIZED_MARKER: &str = ".stream-dock-manager-sqlite-initialized";
 type SchemaObject = (String, String, String, Option<String>);
 pub(crate) const RECOVERY_PENDING: &str = ".stream-dock-manager-recovery-pending";
 
 // Open for the current operation
 pub(crate) fn open(root: &Path) -> Result<Connection, String> {
-    open_validated(root, &|_| Ok(()))
+    open_validated(root, &|_| Ok(()), false)
 }
 
 // Open validated
 pub(crate) fn open_validated(
     root: &Path,
     validator: &dyn Fn(&Connection) -> Result<(), String>,
+    staging: bool,
 ) -> Result<Connection, String> {
-    let path = root.join(DATABASE_NAME);
+    let path = crate::database_path(root, DATABASE_NAME);
     match path.symlink_metadata() {
         Ok(metadata) => {
             if root.join(RECOVERY_PENDING).symlink_metadata().is_ok() {
@@ -33,20 +33,24 @@ pub(crate) fn open_validated(
             // Missing primary means a fresh database, not implicit backup restore or
             // legacy import. Never let SQLite consume orphan sidecars as new data.
             quarantine_orphans(root)?;
-            create(root, &path)?;
+            create(&crate::database_directory(root), &path)?;
         }
         Err(error) => return Err(error.to_string()),
     }
-    let expected = preflight(&path, validator)?;
+    let expected = preflight(root, validator)?;
     if fingerprint(&path)? != expected {
         return Err("Configuration changed during validation; retry after closing other writers. Originals preserved.".into());
     }
     let conn = connect(&path)?;
     validate(&conn)?;
+    if staging {
+        crate::installation_key::attach_empty(&conn)?;
+    } else {
+        crate::installation_key::attach_live(&conn, root)?;
+    }
     validator(&conn)?;
     configure(&conn)?;
     validate(&conn)?;
-    mark_initialized(root)?;
     Ok(conn)
 }
 
@@ -62,7 +66,7 @@ fn quarantine_orphans(root: &Path) -> Result<(), String> {
     ];
     let mut present = Vec::new();
     for name in names {
-        match root.join(name).symlink_metadata() {
+        match live_evidence_path(root, name).symlink_metadata() {
             Ok(_) => present.push(name),
             Err(error) if error.kind() == std::io::ErrorKind::NotFound => {}
             Err(error) => return Err(error.to_string()),
@@ -81,36 +85,90 @@ fn quarantine_orphans(root: &Path) -> Result<(), String> {
     crate::files::sync_directory(root)?;
     for name in present {
         // Rename preserves bytes and symlinks without following their targets
-        fs::rename(root.join(name), preserved.join(name)).map_err(|error| {
+        fs::rename(live_evidence_path(root, name), preserved.join(name)).map_err(|error| {
             format!(
                 "Could not preserve orphan database evidence in {}: {error}",
                 preserved.display()
             )
         })?;
         crate::files::sync_directory(&preserved)?;
+        crate::files::sync_directory(&crate::database_directory(root))?;
         crate::files::sync_directory(root)?;
     }
     Ok(())
 }
 
+pub(crate) fn live_evidence_path(root: &Path, name: &str) -> std::path::PathBuf {
+    if name == RECOVERY_PENDING {
+        root.join(name)
+    } else {
+        crate::database_path(root, name)
+    }
+}
+
 /// Recover a disposable copy including sidecars; never recover unsupported originals
 fn preflight(
-    path: &Path,
+    root: &Path,
     validator: &dyn Fn(&Connection) -> Result<(), String>,
 ) -> Result<Fingerprint, String> {
-    let (copy, fingerprint) = snapshot_copy_checked(path)?;
+    let (copy, fingerprint) = live_snapshot_copy_checked(root)?;
     validator(&copy)
         .map_err(|error| format!("Unsupported configuration; originals preserved: {error}"))?;
     Ok(fingerprint)
 }
 
-// Create a consistent SQLite snapshot
-pub(crate) fn snapshot_copy(path: &Path) -> Result<Connection, String> {
-    snapshot_copy_checked(path).map(|(connection, _)| connection)
+// Keep the private directory alive until SQLite releases its database and sidecars.
+pub(crate) struct ScratchDatabase {
+    pub connection: Connection,
+    pub directory: tempfile::TempDir,
+}
+impl ScratchDatabase {
+    pub fn new() -> Result<Self, String> {
+        let directory = tempfile::tempdir().map_err(|e| e.to_string())?;
+        let connection =
+            Connection::open(directory.path().join(DATABASE_NAME)).map_err(|e| e.to_string())?;
+        Ok(Self {
+            connection,
+            directory,
+        })
+    }
+}
+impl std::ops::Deref for ScratchDatabase {
+    type Target = Connection;
+    fn deref(&self) -> &Connection {
+        &self.connection
+    }
+}
+impl std::ops::DerefMut for ScratchDatabase {
+    fn deref_mut(&mut self) -> &mut Connection {
+        &mut self.connection
+    }
 }
 
-// Create a snapshot and validate the resulting database
-pub(crate) fn snapshot_copy_checked(path: &Path) -> Result<(Connection, Fingerprint), String> {
+// Create a consistent SQLite snapshot
+pub(crate) fn snapshot_copy(path: &Path) -> Result<ScratchDatabase, String> {
+    let (copy, _) = snapshot_copy_unattached(path)?;
+    crate::installation_key::attach_archive_if_needed(
+        &copy,
+        path.parent().ok_or("Missing data directory")?,
+    )?;
+    Ok(copy)
+}
+
+pub(crate) fn live_snapshot_copy(root: &Path) -> Result<ScratchDatabase, String> {
+    live_snapshot_copy_checked(root).map(|(copy, _)| copy)
+}
+
+fn live_snapshot_copy_checked(root: &Path) -> Result<(ScratchDatabase, Fingerprint), String> {
+    let (copy, before) = snapshot_copy_unattached(&crate::database_path(root, DATABASE_NAME))?;
+    crate::installation_key::attach_existing_if_needed(&copy, root)?;
+    Ok((copy, before))
+}
+
+// Copy and validate the main database without attaching or opening live secrets.
+pub(crate) fn snapshot_copy_unattached(
+    path: &Path,
+) -> Result<(ScratchDatabase, Fingerprint), String> {
     let before = fingerprint(path)?;
     let metadata = path.symlink_metadata().map_err(|e| e.to_string())?;
     if !metadata.is_file() {
@@ -140,11 +198,13 @@ pub(crate) fn snapshot_copy_checked(path: &Path) -> Result<(Connection, Fingerpr
     }
     let copy = connect(&scratch.path().join(DATABASE_NAME))?;
     validate(&copy)?;
-    // SQLite owns this temporary database and removes it when the connection closes
-    // Unlike an in-memory copy this does not retain an entire large workspace in RAM
-    let mut recovered = Connection::open("").map_err(|e| e.to_string())?;
-    crate::maintenance::copy_database(&copy, &mut recovered)?;
-    Ok((recovered, before))
+    Ok((
+        ScratchDatabase {
+            connection: copy,
+            directory: scratch,
+        },
+        before,
+    ))
 }
 
 pub(crate) type Fingerprint = Vec<Option<[u8; 32]>>;
@@ -174,7 +234,7 @@ pub(crate) fn fingerprint(path: &Path) -> Result<Fingerprint, String> {
                 result.push(Some(digest.finalize().into()));
             }
             Ok(_) => {
-                return Err("Database evidence is not a regular file; originals preserved".into())
+                return Err("Database evidence is not a regular file; originals preserved".into());
             }
             Err(error) if error.kind() == std::io::ErrorKind::NotFound => result.push(None),
             Err(error) => return Err(error.to_string()),
@@ -209,24 +269,6 @@ fn create(root: &Path, path: &Path) -> Result<(), String> {
         .persist_noclobber(path)
         .map_err(|e| e.to_string())?;
     crate::files::sync_directory(root)
-}
-
-// Mark initialized
-pub(crate) fn mark_initialized(root: &Path) -> Result<(), String> {
-    let marker = root.join(INITIALIZED_MARKER);
-    if !marker.exists() {
-        let mut options = fs::OpenOptions::new();
-        options.write(true).create_new(true);
-        #[cfg(unix)]
-        {
-            use std::os::unix::fs::OpenOptionsExt;
-            options.mode(0o600);
-        }
-        let file = options.open(marker).map_err(|e| e.to_string())?;
-        file.sync_all().map_err(|e| e.to_string())?;
-        crate::files::sync_directory(root)?;
-    }
-    Ok(())
 }
 
 // Configure for the current operation
@@ -273,17 +315,16 @@ fn initialize(conn: &mut Connection) -> Result<(), String> {
     )
     .map_err(|e| e.to_string())?;
     tx.execute(
-        "INSERT INTO database_metadata VALUES('contract','current-v1')",
+        "INSERT INTO database_metadata VALUES('contract','settings-v3'),('settings_installation','')",
         [],
     )
     .map_err(|e| e.to_string())?;
     for domain in Domain::ALL {
         tx.execute_batch(&format!("CREATE TABLE {}(key TEXT PRIMARY KEY NOT NULL CHECK(length(CAST(key AS BLOB)) BETWEEN 1 AND 1024),payload TEXT NOT NULL CHECK(json_valid(payload) AND length(CAST(payload AS BLOB)) <= {}),revision INTEGER NOT NULL CHECK(revision>0)) STRICT;",domain.table(),crate::records::MAX_RECORD_BYTES)).map_err(|e|e.to_string())?;
     }
-    tx.execute_batch("CREATE TABLE plugin_storage_namespaces(plugin_id TEXT NOT NULL,namespace TEXT NOT NULL,generation TEXT NOT NULL,revision TEXT NOT NULL,PRIMARY KEY(plugin_id,namespace)) STRICT;
-        CREATE TABLE plugin_storage_records(plugin_id TEXT NOT NULL,namespace TEXT NOT NULL,key TEXT NOT NULL,value TEXT NOT NULL CHECK(json_valid(value)),encoded_bytes INTEGER NOT NULL CHECK(encoded_bytes>=0),PRIMARY KEY(plugin_id,namespace,key),FOREIGN KEY(plugin_id,namespace) REFERENCES plugin_storage_namespaces(plugin_id,namespace) ON DELETE CASCADE) STRICT;
-        CREATE TABLE plugin_storage_receipts(plugin_id TEXT NOT NULL,namespace TEXT NOT NULL,operation_id TEXT NOT NULL,digest TEXT NOT NULL,generation TEXT NOT NULL,revision TEXT NOT NULL,result TEXT NOT NULL CHECK(json_valid(result)),created_ms INTEGER NOT NULL,PRIMARY KEY(plugin_id,namespace,operation_id),FOREIGN KEY(plugin_id,namespace) REFERENCES plugin_storage_namespaces(plugin_id,namespace) ON DELETE CASCADE) STRICT;
-        CREATE INDEX plugin_storage_receipts_created ON plugin_storage_receipts(plugin_id,created_ms);").map_err(|e|e.to_string())?;
+    crate::plugin_settings::initialize(&tx)?;
+    crate::plugin_health::create(&tx)?;
+    crate::plugin_installations::initialize(&tx)?;
     tx.pragma_update(None, "application_id", APPLICATION_ID)
         .map_err(|e| e.to_string())?;
     tx.pragma_update(None, "user_version", SCHEMA_VERSION)
@@ -303,10 +344,15 @@ pub fn validate(conn: &Connection) -> Result<(), String> {
         return Err("Configuration database belongs to a different application or has not completed initialization; data preserved".into());
     }
     if version != SCHEMA_VERSION {
-        return Err(format!("Unsupported configuration database schema {version}; expected {SCHEMA_VERSION}. Data preserved."));
+        return Err(format!(
+            "Unsupported configuration database schema {version}; expected {SCHEMA_VERSION}. Data preserved."
+        ));
     }
     let mut expected = Connection::open_in_memory().map_err(|e| e.to_string())?;
     initialize(&mut expected)?;
+    if crate::permissions::installed(conn)? {
+        crate::permissions::migrate(&expected)?;
+    }
     // Read the database schema entries
     fn schema_rows(connection: &Connection) -> Result<Vec<SchemaObject>, String> {
         let mut statement = connection
@@ -333,7 +379,7 @@ pub fn validate(conn: &Connection) -> Result<(), String> {
             |r| r.get(0),
         )
         .ok();
-    if total != 3 || contract.as_deref() != Some("current-v1") {
+    if total != 4 || contract.as_deref() != Some("settings-v3") {
         return Err("Unsupported configuration database contract; original preserved".into());
     }
     let integrity: String = conn
@@ -356,12 +402,12 @@ pub fn validate(conn: &Connection) -> Result<(), String> {
             "Configuration database has invalid foreign-key references; data preserved".into(),
         );
     }
-    for name in Domain::ALL.into_iter().map(Domain::table).chain([
-        "database_metadata",
-        "plugin_storage_namespaces",
-        "plugin_storage_records",
-        "plugin_storage_receipts",
-    ]) {
+    crate::plugin_health::validate(conn)?;
+    for name in Domain::ALL
+        .into_iter()
+        .map(Domain::table)
+        .chain(["database_metadata"])
+    {
         let exists: bool = conn
             .query_row(
                 "SELECT EXISTS(SELECT 1 FROM sqlite_schema WHERE type='table' AND name=?1)",
@@ -375,15 +421,7 @@ pub fn validate(conn: &Connection) -> Result<(), String> {
             ));
         }
     }
-    let generation: String = conn
-        .query_row(
-            "SELECT value FROM database_metadata WHERE key='storage_generation'",
-            [],
-            |r| r.get(0),
-        )
-        .map_err(|_| "Configuration database generation is missing".to_string())?;
-    uuid::Uuid::parse_str(&generation)
-        .map_err(|_| "Configuration database generation is invalid".to_string())?;
+    persisted_generation(conn)?;
     let revision: String = conn
         .query_row(
             "SELECT value FROM database_metadata WHERE key='commit_sequence'",
@@ -395,4 +433,18 @@ pub fn validate(conn: &Connection) -> Result<(), String> {
         return Err("Configuration database commit sequence is invalid".into());
     }
     Ok(())
+}
+
+/// The durable restore/reset identity of this database, read on the caller's connection.
+pub fn persisted_generation(conn: &Connection) -> Result<String, String> {
+    let generation: String = conn
+        .query_row(
+            "SELECT value FROM database_metadata WHERE key='storage_generation'",
+            [],
+            |r| r.get(0),
+        )
+        .map_err(|_| "Configuration database generation is missing".to_string())?;
+    uuid::Uuid::parse_str(&generation)
+        .map_err(|_| "Configuration database generation is invalid".to_string())?;
+    Ok(generation)
 }

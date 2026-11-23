@@ -76,7 +76,9 @@ fn sqlite_busy_has_a_bounded_failure_and_accepts_writes_after_release() {
     storage
         .write_json(Domain::LocalPreferences, "kept", &42, 64)
         .unwrap();
-    let outside = rusqlite::Connection::open(storage.root().join("manager.sqlite3")).unwrap();
+    let outside =
+        rusqlite::Connection::open(crate::database_path(storage.root(), "manager.sqlite3"))
+            .unwrap();
     outside.execute_batch("BEGIN IMMEDIATE").unwrap();
     let start = std::time::Instant::now();
     let error = storage
@@ -183,7 +185,7 @@ fn legacy_data_is_preserved_without_import() {
         .unwrap()
         .is_none());
     assert_eq!(std::fs::read(path).unwrap(), b"legacy source");
-    assert!(dir.path().join(DATABASE_NAME).is_file());
+    assert!(crate::database_path(dir.path(), DATABASE_NAME).is_file());
 }
 
 #[test]
@@ -196,14 +198,14 @@ fn missing_previously_initialized_database_is_fresh_and_preserves_other_files() 
         .unwrap();
     let backup = storage.backup(root.join("saved.sqlite3")).unwrap();
     drop(storage);
-    std::fs::remove_file(root.join(DATABASE_NAME)).unwrap();
+    std::fs::remove_file(crate::database_path(&root, DATABASE_NAME)).unwrap();
     std::fs::write(root.join("desktop-settings.json"), b"legacy source").unwrap();
     for name in [
         "manager.sqlite3-journal",
         "manager.sqlite3-wal",
         "manager.sqlite3-shm",
     ] {
-        std::fs::write(root.join(name), name).unwrap();
+        std::fs::write(crate::database_path(&root, name), name).unwrap();
     }
 
     let storage = Storage::open(root.clone()).unwrap();
@@ -240,7 +242,8 @@ fn missing_previously_initialized_database_is_fresh_and_preserves_other_files() 
 // Verify corrupt and foreign databases are preserved
 fn corrupt_and_foreign_databases_are_preserved() {
     let dir = tempfile::tempdir().unwrap();
-    let path = dir.path().join(DATABASE_NAME);
+    let path = crate::database_path(dir.path(), DATABASE_NAME);
+    crate::prepare_database_layout(dir.path()).unwrap();
     std::fs::write(&path, b"invalid sqlite contents").unwrap();
     assert!(Storage::open(dir.path().into()).is_err());
     assert_eq!(std::fs::read(&path).unwrap(), b"invalid sqlite contents");
@@ -267,11 +270,14 @@ fn newer_schema_is_not_modified_or_downgraded() {
         })
         .unwrap();
     drop(storage);
-    let before = std::fs::read(root.join(DATABASE_NAME)).unwrap();
+    let before = std::fs::read(crate::database_path(&root, DATABASE_NAME)).unwrap();
     assert!(Storage::open(root.clone())
         .unwrap_err()
         .contains("Unsupported"));
-    assert_eq!(std::fs::read(root.join(DATABASE_NAME)).unwrap(), before);
+    assert_eq!(
+        std::fs::read(crate::database_path(&root, DATABASE_NAME)).unwrap(),
+        before
+    );
 }
 
 #[test]
@@ -503,7 +509,30 @@ fn rejected_restore_keeps_current_database_and_backup_cannot_replace_live_file()
             .unwrap(),
         Some(json!(2))
     );
-    assert!(storage.backup(storage.root().join(DATABASE_NAME)).is_err());
+    assert!(storage
+        .backup(crate::database_path(storage.root(), DATABASE_NAME))
+        .is_err());
+    for name in [
+        DATABASE_NAME,
+        "manager.sqlite3-journal",
+        "cache.sqlite3",
+        "datastore.sqlite3",
+    ] {
+        assert!(
+            crate::vault::check_transfer_path(storage.root(), &storage.root().join(name)).is_err()
+        );
+    }
+    for name in [
+        crate::vault::FILE_NAME,
+        "datastore.sqlite3-journal",
+        ".keystore-reset-v1.json",
+        ".keystore-stage-private",
+    ] {
+        let file = storage.root().join(name);
+        std::fs::write(&file, b"fixture").unwrap();
+        assert!(storage.backup(file.clone()).is_err());
+        assert_eq!(std::fs::read(file).unwrap(), b"fixture");
+    }
 }
 
 #[test]
@@ -549,7 +578,10 @@ fn backup_validation_precedes_publication_and_retention_is_bounded() {
         assert!(point.path.exists());
         assert!(storage.backup_paths().unwrap().len() <= 32);
     }
-    assert_eq!(storage.stats().unwrap().recovery_snapshots.len(), 32);
+    let snapshots = storage.stats().unwrap().recovery_snapshots;
+    let encrypted = installation_key::recovery::backups(storage.root()).unwrap();
+    assert!(!snapshots.is_empty() && !encrypted.is_empty());
+    assert_eq!(snapshots.len() + encrypted.len(), 32);
 }
 
 #[test]
@@ -599,6 +631,16 @@ fn subprocess_helper() {
     let _: Result<(), String> = storage.run(|conn| {
         conn.execute_batch("PRAGMA cache_size=1; BEGIN IMMEDIATE;")
             .unwrap();
+        conn.execute_batch("PRAGMA settings_vault.cache_size=1")
+            .unwrap();
+        write_json(
+            conn,
+            Domain::PluginGlobals,
+            "interrupted",
+            &json!({"secret":"uncommitted-private-token".repeat(2048)}),
+            128 * 1024,
+        )
+        .unwrap();
         for n in 0..100 {
             write_json(
                 conn,
@@ -634,6 +676,14 @@ fn other_process_is_excluded_and_interrupted_transaction_recovers() {
     storage
         .write_json(Domain::Profiles, "preserved", &json!(true), 100)
         .unwrap();
+    storage
+        .write_json(
+            Domain::PluginGlobals,
+            "interrupted",
+            &json!({"secret":"original-private-token"}),
+            1024,
+        )
+        .unwrap();
     drop(storage);
     let interrupted = std::process::Command::new(&executable)
         .args(["--exact", "tests::subprocess_helper"])
@@ -641,8 +691,28 @@ fn other_process_is_excluded_and_interrupted_transaction_recovers() {
         .output()
         .unwrap();
     assert_eq!(interrupted.status.code(), Some(41));
-    assert!(root.join("manager.sqlite3-journal").exists());
+    assert!(crate::database_path(&root, "manager.sqlite3-journal").exists());
+    for f in [
+        "manager.sqlite3",
+        "manager.sqlite3-journal",
+        "datastore.sqlite3",
+        "datastore.sqlite3-journal",
+    ] {
+        let bytes = std::fs::read(crate::database_path(&root, f)).unwrap();
+        for secret in ["original-private-token", "uncommitted-private-token"] {
+            assert!(
+                !bytes.windows(secret.len()).any(|s| s == secret.as_bytes()),
+                "{f}"
+            );
+        }
+    }
     let storage = Storage::open(root).unwrap();
+    assert_eq!(
+        storage
+            .read_json::<Value>(Domain::PluginGlobals, "interrupted", 1024)
+            .unwrap(),
+        Some(json!({"secret":"original-private-token"}))
+    );
     assert_eq!(
         storage
             .list_json::<Value>(Domain::Profiles, 1000, 1024 * 1024)
@@ -670,14 +740,14 @@ fn unsupported_exact_schema_and_contract_are_rejected_without_touching_files() {
             .run(move |connection| connection.execute_batch(&sql).map_err(|e| e.to_string()))
             .unwrap();
         drop(storage);
-        let original = std::fs::read(root.join(DATABASE_NAME)).unwrap();
+        let original = std::fs::read(crate::database_path(&root, DATABASE_NAME)).unwrap();
         assert!(Storage::open(root.clone()).is_err(), "{modification}");
         assert_eq!(
-            std::fs::read(root.join(DATABASE_NAME)).unwrap(),
+            std::fs::read(crate::database_path(&root, DATABASE_NAME)).unwrap(),
             original,
             "{modification}"
         );
-        assert!(!root.join(format!("{DATABASE_NAME}-journal")).exists());
+        assert!(!crate::database_path(&root, &format!("{DATABASE_NAME}-journal")).exists());
     }
 }
 
@@ -687,7 +757,8 @@ fn rejected_wal_and_domain_payload_preserve_primary_and_sidecars() {
     let (_dir, storage) = store();
     let root = storage.root().to_owned();
     drop(storage);
-    let connection = rusqlite::Connection::open(root.join(DATABASE_NAME)).unwrap();
+    let connection =
+        rusqlite::Connection::open(crate::database_path(&root, DATABASE_NAME)).unwrap();
     connection.execute_batch("PRAGMA journal_mode=WAL; UPDATE database_metadata SET value='unsupported' WHERE key='contract';").unwrap();
     let names = [
         DATABASE_NAME.to_owned(),
@@ -696,32 +767,39 @@ fn rejected_wal_and_domain_payload_preserve_primary_and_sidecars() {
     ];
     let before: Vec<_> = names
         .iter()
-        .map(|name| std::fs::read(root.join(name)).unwrap())
+        .map(|name| std::fs::read(crate::database_path(&root, name)).unwrap())
         .collect();
     assert!(Storage::open(root.clone()).is_err());
     for (name, bytes) in names.iter().zip(before) {
-        assert_eq!(std::fs::read(root.join(name)).unwrap(), bytes, "{name}");
+        assert_eq!(
+            std::fs::read(crate::database_path(&root, name)).unwrap(),
+            bytes,
+            "{name}"
+        );
     }
     drop(connection);
 
     let (_dir, storage) = store();
     let root = storage.root().to_owned();
     drop(storage);
-    let before = std::fs::read(root.join(DATABASE_NAME)).unwrap();
+    let before = std::fs::read(crate::database_path(&root, DATABASE_NAME)).unwrap();
     assert!(Storage::open_validated(root.clone(), |_| Err("unsupported payload".into())).is_err());
-    assert_eq!(std::fs::read(root.join(DATABASE_NAME)).unwrap(), before);
-    assert!(!root.join(format!("{DATABASE_NAME}-journal")).exists());
+    assert_eq!(
+        std::fs::read(crate::database_path(&root, DATABASE_NAME)).unwrap(),
+        before
+    );
+    assert!(!crate::database_path(&root, &format!("{DATABASE_NAME}-journal")).exists());
 }
 
 #[test]
 // Verify missing primary with recovery evidence initializes without import
 fn missing_primary_with_recovery_evidence_initializes_without_import() {
     let root = tempfile::tempdir().unwrap();
-    std::fs::create_dir(root.path().join("recovery")).unwrap();
-    let evidence = root.path().join("recovery/prior.sqlite3");
+    std::fs::create_dir_all(crate::recovery_directory(root.path())).unwrap();
+    let evidence = crate::recovery_directory(root.path()).join("prior.sqlite3");
     std::fs::write(&evidence, b"preserve recovery evidence").unwrap();
     assert!(Storage::open(root.path().into()).is_ok());
-    assert!(root.path().join(DATABASE_NAME).is_file());
+    assert!(crate::database_path(root.path(), DATABASE_NAME).is_file());
     assert_eq!(
         std::fs::read(evidence).unwrap(),
         b"preserve recovery evidence"
@@ -734,7 +812,7 @@ fn external_change_during_preflight_is_detected_before_original_open() {
     let (_dir, storage) = store();
     let root = storage.root().to_owned();
     drop(storage);
-    let primary = root.join(DATABASE_NAME);
+    let primary = crate::database_path(&root, DATABASE_NAME);
     let changed = primary.clone();
     let result = Storage::open_validated(root, move |_| {
         std::fs::write(&changed, b"external writer changed the primary").map_err(|e| e.to_string())
@@ -830,12 +908,13 @@ fn startup_failure_and_panic_finish_releasing_ownership_before_return() {
 fn repeated_missing_primary_quarantines_never_clobber_prior_evidence() {
     let root = tempfile::tempdir().unwrap();
     let name = "manager.sqlite3-wal";
+    crate::prepare_database_layout(root.path()).unwrap();
     for payload in [b"first".as_slice(), b"second".as_slice()] {
-        std::fs::write(root.path().join(name), payload).unwrap();
+        std::fs::write(crate::database_path(root.path(), name), payload).unwrap();
         let storage = Storage::open(root.path().into()).unwrap();
-        assert!(!root.path().join(name).exists());
+        assert!(!crate::database_path(root.path(), name).exists());
         drop(storage);
-        std::fs::remove_file(root.path().join(DATABASE_NAME)).unwrap();
+        std::fs::remove_file(crate::database_path(root.path(), DATABASE_NAME)).unwrap();
     }
     let mut preserved: Vec<_> = std::fs::read_dir(root.path())
         .unwrap()
@@ -858,10 +937,15 @@ fn repeated_missing_primary_quarantines_never_clobber_prior_evidence() {
 fn missing_primary_preserves_orphan_symlink_without_touching_target() {
     use std::os::unix::fs::symlink;
     let root = tempfile::tempdir().unwrap();
+    crate::prepare_database_layout(root.path()).unwrap();
     let outside = tempfile::tempdir().unwrap();
     let target = outside.path().join("journal");
     std::fs::write(&target, b"untouched target").unwrap();
-    symlink(&target, root.path().join("manager.sqlite3-journal")).unwrap();
+    symlink(
+        &target,
+        crate::database_path(root.path(), "manager.sqlite3-journal"),
+    )
+    .unwrap();
     let storage = Storage::open(root.path().into()).unwrap();
     let preserved = std::fs::read_dir(root.path())
         .unwrap()
@@ -889,11 +973,14 @@ fn pending_recovery_with_existing_primary_remains_fenced() {
     let root = storage.root().to_owned();
     drop(storage);
     std::fs::write(root.join(crate::schema::RECOVERY_PENDING), b"pending").unwrap();
-    let original = std::fs::read(root.join(DATABASE_NAME)).unwrap();
+    let original = std::fs::read(crate::database_path(&root, DATABASE_NAME)).unwrap();
     assert!(Storage::open(root.clone())
         .unwrap_err()
         .contains("recovery did not finish"));
-    assert_eq!(std::fs::read(root.join(DATABASE_NAME)).unwrap(), original);
+    assert_eq!(
+        std::fs::read(crate::database_path(&root, DATABASE_NAME)).unwrap(),
+        original
+    );
 }
 
 #[test]
@@ -904,11 +991,11 @@ fn independent_backup_inventory_reads_without_primary_and_across_generations() {
     storage
         .write_json(Domain::ManagerPreferences, "prior", &true, 64)
         .unwrap();
-    std::fs::create_dir_all(root.path().join("recovery")).unwrap();
-    let backup = root.path().join("recovery/prior.sqlite3");
+    std::fs::create_dir_all(crate::recovery_directory(root.path())).unwrap();
+    let backup = crate::recovery_directory(root.path()).join("prior.sqlite3");
     storage.backup(backup.clone()).unwrap();
     drop(storage);
-    std::fs::remove_file(root.path().join(DATABASE_NAME)).unwrap();
+    std::fs::remove_file(crate::database_path(root.path(), DATABASE_NAME)).unwrap();
     let inspect = || {
         crate::inspect_recovery_backups(root.path(), 10, |name, _, conn| {
             Ok((
@@ -921,7 +1008,7 @@ fn independent_backup_inventory_reads_without_primary_and_across_generations() {
     let (before, warnings) = inspect();
     assert!(warnings.is_empty());
     assert!(before.contains(&("prior.sqlite3".into(), Some(true))));
-    assert!(!root.path().join(DATABASE_NAME).exists());
+    assert!(!crate::database_path(root.path(), DATABASE_NAME).exists());
     let fresh = Storage::open(root.path().into()).unwrap();
     assert_eq!(inspect().0, before);
     drop(fresh);
@@ -931,12 +1018,16 @@ fn independent_backup_inventory_reads_without_primary_and_across_generations() {
         .unwrap()
         .0
         .is_empty());
-    std::fs::write(root.path().join("recovery/prior.sqlite3-wal"), b"orphan").unwrap();
+    std::fs::write(
+        crate::recovery_directory(root.path()).join("prior.sqlite3-wal"),
+        b"orphan",
+    )
+    .unwrap();
     let (found, warnings) = inspect();
     assert!(!found.iter().any(|(name, _)| name == "prior.sqlite3"));
     assert!(warnings.iter().any(|w| w.contains("sidecars")));
     assert_eq!(
-        std::fs::read(root.path().join("recovery/prior.sqlite3-wal")).unwrap(),
+        std::fs::read(crate::recovery_directory(root.path()).join("prior.sqlite3-wal")).unwrap(),
         b"orphan"
     );
 }
@@ -951,7 +1042,7 @@ fn fresh_primary_retention_counts_prior_generation_backups() {
         .unwrap();
     let mut originals = Vec::new();
     for index in 0..5 {
-        let path = root.path().join(format!("recovery/old-{index}.sqlite3"));
+        let path = crate::recovery_directory(root.path()).join(format!("old-{index}.sqlite3"));
         storage.backup(path.clone()).unwrap();
         originals.push((path.clone(), std::fs::read(path).unwrap()));
     }
@@ -962,7 +1053,7 @@ fn fresh_primary_retention_counts_prior_generation_backups() {
     for (path, _) in &originals {
         std::fs::write(path, &source).unwrap();
     }
-    std::fs::remove_file(root.path().join(DATABASE_NAME)).unwrap();
+    std::fs::remove_file(crate::database_path(root.path(), DATABASE_NAME)).unwrap();
     let fresh = Storage::open(root.path().into()).unwrap();
     fresh
         .write_json(Domain::ManagerPreferences, "new", &true, 64)
@@ -972,7 +1063,7 @@ fn fresh_primary_retention_counts_prior_generation_backups() {
     }
     drop(fresh);
     assert!(originals.iter().all(|(path, _)| !path.exists()));
-    let count = std::fs::read_dir(root.path().join("recovery"))
+    let count = std::fs::read_dir(crate::recovery_directory(root.path()))
         .unwrap()
         .count();
     assert!(count <= 32);
@@ -994,7 +1085,7 @@ fn recovery_retention_detects_either_budget_limit() {
 // Verify successful snapshot reports incomplete cleanup as a warning
 fn successful_snapshot_reports_incomplete_cleanup_as_a_warning() {
     let (_root, storage) = store();
-    let mut deep = storage.root().join("recovery");
+    let mut deep = crate::recovery_directory(storage.root());
     for _ in 0..66 {
         deep.push("nested");
     }
@@ -1007,4 +1098,352 @@ fn successful_snapshot_reports_incomplete_cleanup_as_a_warning() {
         .last_backup_error
         .unwrap()
         .contains("cleanup deferred"));
+}
+
+#[test]
+fn deadline_worker_parks_clean_reopens_admission_and_flushes_on_shutdown() {
+    use std::sync::atomic::Ordering;
+    let (_dir, storage) = store();
+    let counts = storage.inner.counts.clone();
+    storage.run(|_| Ok(())).unwrap();
+    // Real channel evidence across the former one-second polling interval;
+    // the separate virtual-clock test covers a full minute without sleeping.
+    std::thread::sleep(Duration::from_millis(1100));
+    assert_eq!(counts.timers.load(Ordering::SeqCst), 0);
+    assert_eq!(counts.jobs.load(Ordering::SeqCst), 1);
+    assert_eq!(counts.backups.load(Ordering::SeqCst), 0);
+    let maintenance = storage.maintenance().unwrap();
+    drop(maintenance);
+    storage
+        .write_json(Domain::ManagerPreferences, "deadline-test", &true, 32)
+        .unwrap();
+    assert_eq!(counts.wakes.load(Ordering::SeqCst), 1);
+    let root = storage.root().to_owned();
+    drop(storage);
+    assert_eq!(counts.backups.load(Ordering::SeqCst), 1);
+    let reopened = Storage::open(root).unwrap();
+    let paths = reopened.backup_paths().unwrap();
+    assert_eq!(paths.len(), 1);
+    assert_eq!(
+        reopened
+            .read_snapshot(&paths[0], |conn| read_json::<bool>(
+                conn,
+                Domain::ManagerPreferences,
+                "deadline-test",
+                32
+            ))
+            .unwrap(),
+        Some(true)
+    );
+}
+
+#[test]
+fn maintenance_reopen_with_full_channel_keeps_a_queued_wake() {
+    let (_dir, storage) = store();
+    let maintenance = storage.maintenance().unwrap();
+    let (started, start) = mpsc::channel();
+    let (release, released) = mpsc::channel();
+    storage
+        .inner
+        .sender
+        .send(Message::Job(Box::new(move |_| {
+            started.send(()).unwrap();
+            released.recv().unwrap();
+        })))
+        .unwrap();
+    start.recv_timeout(Duration::from_secs(2)).unwrap();
+    for _ in 0..MAX_PENDING_OPERATIONS {
+        storage.inner.sender.try_send(Message::Wake).unwrap();
+    }
+    drop(maintenance);
+    assert!(storage.inner.gate.lock().unwrap().mode == Mode::Open);
+    release.send(()).unwrap();
+    let (done, completed) = mpsc::channel();
+    storage
+        .inner
+        .sender
+        .send(Message::Job(Box::new(move |_| {
+            done.send(()).unwrap();
+        })))
+        .unwrap();
+    completed.recv_timeout(Duration::from_secs(2)).unwrap();
+    assert_eq!(
+        storage
+            .inner
+            .counts
+            .wakes
+            .load(std::sync::atomic::Ordering::SeqCst),
+        MAX_PENDING_OPERATIONS
+    );
+}
+
+#[test]
+fn reordering_identical_page_bindings_invalidates_open_settings_editors() {
+    let (_temp, storage) = store();
+    let action = json!({"kind":"plugin","action_id":"action","plugin_id":"vendor","settings":{"text":"value"}});
+    let page = |id: &str| json!({"id":id, "bindings":{"key-1":{"action":action}}});
+    let save = |pages: Value| {
+        storage
+            .write_json(Domain::Profiles, "profile", &json!({"pages":pages}), 8192)
+            .unwrap()
+    };
+    save(json!([page("one"), page("two")]));
+    let original = storage
+        .run(|db| plugin_settings::settings(db, None))
+        .unwrap();
+    assert_eq!(original.len(), 2);
+    assert_ne!(original[0].id, original[1].id);
+    save(json!([page("two"), page("one")]));
+    storage
+        .run(move |db| {
+            for entry in original {
+                assert!(plugin_settings::setting(db, &entry.id).is_err());
+            }
+            assert_eq!(plugin_settings::settings(db, None)?.len(), 2);
+            Ok(())
+        })
+        .unwrap();
+}
+
+#[test]
+fn ordinary_restore_leaves_live_sdk_datastore_but_rotates_main_epoch() {
+    let (dir, storage) = store();
+    let source = dir.path().join("ordinary.sqlite3");
+    let snapshot = storage.backup(source.clone()).unwrap();
+    storage
+        .run(|db| {
+            db.execute_batch(
+                "INSERT INTO settings_vault.plugin_storage_generations VALUES('later',1);",
+            )
+            .map_err(|error| error.to_string())
+        })
+        .unwrap();
+    let path = crate::database_path(storage.root(), crate::installation_key::NAME);
+    let root = storage.root().to_owned();
+    drop(storage);
+    let before = std::fs::read(&path).unwrap();
+    let report = Storage::recover(root, source, |_| Ok(()), |_, _| Ok(vec![])).unwrap();
+    assert_ne!(
+        report.restored.storage_generation,
+        snapshot.storage_generation
+    );
+    assert_eq!(before, std::fs::read(&path).unwrap());
+}
+
+#[test]
+fn settings_backup_round_trip_is_portable_and_authenticates_before_restore() {
+    let (dir, storage) = store();
+    let secret = "transfer-private-token-8ba";
+    let plugin = json!({"kind":"plugin","plugin_id":"vendor","action_id":"vendor.action","settings":[secret,false,0,null]});
+    let nested = json!({"name":"Nested","action":{"kind":"macro","actions":[plugin.clone(),plugin.clone()]}});
+    let scopes = [
+        (Domain::PluginGlobals, json!([secret, 0])),
+        (
+            Domain::PluginDefaults,
+            json!({"vendor.action":false,"nested":[secret]}),
+        ),
+        (Domain::SavedMacros, nested),
+    ];
+    for (domain, value) in &scopes {
+        storage.write_json(*domain, "vendor", value, 8192).unwrap();
+    }
+    let ids = storage
+        .run(|db| plugin_settings::settings(db, None))
+        .unwrap();
+    assert_eq!(ids.len(), 5);
+    assert_ne!(ids[3].id, ids[4].id);
+    storage.transaction(move |db| {
+        db.execute_batch("INSERT INTO settings_vault.plugin_storage_generations VALUES('vendor',7);
+            INSERT INTO settings_vault.plugin_storage_namespaces VALUES('vendor','state','17',X'ffffffffffffffff');
+            INSERT INTO settings_vault.plugin_storage_receipts VALUES('vendor','state','transaction','digest','17',X'ffffffffffffffff',1);").map_err(|e| e.to_string())?;
+        let encoded = json!(secret).to_string();
+        db.execute("INSERT INTO settings_vault.plugin_storage_records VALUES('vendor','state','key',?1,?2)", rusqlite::params![encoded, 3 + encoded.len()]).map_err(|e| e.to_string())?;
+        Ok(())
+    }).unwrap();
+    let ordinary = dir.path().join("ordinary.sqlite3");
+    storage.backup(ordinary.clone()).unwrap();
+    let ordinary_db = crate::maintenance::open_snapshot(&ordinary).unwrap();
+    assert!(!crate::plugin_storage_attached(&ordinary_db).unwrap());
+    assert!(ordinary_db
+        .prepare("SELECT * FROM main.plugin_storage_records")
+        .is_err());
+    let transfer = dir.path().join("encrypted.sdmbackup");
+    storage
+        .backup_with_settings(&transfer, "portable password")
+        .unwrap();
+    for path in [
+        ordinary,
+        transfer.clone(),
+        crate::database_path(storage.root(), "manager.sqlite3"),
+        crate::database_path(storage.root(), "datastore.sqlite3"),
+    ] {
+        assert!(!std::fs::read(path)
+            .unwrap()
+            .windows(secret.len())
+            .any(|s| s == secret.as_bytes()));
+    }
+    let target = dir.path().join("new installation");
+    let restore = |password| {
+        Storage::recover_with_settings(
+            target.clone(),
+            &transfer,
+            password,
+            |_| Ok(()),
+            |_, _| Ok(vec![]),
+        )
+    };
+    assert!(restore("wrong password").unwrap_err().contains("incorrect"));
+    assert!(!target.exists());
+    let (other, destination) = store();
+    destination
+        .run(|db| {
+            db.execute_batch(
+                "INSERT INTO settings_vault.plugin_storage_generations VALUES('destination',4);",
+            )
+            .map_err(|e| e.to_string())
+        })
+        .unwrap();
+    let path = crate::database_path(destination.root(), crate::installation_key::NAME);
+    let destination_root = destination.root().to_owned();
+    drop(destination);
+    let before = std::fs::read(&path).unwrap();
+    assert!(Storage::recover_with_settings(
+        destination_root,
+        &transfer,
+        "portable password",
+        |_| Ok(()),
+        |_, _| Err("reject reconcile".into()),
+    )
+    .unwrap_err()
+    .contains("reject reconcile"));
+    assert_eq!(before, std::fs::read(&path).unwrap());
+    assert!(other.path().exists());
+    restore("portable password").unwrap();
+    let reopened = Storage::open(target).unwrap();
+    reopened.run(move |db| {
+        let (generation, revision, value, receipts): (i64, [u8; 8], String, i64) = db.query_row(
+            "SELECT g.generation,n.revision,r.value,(SELECT count(*) FROM settings_vault.plugin_storage_receipts)
+                FROM settings_vault.plugin_storage_generations g
+                JOIN settings_vault.plugin_storage_namespaces n USING(plugin_id)
+                JOIN settings_vault.plugin_storage_records r USING(plugin_id,namespace)",
+            [], |row| Ok((row.get(0)?,row.get(1)?,row.get(2)?,row.get(3)?)),
+        ).map_err(|e| e.to_string())?;
+        assert_eq!((generation,u64::from_be_bytes(revision),value,receipts),(7,u64::MAX,json!(secret).to_string(),0));
+        Ok(())
+    }).unwrap();
+    for (domain, value) in scopes {
+        assert_eq!(
+            reopened.read_json::<Value>(domain, "vendor", 8192).unwrap(),
+            Some(value)
+        );
+    }
+}
+
+#[test]
+#[ignore = "Uses the current OS credential store and removes only the generated fixture credentials"]
+fn native_installation_credentials_survive_restart_and_distinguish_fresh_installs() {
+    assert!(std::env::var_os(installation_key::KEY_FILE).is_none());
+    let dir = tempfile::tempdir().unwrap();
+    let root = dir.path().join("config");
+    let credential = |root: &std::path::Path| {
+        let data = std::fs::read(crate::database_path(root, "datastore.sqlite3")).unwrap();
+        keyring::Entry::new(
+            "app.streamdockmanager.plugin-settings",
+            &hex::encode(&data[..16]),
+        )
+        .unwrap()
+    };
+    let first = Storage::open(root.clone()).unwrap();
+    first
+        .write_json(
+            Domain::PluginGlobals,
+            "fixture",
+            &json!({"kept":true}),
+            1024,
+        )
+        .unwrap();
+    drop(first);
+    let old = credential(&root);
+    drop(Storage::open(root.clone()).unwrap());
+    let preserved = dir.path().join("first");
+    std::fs::rename(&root, &preserved).unwrap();
+    drop(Storage::open(root.clone()).unwrap());
+    let new = credential(&root);
+    assert!(
+        zeroize::Zeroizing::new(old.get_password().unwrap())
+            != zeroize::Zeroizing::new(new.get_password().unwrap())
+    );
+    new.delete_credential().unwrap();
+    let before = std::fs::read(crate::database_path(&root, "datastore.sqlite3")).unwrap();
+    assert!(Storage::open(root.clone())
+        .unwrap_err()
+        .contains("installation key"));
+    assert_eq!(
+        std::fs::read(crate::database_path(&root, "datastore.sqlite3")).unwrap(),
+        before
+    );
+    old.delete_credential().unwrap();
+}
+
+#[test]
+fn summary_lists_files_without_reading_domains_or_opening_snapshots() {
+    let (_dir, storage) = store();
+    let empty = storage.summary().unwrap();
+    assert!(empty.recovery_files.is_empty());
+    assert!(empty.inventory_error.is_none());
+    let generation = storage.persisted_generation().unwrap();
+    let saved = storage.backup_recovery().unwrap();
+    let recovery = saved.path.parent().unwrap();
+    for n in 1..32 {
+        std::fs::write(recovery.join(format!("fixture-{n}.sqlite3")), b"invalid").unwrap();
+    }
+    let summary = storage.summary().unwrap();
+    assert_eq!(summary.recovery_files.len(), 32);
+    assert!(summary.inventory_error.is_none());
+    let file = summary
+        .recovery_files
+        .iter()
+        .find(|f| saved.path.ends_with(&f.name))
+        .unwrap();
+    assert_eq!(file.bytes, saved.bytes);
+    assert!(file.completed_ms > 0);
+    assert!(storage.stats().is_err());
+    let bad = recovery.join("fixture-1.sqlite3");
+    {
+        let maintenance = storage.maintenance().unwrap();
+        assert!(maintenance.restore(bad.clone(), |_| Ok(())).is_err());
+        maintenance.compact().unwrap();
+    }
+    assert_eq!(std::fs::read(bad).unwrap(), b"invalid");
+    std::fs::create_dir(recovery.join("directory.sqlite3")).unwrap();
+    let compacted = storage.summary().unwrap();
+    assert_eq!(
+        compacted.database_bytes,
+        std::fs::metadata(database_path(storage.root(), DATABASE_NAME))
+            .unwrap()
+            .len()
+    );
+    assert_eq!(compacted.reclaimable_bytes, 0);
+    assert_eq!(compacted.sqlite_version, rusqlite::version());
+    assert_eq!(compacted.recovery_files.len(), 32);
+    assert!(compacted
+        .inventory_error
+        .unwrap()
+        .contains("Recovery inventory"));
+    assert_eq!(storage.persisted_generation().unwrap(), generation);
+    // Fail any attempted scan of this configuration domain on the writer.
+    storage
+        .run(|c| {
+            c.execute_batch("CREATE TEMP VIEW profiles AS SELECT * FROM absent")
+                .map_err(|e| e.to_string())
+        })
+        .unwrap();
+    assert!(storage.stats().unwrap_err().contains("absent"));
+    storage.summary().unwrap();
+    storage
+        .run(|c| {
+            c.execute_batch("DROP VIEW temp.profiles")
+                .map_err(|e| e.to_string())
+        })
+        .unwrap();
 }

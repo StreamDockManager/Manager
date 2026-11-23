@@ -22,6 +22,7 @@ interface Entry {
     priority: number;
     previewState: number | null;
     sequence: number;
+    signature: string;
 }
 
 // Visual-only ownership: an appearance dialog temporarily overlays the inspector
@@ -39,11 +40,51 @@ let hardwareToken = '';
 let hardwareSignature = '';
 let hardwareUpdatedAt = 0;
 let listenerInstalled = false;
+let palettePreviewActive = false;
+let retryRender = true;
+
+// Only known time-independent inputs may park pixel rendering. Unknown actions,
+// assets/compositions and feedback retain the established one-second fallback.
+function staticPixels(entry: Entry) {
+    const binding = entry.binding;
+    return (
+        ['none', 'hotkey', 'open_url', 'open_path', 'command', 'delay'].includes(
+            binding.action.kind,
+        ) &&
+        !binding.asset &&
+        !binding.composition &&
+        (!binding.feedback || binding.feedback === 'off')
+    );
+}
+function invalidatePixels(event: Event) {
+    select();
+    if (!selected) return;
+    const device = (event as CustomEvent<{ device_id?: string | null }>).detail?.device_id;
+    if (device && device !== selected.deviceId) return;
+    const kind = (event as CustomEvent<{ kind?: string }>).detail?.kind;
+    // Feedback changes pixels, not ownership. Publish the coherent in-flight
+    // frame, then sample again, rather than starving under faster producers.
+    if (kind !== 'plugin-feedback' && kind !== 'live-feedback') generation++;
+    retryRender = true;
+    if (rendering) renderAgain = true;
+    else schedule();
+}
+
+// Palette browsing owns device-wide output. Keep inspector drafts registered but
+// retire their hardware lease and image override until the palette owner dismisses.
+export function suspendLiveActionForPalette(active: boolean) {
+    palettePreviewActive = active;
+    select();
+    const settled = queueHardware();
+    if (!active && entries.size) schedule();
+    return settled;
+}
 
 // Require the preview owner to match the visible editor device, binding and revision
 function current(entry: Entry) {
     const state = app();
     return (
+        !palettePreviewActive &&
         state.route === 'editor' &&
         !state.windowSuspended &&
         !windowCloseOwners.closing &&
@@ -66,6 +107,7 @@ function select() {
     if (selected === next) return;
     selected = next;
     generation++;
+    retryRender = true;
     if (next) {
         const previous = app().liveActionPreview;
         app().liveActionPreview = {
@@ -156,8 +198,10 @@ async function render() {
             binding: entry.binding,
             previewState: entry.previewState,
         });
-        if (wanted === generation && current(entry) && app().liveActionPreview)
+        if (wanted === generation && current(entry) && app().liveActionPreview) {
             app().liveActionPreview = { ...app().liveActionPreview!, image: result.image };
+            retryRender = false;
+        }
     } catch {
         // Keep the last valid visual while a field contains incomplete input
     } finally {
@@ -191,12 +235,34 @@ export function setLiveActionPreview(
 ) {
     const state = app();
     const source = state.control;
-    const surfaceId = source?.feedback_surface || state.controlId;
+    const feedback = source?.feedback_surface;
+    // Match saved surface precedence: touch-panel buttons and explicitly bound
+    // displays are independent, even while their paired encoder is being edited.
+    const independent =
+        feedback &&
+        (state.device?.manifest.capabilities.touch_panel?.button_controls.includes(feedback) ||
+            state.page?.bindings?.[feedback] ||
+            state.snapshot.binding_overrides?.[state.deviceId]?.[feedback]);
+    const surfaceId = (independent ? undefined : feedback) || state.controlId;
     const surface = state.device?.manifest.controls.find((control) => control.id === surfaceId);
     if (!source) {
         void clearLiveActionPreview(owner);
         return;
     }
+    const signature = JSON.stringify([
+        state.bindingAddress(),
+        state.deviceId,
+        state.controlId,
+        surfaceId,
+        state.configurationRevision,
+        state.profile?.id,
+        state.page?.id,
+        binding,
+        options.priority || 0,
+        options.previewState ?? null,
+    ]);
+    const previous = entries.get(owner);
+    if (previous === selected && previous?.signature === signature && current(previous)) return;
     entries.set(owner, {
         owner,
         address: state.bindingAddress(),
@@ -210,15 +276,22 @@ export function setLiveActionPreview(
         priority: options.priority || 0,
         previewState: options.previewState ?? null,
         sequence: ++sequence,
+        signature,
     });
     if (!listenerInstalled) {
         document.addEventListener('visibilitychange', visibilityChanged);
+        if (typeof window !== 'undefined') {
+            window.addEventListener('live-preview-invalidated', invalidatePixels);
+            window.addEventListener('plugin-theme-metadata', invalidatePixels);
+        }
         listenerInstalled = true;
     }
     if (!heartbeat)
         heartbeat = setInterval(() => {
-            // Re-render dynamic built-in/plugin feedback and renew the short hardware lease
-            schedule();
+            select();
+            void queueHardware();
+            // Lease renewal does not require static pixels to be rendered again.
+            if (selected && (retryRender || !staticPixels(selected))) schedule();
         }, 1000);
     schedule();
 }
@@ -231,7 +304,13 @@ export function clearLiveActionPreview(owner: string): Promise<void> {
         timer = undefined;
         clearInterval(heartbeat);
         heartbeat = undefined;
-        if (listenerInstalled) document.removeEventListener('visibilitychange', visibilityChanged);
+        if (listenerInstalled) {
+            document.removeEventListener('visibilitychange', visibilityChanged);
+            if (typeof window !== 'undefined') {
+                window.removeEventListener('live-preview-invalidated', invalidatePixels);
+                window.removeEventListener('plugin-theme-metadata', invalidatePixels);
+            }
+        }
         listenerInstalled = false;
     } else schedule();
     return queueHardware();

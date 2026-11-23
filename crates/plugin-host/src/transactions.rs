@@ -224,6 +224,31 @@ impl PluginHost {
         prepared: PreparedPlugin,
         preserve_enabled: bool,
     ) -> Result<PluginInfo, String> {
+        self.replace_prepared_transaction(prepared, preserve_enabled, None)
+    }
+
+    // Anchor an already reviewed prospective Vault identity in the package transaction
+    pub fn replace_prepared_with_vault(
+        &mut self,
+        mut prepared: PreparedPlugin,
+        identity: &crate::vault_rpc::VaultInstallation,
+    ) -> Result<PluginInfo, String> {
+        if identity.owner != prepared.id
+            || identity.inventory_sha256 != hash_inventory(&prepared.inventory)?
+        {
+            return Err("Vault setup package identity changed".into());
+        }
+        prepared.provenance.get_or_insert_with(|| json!({}))["vault_mode"] = json!("managed");
+        self.replace_prepared_transaction(prepared, true, Some(&identity.token))
+    }
+
+    // Commit replacement and its unique installation token in the owning durable journal
+    fn replace_prepared_transaction(
+        &mut self,
+        mut prepared: PreparedPlugin,
+        preserve_enabled: bool,
+        vault_token: Option<&str>,
+    ) -> Result<PluginInfo, String> {
         if pending(&self.root)? {
             return Err(
                 "Package recovery is pending; restart Manager before another replacement".into(),
@@ -269,7 +294,40 @@ impl PluginHost {
                 return Err("Installation identity index exceeds 4,096 entries".into());
             }
         }
+        if prepared.manifest.permissions.is_some() {
+            prepared.provenance.get_or_insert_with(|| json!({}))["permission_reviewed_inventory"] =
+                json!(hash_inventory(&prepared.inventory)?);
+        }
+        if prepared.manifest.setup_slots.is_some() {
+            prepared.provenance.get_or_insert_with(|| json!({}))["vault_reviewed_inventory"] =
+                json!(hash_inventory(&prepared.inventory)?);
+        }
         let had_old = target.exists();
+        let approvals = prepared.service_review.take();
+        if prepared.manifest.missing_required_services(
+            approvals
+                .as_ref()
+                .map_or(&[], |(_, grants)| grants.as_slice()),
+        ) {
+            return Err("Approve all required Manager permissions before installing".into());
+        }
+        let old_managed = self
+            .provenance(&info.id)
+            .is_some_and(|p| p["vault_mode"] == "managed");
+        // Keep a previously selected managed mode when optional entry access is deferred.
+        // The new installation token makes all former approvals ineligible, even on rollback.
+        if old_managed && prepared.manifest.setup_slots.is_some() {
+            prepared.provenance.get_or_insert_with(|| json!({}))["vault_mode"] = json!("managed");
+        }
+        if vault_token.is_none()
+            && prepared
+                .manifest
+                .setup_slots
+                .as_ref()
+                .is_some_and(|slots| slots.iter().any(|slot| slot.required))
+        {
+            return Err("Vault-dependent package requires trusted install setup".into());
+        }
         let was_enabled = old.is_some_and(|p| {
             if preserve_enabled {
                 self.hub.lock().unwrap().enabled.contains(&p.info.id)
@@ -318,11 +376,7 @@ impl PluginHost {
             let mut plugin = read_plugin_with_identity(&target, Some(&info.id))?;
             {
                 let mut hub = self.hub.lock().unwrap();
-                hub.health
-                    .entry(info.id.clone())
-                    .or_default()
-                    .blocked_reason = None;
-                hub.health_dirty = true;
+                hub.health_mut(&info.id).blocked_reason = None;
                 hub.enabled.remove(&info.id);
                 if preserve_enabled && was_enabled {
                     hub.enabled.insert(info.id.clone());
@@ -333,13 +387,23 @@ impl PluginHost {
                 } else {
                     hub.provenance.remove(&info.id);
                 }
-                hub.installations
-                    .insert(info.id.clone(), uuid::Uuid::new_v4().to_string());
+                let token = vault_token
+                    .map(str::to_owned)
+                    .unwrap_or_else(|| uuid::Uuid::new_v4().to_string());
+                hub.installations.insert(info.id.clone(), token.clone());
                 if let Some((receipt, _)) = &receipt {
                     hub.backup_receipts
                         .insert(journal.backup.clone(), receipt.clone());
                 }
-                hub.persist()?;
+                if let Some((review, selected)) = approvals {
+                    let owner = info.id.clone();
+                    let inventory = hash_inventory(&prepared.inventory)?;
+                    hub.persist_with(move |tx| {
+                        review.commit(tx, owner, token, inventory, selected)
+                    })?;
+                } else {
+                    hub.persist()?;
+                }
             };
             journal.committed = true;
             save(&journal_path, &journal)?;
@@ -368,11 +432,7 @@ impl PluginHost {
                     let message = format!("Package recovery required: {recovery}");
                     let mut hub = self.hub.lock().unwrap();
                     hub.enabled.remove(&info.id);
-                    hub.health
-                        .entry(info.id.clone())
-                        .or_default()
-                        .blocked_reason = Some(message.clone());
-                    hub.health_dirty = true;
+                    hub.health_mut(&info.id).blocked_reason = Some(message.clone());
                     let persisted = hub.persist();
                     drop(hub);
                     if let Some(plugin) = self.plugins.get_mut(&info.id) {

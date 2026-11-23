@@ -36,6 +36,8 @@ export function registerPluginSettings(Alpine: typeof AlpineType, bridge: Bridge
     let resolve: ((value: JsonValue | null) => void) | undefined;
     let pluginId: string,
         pluginScope = false;
+    let panelAction: string | null = null;
+    let requestedVaultLocation = false;
     let resourceTarget: Partial<Record<string, string>> | undefined;
     let saved: (() => void) | undefined;
     const cancellations = new Map<string, Promise<void>>();
@@ -100,6 +102,18 @@ export function registerPluginSettings(Alpine: typeof AlpineType, bridge: Bridge
         // Send the approved location to the currently open settings inspector
         useLocation() {
             if (!this.locationPreview || !this.open) return;
+            this.sendLocation({ ...this.locationPreview, source: 'device' });
+            this.locationPreview = null;
+        },
+        sendLocation(location: {
+            latitude: number;
+            longitude: number;
+            source: string;
+            label?: string;
+            accuracy_m?: number;
+            timestamp?: number;
+        }) {
+            if (!this.open || !this.location) return;
             const frame = document.querySelector<HTMLIFrameElement>(
                 '.plugin-settings-dialog iframe',
             );
@@ -107,12 +121,7 @@ export function registerPluginSettings(Alpine: typeof AlpineType, bridge: Bridge
                 {
                     event: 'stream-dock-manager-location-selected',
                     context: `settings-draft:${this.token}`,
-                    location: {
-                        latitude: this.locationPreview.latitude,
-                        longitude: this.locationPreview.longitude,
-                        accuracy_m: this.locationPreview.accuracy_m,
-                        timestamp: this.locationPreview.timestamp,
-                    },
+                    location: { ...location },
                 },
                 new URL(this.url).origin,
             );
@@ -346,6 +355,45 @@ export function registerPluginSettings(Alpine: typeof AlpineType, bridge: Bridge
             event.data?.context !== `settings-draft:${state.token}`
         )
             return;
+        if (event.data?.event === 'stream-dock-manager-request-vault-location') {
+            if (!state.location || state.nativeWindow || !panelAction || requestedVaultLocation)
+                return;
+            requestedVaultLocation = true;
+            const owner = pluginId;
+            const action = panelAction;
+            const token = state.token;
+            const target = frame.contentWindow;
+            const origin = event.origin;
+            // Resolve only a verified, already-approved location slot for the current action
+            void bridge
+                .command('vault_access')
+                .then((grants) => {
+                    const grant = grants.find(
+                        (item) =>
+                            item.plugin_id === owner &&
+                            item.action === action &&
+                            item.field === 'location' &&
+                            item.slot_id === 'location' &&
+                            !item.direct_secret &&
+                            item.entry.kind === 'location',
+                    );
+                    return grant ? { label: grant.entry.label } : null;
+                })
+                .catch(() => null)
+                .then((location) => {
+                    if (!state.open || state.token !== token || target !== frame.contentWindow)
+                        return;
+                    target?.postMessage(
+                        {
+                            event: 'stream-dock-manager-vault-location',
+                            context: `settings-draft:${token}`,
+                            location,
+                        },
+                        origin,
+                    );
+                });
+            return;
+        }
         if (event.data?.event === 'stream-dock-manager-cancel-settings') {
             void state.cancel().catch(() => {});
             return;
@@ -401,6 +449,8 @@ export function registerPluginSettings(Alpine: typeof AlpineType, bridge: Bridge
         state.nativeWindow = panel.native_window;
         resourceTarget = resources;
         pluginId = id;
+        panelAction = action;
+        requestedVaultLocation = false;
         pluginScope = action === null || settings === null;
         state.definition = action !== null && settings === null;
         state.binding = action !== null && settings !== null;

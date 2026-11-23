@@ -1,6 +1,10 @@
 {
     "version": 1,
-    "groups": ["shell"],
-    "options": { "shadow": false },
-    "metadata": { "description": "Managed media reuse and reviewed retention-safe cleanup." }
+    "groups": ["media-library"],
+    "options": {
+        "shadow": false
+    },
+    "metadata": {
+        "description": "Managed media reuse and reviewed retention-safe cleanup."
+    }
 }

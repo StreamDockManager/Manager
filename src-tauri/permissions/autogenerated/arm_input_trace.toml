@@ -1,0 +1,11 @@
+# Automatically generated - DO NOT EDIT!
+
+[[permission]]
+identifier = "allow-arm-input-trace"
+description = "Enables the arm_input_trace command without any pre-configured scope."
+commands.allow = ["arm_input_trace"]
+
+[[permission]]
+identifier = "deny-arm-input-trace"
+description = "Denies the arm_input_trace command without any pre-configured scope."
+commands.deny = ["arm_input_trace"]

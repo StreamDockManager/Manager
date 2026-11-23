@@ -26,6 +26,11 @@ export function resolvePaletteBinding(binding: Binding): Binding {
         ...(presets[id] || presets.default),
         ...theme.customPalettes.find((palette) => palette.id === id && palette.mode === mode)
             ?.colors,
+        ...(theme.palettePreview?.draft &&
+        theme.palettePreview.mode === mode &&
+        theme.palettePreview.id === id
+            ? theme.palettePreview.draft.colors
+            : {}),
     };
     const appearance =
         binding.action.kind !== 'plugin' &&

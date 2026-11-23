@@ -209,6 +209,7 @@ impl Codec {
         if data.is_empty() || data.len() > 16 * 1024 * 1024 {
             return Err(Error::Protocol("invalid CRT image size".into()));
         }
+        let started = std::time::Instant::now();
         let mut reports = vec![self.command(header)?];
         for bytes in data.chunks(self.payload_size()) {
             reports.push(self.packet(bytes)?);
@@ -216,12 +217,58 @@ impl Codec {
         if commit {
             reports.push(self.command(b"STP")?);
         }
+        hardware_core::AdapterWork::framed(started, data.len());
         Ok(DeviceTransaction {
             reports,
             coalesce_key: Some(key.into()),
         })
     }
 }
+/// Prefer a fitting even quality. Probe both common high-quality cases, then
+/// bracket the remaining qualities. A non-monotone size can hide a higher fit,
+/// but every selected candidate is measured and quality 2 retains the soft floor.
+fn targeted_jpeg(target: usize, mut encode: impl FnMut(u8) -> Result<Vec<u8>>) -> Result<Vec<u8>> {
+    let mut trial = |quality| {
+        hardware_core::AdapterWork::jpeg_attempt();
+        encode(quality)
+    };
+    let maximum = trial(100)?;
+    if maximum.len() <= target {
+        return Ok(maximum);
+    }
+    drop(maximum);
+    let near_maximum = trial(98)?;
+    if near_maximum.len() <= target {
+        return Ok(near_maximum);
+    }
+    let size = near_maximum.len();
+    drop(near_maximum);
+    let (mut low, mut high) = (1, 48);
+    let mut best = None;
+    // A near miss at 98 is common for photographs on a static key. Probe near
+    // that end first, then bracket either side. At most nine encodes in total.
+    let mut first = if size <= target.saturating_add(target / 2) {
+        Some(47)
+    } else if size <= target.saturating_mul(2) {
+        Some(43)
+    } else {
+        None
+    };
+    while low <= high {
+        let slot = first.take().unwrap_or_else(|| low + (high - low) / 2);
+        let bytes = trial(slot * 2)?;
+        if bytes.len() <= target {
+            best = Some(bytes);
+            low = slot + 1;
+        } else if slot == 1 {
+            return Ok(bytes);
+        } else {
+            high = slot - 1;
+        }
+    }
+    best.ok_or_else(|| Error::Protocol("No JPEG candidate".into()))
+}
+
 /// Decode bounded PNG/JPEG source assets into model-owned wire geometry/formats
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum EncodingPurpose {
@@ -337,24 +384,32 @@ pub fn encode_surface_for(
             EncodingPurpose::Background => usize::MAX,
         };
         let pixels = DynamicImage::ImageRgb8(rgb);
-        let mut quality = if purpose == EncodingPurpose::Background {
-            60
+        // Keep imported/animated backgrounds on their established bandwidth policy.
+        // Generated gradients need higher fidelity to retain their sub-byte dither.
+        let quality = if purpose == EncodingPurpose::Background {
+            if hardware_core::render::is_generated_palette_wallpaper(data) {
+                90
+            } else {
+                60
+            }
         } else {
             100
         };
-        loop {
-            let mut out = vec![];
+        let encode = |quality| {
+            let mut out = Vec::new();
             image::codecs::jpeg::JpegEncoder::new_with_quality(&mut out, quality)
                 .encode_image(&pixels)
                 .map_err(|e| Error::Protocol(e.to_string()))?;
-            if out.len() <= target || quality <= 2 || purpose == EncodingPurpose::Boot {
-                if purpose == EncodingPurpose::Boot && out.len() > 522_240 {
-                    return Err(Error::Protocol("startup JPEG exceeds 522240 bytes".into()));
-                }
-                return Ok(out);
+            Ok(out)
+        };
+        if purpose == EncodingPurpose::Boot || purpose == EncodingPurpose::Background {
+            let out = encode(quality)?;
+            if out.len() > target {
+                return Err(Error::Protocol("startup JPEG exceeds 522240 bytes".into()));
             }
-            quality -= 2;
+            return Ok(out);
         }
+        return targeted_jpeg(target, encode);
     }
     if encoding == WireEncoding::Rgb565Le {
         return Ok(rgb
@@ -783,6 +838,130 @@ mod tests {
                 .len(),
             6
         );
+    }
+    #[test]
+    fn background_jpeg_preserves_generated_gradient_levels() {
+        let svg = r##"<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 200 100" preserveAspectRatio="none"><defs><linearGradient id="wash" x2="100%" y2="100%"><stop stop-color="#080808"/><stop offset="1" stop-color="#1a1a1a"/></linearGradient></defs><path fill="url(#wash)" d="M0 0h200v100H0z"/><path fill="#c61e32" opacity=".08" d="M122 100 200 22v78z"/></svg>"##;
+        let input = hardware_core::render::render_palette_wallpaper(svg, 512, 256, 0).unwrap();
+        let original = image::load_from_memory(&input).unwrap().to_rgb8();
+        let output = encode_surface_for(
+            &input,
+            [512, 256],
+            &surface(WireEncoding::Jpeg, 0, false),
+            EncodingPurpose::Background,
+        )
+        .unwrap();
+        let decoded = image::load_from_memory(&output).unwrap().to_rgb8();
+        let mut old = vec![];
+        image::codecs::jpeg::JpegEncoder::new_with_quality(&mut old, 60)
+            .encode_image(&DynamicImage::ImageRgb8(original.clone()))
+            .unwrap();
+        let old_decoded = image::load_from_memory(&old).unwrap().to_rgb8();
+        let mse = |pixels: &image::RgbImage| {
+            pixels
+                .as_raw()
+                .iter()
+                .zip(original.as_raw())
+                .map(|(a, b)| (f64::from(*a) - f64::from(*b)).powi(2))
+                .sum::<f64>()
+                / original.as_raw().len() as f64
+        };
+        let new_error = mse(&decoded);
+        let old_error = mse(&old_decoded);
+        eprintln!(
+            "gradient JPEG MSE: {old_error:.4} -> {new_error:.4}; bytes: {} -> {}",
+            old.len(),
+            output.len()
+        );
+        assert!(new_error < old_error * 0.5);
+        assert!(new_error < 0.5);
+        assert_eq!(
+            output,
+            encode_surface_for(
+                &input,
+                [512, 256],
+                &surface(WireEncoding::Jpeg, 0, false),
+                EncodingPurpose::Background
+            )
+            .unwrap()
+        );
+    }
+    #[test]
+    fn target_search_matches_descending_oracle_on_fixture_corpus() {
+        let chart=image::load_from_memory(include_bytes!("../../../tests/fixtures/plugins/vendor/vsd/VSDJavaScriptSDK/com.vsd.craft.xxx.sdPlugin/static/default.jpg")).unwrap().thumbnail(112,112);
+        let text = image::load_from_memory(
+            &hardware_core::render::tile(112, 112, [35, 60, 215], "12:59 AM", 180, "png").unwrap(),
+        )
+        .unwrap();
+        let noise = DynamicImage::ImageRgb8(image::RgbImage::from_fn(112, 112, |x, y| {
+            let n = (x.wrapping_mul(1664525) ^ y.wrapping_mul(1013904223)).wrapping_mul(2654435761);
+            image::Rgb([n as u8, (n >> 8) as u8, (n >> 16) as u8])
+        }));
+        let gradient = DynamicImage::ImageRgb8(image::RgbImage::from_fn(112, 112, |x, y| {
+            image::Rgb([x as u8, (2 * y) as u8, (x + y) as u8])
+        }));
+        for pixels in [chart, text, noise, gradient] {
+            let encode = |quality| {
+                let mut data = Vec::new();
+                image::codecs::jpeg::JpegEncoder::new_with_quality(&mut data, quality)
+                    .encode_image(&pixels)
+                    .unwrap();
+                data
+            };
+            let candidates: Vec<_> = (1..=50).rev().map(|q| encode(q * 2)).collect();
+            for target in [1, 2040, 3000, 9000, usize::MAX] {
+                let expected = candidates
+                    .iter()
+                    .find(|v| v.len() <= target)
+                    .unwrap_or(candidates.last().unwrap());
+                let mut attempts = 0;
+                let actual = targeted_jpeg(target, |q| {
+                    attempts += 1;
+                    Ok(encode(q))
+                })
+                .unwrap();
+                assert_eq!(actual, *expected);
+                assert!(attempts <= 9);
+            }
+        }
+    }
+    #[test]
+    fn imported_background_quality_and_payload_are_unchanged() {
+        let chart = image::load_from_memory(include_bytes!("../../../tests/fixtures/plugins/vendor/vsd/VSDJavaScriptSDK/com.vsd.craft.xxx.sdPlugin/static/default.jpg")).unwrap().resize_exact(512,256,image::imageops::FilterType::Lanczos3).to_rgb8();
+        // Textured stress input, not a photographic fidelity claim.
+        let texture = image::RgbImage::from_fn(512, 256, |x, y| {
+            image::Rgb([
+                (x.wrapping_mul(17) ^ y.wrapping_mul(31)) as u8,
+                (x + y) as u8,
+                (x * 3 + y * 7) as u8,
+            ])
+        });
+        for (name, pixels) in [("chart", chart), ("synthetic texture", texture)] {
+            let mut input = Cursor::new(Vec::new());
+            DynamicImage::ImageRgb8(pixels.clone())
+                .write_to(&mut input, ImageFormat::Png)
+                .unwrap();
+            let output = encode_surface_for(
+                input.get_ref(),
+                [512, 256],
+                &surface(WireEncoding::Jpeg, 0, false),
+                EncodingPurpose::Background,
+            )
+            .unwrap();
+            let decoded = image::load_from_memory(&output).unwrap().to_rgb8();
+            let mut old = vec![];
+            image::codecs::jpeg::JpegEncoder::new_with_quality(&mut old, 60)
+                .encode_image(&DynamicImage::ImageRgb8(pixels))
+                .unwrap();
+            eprintln!(
+                "{name} background bytes Q60→current: {} -> {}",
+                old.len(),
+                output.len()
+            );
+            assert_eq!(output, old);
+            assert_eq!(decoded.dimensions(), (512, 256));
+            assert!(output.len() < 512 * 256 * 3);
+        }
     }
     #[test]
     // Verify lossless soft targets never quantize or drop alpha

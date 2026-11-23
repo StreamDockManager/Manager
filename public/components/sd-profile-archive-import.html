@@ -1,435 +1,457 @@
 <div x-data="profileArchiveImport" @open-profile-import.window="openProfileImport">
-    <dialog
-        class="feature-dialog wide-dialog"
-        x-ref="profileImportDialog"
-        aria-labelledby="profile-import-title"
-        @cancel.prevent="closeProfileImport"
-    >
-        <header class="picker-header">
-            <h2 id="profile-import-title">Review profile import</h2>
-            <button
-                class="icon-button"
-                aria-label="Cancel profile import"
-                @click="closeProfileImport"
-                :disabled="working"
-            >
-                ×
-            </button>
-        </header>
-        <div class="feature-body">
-            <p x-show="!imported && working">Inspecting archive…</p>
-            <section class="feature-fields" x-show="imported">
-                <p x-text="imported ? imported.profiles.join(', ') : ''"></p>
-                <label x-show="!imported || !imported.plugin">
-                    Import mode
-                    <select
-                        aria-label="Import mode"
-                        x-model="importMode"
-                        @change="recheckImport"
-                        :disabled="working"
-                    >
-                        <option value="merge">Merge with existing profiles</option>
-                        <option value="replace">Replace existing profiles</option>
-                    </select>
-                </label>
-                <template x-if="imported && imported.plugin">
-                    <section class="settings-section" aria-label="Suggested profile placement">
-                        <p
-                            class="field-help"
-                            x-show="pluginImportDevice"
-                            x-text="pluginImportDevice ? 'Destination device: ' + pluginImportDevice.name + ' (' + pluginImportDevice.id + ')' : ''"
-                        ></p>
-                        <div class="settings-form-grid">
-                            <label class="settings-field">
-                                Destination profile
-                                <select
-                                    aria-label="Destination profile"
-                                    x-model="imported.plugin.placement.target_profile"
-                                    @change="pluginTargetChanged"
-                                    :disabled="working"
-                                >
-                                    <template
-                                        x-for="profile in pluginTargetProfiles"
-                                        :key="profile.id"
-                                    >
-                                        <option :value="profile.id" x-text="profile.name"></option>
-                                    </template>
-                                    <option value="@new">Create a new profile</option>
-                                </select>
-                            </label>
-                            <label
-                                class="settings-field"
-                                x-show="imported.plugin.placement.target_profile === '@new'"
-                            >
-                                New profile name
-                                <input
-                                    aria-label="New profile name"
-                                    x-model="imported.plugin.placement.profile_name"
-                                    @input="pluginPlacementChanged"
-                                    :disabled="working"
-                                />
-                            </label>
-                            <label
-                                class="settings-field"
-                                x-show="imported.plugin.placement.target_profile === '@new'"
-                            >
-                                Target hardware
-                                <select
-                                    aria-label="Target hardware"
-                                    x-model="imported.plugin.placement.target_model"
-                                    @change="pluginPlacementChanged"
-                                    :disabled="working"
-                                >
-                                    <template
-                                        x-for="model in pluginTargetModels"
-                                        :key="model.model_id"
-                                    >
-                                        <option
-                                            :value="model.model_id"
-                                            x-text="model.name"
-                                        ></option>
-                                    </template>
-                                </select>
-                            </label>
-                        </div>
-                        <template
-                            x-for="destination in imported.plugin.placement.pages"
-                            :key="destination.source_page"
+    <template x-if="viewMounted">
+        <dialog
+            class="feature-dialog wide-dialog"
+            x-ref="profileImportDialog"
+            aria-labelledby="profile-import-title"
+            @cancel.prevent="closeProfileImport"
+        >
+            <header class="picker-header">
+                <h2 id="profile-import-title">Review profile import</h2>
+                <button
+                    class="icon-button"
+                    aria-label="Cancel profile import"
+                    @click="closeProfileImport"
+                    :disabled="working"
+                >
+                    ×
+                </button>
+            </header>
+            <div class="feature-body">
+                <p x-show="!imported && working">Inspecting archive…</p>
+                <section class="feature-fields" x-show="imported">
+                    <p x-text="imported ? imported.profiles.join(', ') : ''"></p>
+                    <label x-show="!imported || !imported.plugin">
+                        Import mode
+                        <select
+                            aria-label="Import mode"
+                            x-model="importMode"
+                            @change="recheckImport"
+                            :disabled="working"
                         >
-                            <fieldset class="parameter-editor settings-section">
-                                <legend x-text="'Suggested page: ' + destination.name"></legend>
-                                <div class="settings-form-grid">
-                                    <label class="settings-field">
-                                        Apply to page
-                                        <select
-                                            :aria-label="'Destination page for ' + destination.source_page"
-                                            x-model="destination.target_page"
-                                            @change="pluginPlacementChanged"
-                                            :disabled="working"
-                                        >
-                                            <template
-                                                x-for="page in pluginTargetPages"
-                                                :key="page.id"
-                                            >
-                                                <option
-                                                    :value="page.id"
-                                                    x-text="page.name"
-                                                ></option>
-                                            </template>
-                                            <option value="@new">Create a new page</option>
-                                        </select>
-                                    </label>
-                                    <label
-                                        class="settings-field"
-                                        x-show="destination.target_page === '@new'"
-                                    >
-                                        New page name
-                                        <input
-                                            :aria-label="'New page name for ' + destination.source_page"
-                                            x-model="destination.name"
-                                            @input="pluginPlacementChanged"
-                                            :disabled="working"
-                                        />
-                                    </label>
-                                </div>
-                            </fieldset>
-                        </template>
-                        <p class="field-help">
-                            Choose destinations, then review placements. Existing controls are kept
-                            unless you explicitly replace them. A new page avoids overlapping
-                            controls.
-                        </p>
-                        <div
-                            class="runtime-table-scroll"
-                            role="region"
-                            aria-label="Suggested control mappings"
-                            tabindex="0"
-                        >
-                            <table class="runtime-table">
-                                <thead>
-                                    <tr>
-                                        <th scope="col">Suggested binding</th>
-                                        <th scope="col">Destination control</th>
-                                        <th scope="col">Existing binding</th>
-                                    </tr>
-                                </thead>
-                                <tbody>
-                                    <template
-                                        x-for="mapping in imported.plugin.placement.bindings"
-                                        :key="mapping.source_page + '/' + mapping.source_control"
-                                    >
-                                        <tr>
-                                            <th scope="row">
-                                                <div class="runtime-metadata">
-                                                    <span
-                                                        x-text="pluginMappingRow(mapping).title || mapping.source_control"
-                                                    ></span>
-                                                    <small
-                                                        x-text="pluginPageLabel(mapping.source_page) + ' / ' + mapping.source_control"
-                                                    ></small>
-                                                    <p
-                                                        class="danger-text"
-                                                        x-show="pluginMappingRow(mapping).problem"
-                                                        x-text="pluginMappingRow(mapping).problem"
-                                                    ></p>
-                                                </div>
-                                            </th>
-                                            <td>
-                                                <select
-                                                    :aria-label="'Destination for ' + mapping.source_page + '/' + mapping.source_control"
-                                                    x-model="mapping.target_control"
-                                                    @change="pluginPlacementChanged"
-                                                    :disabled="working"
-                                                >
-                                                    <option value="">Choose a control</option>
-                                                    <option value="@omit">Skip this binding</option>
-                                                    <template
-                                                        x-for="choice in pluginMappingRow(mapping).choices || []"
-                                                        :key="choice.value"
-                                                    >
-                                                        <option
-                                                            :value="choice.value"
-                                                            x-text="choice.label"
-                                                        ></option>
-                                                    </template>
-                                                </select>
-                                            </td>
-                                            <td>
-                                                <label class="preference-toggle">
-                                                    <input
-                                                        type="checkbox"
-                                                        x-model="mapping.replace"
-                                                        @change="pluginPlacementChanged"
-                                                        :disabled="working"
-                                                        :aria-label="'Replace existing binding for ' + mapping.source_page + '/' + mapping.source_control"
-                                                    />
-                                                    <span>Replace if occupied</span>
-                                                </label>
-                                                <small
-                                                    x-show="pluginMappingRow(mapping).occupied"
-                                                    x-text="mapping.replace ? 'Existing binding will be replaced' : 'Existing binding will be kept'"
-                                                ></small>
-                                            </td>
-                                        </tr>
-                                    </template>
-                                </tbody>
-                            </table>
-                        </div>
-                        <section
-                            class="settings-section"
-                            x-show="imported.plugin.configuration.length"
-                        >
-                            <h3>Suggested plugin configuration</h3>
-                            <label class="preference-toggle">
-                                <input
-                                    type="checkbox"
-                                    x-model="imported.plugin.placement.include_configuration"
-                                    @change="pluginPlacementChanged"
-                                    :disabled="working"
-                                />
-                                <span>Include shared plugin settings and action defaults</span>
-                            </label>
-                            <template
-                                x-for="field in imported.plugin.configuration"
-                                :key="field.path.join('/')"
-                            >
-                                <fieldset class="parameter-editor settings-section">
-                                    <legend x-text="field.path.join(' / ')"></legend>
-                                    <p
-                                        class="source-path"
-                                        x-text="'Current: ' + configurationLabel(field.current)"
-                                    ></p>
-                                    <p
-                                        class="source-path"
-                                        x-text="'Suggested: ' + configurationLabel(field.suggested)"
-                                    ></p>
-                                    <label class="preference-toggle">
-                                        <input
-                                            type="checkbox"
-                                            x-model="field.use_suggested"
-                                            @change="pluginPlacementChanged"
-                                            :disabled="working || !imported.plugin.placement.include_configuration"
-                                        />
-                                        <span>Use suggested value</span>
-                                    </label>
-                                </fieldset>
-                            </template>
-                        </section>
-                        <p class="field-help" role="status" x-show="!pluginImportReviewed">
-                            Review placements and settings before applying.
-                        </p>
-                    </section>
-                </template>
-                <template x-for="impact in imported ? imported.impact : []" :key="impact">
-                    <p x-text="impact"></p>
-                </template>
-                <div class="button-row">
-                    <button class="button" @click="recheckImport" :disabled="working">
-                        <span
-                            x-text="imported && imported.plugin ? 'Review placements and settings' : 'Recheck dependencies'"
-                        ></span>
-                    </button>
-                    <button
-                        class="button"
-                        x-show="missingPluginIssues"
-                        @click="$dispatch('open-plugin-import')"
-                    >
-                        Find VSD Craft / Stream Deck plugins
-                    </button>
-                </div>
-                <p
-                    class="field-help"
-                    x-show="imported && imported.recipe_warning"
-                    role="alert"
-                    x-text="imported ? imported.recipe_warning : ''"
-                ></p>
-                <template x-for="issue in imported ? imported.issues : []" :key="issue.key">
-                    <article class="import-candidate feature-fields">
-                        <strong x-text="issue.message"></strong>
-                        <p
-                            class="source-path"
-                            x-text="issue.profile_id + ' / ' + issue.page_id + ' / ' + issue.control_id"
-                        ></p>
-                        <small class="source-path" x-text="issue.value"></small>
-                        <template
-                            x-for="suggestion in repairSuggestions(issue)"
-                            :key="suggestion.id"
-                        >
-                            <div class="field-group">
-                                <small class="source-path" x-text="suggestion.label"></small>
-                                <div class="button-row">
-                                    <button
-                                        type="button"
-                                        class="button"
-                                        :data-recipe="suggestion.id"
-                                        :data-key="issue.key"
-                                        @click="chooseRepairSuggestion"
-                                        :disabled="working"
-                                    >
-                                        Review suggestion
-                                    </button>
-                                    <button
-                                        type="button"
-                                        class="text-button"
-                                        :data-recipe="suggestion.id"
-                                        @click="forgetRepairSuggestion"
-                                        :disabled="working"
-                                    >
-                                        Forget recipe
-                                    </button>
-                                </div>
-                            </div>
-                        </template>
-                        <label>
-                            Replacement
-                            <select
-                                x-show="issue.choices.length > 0"
-                                :aria-label="'Choose replacement for ' + issue.key"
-                                x-model="repairs[issue.key]"
-                            >
-                                <option value="">Choose a replacement</option>
-                                <template x-for="choice in issue.choices" :key="choice.value">
-                                    <option :value="choice.value" x-text="choice.label"></option>
-                                </template>
-                            </select>
-                            <input
-                                x-show="issue.choices.length === 0"
-                                :aria-label="'Repair ' + issue.key"
-                                x-model="repairs[issue.key]"
-                                :placeholder="repairHint(issue)"
-                            />
-                        </label>
-                        <details x-show="canRememberRepair(issue)">
-                            <summary>Remember this repair</summary>
-                            <div class="feature-fields">
-                                <p class="field-help">
-                                    Recipes stay on this computer and only suggest later repairs.
-                                    Every import still requires review.
-                                </p>
-                                <label>
-                                    Match future imports
+                            <option value="merge">Merge with existing profiles</option>
+                            <option value="replace">Replace existing profiles</option>
+                        </select>
+                    </label>
+                    <template x-if="imported && imported.plugin">
+                        <section class="settings-section" aria-label="Suggested profile placement">
+                            <p
+                                class="field-help"
+                                x-show="pluginImportDevice"
+                                x-text="pluginImportDevice ? 'Destination device: ' + pluginImportDevice.name + ' (' + pluginImportDevice.id + ')' : ''"
+                            ></p>
+                            <div class="settings-form-grid">
+                                <label class="settings-field">
+                                    Destination profile
                                     <select
-                                        :aria-label="'Remember repair for ' + issue.key"
-                                        x-model="recipeModes[issue.key]"
+                                        aria-label="Destination profile"
+                                        x-model="imported.plugin.placement.target_profile"
+                                        @change="pluginTargetChanged"
                                         :disabled="working"
                                     >
-                                        <option value="">Do not remember</option>
-                                        <option value="exact">Exact path or identity</option>
-                                        <template x-if="issue.kind === 'path'">
-                                            <option value="component_prefix">
-                                                Path component prefix
-                                            </option>
+                                        <template
+                                            x-for="profile in pluginTargetProfiles"
+                                            :key="profile.id"
+                                        >
+                                            <option
+                                                :value="profile.id"
+                                                x-text="profile.name"
+                                            ></option>
+                                        </template>
+                                        <option value="@new">Create a new profile</option>
+                                    </select>
+                                </label>
+                                <label
+                                    class="settings-field"
+                                    x-show="imported.plugin.placement.target_profile === '@new'"
+                                >
+                                    New profile name
+                                    <input
+                                        aria-label="New profile name"
+                                        x-model="imported.plugin.placement.profile_name"
+                                        @input="pluginPlacementChanged"
+                                        :disabled="working"
+                                    />
+                                </label>
+                                <label
+                                    class="settings-field"
+                                    x-show="imported.plugin.placement.target_profile === '@new'"
+                                >
+                                    Target hardware
+                                    <select
+                                        aria-label="Target hardware"
+                                        x-model="imported.plugin.placement.target_model"
+                                        @change="pluginPlacementChanged"
+                                        :disabled="working"
+                                    >
+                                        <template
+                                            x-for="model in pluginTargetModels"
+                                            :key="model.model_id"
+                                        >
+                                            <option
+                                                :value="model.model_id"
+                                                x-text="model.name"
+                                            ></option>
                                         </template>
                                     </select>
                                 </label>
-                                <div
-                                    class="settings-form-grid"
-                                    x-show="recipeModes[issue.key] === 'component_prefix'"
-                                >
-                                    <label>
-                                        Original path prefix
-                                        <input
-                                            :aria-label="'Original prefix for ' + issue.key"
-                                            x-model="recipeFrom[issue.key]"
-                                            :disabled="working"
-                                        />
-                                    </label>
-                                    <label>
-                                        Replacement path prefix
-                                        <input
-                                            :aria-label="'Replacement prefix for ' + issue.key"
-                                            x-model="recipeTo[issue.key]"
-                                            :disabled="working"
-                                        />
-                                    </label>
-                                </div>
                             </div>
-                        </details>
-                        <div class="button-row">
-                            <button
-                                class="button"
-                                :data-key="issue.key"
-                                @click="browseRepair"
-                                x-show="canBrowse(issue)"
-                                :disabled="working"
+                            <template
+                                x-for="destination in imported.plugin.placement.pages"
+                                :key="destination.source_page"
                             >
-                                Browse
-                            </button>
-                            <button
-                                class="button"
-                                :data-key="issue.key"
-                                @click="applyRepair"
-                                :disabled="working"
+                                <fieldset class="parameter-editor settings-section">
+                                    <legend x-text="'Suggested page: ' + destination.name"></legend>
+                                    <div class="settings-form-grid">
+                                        <label class="settings-field">
+                                            Apply to page
+                                            <select
+                                                :aria-label="'Destination page for ' + destination.source_page"
+                                                x-model="destination.target_page"
+                                                @change="pluginPlacementChanged"
+                                                :disabled="working"
+                                            >
+                                                <template
+                                                    x-for="page in pluginTargetPages"
+                                                    :key="page.id"
+                                                >
+                                                    <option
+                                                        :value="page.id"
+                                                        x-text="page.name"
+                                                    ></option>
+                                                </template>
+                                                <option value="@new">Create a new page</option>
+                                            </select>
+                                        </label>
+                                        <label
+                                            class="settings-field"
+                                            x-show="destination.target_page === '@new'"
+                                        >
+                                            New page name
+                                            <input
+                                                :aria-label="'New page name for ' + destination.source_page"
+                                                x-model="destination.name"
+                                                @input="pluginPlacementChanged"
+                                                :disabled="working"
+                                            />
+                                        </label>
+                                    </div>
+                                </fieldset>
+                            </template>
+                            <p class="field-help">
+                                Choose destinations, then review placements. Existing controls are
+                                kept unless you explicitly replace them. A new page avoids
+                                overlapping controls.
+                            </p>
+                            <div
+                                class="runtime-table-scroll"
+                                role="region"
+                                aria-label="Suggested control mappings"
+                                tabindex="0"
                             >
-                                Apply repair
-                            </button>
-                            <button
-                                class="button"
-                                :data-key="issue.key"
-                                data-disable="true"
-                                @click="applyRepair"
-                                x-show="canDisable(issue)"
-                                :disabled="working"
+                                <table class="runtime-table">
+                                    <thead>
+                                        <tr>
+                                            <th scope="col">Suggested binding</th>
+                                            <th scope="col">Destination control</th>
+                                            <th scope="col">
+                                                <label class="preference-toggle">
+                                                    <input
+                                                        type="checkbox"
+                                                        aria-label="Replace all eligible existing bindings"
+                                                        x-effect="syncPluginReplaceAll($el)"
+                                                        @change="changePluginReplaceAll"
+                                                    />
+                                                    <span>Existing binding</span>
+                                                </label>
+                                            </th>
+                                        </tr>
+                                    </thead>
+                                    <tbody>
+                                        <template
+                                            x-for="mapping in imported.plugin.placement.bindings"
+                                            :key="mapping.source_page + '/' + mapping.source_control"
+                                        >
+                                            <tr>
+                                                <th scope="row">
+                                                    <div class="runtime-metadata">
+                                                        <span
+                                                            x-text="pluginMappingRow(mapping).title || mapping.source_control"
+                                                        ></span>
+                                                        <small
+                                                            x-text="pluginPageLabel(mapping.source_page) + ' / ' + mapping.source_control"
+                                                        ></small>
+                                                        <p
+                                                            class="danger-text"
+                                                            x-show="pluginMappingRow(mapping).problem"
+                                                            x-text="pluginMappingRow(mapping).problem"
+                                                        ></p>
+                                                    </div>
+                                                </th>
+                                                <td>
+                                                    <select
+                                                        :aria-label="'Destination for ' + mapping.source_page + '/' + mapping.source_control"
+                                                        x-model="mapping.target_control"
+                                                        @change="pluginPlacementChanged"
+                                                        :disabled="working"
+                                                    >
+                                                        <option value="">Choose a control</option>
+                                                        <option value="@omit">
+                                                            Skip this binding
+                                                        </option>
+                                                        <template
+                                                            x-for="choice in pluginMappingRow(mapping).choices || []"
+                                                            :key="choice.value"
+                                                        >
+                                                            <option
+                                                                :value="choice.value"
+                                                                x-text="choice.label"
+                                                            ></option>
+                                                        </template>
+                                                    </select>
+                                                </td>
+                                                <td>
+                                                    <label class="preference-toggle">
+                                                        <input
+                                                            type="checkbox"
+                                                            x-model="mapping.replace"
+                                                            @change="pluginPlacementChanged"
+                                                            :disabled="working || !pluginReplacementEligible(mapping)"
+                                                            :aria-label="'Replace existing binding for ' + mapping.source_page + '/' + mapping.source_control"
+                                                        />
+                                                        <span>Replace if occupied</span>
+                                                    </label>
+                                                    <small
+                                                        x-show="pluginMappingRow(mapping).occupied"
+                                                        x-text="mapping.replace ? 'Existing binding will be replaced' : 'Existing binding will be kept'"
+                                                    ></small>
+                                                </td>
+                                            </tr>
+                                        </template>
+                                    </tbody>
+                                </table>
+                            </div>
+                            <section
+                                class="settings-section"
+                                x-show="imported.plugin.configuration.length"
                             >
-                                Keep binding disabled
-                            </button>
-                        </div>
-                    </article>
-                </template>
-                <p x-show="canCommitImport" role="status">
-                    Ready to import. Review the changes, then apply.
-                </p>
-            </section>
-            <p class="danger-text" role="alert" x-show="error" x-text="error"></p>
-        </div>
-        <footer class="feature-footer">
-            <button class="button" @click="closeProfileImport" :disabled="working">Cancel</button>
-            <button
-                class="button primary"
-                @click="commitImport"
-                :disabled="working || !canCommitImport"
-                x-text="importCommitLabel"
-            ></button>
-        </footer>
-    </dialog>
+                                <h3>Suggested plugin configuration</h3>
+                                <label class="preference-toggle">
+                                    <input
+                                        type="checkbox"
+                                        x-model="imported.plugin.placement.include_configuration"
+                                        @change="pluginPlacementChanged"
+                                        :disabled="working"
+                                    />
+                                    <span>Include shared plugin settings and action defaults</span>
+                                </label>
+                                <template
+                                    x-for="field in imported.plugin.configuration"
+                                    :key="field.path.join('/')"
+                                >
+                                    <fieldset class="parameter-editor settings-section">
+                                        <legend x-text="field.path.join(' / ')"></legend>
+                                        <p
+                                            class="source-path"
+                                            x-text="'Current: ' + configurationLabel(field.current)"
+                                        ></p>
+                                        <p
+                                            class="source-path"
+                                            x-text="'Suggested: ' + configurationLabel(field.suggested)"
+                                        ></p>
+                                        <label class="preference-toggle">
+                                            <input
+                                                type="checkbox"
+                                                x-model="field.use_suggested"
+                                                @change="pluginPlacementChanged"
+                                                :disabled="working || !imported.plugin.placement.include_configuration"
+                                            />
+                                            <span>Use suggested value</span>
+                                        </label>
+                                    </fieldset>
+                                </template>
+                            </section>
+                            <p class="field-help" role="status" x-show="!pluginImportReviewed">
+                                Review placements and settings before applying.
+                            </p>
+                        </section>
+                    </template>
+                    <template x-for="impact in imported ? imported.impact : []" :key="impact">
+                        <p x-text="impact"></p>
+                    </template>
+                    <div class="button-row">
+                        <button class="button" @click="recheckImport" :disabled="working">
+                            <span
+                                x-text="imported && imported.plugin ? 'Review placements and settings' : 'Recheck dependencies'"
+                            ></span>
+                        </button>
+                        <button
+                            class="button"
+                            x-show="missingPluginIssues"
+                            @click="$dispatch('open-plugin-import')"
+                        >
+                            Find VSD Craft / Stream Deck plugins
+                        </button>
+                    </div>
+                    <p
+                        class="field-help"
+                        x-show="imported && imported.recipe_warning"
+                        role="alert"
+                        x-text="imported ? imported.recipe_warning : ''"
+                    ></p>
+                    <template x-for="issue in imported ? imported.issues : []" :key="issue.key">
+                        <article class="import-candidate feature-fields">
+                            <strong x-text="issue.message"></strong>
+                            <p
+                                class="source-path"
+                                x-text="issue.profile_id + ' / ' + issue.page_id + ' / ' + issue.control_id"
+                            ></p>
+                            <small class="source-path" x-text="issue.value"></small>
+                            <template
+                                x-for="suggestion in repairSuggestions(issue)"
+                                :key="suggestion.id"
+                            >
+                                <div class="field-group">
+                                    <small class="source-path" x-text="suggestion.label"></small>
+                                    <div class="button-row">
+                                        <button
+                                            type="button"
+                                            class="button"
+                                            :data-recipe="suggestion.id"
+                                            :data-key="issue.key"
+                                            @click="chooseRepairSuggestion"
+                                            :disabled="working"
+                                        >
+                                            Review suggestion
+                                        </button>
+                                        <button
+                                            type="button"
+                                            class="text-button"
+                                            :data-recipe="suggestion.id"
+                                            @click="forgetRepairSuggestion"
+                                            :disabled="working"
+                                        >
+                                            Forget recipe
+                                        </button>
+                                    </div>
+                                </div>
+                            </template>
+                            <label>
+                                Replacement
+                                <select
+                                    x-show="issue.choices.length > 0"
+                                    :aria-label="'Choose replacement for ' + issue.key"
+                                    x-model="repairs[issue.key]"
+                                >
+                                    <option value="">Choose a replacement</option>
+                                    <template x-for="choice in issue.choices" :key="choice.value">
+                                        <option
+                                            :value="choice.value"
+                                            x-text="choice.label"
+                                        ></option>
+                                    </template>
+                                </select>
+                                <input
+                                    x-show="issue.choices.length === 0"
+                                    :aria-label="'Repair ' + issue.key"
+                                    x-model="repairs[issue.key]"
+                                    :placeholder="repairHint(issue)"
+                                />
+                            </label>
+                            <details x-show="canRememberRepair(issue)">
+                                <summary>Remember this repair</summary>
+                                <div class="feature-fields">
+                                    <p class="field-help">
+                                        Recipes stay on this computer and only suggest later
+                                        repairs. Every import still requires review.
+                                    </p>
+                                    <label>
+                                        Match future imports
+                                        <select
+                                            :aria-label="'Remember repair for ' + issue.key"
+                                            x-model="recipeModes[issue.key]"
+                                            :disabled="working"
+                                        >
+                                            <option value="">Do not remember</option>
+                                            <option value="exact">Exact path or identity</option>
+                                            <template x-if="issue.kind === 'path'">
+                                                <option value="component_prefix">
+                                                    Path component prefix
+                                                </option>
+                                            </template>
+                                        </select>
+                                    </label>
+                                    <div
+                                        class="settings-form-grid"
+                                        x-show="recipeModes[issue.key] === 'component_prefix'"
+                                    >
+                                        <label>
+                                            Original path prefix
+                                            <input
+                                                :aria-label="'Original prefix for ' + issue.key"
+                                                x-model="recipeFrom[issue.key]"
+                                                :disabled="working"
+                                            />
+                                        </label>
+                                        <label>
+                                            Replacement path prefix
+                                            <input
+                                                :aria-label="'Replacement prefix for ' + issue.key"
+                                                x-model="recipeTo[issue.key]"
+                                                :disabled="working"
+                                            />
+                                        </label>
+                                    </div>
+                                </div>
+                            </details>
+                            <div class="button-row">
+                                <button
+                                    class="button"
+                                    :data-key="issue.key"
+                                    @click="browseRepair"
+                                    x-show="canBrowse(issue)"
+                                    :disabled="working"
+                                >
+                                    Browse
+                                </button>
+                                <button
+                                    class="button"
+                                    :data-key="issue.key"
+                                    @click="applyRepair"
+                                    :disabled="working"
+                                >
+                                    Apply repair
+                                </button>
+                                <button
+                                    class="button"
+                                    :data-key="issue.key"
+                                    data-disable="true"
+                                    @click="applyRepair"
+                                    x-show="canDisable(issue)"
+                                    :disabled="working"
+                                >
+                                    Keep binding disabled
+                                </button>
+                            </div>
+                        </article>
+                    </template>
+                    <p x-show="canCommitImport" role="status">
+                        Ready to import. Review the changes, then apply.
+                    </p>
+                </section>
+                <p class="danger-text" role="alert" x-show="error" x-text="error"></p>
+            </div>
+            <footer class="feature-footer">
+                <button class="button" @click="closeProfileImport" :disabled="working">
+                    Cancel
+                </button>
+                <button
+                    class="button primary"
+                    @click="commitImport"
+                    :disabled="working || !canCommitImport"
+                    x-text="importCommitLabel"
+                ></button>
+            </footer>
+        </dialog>
+    </template>
 </div>

@@ -34,3 +34,8 @@ build-macos build-macos-arm64 build-macos-amd64:
 	for target in $$targets; do \
 		TARGET="$$target" PRODUCT="$${PRODUCT:-all}" $(PYTHON) "$(PROJECT)/scripts/build.py" package-target; \
 	done
+
+# Explicit local outputs only; CLEAN_DRY_RUN=1 previews without deleting.
+.PHONY: clean
+clean:
+	@$(PYTHON) "$(PROJECT)/scripts/clean.py"

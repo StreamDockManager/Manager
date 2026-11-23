@@ -20,6 +20,57 @@ fn default_configuration_root_matches_the_platform_application_identity() {
 }
 
 #[test]
+fn fresh_runtime_places_only_live_databases_in_the_database_directory() {
+    use std::sync::Arc;
+    use stream_dock_manager_storage::{database_directory, database_path, DATABASE_NAME};
+
+    let root = tempfile::tempdir().unwrap();
+    let config = root.path().join("disposable-config");
+    let runtime = Runtime::build_credentials(
+        config.clone(),
+        false,
+        crate::credentials::Credentials::with_provider(Arc::new(
+            crate::vault::tests::TestKeys::default(),
+        )),
+    )
+    .unwrap();
+    let db_dir = database_directory(&config);
+    assert!(db_dir.is_dir());
+    assert!(database_path(&config, DATABASE_NAME).is_file());
+    assert!(database_path(&config, "datastore.sqlite3").is_file());
+    assert!(!database_path(&config, "keystore.sqlite3").exists());
+    runtime.cache_status().unwrap();
+    assert!(database_path(&config, "cache.sqlite3").is_file());
+    runtime.vault.initialize().unwrap();
+    assert!(database_path(&config, "keystore.sqlite3").is_file());
+    assert!(std::fs::read_dir(&db_dir).unwrap().any(|entry| {
+        entry
+            .unwrap()
+            .file_name()
+            .to_string_lossy()
+            .starts_with(".keystore-key-")
+    }));
+    for file in [
+        DATABASE_NAME,
+        "datastore.sqlite3",
+        "keystore.sqlite3",
+        "cache.sqlite3",
+    ] {
+        assert!(!config.join(file).exists());
+    }
+    assert!(!config.join("recovery").exists());
+    assert!(config.join("profiles/writer.lock").is_file());
+    assert!(!db_dir.join("profiles/writer.lock").exists());
+    assert!(runtime
+        .profiles
+        .storage()
+        .backup(database_path(&config, DATABASE_NAME))
+        .is_err());
+    runtime.shutdown();
+    drop(runtime);
+}
+
+#[test]
 // Verify that startup recreates a deleted database without replacing preserved backups
 fn startup_recreates_a_deleted_database_without_replacing_preserved_backups() {
     let root = tempfile::tempdir().unwrap();
@@ -37,7 +88,7 @@ fn startup_recreates_a_deleted_database_without_replacing_preserved_backups() {
     runtime.shutdown();
     drop(runtime);
 
-    let backups = std::fs::read_dir(config.join("recovery"))
+    let backups = std::fs::read_dir(stream_dock_manager_storage::recovery_directory(&config))
         .unwrap()
         .map(|entry| entry.unwrap().path())
         .filter(|path| {
@@ -50,11 +101,17 @@ fn startup_recreates_a_deleted_database_without_replacing_preserved_backups() {
         })
         .collect::<Vec<_>>();
     assert!(!backups.is_empty());
-    std::fs::remove_file(config.join(stream_dock_manager_storage::DATABASE_NAME)).unwrap();
+    std::fs::remove_file(stream_dock_manager_storage::database_path(
+        &config,
+        stream_dock_manager_storage::DATABASE_NAME,
+    ))
+    .unwrap();
     let fresh = Runtime::build(config.clone(), false).unwrap();
-    assert!(config
-        .join(stream_dock_manager_storage::DATABASE_NAME)
-        .exists());
+    assert!(stream_dock_manager_storage::database_path(
+        &config,
+        stream_dock_manager_storage::DATABASE_NAME
+    )
+    .exists());
     assert!(fresh
         .snapshot()
         .profiles
@@ -65,9 +122,6 @@ fn startup_recreates_a_deleted_database_without_replacing_preserved_backups() {
     for (path, bytes) in backups {
         assert_eq!(std::fs::read(path).unwrap(), bytes);
     }
-    assert!(config
-        .join(".stream-dock-manager-sqlite-initialized")
-        .exists());
 }
 
 #[test]
@@ -105,7 +159,7 @@ fn device_output_is_validated_isolated_and_restored_after_restart() {
         snapshot.session("simulator:first").output.lighting_colors,
         output.lighting_colors
     );
-    assert_eq!(snapshot.session("simulator:second").output.brightness, 65);
+    assert_eq!(snapshot.session("simulator:second").output.brightness, 50);
     assert!(snapshot
         .session("simulator:second")
         .output
@@ -431,6 +485,8 @@ fn delayed_macros_yield_and_device_navigation_does_not_conflict_with_edits() {
         .unwrap()
         .insert("test-device".into(), 1);
     let request = |control: &str, action: Action| Request {
+        event_slot: None,
+        physical_activation: None,
         manual: false,
         activation_policy: Default::default(),
         icon_signature: None,
@@ -442,6 +498,7 @@ fn delayed_macros_yield_and_device_navigation_does_not_conflict_with_edits() {
         binding_scope: "default:main".into(),
         connection_epoch: Some(1),
         input: hardware_core::Input::Pulse,
+        trace: None,
         cancellation_generation: 0,
     };
     runtime
@@ -624,6 +681,8 @@ fn activation_policies_keep_active_run_and_classify_pending_work() {
             runtime
                 .action_sender
                 .send(Request {
+                    event_slot: None,
+                    physical_activation: None,
                     manual: false,
                     activation_policy: policy,
                     icon_signature: None,
@@ -639,6 +698,7 @@ fn activation_policies_keep_active_run_and_classify_pending_work() {
                     binding_scope: "default:main".into(),
                     connection_epoch: Some(1),
                     input: hardware_core::Input::Pulse,
+                    trace: None,
                     cancellation_generation: 0,
                 })
                 .unwrap();
@@ -660,5 +720,87 @@ fn activation_policies_keep_active_run_and_classify_pending_work() {
             .map(|status| outcomes.iter().filter(|value| *value == status).count());
         assert_eq!(counts, expected, "{policy:?}: {outcomes:?}");
         runtime.shutdown();
+    }
+}
+
+#[test]
+fn owned_second_press_waits_for_cleanup_and_distinguishes_restart_from_cancel() {
+    use crate::actions::{Action, ActivationPolicy, Request};
+    use std::time::{Duration, Instant};
+    for policy in [ActivationPolicy::Restart, ActivationPolicy::Cancel] {
+        let dir = tempfile::tempdir().unwrap();
+        let runtime = Runtime::build(dir.path().into(), false).unwrap();
+        runtime
+            .connection_epochs
+            .lock()
+            .unwrap()
+            .insert("fixture".into(), 1);
+        let events = runtime.subscribe();
+        let press = |delay| {
+            runtime
+                .action_sender
+                .send(Request {
+                    event_slot: None,
+                    physical_activation: None,
+                    manual: false,
+                    activation_policy: policy,
+                    icon_signature: None,
+                    pressed: None,
+                    action: Action::Delay {
+                        milliseconds: delay,
+                    },
+                    queued_at: Instant::now(),
+                    device_id: "fixture".into(),
+                    control_id: "key-1".into(),
+                    binding_scope: "default:main".into(),
+                    connection_epoch: Some(1),
+                    input: hardware_core::Input::Pulse,
+                    trace: None,
+                    cancellation_generation: 0,
+                })
+                .unwrap();
+        };
+        press(2000);
+        press(1);
+        let mut outcomes = vec![];
+        let end = Instant::now() + Duration::from_secs(4);
+        while outcomes.len() < 2 && Instant::now() < end {
+            if let Ok(e) = events.recv_timeout(Duration::from_millis(50)) {
+                if e.kind == "action-run" {
+                    let v: serde_json::Value = serde_json::from_str(&e.message.unwrap()).unwrap();
+                    outcomes.push(v["outcome"].as_str().unwrap().to_owned());
+                }
+            }
+        }
+        if policy == ActivationPolicy::Restart {
+            assert_eq!(outcomes, ["cancelled", "completed"]);
+        } else {
+            outcomes.sort();
+            assert_eq!(outcomes, ["cancelled", "ignored"]);
+        }
+        runtime.shutdown();
+    }
+}
+
+#[test]
+// Default missing screen preferences without changing saved extremes or unrelated outputs
+fn screen_brightness_defaults_to_fifty_and_preserves_saved_values() {
+    let defaults = crate::workspace::DeviceOutput::default();
+    assert_eq!(defaults.brightness, 50);
+    assert_eq!(defaults.lighting_brightness, 15);
+    assert!(!defaults.sleeping);
+    let mut saved = serde_json::to_value(&defaults).unwrap();
+    saved.as_object_mut().unwrap().remove("brightness");
+    let missing: crate::workspace::DeviceOutput = serde_json::from_value(saved.clone()).unwrap();
+    assert_eq!(missing.brightness, 50);
+    for brightness in [0, 65, 100] {
+        saved["brightness"] = serde_json::json!(brightness);
+        saved["sleeping"] = serde_json::json!(true);
+        saved["lighting_brightness"] = serde_json::json!(73);
+        let output: crate::workspace::DeviceOutput = serde_json::from_value(saved.clone()).unwrap();
+        assert_eq!(output.brightness, brightness);
+        assert_eq!(output.lighting_brightness, 73);
+        assert!(output.sleeping);
+        assert_eq!(serde_json::to_value(output).unwrap(), saved);
     }
 }

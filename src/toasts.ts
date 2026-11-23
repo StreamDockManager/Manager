@@ -97,7 +97,7 @@ export function registerToasts(alpine: typeof Alpine) {
                 // Render outside dialog layout in a viewport-fixed popover. Native modals
                 // still require DOM ownership of the stack to keep its controls non-inert
                 observer = new MutationObserver((records) => this.position(records));
-                observer.observe(document.body, {
+                observer.observe(document.documentElement, {
                     childList: true,
                     subtree: true,
                     attributes: true,
@@ -191,6 +191,20 @@ export function registerToasts(alpine: typeof Alpine) {
             position(records: MutationRecord[] = []) {
                 // Shared pickers can precede their parent in the DOM. The top layer
                 // follows opening order, so keep that order rather than tree order
+                if (
+                    records.length &&
+                    this.$el.isConnected &&
+                    this.$el.parentElement === (dialogs.at(-1) || home) &&
+                    !dialogs.some((dialog) => !dialog.isConnected) &&
+                    !records.some(
+                        (record) =>
+                            this.$el.contains(record.target) ||
+                            record.attributeName === 'data-reduced-motion' ||
+                            (record.attributeName === 'open' &&
+                                record.target instanceof HTMLDialogElement),
+                    )
+                )
+                    return;
                 dialogs = dialogs.filter(
                     (dialog) => dialog.isConnected && dialog.matches(':modal'),
                 );

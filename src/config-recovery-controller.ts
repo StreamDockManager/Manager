@@ -143,7 +143,7 @@ export class ConfigurationRecoveryController {
     }
     // Refresh the backup inventory and invalidate selections when its revision changes
     private async refreshBackups() {
-        if (!this.api.backups) return;
+        if (!this.api.backups || this.report?.incompatible_data_folder) return;
         const catalog = await this.api.backups();
         if (
             this.backupNeedsRefresh ||
@@ -237,7 +237,7 @@ export class ConfigurationRecoveryController {
     constructor(
         readonly api: ConfigurationRecoveryApi,
         // Leave change notification inert when no view is attached
-        readonly changed: () => void = () => {},
+        readonly changed: (editorOnly?: boolean) => void = () => {},
         // Leave user notification inert when no notifier is supplied
         readonly notify: (message: string, level: 'info' | 'success' | 'error') => void = () => {},
     ) {}
@@ -309,7 +309,7 @@ export class ConfigurationRecoveryController {
         this.validation = null;
         this.error = '';
         this.notice = '';
-        this.changed();
+        this.changed(true);
     }
     // Discard the loaded document and unsaved recovery text
     discard() {

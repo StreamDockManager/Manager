@@ -5,6 +5,9 @@ name = "N3 (VSDinside / TreasLin)"
 protocol = "vendor-crt-1"
 status = "experimental"
 
+firmware_instructions = "https://www.vsdinside.com/blogs/tutorial/vsd-stream-dock-connection-issues"
+firmware_instructions_shared = true
+
 [capabilities]
 firmware_query = true
 firmware_report = { kind = "feature", report_id = 1, length = 20, windows_supported = false }

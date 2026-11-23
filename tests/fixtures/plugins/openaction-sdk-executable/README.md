@@ -1,6 +1,6 @@
 # OpenAction SDK test fixture
 
-Opt-in transport qualification against the official Rust SDK 2.8.0, pinned to
+Check Manager’s transport against the official Rust SDK 2.8.0, pinned to
 [OpenActionAPI/rust commit d435b2d57d6df13debaca330011a3067f66a99db](https://github.com/OpenActionAPI/rust/tree/d435b2d57d6df13debaca330011a3067f66a99db).
 The upstream SDK is MIT licensed; it is fetched as a dependency, not copied here.
 The probe source is Manager-owned. It uses only disposable files and the local
@@ -20,6 +20,7 @@ is opened. This is transport evidence, not physical-device or browser qualificat
 From the **Manager repository root**, after setting up the [contributor prerequisites](../../../../CONTRIBUTING.md):
 
 ```sh
+python3 scripts/prepare_patched_deps.py
 cargo build --locked --manifest-path tests/fixtures/plugins/openaction-sdk-executable/Cargo.toml
 STREAM_DOCK_MANAGER_OPENACTION_FIXTURE="$PWD/tests/fixtures/plugins/openaction-sdk-executable/target/debug/manager-openaction-sdk-probe" \
   cargo test -p stream-dock-manager-plugin-host --test openaction_sdk -- --ignored
@@ -27,10 +28,6 @@ STREAM_DOCK_MANAGER_OPENACTION_FIXTURE="$PWD/tests/fixtures/plugins/openaction-s
 
 The shown executable path assumes Cargo's default target directory. If you use `CARGO_TARGET_DIR`, point `STREAM_DOCK_MANAGER_OPENACTION_FIXTURE` at the actual build output. On Windows, use the executable's absolute `.exe` path. The fixture is not installed into your everyday Manager configuration.
 
-The integration test copies
-it into a temporary `.sdPlugin` package before launching it through the production
-host. Registration, lifecycle, arbitrary JSON settings, keypad state transition,
-encoder input, null-state visuals, plugin settings and bidirectional inspector
-messages are checked against genuine SDK deserialization and event dispatch.
+The test runs the fixture through the production host in a temporary `.sdPlugin` package. It checks registration, lifecycle, JSON and plugin settings, keypad and encoder input, null-state visuals, and bidirectional inspector messages against the official SDK.
 
 [All plugin fixtures](../README.md) · [Manager setup](../../../../README.md)

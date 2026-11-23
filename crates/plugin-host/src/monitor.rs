@@ -1,5 +1,6 @@
 //! Cached runtime status and bounded, versioned health records. Live samples are never persisted
 use super::*;
+use stream_dock_manager_storage::plugin_health as stored;
 
 #[derive(
     Debug,
@@ -44,6 +45,8 @@ pub enum RuntimeReason {
     NoActiveDevice,
     NoActiveProfileDemand,
     NoVisibleActions,
+    VaultLocked,
+    VaultSetupRequired,
     RequiredByActiveProfile,
     ManualAction,
     Configuration,
@@ -376,7 +379,7 @@ impl PluginHealth {
             message: message.clone(),
             occurrences: 1,
         });
-        if self.events.len() > 100 {
+        if self.events.len() > stored::MAX_EVENTS {
             self.events.remove(0);
         }
         if category != "automatic_restart" && category != "resource_warning" {
@@ -387,6 +390,100 @@ impl PluginHealth {
         }
     }
 }
+// Translate the UI health type and SQL representation without serializing either to JSON
+macro_rules! map_health {
+    ($h:ident, $source:ident, $destination:path, $counts:path, $event:path) => {{
+        use $counts as Counts;
+        use $destination as Destination;
+        use $event as Event;
+        let $source {
+            totals,
+            session,
+            events,
+            last_registration_ms,
+            last_unexpected_exit_ms,
+            last_issue_ms,
+            last_exit,
+            last_exit_code,
+            last_exit_signal,
+            blocked_reason,
+            last_run_peak_resident_bytes,
+            restart_attempts,
+            recent_failures,
+            missing_assets,
+            unsupported_apis,
+        } = $h;
+        let counts = |crashes, failed_starts, automatic_restarts, issues| Counts {
+            crashes,
+            failed_starts,
+            automatic_restarts,
+            issues,
+        };
+        Destination {
+            totals: counts(
+                totals.crashes,
+                totals.failed_starts,
+                totals.automatic_restarts,
+                totals.issues,
+            ),
+            session: counts(
+                session.crashes,
+                session.failed_starts,
+                session.automatic_restarts,
+                session.issues,
+            ),
+            events: events
+                .into_iter()
+                .map(|event| Event {
+                    id: event.id,
+                    timestamp_ms: event.timestamp_ms,
+                    version: event.version,
+                    run_id: event.run_id,
+                    category: event.category,
+                    severity: event.severity,
+                    message: event.message,
+                    occurrences: event.occurrences,
+                })
+                .collect(),
+            last_registration_ms,
+            last_unexpected_exit_ms,
+            last_issue_ms,
+            last_exit,
+            last_exit_code,
+            last_exit_signal,
+            blocked_reason,
+            last_run_peak_resident_bytes,
+            restart_attempts,
+            recent_failures,
+            missing_assets,
+            unsupported_apis,
+        }
+    }};
+}
+
+// Restore the public health snapshot from validated relational data
+pub(super) fn from_stored_health(h: stored::Health) -> PluginHealth {
+    use stored::Health;
+    map_health!(
+        h,
+        Health,
+        self::PluginHealth,
+        self::HealthCounts,
+        self::HealthEvent
+    )
+}
+
+// Prepare one dirty owner for storage
+fn to_stored_health(h: PluginHealth) -> stored::Health {
+    map_health!(
+        h,
+        PluginHealth,
+        stored::Health,
+        stored::Counts,
+        stored::Event
+    )
+}
+
 pub(super) struct NetworkReport {
     pub run_id: String,
     pub sampled_at: std::time::Instant,
@@ -397,6 +494,19 @@ pub(super) struct NetworkReport {
     pub reading: PluginNetwork,
 }
 impl Hub {
+    fn request_network_samples(&mut self, fresh: bool) {
+        if !self.network_monitor_visible {
+            return;
+        }
+        for (id, queue) in &mut self.sessions.queues {
+            if queue.network_demand {
+                if fresh {
+                    self.network.remove(id);
+                }
+                queue.request_network_sample();
+            }
+        }
+    }
     // Report network
     pub(super) fn report_network(
         &mut self,
@@ -461,51 +571,41 @@ impl Hub {
         Ok(true)
     }
 
+    // Track the exact changed plugin for its next storage flush
+    pub(super) fn health_mut(&mut self, id: &str) -> &mut PluginHealth {
+        self.health_dirty.insert(id.to_owned());
+        self.health.entry(id.to_owned()).or_default()
+    }
+
     // Construct a health issue for the plugin monitor
     pub(super) fn issue(&mut self, id: &str, category: &str, message: &str) {
         let (version, run_id) = self.run_details.get(id).cloned().unwrap_or_default();
-        self.health
-            .entry(id.into())
-            .or_default()
+        self.health_mut(id)
             .record(category, message, &version, run_id);
-        self.health_dirty = true;
     }
-    // Flush health
+
+    // Commit only changed owners and keep dirty IDs when a flush fails
     pub(super) fn flush_health(&mut self) -> Result<(), String> {
-        if !self.health_dirty {
+        if self.health_dirty.is_empty() {
             return Ok(());
         }
         let Some(storage) = &self.store else {
             return Ok(());
         };
-        if self.health.len() > 4096 {
-            return Err("Plugin health index exceeds bounds".into());
+        let dirty = self
+            .health_dirty
+            .iter()
+            .filter_map(|id| {
+                self.health
+                    .get(id)
+                    .map(|health| (id.clone(), to_stored_health(health.clone())))
+            })
+            .collect::<Vec<_>>();
+        if !dirty.is_empty() {
+            let cost = stored::bounded_cost(&dirty)?;
+            storage.transaction_with_cost(cost, move |tx| stored::write_dirty(tx, &dirty))?;
         }
-        let mut retained_bytes = 0usize;
-        for (id, health) in &self.health {
-            retained_bytes = retained_bytes
-                .checked_add(id.len())
-                .and_then(|size| {
-                    serde_json::to_vec(health)
-                        .ok()
-                        .and_then(|value| size.checked_add(value.len()))
-                })
-                .ok_or("Plugin health exceeds bounds")?;
-            if retained_bytes > 16 * 1024 * 1024 {
-                return Err("Plugin health exceeds 16 MiB".into());
-            }
-        }
-        let health = self.health.clone();
-        storage.transaction_with_cost(retained_bytes, move |tx| {
-            let domain = stream_dock_manager_storage::Domain::PluginHealth;
-            tx.execute(&format!("DELETE FROM {}", domain.table()), [])
-                .map_err(|e| e.to_string())?;
-            for (id, value) in health {
-                stream_dock_manager_storage::write_json(tx, domain, &id, &value, 16 * 1024 * 1024)?;
-            }
-            Ok(())
-        })?;
-        self.health_dirty = false;
+        self.health_dirty.clear();
         Ok(())
     }
 }
@@ -527,6 +627,18 @@ impl PluginHost {
             })
             .collect()
     }
+    pub fn network_monitor_visibility(&self, visible: bool) {
+        let mut hub = self.hub.lock().unwrap();
+        if hub.network_monitor_visible != visible {
+            hub.network_monitor_visible = visible;
+            hub.request_network_samples(true);
+        }
+    }
+
+    pub fn request_network_samples(&self) {
+        self.hub.lock().unwrap().request_network_samples(false);
+    }
+
     // Capture the current plugin runtime state
     pub fn runtime_snapshot(&self) -> Vec<PluginRuntimeSnapshot> {
         let hub = self.hub.lock().unwrap();
@@ -651,6 +763,45 @@ impl PluginHost {
 mod network_tests {
     use super::*;
     #[test]
+    fn network_sampling_requires_a_consumer_and_sdk_opt_in() {
+        let mut hub = Hub::default();
+        let poll = mio::Poll::new().unwrap();
+        let wake = std::sync::Arc::new(mio::Waker::new(poll.registry(), mio::Token(1)).unwrap());
+        for id in ["old", "new"] {
+            hub.sessions.tokens.insert(id.into(), id.into());
+            let mut registration = serde_json::json!({"event":"registerPlugin","uuid":id});
+            if id == "new" {
+                registration["payload"] = serde_json::json!({"network_demand":true});
+            }
+            assert!(crate::transport::register(&mut hub, &registration, wake.clone()).is_some());
+        }
+        hub.request_network_samples(false);
+        assert_eq!(
+            hub.sessions.queues["new"]
+                .iter()
+                .filter(|m| m["event"] == "requestNetworkPayload")
+                .count(),
+            0
+        );
+        hub.network_monitor_visible = true;
+        hub.request_network_samples(true);
+        hub.request_network_samples(false);
+        assert_eq!(
+            hub.sessions.queues["old"]
+                .iter()
+                .filter(|m| m["event"] == "requestNetworkPayload")
+                .count(),
+            0
+        );
+        assert_eq!(
+            hub.sessions.queues["new"]
+                .iter()
+                .filter(|m| m["event"] == "requestNetworkPayload")
+                .count(),
+            1
+        );
+    }
+    #[test]
     // Verify cumulative payload reports recover drops and reject stale runs decreases and invalid values
     fn cumulative_payload_reports_recover_drops_and_reject_stale_runs_decreases_and_invalid_values()
     {
@@ -726,5 +877,51 @@ mod network_tests {
         .unwrap();
         assert_eq!(hub.network["plugin"].reading.sent_bytes, Some(0));
         assert_eq!(hub.network["plugin"].reading.upload_bytes_per_second, None);
+    }
+}
+
+#[cfg(test)]
+mod persistence_tests {
+    use super::*;
+
+    #[test]
+    fn health_flush_retries_dirty_owners_after_a_rejected_transaction() {
+        let dir = tempfile::tempdir().unwrap();
+        let storage = stream_dock_manager_storage::Storage::open(dir.path().into()).unwrap();
+        let mut hub = Hub {
+            store: Some(storage.clone()),
+            ..Hub::default()
+        };
+        hub.issue("fixture.one", "crash", "synthetic failure");
+        hub.issue("fixture.two", "failed_start", "synthetic start failure");
+        hub.flush_health().unwrap();
+        assert!(hub.health_dirty.is_empty());
+
+        storage
+            .run(|conn| {
+                conn.execute_batch(
+                "CREATE TEMP TRIGGER simulate_health_failure BEFORE UPDATE ON plugin_health_events
+                WHEN old.owner='fixture.one'
+                BEGIN SELECT raise(ABORT,'synthetic unavailable write'); END;"
+            ).map_err(|error| error.to_string())
+            })
+            .unwrap();
+        hub.issue("fixture.one", "crash", "synthetic failure");
+        assert!(hub.flush_health().is_err());
+        assert_eq!(hub.health_dirty.iter().collect::<Vec<_>>(), ["fixture.one"]);
+        let previous = storage.run(|conn| stored::read(conn)).unwrap();
+        assert_eq!(previous["fixture.one"].events[0].occurrences, 1);
+
+        storage
+            .run(|conn| {
+                conn.execute_batch("DROP TRIGGER simulate_health_failure")
+                    .map_err(|error| error.to_string())
+            })
+            .unwrap();
+        hub.flush_health().unwrap();
+        assert!(hub.health_dirty.is_empty());
+        let next = storage.run(|conn| stored::read(conn)).unwrap();
+        assert_eq!(next["fixture.one"].events[0].occurrences, 2);
+        assert_eq!(next["fixture.two"], previous["fixture.two"]);
     }
 }

@@ -6,7 +6,7 @@
     @resolved-theme.window="resetPluginMenus"
     @focusin.window="rememberPluginFocus"
 >
-    <div class="page-heading">
+    <div class="page-heading" x-effect="updatePluginResults">
         <div>
             <h1>Plugins</h1>
             <p class="plugin-summary" x-text="summary"></p>
@@ -79,7 +79,7 @@
             functionality and performance may vary between operating systems.
         </p>
     </div>
-    <div class="card plugin-toolbar" x-show="installedCount > 0">
+    <div x-effect="updatePluginPage" class="card plugin-toolbar" x-show="installedCount > 0">
         <label class="search-field plugin-search">
             <span aria-hidden="true">⌕</span>
             <input
@@ -125,7 +125,13 @@
         <template x-for="plugin in pluginPage.items" :key="plugin.id">
             <article class="card plugin-card" :aria-label="plugin.name">
                 <div class="plugin-card-header">
-                    <img class="plugin-avatar" x-show="plugin.icon" :src="plugin.icon" alt="" />
+                    <img
+                        data-resource-role="plugin-icon"
+                        class="plugin-avatar"
+                        x-show="plugin.icon"
+                        :src="plugin.icon || null"
+                        alt=""
+                    />
                     <span
                         class="plugin-avatar"
                         x-show="!plugin.icon"
@@ -186,6 +192,7 @@
                             @click="togglePluginMenu"
                         >
                             <img
+                                data-resource-role="plugin-icon"
                                 src="/appearance/icons/settings.svg"
                                 width="20"
                                 height="20"
@@ -357,6 +364,31 @@
                         ></span>
                         <span class="plugin-action-count" x-text="plugin.actions.length"></span>
                     </button>
+                    <button
+                        type="button"
+                        class="text-button plugin-permissions-link"
+                        x-show="hasPluginPermissions(plugin)"
+                        :data-id="plugin.id"
+                        :aria-label="cardPermissionLabel(plugin)"
+                        @click="openCardPermissions"
+                    >
+                        Permissions
+                        <span
+                            class="permission-review-badge"
+                            x-show="permissionReviewCounts[plugin.id]"
+                            x-text="permissionReviewCounts[plugin.id]"
+                            aria-hidden="true"
+                        ></span>
+                    </button>
+                    <button
+                        type="button"
+                        class="text-button"
+                        :data-id="plugin.id"
+                        :aria-label="'Vault for ' + plugin.name"
+                        @click="openPluginVault"
+                    >
+                        Vault
+                    </button>
                     <div
                         class="plugin-tools plugin-menu"
                         :class="{ 'is-open': pluginMenuOpen(plugin.id, 'tools') }"
@@ -499,52 +531,56 @@
                     :id="'plugin-actions-' + plugin.id"
                     x-show="isExpanded(plugin.id)"
                 >
-                    <div class="settings-section" x-show="settingsActions(plugin).length">
-                        <div class="button-row">
-                            <label class="settings-field">
-                                Defaults for new bindings
-                                <select
-                                    :aria-label="'Action defaults for ' + plugin.name"
-                                    :data-id="plugin.id"
-                                    :value="defaultActionId(plugin)"
-                                    @change="chooseDefaults"
-                                >
-                                    <template
-                                        x-for="action in settingsActions(plugin)"
-                                        :key="action.id"
+                    <template x-if="isExpanded(plugin.id)">
+                        <div>
+                            <div class="settings-section" x-show="settingsActions(plugin).length">
+                                <div class="button-row">
+                                    <label class="settings-field">
+                                        Defaults for new bindings
+                                        <select
+                                            :aria-label="'Action defaults for ' + plugin.name"
+                                            :data-id="plugin.id"
+                                            :value="defaultActionId(plugin)"
+                                            @change="chooseDefaults"
+                                        >
+                                            <template
+                                                x-for="action in settingsActions(plugin)"
+                                                :key="action.id"
+                                            >
+                                                <option
+                                                    :value="action.id"
+                                                    :selected="action.id === defaultActionId(plugin)"
+                                                    x-text="action.name"
+                                                ></option>
+                                            </template>
+                                        </select>
+                                    </label>
+                                    <button
+                                        type="button"
+                                        class="button"
+                                        :data-id="plugin.id"
+                                        :aria-label="'Edit action defaults for ' + plugin.name"
+                                        @click="editDefaults"
                                     >
-                                        <option
-                                            :value="action.id"
-                                            :selected="action.id === defaultActionId(plugin)"
-                                            x-text="action.name"
-                                        ></option>
-                                    </template>
-                                </select>
-                            </label>
-                            <button
-                                type="button"
-                                class="button"
-                                :data-id="plugin.id"
-                                :aria-label="'Edit action defaults for ' + plugin.name"
-                                @click="editDefaults"
-                            >
-                                Edit action defaults
-                            </button>
+                                        Edit action defaults
+                                    </button>
+                                </div>
+                                <p class="field-help">
+                                    Defaults are saved separately for each action. Configure a
+                                    binding to use another location or value.
+                                </p>
+                            </div>
+                            <template x-for="group in groupsFor(plugin)" :key="group.id">
+                                <sd-plugin-action-group></sd-plugin-action-group>
+                            </template>
+                            <p class="field-help" x-show="groupsFor(plugin).length === 0">
+                                No matching actions in this plugin.
+                            </p>
+                            <p class="field-help" x-show="!app.control">
+                                Select a device control in the editor to assign an action.
+                            </p>
                         </div>
-                        <p class="field-help">
-                            Defaults are saved separately for each action. Configure a binding to
-                            use another location or value.
-                        </p>
-                    </div>
-                    <template x-for="group in groupsFor(plugin)" :key="group.id">
-                        <sd-plugin-action-group></sd-plugin-action-group>
                     </template>
-                    <p class="field-help" x-show="groupsFor(plugin).length === 0">
-                        No matching actions in this plugin.
-                    </p>
-                    <p class="field-help" x-show="!app.control">
-                        Select a device control in the editor to assign an action.
-                    </p>
                 </div>
             </article>
         </template>
@@ -692,7 +728,7 @@
             </button>
         </header>
         <div
-            class="catalog-tabs health-tabs"
+            class="navigation-tabs catalog-tabs health-tabs"
             role="tablist"
             aria-label="Plugin health views"
             @keydown="navigateHealthTabs"

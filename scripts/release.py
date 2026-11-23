@@ -19,11 +19,14 @@ from native_targets import INSTALLER_VARIANTS, PORTABLE_VARIANTS
 ROOT = Path(__file__).resolve().parent.parent
 PRODUCT = 'manager'
 CLI_PRODUCT = 'manager-cli'
+NOTICES = 'THIRD_PARTY_NOTICES.md'
+MAX_NOTICES = 4 * 1024**2
 COMPATIBILITY_NOTICE = 'Initial public release: build and package integrity verified, but vendor compatibility is partial and exhaustive native, installer and physical-device qualification is not complete.'
 CATALOG_RELEASE_NOTES = COMPATIBILITY_NOTICE + ' Unsigned and unnotarized release. Checksums verify download integrity, not publisher identity or correspondence to source.'
 VARIANTS = set(INSTALLER_VARIANTS)
 CLI_VARIANTS = {*INSTALLER_VARIANTS, *PORTABLE_VARIANTS}
 IDENTITY_FIELDS = ['schema_version', 'repository', 'version', 'channel', 'commit', 'release_tag', 'build']
+TARGET_PROFILES = frozenset(('standard', 'with-intel'))
 
 
 
@@ -122,6 +125,7 @@ def release_notes(catalog):
         f'- Build run: [{build}]({base}/actions/runs/{build})\n'
         f'- Native build workflow: [build-installers.yml]({base}/blob/{commit}/.github/workflows/build-installers.yml)\n'
         f'- CLI build workflow: [build-cli.yml]({base}/blob/{commit}/.github/workflows/build-cli.yml)\n'
+        f'- [Third-party notices]({base}/blob/{commit}/{NOTICES}) (also available as a release asset)\n'
         f'- Preparation workflow: [prepare-release.yml]({base}/blob/{commit}/.github/workflows/prepare-release.yml)\n\n'
         'Installation instructions are included in each OS package and can be read before downloading:\n'
         + ''.join(f'- [{osname.title()} installation instructions]({base}/blob/{commit}/packaging/install-instructions/{osname}/INSTALL-INSTRUCTIONS.md)\n'
@@ -189,8 +193,19 @@ def manager_catalog(directory, osname, arch):
 
 
 # Validate installer catalog fields before release assembly
-def validate_catalog_metadata(catalog, *, complete, product=PRODUCT):
+def validate_catalog_metadata(catalog, *, complete, product=PRODUCT, target_profile=None):
+    if target_profile is not None and target_profile not in TARGET_PROFILES:
+        raise ValueError('Unknown selected release target profile')
+    # Historical preparations had no field and always required the Intel rows.
+    # Only native input fragments can inherit the selection from the workflow.
+    profile = catalog.get('target_profile', target_profile if not complete and target_profile else 'with-intel')
+    if not isinstance(profile, str) or profile not in TARGET_PROFILES:
+        raise ValueError('Unknown release target profile')
+    if target_profile is not None and profile != target_profile:
+        raise ValueError('Catalogue target profile differs from the selected preparation')
     expected_variants = CLI_VARIANTS if product == CLI_PRODUCT else VARIANTS
+    if profile == 'standard':
+        expected_variants = {row for row in expected_variants if row[:2] != ('macos', 'amd64')}
     if (product not in (PRODUCT, CLI_PRODUCT) or catalog['repository'] != os.environ['GITHUB_REPOSITORY']
             or catalog['product'] != product or catalog['schema_version'] != 1):
         raise ValueError('Wrong publication product/repository')
@@ -237,6 +252,8 @@ def validate_matching_identity(catalogs):
         for field in IDENTITY_FIELDS:
             if catalog[field] != first[field]:
                 raise ValueError(f'Native catalogue mismatch: {field}')
+        if catalog.get('target_profile') != first.get('target_profile'):
+            raise ValueError('Native catalogue mismatch: target_profile')
 
 
 # Require a regular file contained in the selected release directory
@@ -247,18 +264,30 @@ def regular_file_in(path, root):
         raise ValueError('Native release input cannot traverse symlink directories')
 
 
+# Validate the standalone notices before copying or publishing them
+def notices_digest(path, root):
+    if not path.exists() and not path.is_symlink():
+        raise ValueError(f'Missing {NOTICES}; run Prepare Release with standalone notices support')
+    regular_file_in(path, root)
+    if not 0 < path.stat().st_size <= MAX_NOTICES:
+        raise ValueError(f'{NOTICES} has an invalid size')
+    return file_digest(path)
+
+
 # Assemble verified installer inputs into the publication bundle
 def assemble(directory):
     products = [(PRODUCT, 'catalog-*.json', 'catalog.json'),
                 (CLI_PRODUCT, 'cli-catalog-*.json', 'cli-catalog.json')]
     combined, native = {}, []
+    target_profile = os.environ.get('RELEASE_TARGET_PROFILE')
+    expected_profile = target_profile if target_profile is not None else 'with-intel'
     for product, pattern, filename in products:
         catalogs = []
         for path in sorted(directory.rglob(pattern)):
             regular_file_in(path, directory)
             catalog = json.loads(path.read_text())
             # Validate untrusted names and provenance before any output writes
-            validate_catalog_metadata(catalog, complete=False, product=product)
+            validate_catalog_metadata(catalog, complete=False, product=product, target_profile=expected_profile)
             catalogs.append(catalog)
         if not catalogs:
             raise ValueError(f'Missing native catalogues for {product}')
@@ -266,7 +295,9 @@ def assemble(directory):
         first = dict(catalogs[0])
         first['assets'] = [asset for catalog in catalogs for asset in catalog['assets']]
         first['packages'] = []
-        validate_catalog_metadata(first, complete=True, product=product)
+        if target_profile is not None:
+            first['target_profile'] = target_profile
+        validate_catalog_metadata(first, complete=True, product=product, target_profile=expected_profile)
         first['release_notes'] = CATALOG_RELEASE_NOTES
         combined[filename] = first
         native.extend(catalogs)
@@ -278,7 +309,7 @@ def assemble(directory):
         catalog['published_at'] = timestamp
     assets = [asset for catalog in combined.values() for asset in catalog['assets']]
     names = [asset['name'] for asset in assets]
-    if len(set(names)) != len(names) or set(names) & {*combined, 'SHA256SUMS'}:
+    if len(set(names)) != len(names) or set(names) & {*combined, NOTICES, 'SHA256SUMS'}:
         raise ValueError('Duplicate release filename across product catalogues')
     output = directory / 'publish'
     if output.is_symlink() or output.exists() and not output.is_dir():
@@ -294,7 +325,9 @@ def assemble(directory):
         if paths[0].stat().st_size != asset['size'] or digest != asset['sha256']:
             raise ValueError('Native asset checksum mismatch')
         inputs.append((asset, paths[0]))
-    for name in [*names, *combined, 'SHA256SUMS']:
+    source_notices = ROOT / NOTICES
+    notice_digest = notices_digest(source_notices, ROOT)
+    for name in [*names, *combined, NOTICES, 'SHA256SUMS']:
         path = output / name
         if path.is_symlink() or path.exists() and not path.is_file():
             raise ValueError('Publication output cannot replace a symlink or non-file')
@@ -307,6 +340,8 @@ def assemble(directory):
         path = output / filename
         path.write_text(json.dumps(catalog, indent=4) + '\n')
         sums.append(file_digest(path) + '  ' + filename)
+    shutil.copyfile(source_notices, output / NOTICES)
+    sums.append(f'{notice_digest}  {NOTICES}')
     (output / 'SHA256SUMS').write_text('\n'.join(sums) + '\n')
     return output
 
@@ -319,13 +354,14 @@ def verify_publication(directory):
     # then validate both catalogues and their shared identity before any upload
     for path in directory.iterdir():
         regular_file_in(path, directory)
-    catalogs, expected = [], {}
+    catalogs, expected = [], {NOTICES: notices_digest(directory / NOTICES, directory)}
     for product, filename in [(PRODUCT, 'catalog.json'), (CLI_PRODUCT, 'cli-catalog.json')]:
         path = directory / filename
         if not path.is_file():
             raise ValueError(f'Missing publication catalogue: {filename}')
         catalog = json.loads(path.read_text())
-        validate_catalog_metadata(catalog, complete=True, product=product)
+        validate_catalog_metadata(catalog, complete=True, product=product,
+                                  target_profile=os.environ.get('RELEASE_TARGET_PROFILE'))
         if catalog.get('release_notes') != CATALOG_RELEASE_NOTES:
             raise ValueError('Publication notes must contain the unsigned release warning; reassemble the original native artifacts')
         catalogs.append(catalog)
@@ -405,6 +441,26 @@ def download_release(repository, tag, directory):
     run(['gh', 'release', 'download', tag, '--repo', repository, '--dir', str(directory)])
 
 
+# Capture the created draft directly instead of relying on immediate release-list visibility
+def create_draft(repository, tag, catalog):
+    payload = {'tag_name': tag, 'target_commitish': catalog['commit'], 'draft': True,
+               'prerelease': False, 'name': f'{PRODUCT.title()} {catalog["version"]}',
+               'body': release_notes(catalog)}
+    with tempfile.TemporaryDirectory() as temporary:
+        request = Path(temporary) / 'draft.json'
+        request.write_text(json.dumps(payload), encoding='utf-8')
+        created = json.loads(run(['gh', 'api', '--method', 'POST',
+                                  f'repos/{repository}/releases', '--input', str(request)], True))
+    if (not isinstance(created, dict) or type(created.get('id')) is not int or created['id'] <= 0
+            or created.get('tag_name') != tag or created.get('target_commitish') != catalog['commit']
+            or created.get('draft') is not True or created.get('prerelease') is not False
+            or created.get('assets') != []):
+        raise ValueError('Created draft response does not match the selected tag, source and empty draft identity')
+    # The authenticated creation response is authoritative even before GET/list propagation
+    # Publication still revalidates this exact ID and the remote tag after asset verification
+    return created
+
+
 # Publish only verified staged assets while preserving immutable release identity
 def publish(directory):
     require_publication_context()
@@ -423,18 +479,15 @@ def publish(directory):
         with tempfile.TemporaryDirectory() as temp:
             download_release(repository, tag, temp)
             remote = verify_publication(Path(temp))
-            for field in ['product', 'repository', 'version', 'commit', 'build', 'channel', 'release_tag']:
-                if remote[field] != catalog[field]:
+            for field in ['product', 'repository', 'version', 'commit', 'build', 'channel', 'release_tag', 'target_profile']:
+                if remote.get(field) != catalog.get(field):
                     raise ValueError('Published release belongs to a different build; refusing overwrite')
             if any(not same_file_bytes(Path(temp) / path.name, path) for path in directory.iterdir()):
                 raise ValueError('Published release bytes differ from prepared artifacts; refusing overwrite')
         print('Published release verified; nothing overwritten')
         return
     if existing is None:
-        release_with_notes(['gh', 'release', 'create', tag, '--repo', repository, '--verify-tag', '--target', catalog['commit'], '--draft', '--title', f'{PRODUCT.title()} {catalog["version"]}'], catalog)
-        existing = remote_release(repository, tag)
-        if not existing or existing['target_commitish'] != catalog['commit'] or existing['prerelease'] or not existing['draft']:
-            raise ValueError('Created draft identity differs from the selected source')
+        existing = create_draft(repository, tag, catalog)
     # Validate every staged asset before uploading anything. Path sorting differs
     # across platforms and must not determine when a conflicting draft is rejected
     with tempfile.TemporaryDirectory() as temp:

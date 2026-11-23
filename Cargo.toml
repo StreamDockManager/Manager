@@ -62,22 +62,22 @@ default-members = [
 ]
 
 [workspace.package]
-version = "0.1.0"
+version = "0.1.1"
 edition = "2021"
 license = "GPL-3.0-or-later"
 rust-version = "1.95"
 
 [workspace.dependencies]
 stream-dock-manager-storage = { path = "crates/storage" }
-rusqlite = { version = "0.42.0", default-features = false, features = [
-  "bundled",
+rusqlite = { version = "0.43.0", default-features = false, features = [
+  "bundled-sqlcipher-vendored-openssl",
   "backup",
   "limits",
   "fallible_uint",
 ] }
 stream-dock-manager-desktop-contract = { path = "crates/desktop-contract" }
 hex = "0.4.3"
-zip = { version = "=9.5.1", default-features = false, features = [
+zip = { version = "=9.8.0", default-features = false, features = [
   "deflate",
   "lzma",
 ] }
@@ -95,8 +95,8 @@ image = { version = "0.25.10", default-features = false, features = [
   "jpeg",
   "gif",
 ] }
-uuid = { version = "1.29.2", features = ["v4", "serde"] }
-clap = { version = "4.6.7", features = ["derive"] }
+uuid = { version = "1.29.3", features = ["v4", "serde"] }
+clap = { version = "4.6.9", features = ["derive"] }
 hardware-core = { package = "stream-dock-manager-hardware-core", path = "crates/hardware-core" }
 hardware-protocols = { package = "stream-dock-manager-hardware-protocols", path = "crates/hardware-protocols" }
 hardware-registry = { package = "stream-dock-manager-hardware-registry", path = "crates/hardware-registry" }
@@ -118,6 +118,26 @@ incremental = false
 # Keep real-time image work optimized when the desktop application is run with
 # `tauri dev`. The application/controller code keeps its normal debug profile
 [profile.dev.package.stream-dock-manager-hardware-core]
+opt-level = 3
+
+# Animated plugin artwork traverses SVG paths and rasterizes them every frame.
+[profile.dev.package.resvg]
+opt-level = 3
+
+[profile.dev.package.usvg]
+opt-level = 3
+
+[profile.dev.package.tiny-skia]
+opt-level = 3
+
+[profile.dev.package.tiny-skia-path]
+opt-level = 3
+
+# The fitted feedback labels are shaped by usvg on the same frame deadline.
+[profile.dev.package.harfrust]
+opt-level = 3
+
+[profile.dev.package.read-fonts]
 opt-level = 3
 
 [profile.dev.package.image]
@@ -143,4 +163,6 @@ opt-level = 3
 # changing that dependency family's ABI. See vendor/README.md for provenance
 [patch.crates-io]
 glib = { path = "vendor/.cache/sources/glib-0.18.5" }
-wry = { path = "vendor/.cache/sources/wry-0.57.2" }
+wry = { path = "vendor/.cache/sources/wry-0.57.3" }
+
+hidapi = { path = "vendor/.cache/sources/hidapi-2.6.7" }

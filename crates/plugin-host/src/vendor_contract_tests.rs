@@ -353,6 +353,49 @@ fn manifest_vendor_package(root: &Path, disabled: bool) {
     .unwrap();
 }
 
+// Exercise delivery after admission without pretending the Elgato package is native on Linux
+fn start_vendor_protocol_fixture(host: &mut PluginHost) {
+    let id = "fixture.vendor";
+    host.enable(id, true).unwrap();
+    lifecycle_tests::demand(host, id);
+
+    #[cfg(target_os = "linux")]
+    {
+        let preflight = host.preflight(id).unwrap();
+        let blockers: Vec<_> = preflight
+            .checks
+            .iter()
+            .filter(|check| check.level == "blocker")
+            .map(|check| check.code.as_str())
+            .collect();
+        assert_eq!(blockers, ["declared_platform"]);
+        assert!(!preflight.can_enable);
+        let plugin = host.plugins.get_mut(id).unwrap();
+        assert_eq!(plugin.info.runtime.state, RuntimeState::Blocked);
+        assert!(plugin.token.is_empty() && plugin.child.is_none());
+
+        // The tests below target host event and visual behaviors, not executing a
+        // vendor package. Model an admitted runtime only in this disposable host.
+        plugin.info.runtime.state = RuntimeState::Starting;
+        let mut hub = host.hub.lock().unwrap();
+        hub.metadata.insert(id.into(), plugin.metadata.clone());
+        hub.manifest_dialects
+            .insert(id.into(), plugin.info.dialect.clone());
+        if let Some(capabilities) = &plugin.info.capabilities {
+            hub.capabilities.insert(id.into(), capabilities.clone());
+        } else {
+            hub.capabilities.remove(id);
+        }
+    }
+
+    assert_eq!(
+        host.plugins[id].info.runtime.state,
+        RuntimeState::Starting,
+        "{}",
+        host.plugins[id].info.status
+    );
+}
+
 #[test]
 // Verify vendor manifest action flags are projected with upstream true defaults
 fn vendor_manifest_action_flags_are_projected_with_upstream_true_defaults() {
@@ -417,8 +460,7 @@ fn vendor_automatic_key_states_toggle_before_press_payload_and_respect_opt_out()
         let root = tempfile::tempdir().unwrap();
         manifest_vendor_package(root.path(), disabled);
         let mut host = lifecycle_tests::host(root.path());
-        host.enable("fixture.vendor", true).unwrap();
-        lifecycle_tests::demand(&mut host, "fixture.vendor");
+        start_vendor_protocol_fixture(&mut host);
         let context = host.hub.lock().unwrap().binding_context(
             "fixture.vendor",
             "profile:page",
@@ -502,8 +544,7 @@ fn automatic_states_do_not_apply_to_encoder_macro_or_manager_contexts() {
                 .info
                 .capabilities = Some(Default::default());
         }
-        host.enable("fixture.vendor", true).unwrap();
-        lifecycle_tests::demand(&mut host, "fixture.vendor");
+        start_vendor_protocol_fixture(&mut host);
         let scope = if mode == "macro" {
             "profile:page@macro"
         } else {
@@ -533,14 +574,38 @@ fn automatic_states_do_not_apply_to_encoder_macro_or_manager_contexts() {
             (mode == "macro").then_some(0),
         )
         .unwrap();
-        let hub = host.hub.lock().unwrap();
-        assert!(
-            hub.sessions.queues["fixture.vendor"]
+        let (events, has_visual) = {
+            let hub = host.hub.lock().unwrap();
+            (
+                hub.sessions.queues["fixture.vendor"]
+                    .iter()
+                    .cloned()
+                    .collect::<Vec<_>>(),
+                hub.visual_state.visuals.contains_key(&context),
+            )
+        };
+        let mut expected = vec!["willAppear"];
+        if mode == "vsd" {
+            expected.push("titleParametersDidChange");
+        }
+        if mode == "encoder" {
+            expected.extend(["dialDown", "dialUp"]);
+        } else {
+            expected.extend(["keyDown", "keyUp"]);
+        }
+        assert_eq!(
+            events
                 .iter()
-                .all(|event| event["payload"]["state"] == 0),
+                .map(|event| event["event"].as_str().unwrap())
+                .collect::<Vec<_>>(),
+            expected,
             "{mode}"
         );
-        assert!(!hub.visual_state.visuals.contains_key(&context), "{mode}");
+        assert!(
+            events.iter().all(|event| event["payload"]["state"] == 0),
+            "{mode}"
+        );
+        assert!(!has_visual, "{mode}");
     }
 }
 
@@ -550,8 +615,7 @@ fn elgato_multi_action_desired_state_is_explicit_separate_and_context_local() {
     let root = tempfile::tempdir().unwrap();
     manifest_vendor_package(root.path(), false);
     let mut host = lifecycle_tests::host(root.path());
-    host.enable("fixture.vendor", true).unwrap();
-    lifecycle_tests::demand(&mut host, "fixture.vendor");
+    start_vendor_protocol_fixture(&mut host);
     let settings = json!({"state": "opaque", "userDesiredState": "also opaque"});
     for (scope, current, desired) in [("profile:page@0", 1, 0), ("profile:page@1", 0, 1)] {
         let context =
@@ -628,8 +692,7 @@ fn elgato_multi_action_selection_rejects_missing_out_of_range_and_wrong_context(
                 .get_mut("fixture.vendor.action")
                 .unwrap()["States"] = json!([{}]);
         }
-        host.enable("fixture.vendor", true).unwrap();
-        lifecycle_tests::demand(&mut host, "fixture.vendor");
+        start_vendor_protocol_fixture(&mut host);
         let scope = if mode == "single" {
             "profile:page"
         } else {
@@ -707,8 +770,7 @@ fn elgato_encoder_defaults_initialize_existing_layout_and_keep_runtime_overrides
         if mode == "vsd" {
             host.plugins.get_mut("fixture.vendor").unwrap().info.dialect = "vsd".into();
         }
-        host.enable("fixture.vendor", true).unwrap();
-        lifecycle_tests::demand(&mut host, "fixture.vendor");
+        start_vendor_protocol_fixture(&mut host);
         let action = || ActiveAction {
             plugin_id: "fixture.vendor".into(),
             action_id: "fixture.vendor.action".into(),
@@ -728,9 +790,15 @@ fn elgato_encoder_defaults_initialize_existing_layout_and_keep_runtime_overrides
             "device",
             "dial",
         );
+        let (visual, software_visual) = {
+            let hub = host.hub.lock().unwrap();
+            (
+                hub.visual_state.visuals.get(&context).cloned(),
+                hub.visual_state.software_visuals.get(&context).cloned(),
+            )
+        };
+        let visual = visual.unwrap_or_else(|| panic!("missing synchronized visual for {mode}"));
         {
-            let mut hub = host.hub.lock().unwrap();
-            let visual = &hub.visual_state.visuals[&context];
             if mode != "encoder" {
                 assert!(visual["layout"].is_null());
                 assert!(visual.get("encoderBackground").is_none());
@@ -744,9 +812,10 @@ fn elgato_encoder_defaults_initialize_existing_layout_and_keep_runtime_overrides
             );
             assert!(visual["encoderBackground"].as_str().unwrap().len() < 512 * 1024);
             assert_eq!(
-                hub.visual_state.software_visuals[&context]["encoderBackground"],
+                software_visual.expect("missing synchronized encoder preview")["encoderBackground"],
                 visual["encoderBackground"]
             );
+            let mut hub = host.hub.lock().unwrap();
             for mut message in [
                 json!({"event":"setFeedbackLayout","context":context,"payload":{"layout":"$A0"}}),
                 json!({"event":"setTriggerDescription","context":context,"payload":{"push":"Runtime override"}}),

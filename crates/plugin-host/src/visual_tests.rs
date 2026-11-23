@@ -424,7 +424,7 @@ fn vendor_state_title_defaults_follow_selected_state_and_keep_plugin_title_overr
     let mut hub = Hub::default();
     hub.roots.insert("plugin".into(), root.path().into());
     hub.metadata.insert("plugin".into(), Arc::new(HashMap::from([("plugin.action".into(), json!({"States":[
-        {"Title":"zero","FontFamily":"Noto Sans","FontSize":"10","FontStyle":"Bold Italic","FontUnderline":true,"ShowTitle":false,"TitleAlignment":"top","TitleColor":"#ff0000"},
+        {"Title":"zero","FontFamily":"Inter","FontSize":"10","FontStyle":"Bold Italic","FontUnderline":true,"ShowTitle":false,"TitleAlignment":"top","TitleColor":"#ff0000"},
         {"Title":"one","FontSize":18,"ShowTitle":true,"TitleAlignment":"bottom","TitleColor":"#00ff00"}
     ]}))])));
     hub.context_state
@@ -439,7 +439,7 @@ fn vendor_state_title_defaults_follow_selected_state_and_keep_plugin_title_overr
     let parameters = hub.visual_state.visuals["ctx"]["titleParameters"].clone();
     assert_eq!(
         parameters,
-        json!({"fontFamily":"Noto Sans","fontSize":10.0,"fontStyle":"Bold Italic","fontUnderline":true,"showTitle":false,"titleAlignment":"top","titleColor":"#ff0000"})
+        json!({"fontFamily":"Inter","fontSize":10.0,"fontStyle":"Bold Italic","fontUnderline":true,"showTitle":false,"titleAlignment":"top","titleColor":"#ff0000"})
     );
     prepare(
         &mut hub,
@@ -875,7 +875,10 @@ fn declared_pixmap_paths_and_layout_budgets_are_bounded_and_rejections_keep_prev
     std::fs::write(root.path().join("large.png"), vec![0; 2 * 1024 * 1024 + 1]).unwrap();
     assert_rejected(&mut hub, layout(vec!["large.png".into()]));
     let svg = |padding: usize| {
-        format!("<svg xmlns=\"http://www.w3.org/2000/svg\" width=\"20\" height=\"10\"><!--{}--><rect width=\"20\" height=\"10\" fill=\"red\"/></svg>","x".repeat(padding))
+        format!(
+            "<svg xmlns=\"http://www.w3.org/2000/svg\" width=\"20\" height=\"10\"><!--{}--><rect width=\"20\" height=\"10\" fill=\"red\"/></svg>",
+            "x".repeat(padding)
+        )
     };
     for i in 0..3 {
         std::fs::write(
@@ -897,4 +900,91 @@ fn declared_pixmap_paths_and_layout_budgets_are_bounded_and_rejections_keep_prev
         &mut hub,
         layout((0..33).map(|i| format!("small-{i}.png")).collect()),
     );
+}
+
+#[test]
+fn large_artwork_is_shared_by_states_feedback_and_both_targets_until_the_last_render() {
+    use image::ImageEncoder;
+    let root = tempfile::tempdir().unwrap();
+    let directory = root.path().canonicalize().unwrap();
+    let mut hub = Hub::default();
+    let cache = Arc::new(ArtworkCache::new(directory.join("cached-media")));
+    hub.visual_state.artwork_cache = Some(cache.clone());
+    hub.roots.insert("plugin".into(), directory.clone());
+    hub.metadata.insert(
+        "plugin".into(),
+        Arc::new(HashMap::from([("art".into(), json!({"States":[{},{}]}))])),
+    );
+    hub.context_state
+        .context_actions
+        .insert("key".into(), "art".into());
+    std::fs::write(
+        directory.join("tile.json"),
+        r#"{"items":[{"type":"pixmap","key":"art","rect":[0,0,200,100]}]}"#,
+    )
+    .unwrap();
+    let mut png = Vec::new();
+    let mut encoder = image::codecs::png::PngEncoder::new(&mut png);
+    encoder.set_exif_metadata(vec![3; 96 * 1024]).unwrap();
+    encoder
+        .write_image(&[10, 22, 31], 1, 1, image::ExtendedColorType::Rgb8)
+        .unwrap();
+    let uri = format!(
+        "data:image/png;base64,{}",
+        base64::engine::general_purpose::STANDARD.encode(png)
+    );
+    for mut event in [
+        json!({"event":"setImage","context":"key","payload":{"image":uri}}),
+        json!({"event":"setFeedbackLayout","context":"key","payload":{"layout":"tile.json"}}),
+        json!({"event":"setFeedback","context":"key","payload":{"art":{"value":uri}}}),
+        json!({"event":"setState","context":"key","payload":{"state":1}}),
+        json!({"event":"setTitle","context":"key","payload":{"title":"new title","target":2}}),
+    ] {
+        prepare(&mut hub, "plugin", &mut event).unwrap();
+    }
+    refresh_themes(&mut hub);
+    let snapshot = hub.visual_state.visuals["key"].clone();
+    let files = hub.visual_state.artwork("key", false).unwrap().clone();
+    assert!(snapshot.to_string().len() < 2000);
+    assert!(hub.visual_state.software_visuals["key"].to_string().len() < 2000);
+    assert_eq!(cache.maintain(None).unwrap().entries, 1);
+    hub.visual_state.remove("key");
+    assert_eq!(cache.maintain(Some(true)).unwrap().removed_entries, 0);
+    let mut expanded = snapshot.as_ref().clone();
+    files.expand(&mut expanded).unwrap();
+    assert_eq!(expanded["image"], uri);
+    let resolve = |token: &str| {
+        files
+            .image_bytes(token)
+            .map_err(hardware_core::Error::Protocol)
+    };
+    for visual in [
+        snapshot.as_ref().clone(),
+        json!({"image":snapshot["image"],"title":"a"}),
+    ] {
+        let resolved =
+            hardware_core::render::visual_resolved(&visual, 112, 112, 90, &resolve).unwrap();
+        let mut inline = visual;
+        files.expand(&mut inline).unwrap();
+        assert_eq!(
+            resolved,
+            hardware_core::render::visual(&inline, 112, 112, 90).unwrap()
+        );
+    }
+    assert_eq!(expanded["feedback"]["art"]["value"], uri);
+    assert_eq!(expanded["stateOverrides"]["1"]["image"], uri);
+    for (w, h) in [(112, 112), (176, 112)] {
+        assert_eq!(
+            hardware_core::render::visual(&expanded, w, h, 0).unwrap(),
+            hardware_core::render::visual(
+                &json!({"layout":expanded["layout"],"feedback":{"art":{"value":uri}}}),
+                w,
+                h,
+                0
+            )
+            .unwrap()
+        );
+    }
+    drop(files);
+    assert_eq!(cache.maintain(Some(true)).unwrap().removed_entries, 1);
 }

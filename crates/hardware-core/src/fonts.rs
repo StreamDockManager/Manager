@@ -1,4 +1,4 @@
-//! Host font families with bundled, portable Noto defaults. Saved profiles store
+//! Host font families with bundled, portable Inter defaults. Saved profiles store
 //! family names only; system font files remain on the computer that owns them.
 use resvg::usvg::fontdb::{Database, Family, Query};
 use std::{
@@ -6,8 +6,9 @@ use std::{
     sync::{Arc, Mutex, OnceLock, RwLock},
 };
 
-pub const SANS: &str = "Noto Sans";
-pub const MONO: &str = "Noto Sans Mono";
+pub const SANS: &str = "Inter";
+// Keep the saved generic choice loadable without bundling a second default family
+pub const MONO: &str = SANS;
 const PREFIX: &str = "system:";
 struct Catalog {
     db: Arc<Database>,
@@ -37,7 +38,7 @@ fn load(system: bool) -> Catalog {
         #[cfg(target_os = "windows")]
         load_windows_registered(&mut db);
     }
-    // Use our bundled versions consistently, even when another Noto version is installed
+    // Use our bundled versions consistently, even when another Inter version is installed
     let duplicates: Vec<_> = db
         .faces()
         .filter(|face| face.families.iter().any(|(n, _)| n == SANS || n == MONO))
@@ -54,8 +55,7 @@ fn load(system: bool) -> Catalog {
                 .or_insert_with(|| name.clone());
         }
     }
-    db.load_font_data(include_bytes!("../../../public/appearance/fonts/NotoSans.ttf").to_vec());
-    db.load_font_data(include_bytes!("../../../public/appearance/fonts/NotoSansMono.ttf").to_vec());
+    load_bundled(&mut db);
     install_svg_aliases(&mut db);
     db.set_sans_serif_family(SANS);
     db.set_monospace_family(MONO);
@@ -64,6 +64,17 @@ fn load(system: bool) -> Catalog {
         families: names.into_values().collect(),
         generation: 1,
         system_loaded: system,
+    }
+}
+// Load real regular bold italic and bold-italic faces for portable native rendering
+fn load_bundled(db: &mut Database) {
+    for bytes in [
+        include_bytes!("../../../public/appearance/fonts/Inter-Regular.ttf").as_slice(),
+        include_bytes!("../../../public/appearance/fonts/Inter-Bold.ttf").as_slice(),
+        include_bytes!("../../../public/appearance/fonts/Inter-Italic.ttf").as_slice(),
+        include_bytes!("../../../public/appearance/fonts/Inter-BoldItalic.ttf").as_slice(),
+    ] {
+        db.load_font_source(resvg::usvg::fontdb::Source::Binary(Arc::new(bytes)));
     }
 }
 // Build the available font catalog
@@ -184,7 +195,7 @@ pub fn svg_family(font: &str, db: &Database) -> String {
         .unwrap_or(family)
         .replace('\\', "\\005c ")
         .replace('"', "\\0022 ");
-    format!("\"{name}\", \"{SANS}\"")
+    format!("\"{name}\"")
         .replace('&', "&amp;")
         .replace('<', "&lt;")
         .replace('>', "&gt;")
@@ -193,12 +204,31 @@ pub fn svg_family(font: &str, db: &Database) -> String {
 }
 // Measure glyph advances for the requested text
 pub fn advances(font: &str, text: &str, size: f64, db: &Database) -> HashMap<char, f64> {
+    styled_advances(font, text, size, db, 400, false)
+}
+// Measure the actual selected face used by primary label rendering
+pub fn styled_advances(
+    font: &str,
+    text: &str,
+    size: f64,
+    db: &Database,
+    weight: u16,
+    italic: bool,
+) -> HashMap<char, f64> {
     #[cfg(target_os = "macos")]
-    if let Some(advances) = crate::native_text::advances(font, text, size, db) {
+    if let Some(advances) =
+        crate::native_text::styled_advances(font, text, size, db, weight == 700, italic)
+    {
         return advances;
     }
     let id = db.query(&Query {
         families: &[Family::Name(family(font, db))],
+        weight: resvg::usvg::fontdb::Weight(weight),
+        style: if italic {
+            resvg::usvg::fontdb::Style::Italic
+        } else {
+            resvg::usvg::fontdb::Style::Normal
+        },
         ..Default::default()
     });
     id.and_then(|id| {
@@ -361,11 +391,34 @@ mod tests {
     // Locate the bundled font resources
     fn bundled() -> Database {
         let mut db = Database::new();
-        db.load_font_data(include_bytes!("../../../public/appearance/fonts/NotoSans.ttf").to_vec());
-        db.load_font_data(
-            include_bytes!("../../../public/appearance/fonts/NotoSansMono.ttf").to_vec(),
-        );
+        load_bundled(&mut db);
         db
+    }
+    #[test]
+    // Resolve every bundled native face without synthesized style or a second fallback family
+    fn inter_static_faces_have_real_style_and_weight() {
+        use resvg::usvg::fontdb::{Style, Weight};
+        let db = bundled();
+        for (style, weight) in [
+            (Style::Normal, Weight::NORMAL),
+            (Style::Normal, Weight::BOLD),
+            (Style::Italic, Weight::NORMAL),
+            (Style::Italic, Weight::BOLD),
+        ] {
+            let id = db
+                .query(&Query {
+                    families: &[Family::Name(SANS)],
+                    style,
+                    weight,
+                    ..Default::default()
+                })
+                .unwrap();
+            let face = db.face(id).unwrap();
+            assert_eq!(face.style, style);
+            assert_eq!(face.weight, weight);
+            assert!(face.families.iter().any(|(family, _)| family == "Inter"));
+        }
+        assert_eq!(db.faces().count(), 4);
     }
     #[test]
     // Verify defaults legacy choices validation and missing font fallback are portable
@@ -375,7 +428,7 @@ mod tests {
         assert_eq!(crate::plugin_display::ElementStyle::default().font, "sans");
         assert_eq!(family("sans", &db), SANS);
         assert_eq!(family("mono", &db), MONO);
-        assert_eq!(family("system:noto sans mono", &db), MONO);
+        assert_eq!(family("system:inter", &db), MONO);
         assert_eq!(family("system:Missing fixture font", &db), SANS);
         for font in [
             "sans",
@@ -423,7 +476,9 @@ mod tests {
         let font = format!("system:{name}");
         assert_eq!(family(&font, &db), name);
         let attribute = svg_family(&font, &db);
-        let svg = format!("<svg xmlns=\"http://www.w3.org/2000/svg\" width=\"80\" height=\"40\"><text y=\"30\" font-family=\"{attribute}\">Text</text></svg>");
+        let svg = format!(
+            "<svg xmlns=\"http://www.w3.org/2000/svg\" width=\"80\" height=\"40\"><text y=\"30\" font-family=\"{attribute}\">Text</text></svg>"
+        );
         let document = roxmltree::Document::parse(&svg).unwrap();
         assert_eq!(document.descendants().filter(|n| n.is_element()).count(), 2);
         let options = resvg::usvg::Options {
@@ -452,7 +507,9 @@ mod tests {
         install_svg_aliases(&mut db);
         let render = |font: &str| {
             let family = svg_family(font, &db);
-            let svg = format!("<svg xmlns=\"http://www.w3.org/2000/svg\" width=\"200\" height=\"60\"><text x=\"5\" y=\"40\" font-size=\"28\" font-family=\"{family}\">Wi 123</text></svg>");
+            let svg = format!(
+                "<svg xmlns=\"http://www.w3.org/2000/svg\" width=\"200\" height=\"60\"><text x=\"5\" y=\"40\" font-size=\"28\" font-family=\"{family}\">Wi 123</text></svg>"
+            );
             let options = resvg::usvg::Options {
                 fontdb: Arc::new(db.clone()),
                 ..Default::default()
@@ -520,7 +577,10 @@ mod tests {
             failures.is_empty(),
             "Advertised families render blank text: {failures:?}"
         );
-        eprintln!("Rendered {} host families through title and plugin/custom text paths; not hardware qualification", names.len());
+        eprintln!(
+            "Rendered {} host families through title and plugin/custom text paths; not hardware qualification",
+            names.len()
+        );
     }
     #[test]
     #[ignore = "Requires installed host fonts; no hardware or font installation changes"]

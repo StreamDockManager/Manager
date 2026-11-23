@@ -69,10 +69,25 @@ pub(crate) fn shared_bytes(bytes: Vec<u8>) -> SharedBytes {
     Arc::new(bytes.into_boxed_slice())
 }
 pub(crate) type WeakBytes = std::sync::Weak<Box<[u8]>>;
-type FramePool = std::collections::HashMap<String, WeakBytes>;
+type FrameDigest = [u8; 32];
+type FramePool = std::collections::HashMap<FrameDigest, WeakBytes>;
+static SHARED_FRAMES: std::sync::OnceLock<std::sync::Mutex<FramePool>> = std::sync::OnceLock::new();
+
+pub(crate) fn prune_shared_frames() {
+    if let Some(pool) = SHARED_FRAMES.get() {
+        let mut pool = pool.lock().unwrap();
+        pool.retain(|_, weak| weak.strong_count() > 0);
+        if pool.capacity() > 256 && pool.len() < pool.capacity() / 4 {
+            pool.shrink_to_fit();
+        }
+    }
+}
 
 // Deduplicate frame allocations by content digest while bounding the weak-reference pool
-fn share_frames(frames: Vec<Vec<u8>>, pool: &mut FramePool) -> (Vec<SharedBytes>, Vec<String>) {
+fn share_frames(
+    frames: Vec<Vec<u8>>,
+    pool: &mut FramePool,
+) -> (Vec<SharedBytes>, Vec<FrameDigest>) {
     use sha2::{Digest, Sha256};
     // Sweep at the admission boundary; the pool can never grow beyond it
     if pool.len() >= MAX_SHARED_FRAMES {
@@ -82,8 +97,8 @@ fn share_frames(frames: Vec<Vec<u8>>, pool: &mut FramePool) -> (Vec<SharedBytes>
     let frames = frames
         .into_iter()
         .map(|bytes| {
-            let hash = hex::encode(Sha256::digest(&bytes));
-            digests.push(hash.clone());
+            let hash: FrameDigest = Sha256::digest(&bytes).into();
+            digests.push(hash);
             if let Some(frame) = pool.get(&hash).and_then(std::sync::Weak::upgrade) {
                 return frame;
             }
@@ -98,12 +113,10 @@ fn share_frames(frames: Vec<Vec<u8>>, pool: &mut FramePool) -> (Vec<SharedBytes>
 }
 
 // Intern frames through the process-wide shared frame pool
-fn intern_frames(frames: Vec<Vec<u8>>) -> (Vec<SharedBytes>, Vec<String>) {
-    use std::sync::{Mutex, OnceLock};
-    static SHARED: OnceLock<Mutex<FramePool>> = OnceLock::new();
+fn intern_frames(frames: Vec<Vec<u8>>) -> (Vec<SharedBytes>, Vec<FrameDigest>) {
     share_frames(
         frames,
-        &mut SHARED.get_or_init(Default::default).lock().unwrap(),
+        &mut SHARED_FRAMES.get_or_init(Default::default).lock().unwrap(),
     )
 }
 
@@ -255,6 +268,16 @@ impl MediaOptions {
             .partition_point(|value| *value <= tick)
             .min(clip.frames.len() - 1)
     }
+    /// Age of the selected source presentation in wall-clock time. The first
+    /// visible frame in a trimmed loop begins at the trim point inside that frame.
+    pub(crate) fn frame_age(&self, clip: &Clip, index: usize, elapsed: Duration) -> Duration {
+        let (tick, _) = self.source_position(clip, elapsed);
+        let start = index
+            .checked_sub(1)
+            .map_or(0, |i| clip.ends_us[i])
+            .max(self.trim_start_ms.saturating_mul(1000));
+        Duration::from_secs_f64(f64::from(tick.saturating_sub(start)) / (1_000_000. * self.speed))
+    }
     // Map elapsed playback time into the trimmed source timeline
     fn source_position(&self, clip: &Clip, elapsed: Duration) -> (u32, u32) {
         let start = self
@@ -274,15 +297,38 @@ impl MediaOptions {
     }
 }
 
+/// Fixed-size identity shared by the lookup and eviction indexes for a rendered output.
+#[derive(Clone, Copy, Eq, Hash, PartialEq)]
+pub(crate) struct RenderKey([u8; 32]);
+
+impl RenderKey {
+    pub(crate) fn from_inputs(inputs: &impl Serialize) -> Result<Self, String> {
+        stream_dock_manager_storage::json_digest::sha256_bytes(inputs).map(Self)
+    }
+
+    pub(crate) fn from_name(name: &str) -> Self {
+        use sha2::{Digest, Sha256};
+        Self(Sha256::digest(name.as_bytes()).into())
+    }
+}
+
+// Each entry stores a digest in both the lookup table and the eviction index.
+const RENDER_KEY_BYTES: usize = 2 * size_of::<RenderKey>();
+
 /// Encoded allocations are shared internally. Evicted buffers remain charged while a
 /// renderer holds them; admission fails rather than allowing unbounded live references
 #[derive(Default)]
 pub struct RenderCache {
-    entries:
-        std::collections::HashMap<String, (Arc<crate::media_budget::Slot>, u64, usize, WeakBytes)>,
+    // Latest-only surfaces use their stable surface key for eviction and verify the content
+    // digest on lookup. Both indexes are retired together under the render-cache lock.
+    latest: std::collections::HashMap<RenderKey, RenderKey>,
+    entries: std::collections::HashMap<
+        RenderKey,
+        (Arc<crate::media_budget::Slot>, u64, usize, WeakBytes),
+    >,
     budget: Arc<crate::media_budget::MediaBudget>,
     resident: std::collections::HashMap<usize, (WeakBytes, usize)>,
-    order: std::collections::BTreeMap<u64, String>,
+    order: std::collections::BTreeMap<u64, RenderKey>,
     retired: Vec<(WeakBytes, usize)>,
     clock: u64,
     pub bytes: usize,
@@ -305,10 +351,10 @@ impl RenderCache {
             .entries
             .iter()
             .filter(|(_, (slot, _, _, _))| !slot.live())
-            .map(|(key, _)| key.clone())
+            .map(|(key, _)| *key)
             .collect();
         for key in expired {
-            self.remove(&key);
+            self.remove_key(key);
         }
     }
     // Collect memory
@@ -325,17 +371,19 @@ impl RenderCache {
     }
     // Return shared
     pub fn get_shared(&mut self, key: &str) -> Option<SharedBytes> {
-        self.get_shared_inner(key, true)
+        self.get_key(RenderKey::from_name(key), true)
     }
     // Return probe shared
     pub(crate) fn get_probe_shared(&mut self, key: &str) -> Option<SharedBytes> {
-        self.get_shared_inner(key, false)
+        self.get_key(RenderKey::from_name(key), false)
     }
-    // Return shared inner
-    fn get_shared_inner(&mut self, key: &str, count_render: bool) -> Option<SharedBytes> {
-        self.prune_entries();
-        if let Some((slot, stamp, _, _)) = self.entries.get_mut(key) {
+    // Refresh recency on every hit. A repeated probe can skip the render counters.
+    pub(crate) fn get_key(&mut self, key: RenderKey, count_render: bool) -> Option<SharedBytes> {
+        // A budget eviction can expire this slot. Admission and memory reports
+        // sweep the whole cache; a lookup only needs to check its own entry.
+        if let Some((slot, stamp, _, _)) = self.entries.get_mut(&key) {
             let Some(bytes) = slot.frame() else {
+                self.remove_key(key);
                 if count_render {
                     self.misses += 1;
                 }
@@ -347,7 +395,7 @@ impl RenderCache {
             self.order.remove(stamp);
             self.clock += 1;
             *stamp = self.clock;
-            self.order.insert(self.clock, key.into());
+            self.order.insert(self.clock, key);
             Some(bytes)
         } else {
             if count_render {
@@ -356,20 +404,44 @@ impl RenderCache {
             None
         }
     }
+    pub(crate) fn get_render(
+        &mut self,
+        content: RenderKey,
+        slots: &[RenderKey],
+    ) -> Option<SharedBytes> {
+        if slots.is_empty() {
+            return self.get_key(content, true);
+        }
+        // The preview and the hardware retain independent latest frames. Reuse
+        // either one when the complete render inputs match.
+        for slot in slots {
+            if self.latest.get(slot) == Some(&content) {
+                if let Some(bytes) = self.get_key(*slot, false) {
+                    self.hits += 1;
+                    return Some(bytes);
+                }
+            }
+        }
+        self.misses += 1;
+        None
+    }
+
     // Look up cached bytes
     fn cached_bytes(&self) -> usize {
         let mut allocations = std::collections::HashSet::new();
-        self.entries
-            .iter()
-            .map(|(key, (_, _, size, weak))| {
-                key.len() * 2
-                    + if allocations.insert(weak.as_ptr()) {
-                        *size
-                    } else {
-                        0
-                    }
-            })
-            .sum()
+        self.latest.len() * RENDER_KEY_BYTES
+            + self
+                .entries
+                .values()
+                .map(|(_, _, size, weak)| {
+                    RENDER_KEY_BYTES
+                        + if allocations.insert(weak.as_ptr()) {
+                            *size
+                        } else {
+                            0
+                        }
+                })
+                .sum::<usize>()
     }
     // Prune expired references and count live render allocations plus retained key storage
     pub fn resident_bytes(&mut self) -> usize {
@@ -377,7 +449,7 @@ impl RenderCache {
         self.retired.retain(|(bytes, _)| bytes.strong_count() > 0);
         self.resident
             .retain(|_, (bytes, _)| bytes.strong_count() > 0);
-        self.entries.keys().map(|key| key.len() * 2).sum::<usize>()
+        (self.entries.len() + self.latest.len()) * RENDER_KEY_BYTES
             + self.resident.values().map(|(_, size)| size).sum::<usize>()
     }
     // Count resident bytes still held outside the cache’s current entry ownership
@@ -386,7 +458,12 @@ impl RenderCache {
     }
     // Remove the selected media entry
     pub fn remove(&mut self, key: &str) {
-        if let Some((slot, stamp, size, weak)) = self.entries.remove(key) {
+        self.remove_key(RenderKey::from_name(key));
+    }
+
+    fn remove_key(&mut self, key: RenderKey) {
+        if let Some((slot, stamp, size, weak)) = self.entries.remove(&key) {
+            self.latest.remove(&key);
             self.bytes = self.cached_bytes();
             self.order.remove(&stamp);
             slot.evict();
@@ -397,9 +474,8 @@ impl RenderCache {
     }
     // Clear retained media state
     pub fn clear(&mut self) {
-        while let Some((_, key)) = self.order.first_key_value() {
-            let key = key.clone();
-            self.remove(&key);
+        while let Some((_, &key)) = self.order.first_key_value() {
+            self.remove_key(key);
         }
         self.resident_bytes();
     }
@@ -411,19 +487,34 @@ impl RenderCache {
     pub fn insert_shared(&mut self, key: String, value: Vec<u8>) -> Result<SharedBytes, String> {
         self.insert_frame(key, shared_bytes(value))
     }
-    // Admit a shared frame only within the cache’s memory and resident-owner limits
     pub(crate) fn insert_frame(
         &mut self,
         key: String,
         value: SharedBytes,
     ) -> Result<SharedBytes, String> {
-        let size = key.len().saturating_mul(2).saturating_add(value.len());
+        self.insert_render(RenderKey::from_name(&key), None, value)
+    }
+
+    // Admit a shared frame within the memory and entry limits.
+    pub(crate) fn insert_render(
+        &mut self,
+        content: RenderKey,
+        surface: Option<RenderKey>,
+        value: SharedBytes,
+    ) -> Result<SharedBytes, String> {
+        let key = surface.unwrap_or(content);
+        let key_bytes = if surface.is_some() {
+            2 * RENDER_KEY_BYTES
+        } else {
+            RENDER_KEY_BYTES
+        };
+        let size = key_bytes.saturating_add(value.len());
         if size > MAX_CACHE {
             self.rejected += 1;
             return Err("Encoded cache item exceeds budget".into());
         }
-        self.remove(&key);
-        let additional = key.len() * 2
+        self.remove_key(key);
+        let additional = key_bytes
             + if self.resident.contains_key(&(Arc::as_ptr(&value) as usize)) {
                 0
             } else {
@@ -432,14 +523,13 @@ impl RenderCache {
         while self.resident_bytes().saturating_add(additional) > MAX_CACHE
             || self.entries.len() + self.retired.len() >= 4096
         {
-            let Some((_, oldest)) = self.order.first_key_value() else {
+            let Some((_, &oldest)) = self.order.first_key_value() else {
                 self.rejected += 1;
                 return Err(
                     "Encoded cache budget is held by in-flight frames; retry next cycle".into(),
                 );
             };
-            let oldest = oldest.clone();
-            self.remove(&oldest);
+            self.remove_key(oldest);
         }
         let slot = self
             .budget
@@ -452,9 +542,12 @@ impl RenderCache {
         self.resident
             .insert(Arc::as_ptr(&value) as usize, (weak.clone(), value.len()));
         self.clock += 1;
-        self.order.insert(self.clock, key.clone());
+        self.order.insert(self.clock, key);
         self.entries
             .insert(key, (slot, self.clock, value.len(), weak));
+        if let Some(surface) = surface {
+            self.latest.insert(surface, content);
+        }
         self.bytes = self.cached_bytes();
         Ok(value)
     }
@@ -463,7 +556,7 @@ impl RenderCache {
 pub struct Clip {
     pub source_format: String,
     pub frames: Vec<SharedBytes>,
-    pub frame_digests: Vec<String>,
+    pub frame_digests: Vec<FrameDigest>,
     pub delays_ms: Vec<u32>,
     ends_us: Vec<u32>,
     pub delays_us: Vec<u32>,
@@ -488,12 +581,7 @@ impl Clip {
         size_of::<Self>()
             + self.source_format.capacity()
             + self.frames.capacity() * size_of::<SharedBytes>()
-            + self.frame_digests.capacity() * size_of::<String>()
-            + self
-                .frame_digests
-                .iter()
-                .map(String::capacity)
-                .sum::<usize>()
+            + self.frame_digests.capacity() * size_of::<FrameDigest>()
             + (self.delays_ms.capacity() + self.ends_us.capacity() + self.delays_us.capacity())
                 * size_of::<u32>()
             + provenance
@@ -543,7 +631,7 @@ impl Clip {
     fn with_shared_timing(
         format: &str,
         frames: Vec<SharedBytes>,
-        frame_digests: Vec<String>,
+        frame_digests: Vec<FrameDigest>,
         delays_us: Vec<u32>,
         preparation_revision: u16,
         clip_info: Option<crate::video::ClipInfo>,
@@ -791,13 +879,13 @@ impl Clip {
             has_original: !source.is_empty(),
             source_format: self.source_format.clone(),
             delays_ms: self.delays_ms.clone(),
-            frames: self.frame_digests.clone(),
+            frames: self.frame_digests.iter().map(hex::encode).collect(),
         };
         let mut seen = std::collections::HashSet::new();
         for (index, frame) in self.frames.iter().enumerate() {
             control.check()?;
             use sha2::{Digest, Sha256};
-            let digest = hex::encode(Sha256::digest(&***frame));
+            let digest: FrameDigest = Sha256::digest(&***frame).into();
             if self.frame_digests.get(index) != Some(&digest) {
                 return Err("Prepared frame integrity failure".into());
             }
@@ -913,10 +1001,7 @@ impl Clip {
             .iter()
             .map(|index| shared[*index].clone())
             .collect();
-        let digests = timeline
-            .iter()
-            .map(|index| hashes[*index].clone())
-            .collect();
+        let digests = timeline.iter().map(|index| hashes[*index]).collect();
         Self::with_shared_timing(
             &metadata.source_format,
             frames,
@@ -1232,6 +1317,9 @@ pub(crate) fn gif_with_detail(
     edge: u16,
     control: &PreparationControl,
 ) -> Result<Clip, String> {
+    if !(64..=1024).contains(&edge) {
+        return Err("Invalid GIF detail".into());
+    }
     gif_with_detail_checked(bytes, edge, control, &|| false, DECODE_TIMEOUT, MAX_FRAMES)
 }
 // Report the GIF with detail checked condition for media
@@ -1246,7 +1334,7 @@ pub(crate) fn gif_with_detail_checked(
     if cancelled() {
         return Err("Vendor animation source changed during preparation".into());
     }
-    if !(64..=1024).contains(&edge) || bytes.len() > MAX_SOURCE {
+    if !(1..=1024).contains(&edge) || bytes.len() > MAX_SOURCE {
         return Err("Invalid GIF detail or source size".into());
     }
     let decoder = gif_decoder(bytes)?;
@@ -1878,6 +1966,11 @@ pub(crate) mod tests {
             options.next_frame_delay(&clip, Duration::from_millis(10)),
             Duration::from_millis(30)
         );
+        options.trim_start_ms = 50;
+        assert_eq!(
+            options.frame_age(&clip, 1, Duration::from_millis(40)),
+            Duration::from_millis(5)
+        );
         let start = Instant::now();
         let period = Duration::from_millis(40);
         assert_eq!(
@@ -2018,7 +2111,7 @@ pub(crate) mod tests {
             file.read_to_end(&mut data).unwrap();
             if file.name().unwrap() == "animation.json" {
                 let mut metadata: Metadata = serde_json::from_slice(&data).unwrap();
-                metadata.frames = vec![clip.frame_digests[0].clone(); MAX_FRAMES];
+                metadata.frames = vec![hex::encode(clip.frame_digests[0]); MAX_FRAMES];
                 metadata.delays_ms = vec![1; MAX_FRAMES];
                 metadata.delays_us = vec![1000; MAX_FRAMES];
                 data = serde_json::to_vec(&metadata).unwrap();
@@ -2078,12 +2171,13 @@ pub(crate) mod tests {
     #[test]
     // Verify that shared frame pool recovers at capacity without retiring live frames
     fn shared_frame_pool_recovers_at_capacity_without_retiring_live_frames() {
+        use sha2::Digest;
         let mut pool = FramePool::default();
         let held = Arc::new(vec![91; 12].into_boxed_slice());
-        pool.insert("retained".into(), Arc::downgrade(&held));
+        pool.insert([255; 32], Arc::downgrade(&held));
         for index in 1..MAX_SHARED_FRAMES {
             pool.insert(
-                index.to_string(),
+                sha2::Sha256::digest(index.to_le_bytes()).into(),
                 Arc::downgrade(&Arc::new(vec![0].into_boxed_slice())),
             );
         }
@@ -2093,13 +2187,16 @@ pub(crate) mod tests {
             "expired admissions must be reusable"
         );
         assert_eq!(pool.len(), 2);
-        assert_eq!(&**pool["retained"].upgrade().unwrap(), &[91; 12]);
+        assert_eq!(&**pool[&[255; 32]].upgrade().unwrap(), &[91; 12]);
         assert_eq!(held.len(), 12);
         // A full live pool stays bounded and must not revoke external ownership
         let mut live = vec![];
         for index in pool.len()..MAX_SHARED_FRAMES {
             let value = Arc::new(vec![1].into_boxed_slice());
-            pool.insert(format!("live-{index}"), Arc::downgrade(&value));
+            pool.insert(
+                sha2::Sha256::digest(index.to_le_bytes()).into(),
+                Arc::downgrade(&value),
+            );
             live.push(value);
         }
         share_frames(vec![vec![8]], &mut pool);
@@ -2172,11 +2269,11 @@ pub(crate) mod tests {
         let mut cache = RenderCache::default();
         let frame = cache.insert_shared("first".into(), vec![7; 100]).unwrap();
         cache.insert_frame("alias".into(), frame.clone()).unwrap();
-        assert_eq!(cache.bytes, 120);
-        assert_eq!(cache.resident_bytes(), 120);
+        assert_eq!(cache.bytes, 100 + 2 * RENDER_KEY_BYTES);
+        assert_eq!(cache.resident_bytes(), 100 + 2 * RENDER_KEY_BYTES);
         assert_eq!(cache.in_flight_bytes(), 0);
         cache.remove("first");
-        assert_eq!(cache.bytes, 110);
+        assert_eq!(cache.bytes, 100 + RENDER_KEY_BYTES);
         assert_eq!(cache.in_flight_bytes(), 0);
         assert!(Arc::ptr_eq(&cache.get_shared("alias").unwrap(), &frame));
         cache.clear();

@@ -2,7 +2,8 @@
 use std::sync::{Arc, Mutex};
 use stream_dock_manager_runtime::configuration_recovery::{
     ConfigurationRecovery, ConfigurationRecoveryBackupProfiles, ConfigurationRecoveryBackups,
-    ConfigurationRecoveryDocument, ConfigurationRecoveryReport,
+    ConfigurationRecoveryDocument, ConfigurationRecoveryKeystoreReview,
+    ConfigurationRecoveryKeystoreStatus, ConfigurationRecoveryReport,
     ConfigurationRecoveryRestorePreview, ConfigurationRecoveryValidation,
     ConfigurationRecoveryVersions,
 };
@@ -137,6 +138,67 @@ pub async fn configuration_recovery_backups<R: tauri::Runtime>(
         .await
         .map_err(|error| error.to_string())?
 }
+
+#[tauri::command]
+pub async fn configuration_recovery_keystore_status<R: tauri::Runtime>(
+    window: WebviewWindow<R>,
+    recovery: tauri::State<'_, Arc<RecoverySession>>,
+) -> Result<ConfigurationRecoveryKeystoreStatus, String> {
+    authorize(&window)?;
+    let recovery = recovery.inner().clone();
+    tauri::async_runtime::spawn_blocking(move || recovery.run(|service| service.keystore_status()))
+        .await
+        .map_err(|error| error.to_string())?
+}
+
+#[tauri::command]
+pub async fn configuration_recovery_retry_keystore<R: tauri::Runtime>(
+    window: WebviewWindow<R>,
+    recovery: tauri::State<'_, Arc<RecoverySession>>,
+    revision: String,
+) -> Result<ConfigurationRecoveryKeystoreStatus, String> {
+    authorize(&window)?;
+    let recovery = recovery.inner().clone();
+    tauri::async_runtime::spawn_blocking(move || {
+        recovery.run(|service| service.retry_keystore(&revision))
+    })
+    .await
+    .map_err(|error| error.to_string())?
+}
+
+#[tauri::command]
+pub async fn configuration_recovery_review_keystore<R: tauri::Runtime>(
+    window: WebviewWindow<R>,
+    recovery: tauri::State<'_, Arc<RecoverySession>>,
+    revision: String,
+    operation: String,
+    backup_id: Option<String>,
+) -> Result<ConfigurationRecoveryKeystoreReview, String> {
+    authorize(&window)?;
+    let recovery = recovery.inner().clone();
+    tauri::async_runtime::spawn_blocking(move || {
+        recovery.run(|service| service.review_keystore(&revision, &operation, backup_id.as_deref()))
+    })
+    .await
+    .map_err(|error| error.to_string())?
+}
+
+#[tauri::command]
+pub async fn configuration_recovery_apply_keystore<R: tauri::Runtime>(
+    window: WebviewWindow<R>,
+    recovery: tauri::State<'_, Arc<RecoverySession>>,
+    revision: String,
+    review_token: String,
+) -> Result<ConfigurationRecoveryKeystoreStatus, String> {
+    authorize(&window)?;
+    let recovery = recovery.inner().clone();
+    tauri::async_runtime::spawn_blocking(move || {
+        recovery.run(|service| service.apply_keystore(&revision, &review_token))
+    })
+    .await
+    .map_err(|error| error.to_string())?
+}
+
 // Handle the configuration recovery backup profiles desktop command
 
 #[tauri::command]
@@ -496,6 +558,10 @@ mod tests {
             .manage(session)
             .invoke_handler(tauri::generate_handler![
                 configuration_recovery_status,
+                configuration_recovery_keystore_status,
+                configuration_recovery_retry_keystore,
+                configuration_recovery_review_keystore,
+                configuration_recovery_apply_keystore,
                 configuration_recovery_backups,
                 configuration_recovery_preview_restore,
                 configuration_recovery_restore_backup,
@@ -520,15 +586,30 @@ mod tests {
         assert!(app
             .try_state::<Arc<stream_dock_manager_runtime::Runtime>>()
             .is_none());
-        assert_eq!(
-            invoke(&main, "configuration_recovery_status", json!({})).unwrap()["ready"],
-            true
-        );
+        let report = invoke(&main, "configuration_recovery_status", json!({})).unwrap();
+        assert_eq!(report["ready"], true, "{report}");
         assert!(invoke(&plugin, "configuration_recovery_status", json!({}))
             .unwrap_err()
             .to_string()
             .contains("not allowed"));
         for (command, body) in [
+            ("configuration_recovery_keystore_status", json!({})),
+            (
+                "configuration_recovery_retry_keystore",
+                json!({"revision":"stale"}),
+            ),
+            (
+                "configuration_recovery_review_keystore",
+                json!({"revision":"stale","operation":"reset"}),
+            ),
+            (
+                "configuration_recovery_review_keystore",
+                json!({"revision":"stale","operation":"create"}),
+            ),
+            (
+                "configuration_recovery_apply_keystore",
+                json!({"revision":"stale","reviewToken":"unreviewed"}),
+            ),
             ("configuration_recovery_backups", json!({})),
             (
                 "configuration_recovery_preview_restore",
@@ -563,6 +644,20 @@ mod tests {
                 .to_string()
                 .contains("not allowed"));
         }
+        let keystore = invoke(&main, "configuration_recovery_keystore_status", json!({})).unwrap();
+        assert_eq!(keystore["state"], "ready");
+        assert!(invoke(
+            &main,
+            "configuration_recovery_review_keystore",
+            json!({"revision":keystore["revision"],"operation":"create"}),
+        )
+        .is_err());
+        assert!(invoke(
+            &main,
+            "configuration_recovery_apply_keystore",
+            json!({"revision":keystore["revision"],"reviewToken":"unreviewed"})
+        )
+        .is_err());
         let backups = invoke(&main, "configuration_recovery_backups", json!({})).unwrap();
         let backup_revision = backups["revision"].as_str().unwrap();
         for command in [
@@ -637,7 +732,10 @@ mod tests {
         let (directory, session) = fixture();
         drop(session);
         let root = directory.path().to_path_buf();
-        let primary = root.join("manager.sqlite3");
+        let primary = stream_dock_manager_storage::database_path(
+            &root,
+            stream_dock_manager_storage::DATABASE_NAME,
+        );
         std::fs::write(&primary, b"corrupted primary evidence").unwrap();
         let service =
             ConfigurationRecovery::open(root.clone(), "Corrupted primary".into()).unwrap();

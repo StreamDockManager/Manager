@@ -1,5 +1,7 @@
 use super::*;
 use base64::Engine;
+#[cfg(target_os = "macos")]
+mod macos;
 #[derive(serde::Serialize, ts_rs::TS)]
 pub struct AppearancePreferences {
     pub configured: bool,
@@ -98,6 +100,17 @@ impl ProfilePalette {
         }
     }
 }
+// Global connection-scoped SDK/inspector overlay. Never persisted or used by
+// hardware rendering: the runtime owns its separate lease and expiry.
+#[derive(Clone, PartialEq)]
+pub(super) struct PaletteThemePreview {
+    token: String,
+    mode: String,
+    id: String,
+    theme: Value,
+    inspector_palette: Value,
+}
+
 const PALETTE_LIMIT: usize = 64;
 const PALETTE_RECORD_LIMIT: usize = 8 * 1024 * 1024;
 pub(super) const THEME_RPC: &str = "plugin-theme-v1";
@@ -228,7 +241,16 @@ pub struct UiThemeStyle {
     pub dark_palette: String,
     pub font: String,
     pub text_scale: u16,
+    #[serde(default = "default_interface_font_weight")]
+    pub font_weight: u16,
+    #[serde(default)]
+    pub font_italic: bool,
 }
+// Default existing saved interface styles to the regular face
+fn default_interface_font_weight() -> u16 {
+    400
+}
+
 impl Default for UiThemeStyle {
     // Construct the default value
     fn default() -> Self {
@@ -237,6 +259,8 @@ impl Default for UiThemeStyle {
             dark_palette: "default".into(),
             font: "default".into(),
             text_scale: 100,
+            font_weight: default_interface_font_weight(),
+            font_italic: false,
         }
     }
 }
@@ -253,6 +277,7 @@ impl UiThemeStyle {
         if !matches_mode(&self.light_palette, "light")
             || !matches_mode(&self.dark_palette, "dark")
             || !(self.font == "default" || hardware_core::fonts::valid(&self.font))
+            || !(100..=900).contains(&self.font_weight)
             || !(90..=150).contains(&self.text_scale)
             || !self.text_scale.is_multiple_of(5)
         {
@@ -335,6 +360,10 @@ pub(super) fn theme_icon(root: &Path, asset: &ThemedAsset, theme: &str) -> Optio
 pub(super) struct ObserverSignal {
     revision: Mutex<u64>,
     changed: std::sync::Condvar,
+    #[cfg(target_os = "macos")]
+    main_run_loop: AtomicBool,
+    #[cfg(target_os = "macos")]
+    native_registered: AtomicBool,
 }
 impl ObserverSignal {
     // Wake for the current operation
@@ -343,14 +372,34 @@ impl ObserverSignal {
         *revision = revision.wrapping_add(1);
         self.changed.notify_all();
     }
+    fn poll_interval(&self, demand: bool) -> Option<Duration> {
+        if !demand {
+            return None;
+        }
+        #[cfg(target_os = "macos")]
+        {
+            // Headless/failed registration: bounded sparse native reads, no subprocess.
+            if self.main_run_loop.load(Ordering::SeqCst)
+                && self.native_registered.load(Ordering::SeqCst)
+            {
+                None
+            } else {
+                Some(Duration::from_secs(60))
+            }
+        }
+        #[cfg(not(target_os = "macos"))]
+        {
+            Some(Duration::from_secs(2))
+        }
+    }
     // Wait for the current operation
     fn wait(&self, revision: u64, demand: bool, stop: &AtomicBool) {
         let current = self.revision.lock().unwrap();
         let unchanged = |value: &mut u64| *value == revision && !stop.load(Ordering::SeqCst);
-        if demand {
+        if let Some(interval) = self.poll_interval(demand) {
             drop(
                 self.changed
-                    .wait_timeout_while(current, Duration::from_secs(2), unchanged)
+                    .wait_timeout_while(current, interval, unchanged)
                     .unwrap(),
             );
         } else {
@@ -376,10 +425,26 @@ pub(super) fn refresh_system(hub: &Arc<Mutex<Hub>>, probe: impl FnOnce() -> Opti
 // Observe
 pub(super) fn observe(hub: Arc<Mutex<Hub>>, stop: Arc<AtomicBool>) {
     let signal = hub.lock().unwrap().theme_observer.clone();
+    #[cfg(target_os = "macos")]
+    let _native_observer = match macos::Observer::start(signal.clone()) {
+        Ok(observer) => {
+            signal.native_registered.store(true, Ordering::SeqCst);
+            Some(observer)
+        }
+        Err(error) => {
+            log::error!("Native appearance notifications unavailable: {error}");
+            None
+        }
+    };
     while !stop.load(Ordering::SeqCst) {
         let revision = *signal.revision.lock().unwrap();
+        // Subscribe before sampling, and capture the revision before the sample:
+        // a notification during the read must prevent the subsequent wait.
+        #[cfg(target_os = "macos")]
+        refresh_system(&hub, system_appearance);
         let demand = hub.lock().unwrap().follows_system_theme();
         signal.wait(revision, demand, &stop);
+        #[cfg(not(target_os = "macos"))]
         if !stop.load(Ordering::SeqCst) {
             refresh_system(&hub, system_appearance);
         }
@@ -506,11 +571,38 @@ impl Hub {
 
     // Build the effective theme for the selected device
     pub(super) fn resolved_device_theme_for(&self, id: &str, device: &str) -> &'static str {
+        if self.capabilities.contains_key(id) {
+            if let Some(preview) = &self.palette_theme_preview {
+                return if preview.mode == "light" {
+                    "light"
+                } else {
+                    "dark"
+                };
+            }
+        }
         match self.appearance.get(id).map(String::as_str) {
             Some("light") => "light",
             Some("dark") => "dark",
             _ => self.device_mode_for(device),
         }
+    }
+
+    pub(super) fn plugin_palette_id_for(&self, id: &str, mode: &str, device: &str) -> &str {
+        if self.capabilities.contains_key(id) {
+            if let Some(preview) = &self.palette_theme_preview {
+                return &preview.id;
+            }
+        }
+        self.device_palette_id_for(mode, device)
+    }
+
+    pub(super) fn plugin_colors_for(&self, id: &str, mode: &str, device: &str) -> Value {
+        if self.capabilities.contains_key(id) {
+            if let Some(preview) = &self.palette_theme_preview {
+                return preview.theme.clone();
+            }
+        }
+        self.device_colors_for(mode, device)
     }
 
     // Read the configured palette identifier for the appearance mode
@@ -544,8 +636,13 @@ impl Hub {
 
     // Combine built-in colors with the selected custom palette
     fn colors_for_palette(&self, mode: &str, id: &str) -> Value {
+        Self::candidate_colors(mode, id, self.custom_palette(id))
+    }
+
+    // Blend candidate colors over the corresponding device preset without changing host state
+    fn candidate_colors(mode: &str, id: &str, custom: Option<&CustomPalette>) -> Value {
         let mut colors = device_palette(mode, id).clone();
-        if let Some(custom) = self.custom_palette(id) {
+        if let Some(custom) = custom {
             for key in ["surface", "ink", "muted", "accent", "meter", "border"] {
                 if let Some(color) = custom.colors.get(key).or_else(|| {
                     if key == "meter" {
@@ -588,6 +685,10 @@ impl Hub {
 
     // Capture the theme exposed to a plugin
     pub(super) fn plugin_theme_snapshot(&self, id: &str) -> Value {
+        if let Some(preview) = &self.palette_theme_preview {
+            return json!({"version":1,"resolved":preview.mode,
+                "revision":self.theme_revision.wrapping_add(self.palette_preview_revision),"theme":preview.theme});
+        }
         let mode = self.resolved_device_theme(id);
         let mut theme = self.device_colors(mode);
         if let Some(wallpaper) = self.device_wallpaper(mode) {
@@ -596,7 +697,7 @@ impl Hub {
                 |svg| json!(svg),
             );
         }
-        json!({"version":1,"resolved":mode,"revision":self.theme_revision,"theme":theme})
+        json!({"version":1,"resolved":mode,"revision":self.theme_revision.wrapping_add(self.palette_preview_revision),"theme":theme})
     }
 
     // Handle a theme RPC request and return its correlated response
@@ -669,6 +770,11 @@ impl Hub {
     }
     // Build the theme notification payload
     pub(super) fn theme_payload(&self, id: &str, inspector: bool) -> Value {
+        if inspector {
+            if let Some(preview) = &self.palette_theme_preview {
+                return json!({"version":1,"resolved":preview.mode,"palette":preview.inspector_palette});
+            }
+        }
         let resolved = if inspector {
             self.resolved_theme(id)
         } else {
@@ -720,6 +826,40 @@ impl Hub {
         queue.retain(|event| event["event"] != "didReceiveTheme");
         queue.push_back(json!({"event":"didReceiveTheme","payload":payload}));
     }
+    // Preview changes only reach current compatible sessions; never launch a
+    // hidden/disabled plugin, create a new queue, or alter hardware generations.
+    fn notify_palette_preview(&mut self) {
+        // SDK notifications alone cannot recolor host-resolved layouts/images.
+        // Refresh retained references too, including static plugin views, and
+        // invalidate render caches without changing saved appearance revisions.
+        self.visual_state.render_generation = self.visual_state.render_generation.wrapping_add(1);
+        visual::refresh_themes(self);
+        let recipients: Vec<_> = self
+            .sessions
+            .connected
+            .iter()
+            .filter_map(|token| {
+                self.sessions.tokens.get(token).map(|owner| {
+                    (
+                        owner.clone(),
+                        token.clone(),
+                        self.configuration_sessions.contains(token),
+                    )
+                })
+            })
+            .collect();
+        let mut runtimes = HashSet::new();
+        for (owner, token, inspector) in recipients {
+            if inspector {
+                self.queue_theme(&owner, &token, true);
+            } else if runtimes.insert(owner.clone()) {
+                self.queue_display_theme(&owner);
+            }
+        }
+        if let Some(wake) = &self.wake {
+            wake();
+        }
+    }
     // Notify themes
     pub(super) fn notify_themes(&mut self) {
         self.notify_display_theme();
@@ -727,7 +867,14 @@ impl Hub {
             .sessions
             .queues
             .iter()
-            .filter(|(_, queue)| queue.display_theme.is_some())
+            .filter(|(id, queue)| {
+                queue.display_theme.is_some()
+                    && (self.palette_theme_preview.is_none()
+                        || self.sessions.connected.iter().any(|token| {
+                            !self.configuration_sessions.contains(token)
+                                && self.sessions.tokens.get(token) == Some(*id)
+                        }))
+            })
             .map(|(id, _)| id.clone())
             .collect();
         for id in modern {
@@ -750,7 +897,11 @@ impl Hub {
             .sessions
             .files
             .iter()
-            .filter(|(_, grant)| grant.context.is_some())
+            .filter(|(token, grant)| {
+                grant.context.is_some()
+                    && (self.palette_theme_preview.is_none()
+                        || self.sessions.connected.contains(*token))
+            })
             .filter_map(|(token, _)| {
                 self.sessions
                     .tokens
@@ -764,6 +915,127 @@ impl Hub {
     }
 }
 impl PluginHost {
+    /// Global temporary SDK/inspector palette, independent of physical devices.
+    /// Runtime serializes this with cancellation/expiry using its lease mutex.
+    /// All contexts in a plugin connection share this existing protocol theme.
+    pub fn set_palette_theme_preview(
+        &self,
+        token: &str,
+        mode: &str,
+        id: &str,
+        custom: Option<&CustomPalette>,
+    ) -> Result<bool, String> {
+        if token.is_empty() || token.len() > 128 || !matches!(mode, "light" | "dark") {
+            return Err("Invalid palette preview token or mode".into());
+        }
+        let mut hub = self.hub.lock().unwrap();
+        let custom = if let Some(custom) = custom {
+            custom.validate()?;
+            if custom.id != id || custom.mode != mode {
+                return Err("Preview palette does not match ID and mode".into());
+            }
+            Some(custom)
+        } else {
+            if hub.available_palette_id(mode, id) != id {
+                return Err("Unknown preview palette for this mode".into());
+            }
+            hub.custom_palette(id)
+        };
+        let mut theme = Hub::candidate_colors(mode, id, custom);
+        if let Some(wallpaper) = custom.and_then(|palette| palette.wallpaper.as_ref()) {
+            theme["wallpaper"] = wallpaper.svg.as_ref().map_or_else(
+                || json!({"kind":"media","asset_id":wallpaper.asset_id,"format":wallpaper.format,"animated":wallpaper.animated}), |svg| json!(svg));
+        }
+        let data = palettes();
+        let mut inspector_palette = data["themes"][mode].clone();
+        for key in ["danger-text", "toast-error"] {
+            inspector_palette[key] = inspector_palette["accent-ink"].clone();
+        }
+        if let (Some(colors), Some(overrides)) = (
+            inspector_palette.as_object_mut(),
+            data["managerSchemes"][id]["tokens"].as_object(),
+        ) {
+            colors.extend(overrides.clone());
+        }
+        if let Some(custom) = custom {
+            for (key, value) in &custom.colors {
+                inspector_palette[key] = json!(value);
+            }
+        }
+        let candidate = PaletteThemePreview {
+            token: token.into(),
+            mode: mode.into(),
+            id: id.into(),
+            theme,
+            inspector_palette,
+        };
+        let changed = hub.palette_theme_preview.as_ref().is_none_or(|old| {
+            old.mode != candidate.mode
+                || old.id != candidate.id
+                || old.theme != candidate.theme
+                || old.inspector_palette != candidate.inspector_palette
+        });
+        hub.palette_theme_preview = Some(candidate);
+        if changed {
+            hub.palette_preview_revision = hub.palette_preview_revision.wrapping_add(1);
+            hub.notify_palette_preview();
+        }
+        Ok(changed)
+    }
+
+    /// Restore current saved settings, not a stale copy captured when browsing began.
+    pub fn clear_palette_theme_preview(&self, token: &str) -> bool {
+        let mut hub = self.hub.lock().unwrap();
+        if !hub
+            .palette_theme_preview
+            .as_ref()
+            .is_some_and(|preview| preview.token == token)
+        {
+            return false;
+        }
+        hub.palette_theme_preview = None;
+        hub.palette_preview_revision = hub.palette_preview_revision.wrapping_add(1);
+        hub.notify_palette_preview();
+        true
+    }
+    /// Call only from a desktop integration with a running main event loop.
+    /// Tray-hidden desktops retain that loop; CLI hosts use sparse native reads.
+    #[cfg(target_os = "macos")]
+    pub fn enable_native_appearance_notifications(&self) {
+        let signal = self.hub.lock().unwrap().theme_observer.clone();
+        signal.main_run_loop.store(true, Ordering::SeqCst);
+        signal.wake();
+    }
+
+    /// Resolve a visual-only candidate without changing plugin themes or saved preferences
+    pub fn preview_device_palette(
+        &self,
+        mode: &str,
+        id: &str,
+        custom: Option<&CustomPalette>,
+    ) -> Result<(Value, Option<PaletteWallpaper>), String> {
+        if !matches!(mode, "light" | "dark") {
+            return Err("Invalid preview palette mode".into());
+        }
+        let hub = self.hub.lock().unwrap();
+        let custom = if let Some(custom) = custom {
+            custom.validate()?;
+            if custom.id != id || custom.mode != mode {
+                return Err("Preview palette does not match its selected ID and mode".into());
+            }
+            Some(custom)
+        } else {
+            if hub.available_palette_id(mode, id) != id {
+                return Err("Unknown preview palette for this mode".into());
+            }
+            hub.custom_palette(id)
+        };
+        Ok((
+            Hub::candidate_colors(mode, id, custom),
+            custom.and_then(|palette| palette.wallpaper.clone()),
+        ))
+    }
+
     /// Session-derived overrides are transient; profile storage remains runtime-owned
     pub fn set_profile_palettes(&self, palettes: HashMap<String, ProfilePalette>) {
         let mut hub = self.hub.lock().unwrap();
@@ -797,7 +1069,14 @@ impl PluginHost {
         }
         let mut hub = self.hub.lock().unwrap();
         let previous = hub.appearance.remove(id);
-        match hub.persist_with(edit) {
+        match hub.persist_scoped_with(
+            persistence::Scope {
+                globals: &[],
+                defaults: &[],
+                metadata: &["appearance"],
+            },
+            edit,
+        ) {
             Ok(result) => {
                 if previous.is_some() {
                     hub.notify_themes();
@@ -826,7 +1105,10 @@ impl PluginHost {
         );
         (
             hub.device_theme_for(device),
-            hub.device_colors_for(mode, device),
+            plugin.map_or_else(
+                || hub.device_colors_for(mode, device),
+                |id| hub.plugin_colors_for(id, mode, device),
+            ),
         )
     }
 
@@ -877,7 +1159,11 @@ impl PluginHost {
         if let Some(mode) = preference {
             h.ui_appearance = mode.into();
         }
-        if let Err(error) = h.persist() {
+        if let Err(error) = h.persist_scoped(persistence::Scope {
+            globals: &[],
+            defaults: &[],
+            metadata: &["ui_theme_style", "ui_appearance"],
+        }) {
             h.ui_theme_style = previous;
             h.ui_appearance = previous_mode;
             return Err(error);
@@ -902,7 +1188,11 @@ impl PluginHost {
             return Ok(());
         }
         let before = std::mem::replace(&mut h.device_theme, preferences);
-        if let Err(error) = h.persist() {
+        if let Err(error) = h.persist_scoped(persistence::Scope {
+            globals: &[],
+            defaults: &[],
+            metadata: &["device_theme"],
+        }) {
             h.device_theme = before;
             return Err(error);
         }
@@ -957,7 +1247,11 @@ impl PluginHost {
         }
         let previous = std::mem::replace(&mut h.custom_palettes, palettes);
         let previous_style = std::mem::replace(&mut h.ui_theme_style, style);
-        if let Err(error) = h.persist() {
+        if let Err(error) = h.persist_scoped(persistence::Scope {
+            globals: &[],
+            defaults: &[],
+            metadata: &["custom_palettes", "ui_theme_style"],
+        }) {
             h.custom_palettes = previous;
             h.ui_theme_style = previous_style;
             return Err(error);
@@ -997,7 +1291,11 @@ impl PluginHost {
         if let Some(dark) = system_dark {
             h.system_dark = dark;
         }
-        if let Err(error) = h.persist() {
+        if let Err(error) = h.persist_scoped(persistence::Scope {
+            globals: &[],
+            defaults: &[],
+            metadata: &["appearance", "ui_appearance", "system_dark"],
+        }) {
             (h.appearance, h.ui_appearance, h.system_dark) = before;
             return Err(error);
         }
@@ -1011,17 +1309,13 @@ impl PluginHost {
 
 // Probe the system’s current dark-mode preference
 pub(super) fn system_appearance() -> Option<bool> {
-    #[cfg(not(target_os = "windows"))]
+    #[cfg(target_os = "linux")]
     use std::process::Command;
+    #[cfg(not(target_os = "macos"))]
     use std::process::Stdio;
     #[cfg(target_os = "macos")]
     {
-        let output = Command::new("defaults")
-            .args(["read", "-g", "AppleInterfaceStyle"])
-            .stderr(Stdio::null())
-            .output()
-            .ok()?;
-        Some(output.status.success() && String::from_utf8_lossy(&output.stdout).trim() == "Dark")
+        macos::appearance()
     }
     #[cfg(target_os = "windows")]
     {
@@ -1071,6 +1365,259 @@ impl PluginHost {
 #[cfg(test)]
 mod tests {
     use super::*;
+    #[test]
+    fn preview_refreshes_retained_palette_layout_without_plugin_republication() {
+        let root = tempfile::tempdir().unwrap();
+        let host = PluginHost::new(root.path().into()).unwrap();
+        std::fs::write(root.path().join("layout.json"), json!({"id":"fixture", "streamDockManager":{"displayPalette":true},"background":"#000000","items":[]}).to_string()).unwrap();
+        let context = "fixture-context";
+        let saved;
+        let generation;
+        {
+            let mut hub = host.hub.lock().unwrap();
+            hub.ui_appearance = "dark".into();
+            hub.roots.insert("fixture".into(), root.path().into());
+            hub.capabilities
+                .insert("fixture".into(), Capabilities::default());
+            hub.context_state
+                .contexts
+                .insert(context.into(), "fixture".into());
+            hub.context_state
+                .targets
+                .insert(context.into(), ("device".into(), "key-1".into()));
+            hub.context_state
+                .scopes
+                .insert(context.into(), "scope".into());
+            saved = visual::themed_layout(
+                root.path(),
+                "layout.json",
+                "dark",
+                "default",
+                &hub.device_colors("dark"),
+            )
+            .unwrap()
+            .0;
+            hub.visual_state.visuals.insert(context.into(), Arc::new(json!({"layoutReference":"layout.json","layout":saved,"paletteTile":true,"feedback":{}})));
+            generation = hub.visual_state.render_generation;
+        }
+        host.set_palette_theme_preview("preview", "dark", "midnight", None)
+            .unwrap();
+        {
+            let hub = host.hub.lock().unwrap();
+            assert_eq!(
+                hub.visual_state.visuals[context]["layout"]["background"],
+                device_palette("dark", "midnight")["surface"]
+            );
+            assert!(hub.visual_state.render_generation > generation);
+            assert_eq!(
+                hub.device_colors_for("dark", "device"),
+                hub.device_colors("dark"),
+                "global device background remains independent"
+            );
+        }
+        host.clear_palette_theme_preview("preview");
+        assert_eq!(
+            host.hub.lock().unwrap().visual_state.visuals[context]["layout"],
+            saved
+        );
+    }
+
+    #[test]
+    fn palette_theme_preview_pairs_getter_push_and_restores_latest_without_waking_plugins() {
+        let root = tempfile::tempdir().unwrap();
+        let host = PluginHost::new(root.path().into()).unwrap();
+        let request = json!({"event":"streamDockManagerRpc","protocol_id":THEME_RPC,"request_id":uuid::Uuid::new_v4().to_string(),"method":"get","payload":{}});
+        let initial;
+        {
+            let mut hub = host.hub.lock().unwrap();
+            hub.ui_appearance = "light".into();
+            hub.device_theme.sync = true;
+            initial = hub.theme_rpc("active", &request, false)["result"].clone();
+            hub.theme_rpc("sleeping", &request, false);
+            for id in ["active", "unsupported"] {
+                hub.sessions.tokens.insert(format!("token-{id}"), id.into());
+                hub.sessions.connected.insert(format!("token-{id}"));
+            }
+        }
+        let saved_revision = host.display_theme_revision();
+        let saved_preferences = serde_json::to_value(host.appearance_preferences()).unwrap();
+        assert!(host
+            .set_palette_theme_preview("first", "dark", "midnight", None)
+            .unwrap());
+        assert_eq!(host.display_theme_revision(), saved_revision);
+        assert_eq!(
+            serde_json::to_value(host.appearance_preferences()).unwrap(),
+            saved_preferences
+        );
+        let preview;
+        {
+            let mut hub = host.hub.lock().unwrap();
+            preview = hub.plugin_theme_snapshot("active");
+            assert!(preview["revision"].as_u64().unwrap() > initial["revision"].as_u64().unwrap());
+            let events = hub
+                .sessions
+                .queues
+                .get_mut("active")
+                .unwrap()
+                .take_batch()
+                .unwrap();
+            assert_eq!(events.len(), 1);
+            assert_eq!(events[0].value["payload"], preview);
+            assert!(hub.sessions.queues["sleeping"].is_empty());
+            assert!(!hub.sessions.queues.contains_key("unsupported"));
+            // A newly authenticated plugin negotiates the same effective overlay.
+            assert_eq!(hub.theme_rpc("new", &request, false)["result"], preview);
+            hub.capabilities
+                .insert("active".into(), Capabilities::default());
+            hub.queue_theme("active", "new-panel", true);
+            assert_eq!(
+                hub.sessions.queues["pi:new-panel"].iter().next().unwrap()["payload"]["resolved"],
+                "dark"
+            );
+            // No compatibility claim/event for legacy inspectors.
+            hub.queue_theme("legacy", "legacy-panel", true);
+            assert!(!hub.sessions.queues.contains_key("pi:legacy-panel"));
+        }
+        // Heartbeat/identical takeover does not emit or advance protocol revision.
+        assert!(!host
+            .set_palette_theme_preview("second", "dark", "midnight", None)
+            .unwrap());
+        assert!(!host.clear_palette_theme_preview("first"));
+        assert_eq!(
+            host.hub.lock().unwrap().plugin_theme_snapshot("active"),
+            preview
+        );
+        {
+            let mut hub = host.hub.lock().unwrap();
+            hub.ui_appearance = "system".into();
+            hub.system_dark = false;
+            hub.ui_theme_style.light_palette = "sage".into();
+            hub.notify_themes();
+            assert!(hub.sessions.queues["active"].is_empty());
+            assert!(hub.sessions.queues["sleeping"].is_empty());
+        }
+        assert!(host.clear_palette_theme_preview("second"));
+        let mut hub = host.hub.lock().unwrap();
+        let restored = hub.plugin_theme_snapshot("active");
+        assert_eq!(restored["resolved"], "light");
+        assert_eq!(restored["theme"], hub.device_colors("light"));
+        assert!(restored["revision"].as_u64().unwrap() > preview["revision"].as_u64().unwrap());
+        let events = hub
+            .sessions
+            .queues
+            .get_mut("active")
+            .unwrap()
+            .take_batch()
+            .unwrap();
+        assert_eq!(events.len(), 1);
+        assert_eq!(events[0].value["payload"], restored);
+    }
+
+    #[test]
+    fn palette_theme_preview_invalid_candidate_preserves_owner_and_inspector_restores() {
+        let root = tempfile::tempdir().unwrap();
+        let host = PluginHost::new(root.path().into()).unwrap();
+        {
+            let mut hub = host.hub.lock().unwrap();
+            hub.ui_appearance = "light".into();
+            hub.capabilities
+                .insert("active".into(), Capabilities::default());
+            hub.sessions.tokens.insert("panel".into(), "active".into());
+            hub.sessions.connected.insert("panel".into());
+            hub.configuration_sessions.insert("panel".into());
+        }
+        host.set_palette_theme_preview("owner", "dark", "midnight", None)
+            .unwrap();
+        assert!(host
+            .set_palette_theme_preview("invalid", "light", "midnight", None)
+            .is_err());
+        {
+            let mut hub = host.hub.lock().unwrap();
+            let payload = hub.theme_payload("active", true);
+            let events = hub
+                .sessions
+                .queues
+                .get_mut("pi:panel")
+                .unwrap()
+                .take_batch()
+                .unwrap();
+            assert_eq!(events.len(), 1);
+            assert_eq!(events[0].value["payload"], payload);
+        }
+        assert!(host.clear_palette_theme_preview("owner"));
+        let mut hub = host.hub.lock().unwrap();
+        let expected = hub.theme_payload("active", true);
+        let events = hub
+            .sessions
+            .queues
+            .get_mut("pi:panel")
+            .unwrap()
+            .take_batch()
+            .unwrap();
+        assert_eq!(events.len(), 1);
+        assert_eq!(events[0].value["payload"], expected);
+        assert_eq!(expected["resolved"], "light");
+    }
+
+    #[test]
+    // Resolve saved and unsaved candidates without publishing a theme revision
+    fn candidate_device_palette_is_visual_only() {
+        let root = tempfile::tempdir().unwrap();
+        let host = PluginHost::new(root.path().into()).unwrap();
+        let revision = host.display_theme_revision();
+        assert_eq!(
+            host.preview_device_palette("light", "sage", None).unwrap(),
+            (device_palette("light", "sage").clone(), None)
+        );
+        assert!(host.preview_device_palette("dark", "sage", None).is_err());
+        assert!(host
+            .preview_device_palette("system", "default", None)
+            .is_err());
+        assert!(host
+            .preview_device_palette("light", "missing", None)
+            .is_err());
+        let mut palette = CustomPalette {
+            id: uuid::Uuid::new_v4().to_string(),
+            name: "Temporary candidate".into(),
+            mode: "dark".into(),
+            colors: [
+                ("surface".into(), "#123456".into()),
+                ("accent".into(), "#654321".into()),
+            ]
+            .into(),
+            wallpaper: None,
+        };
+        let (colors, wallpaper) = host
+            .preview_device_palette("dark", &palette.id, Some(&palette))
+            .unwrap();
+        assert_eq!(colors["surface"], "#123456");
+        assert_eq!(colors["meter"], "#654321");
+        assert_eq!(
+            colors["wallpaper"],
+            device_palette("dark", "default")["wallpaper"]
+        );
+        assert!(wallpaper.is_none());
+        assert!(host
+            .preview_device_palette("dark", &palette.id, None)
+            .is_err());
+        host.hub
+            .lock()
+            .unwrap()
+            .custom_palettes
+            .push(palette.clone());
+        assert_eq!(
+            host.preview_device_palette("dark", &palette.id, None)
+                .unwrap()
+                .0,
+            colors
+        );
+        palette.colors.insert("surface".into(), "invalid".into());
+        assert!(host
+            .preview_device_palette("dark", &palette.id, Some(&palette))
+            .is_err());
+        assert_eq!(host.display_theme_revision(), revision);
+    }
+
     #[test]
     // Verify profile palettes isolate targets devices and follow system
     fn profile_palettes_isolate_targets_devices_and_follow_system() {
@@ -1312,6 +1859,29 @@ mod tests {
         assert_eq!(hub.resolved_theme("fixture"), "dark");
     }
     #[test]
+    // Load prior style records and reject unsupported weights without changing explicit families
+    fn interface_font_style_defaults_and_validation() {
+        let old = json!({"lightPalette":"default","darkPalette":"default","font":"system:Custom Family","textScale":100});
+        let style: UiThemeStyle = serde_json::from_value(old).unwrap();
+        assert_eq!(style.font_weight, 400);
+        assert!(!style.font_italic);
+        assert_eq!(style.font, "system:Custom Family");
+        for weight in [100, 400, 650, 900] {
+            let mut value = style.clone();
+            value.font_weight = weight;
+            value.font_italic = true;
+            value.validate(&[]).unwrap();
+            let restored: UiThemeStyle =
+                serde_json::from_value(serde_json::to_value(&value).unwrap()).unwrap();
+            assert!(restored == value);
+        }
+        for weight in [0, 99, 901, u16::MAX] {
+            let mut value = style.clone();
+            value.font_weight = weight;
+            assert!(value.validate(&[]).is_err());
+        }
+    }
+    #[test]
     // Verify curated style persists and uses the resolved inspector mode
     fn curated_style_persists_and_uses_the_resolved_inspector_mode() {
         let root = tempfile::tempdir().unwrap();
@@ -1323,6 +1893,8 @@ mod tests {
             dark_palette: "hot-pink".into(),
             font: "system:Absent Fixture".into(),
             text_scale: 135,
+            font_weight: 650,
+            font_italic: true,
         };
         hub.ui_theme_style.validate(&[]).unwrap();
         hub.ui_appearance = "light".into();

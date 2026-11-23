@@ -122,13 +122,15 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
         return storage_acceptance(&archive);
     }
     let root = tempfile::tempdir()?;
-    let mut host = PluginHost::new(root.path().join("plugins"))?;
+    let mut host = support::protocol_host(root.path())?;
     let plugin = host.install(std::path::Path::new(&archive))?;
     assert!(!plugin.enabled, "install must stay disabled");
     let id = &plugin.id;
     let action = &plugin.actions[0].id;
     let capture = host.logs.start(id, &plugin.name)?;
     support::runtime(&host, id, false)?;
+    // Register on profile demand before the fixture supplies visible actions.
+    host.set_sleep_when_hidden(id, false)?;
     host.enable(id, true)?;
     support::demand(&mut host, id, "sdk-device");
     wait_registered(&mut host, id);
@@ -397,15 +399,14 @@ fn private_probe_value(host: &PluginHost, id: &str) -> Result<Option<serde_json:
     use stream_dock_manager_storage::rusqlite::OptionalExtension;
     let owner = id.to_owned();
     host.storage().run(move|connection| {
-        let value:Option<String>=connection.query_row("SELECT value FROM plugin_storage_records WHERE plugin_id=?1 AND namespace='sdk-storage-v1' AND key='value'",[owner],|row|row.get(0)).optional().map_err(|e|e.to_string())?;
+        let value:Option<String>=connection.query_row("SELECT value FROM settings_vault.plugin_storage_records WHERE plugin_id=?1 AND namespace='sdk-storage-v1' AND key='value'",[owner],|row|row.get(0)).optional().map_err(|e|e.to_string())?;
         value.map(|value|serde_json::from_str(&value).map_err(|e|e.to_string())).transpose()
     })
 }
 // Run the host storage acceptance scenario
 fn storage_acceptance(archive: &str) -> Result<(), Box<dyn std::error::Error>> {
     let root = tempfile::tempdir()?;
-    let plugins = root.path().join("plugins");
-    let mut host = PluginHost::new(plugins.clone())?;
+    let mut host = support::protocol_host(root.path())?;
     let plugin = host.install(std::path::Path::new(archive))?;
     let id = plugin.id.clone();
     let action = plugin.actions[0].id.clone();
@@ -417,6 +418,8 @@ fn storage_acceptance(archive: &str) -> Result<(), Box<dyn std::error::Error>> {
     )?;
     host.configuration_transaction_sql(&id, &before, &after, 0, |_| Ok(()))?;
     support::runtime(&host, &id, false)?;
+    // Register on profile demand before the fixture supplies visible actions.
+    host.set_sleep_when_hidden(&id, false)?;
     host.enable(&id, true)?;
     support::demand(&mut host, &id, "sdk-device");
     wait_registered(&mut host, &id);
@@ -435,7 +438,7 @@ fn storage_acceptance(archive: &str) -> Result<(), Box<dyn std::error::Error>> {
     stop_storage_host(&mut host)?;
     drop(host);
     // Reopening reacquires the configuration lock and uses a fresh authenticated process token
-    let mut host = PluginHost::new(plugins)?;
+    let mut host = support::protocol_host(root.path())?;
     host.logs.start(&id, &plugin.name)?;
     support::demand(&mut host, &id, "sdk-device");
     wait_registered(&mut host, &id);
@@ -448,9 +451,9 @@ fn storage_acceptance(archive: &str) -> Result<(), Box<dyn std::error::Error>> {
     storage_phase(&mut host, &id, &action, "delete")?;
     assert!(private_probe_value(&host, &id)?.is_none());
     let owner = id.clone();
-    let revision:String=host.storage().run(move|connection|connection.query_row("SELECT revision FROM plugin_storage_namespaces WHERE plugin_id=?1 AND namespace='sdk-storage-v1'",[owner],|row|row.get(0)).map_err(|e|e.to_string()))?;
+    let revision:[u8; 8]=host.storage().run(move|connection|connection.query_row("SELECT revision FROM settings_vault.plugin_storage_namespaces WHERE plugin_id=?1 AND namespace='sdk-storage-v1'",[owner],|row|row.get(0)).map_err(|e|e.to_string()))?;
     assert!(
-        revision.parse::<u64>()? > 1,
+        u64::from_be_bytes(revision) > 1,
         "deleting keys must retain namespace revision"
     );
     stop_storage_host(&mut host)?;

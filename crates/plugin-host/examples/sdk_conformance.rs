@@ -108,6 +108,8 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     });
     assert!(!plugin.enabled);
     support::runtime(&host, &id, false)?;
+    // This probe registers on profile demand before its action first appears.
+    host.set_sleep_when_hidden(&id, false)?;
     host.enable(&id, true)?;
     let launch_started = Instant::now();
     support::demand(&mut host, &id, "sdk-device");
@@ -221,7 +223,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     // Keep the SDK's future/stale rejection and the five-second lifetime intact
     let observed_at = now.checked_sub(100).ok_or("Fixture clock predates epoch")?;
     host.publish_telemetry(
-        json!({"cpu":{"value":42,"observed_at":observed_at,"max_age_ms":5000,"error":null}}),
+        json!({"audio_observer":false,"cpu":{"value":42,"observed_at":observed_at,"max_age_ms":5000,"error":null}}),
     );
     title(&mut host, "telemetry:42")?;
     host.set_appearance(Some(&id), "dark", None)?;

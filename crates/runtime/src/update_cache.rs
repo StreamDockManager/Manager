@@ -1,18 +1,24 @@
 //! Retention for owned update metadata and published plugin archives
 //! Unknown files and user-facing manager installers are never cache-clear targets
 use super::*;
-use std::{collections::HashMap, fs, sync::MutexGuard};
+use std::{
+    collections::{HashMap, HashSet},
+    fs,
+    io::ErrorKind,
+};
+use stream_dock_manager_storage::cache_index::{self, Limits, Record, Removal, Table};
 
 const DOWNLOAD_MAX_BYTES: u64 = 4 * 1024 * 1024 * 1024;
 const DOWNLOAD_MAX_ENTRIES: usize = 128;
 const METADATA_MAX_ENTRIES: usize = 64;
 const DOWNLOAD_MAX_AGE: u64 = 2 * 24 * 60 * 60;
-const METADATA_MAX_BYTES: u64 = 1024 * 1024 * 1024;
+const METADATA_MAX_BYTES: u64 = 512 * 1024 * 1024;
 const METADATA_MAX_AGE: u64 = 24 * 60 * 60;
 type Leases = Arc<Mutex<HashMap<PathBuf, usize>>>;
 
 pub struct UpdateCacheLease {
     leases: Leases,
+    indexed: Option<(Table, String)>,
     path: PathBuf,
 }
 impl Drop for UpdateCacheLease {
@@ -23,6 +29,9 @@ impl Drop for UpdateCacheLease {
             *count -= 1;
             if *count == 0 {
                 leases.remove(&self.path);
+                if let Some((table, key)) = &self.indexed {
+                    let _ = table.touch(key, false);
+                }
             }
         }
     }
@@ -40,7 +49,7 @@ fn safe_ancestors(path: &Path, boundary: &Path) -> Result<(), String> {
             break;
         }
         match ancestor.symlink_metadata() {
-            Ok(m) if m.file_type().is_symlink() || !m.is_dir() => {
+            Ok(m) if !plain_directory(&m) => {
                 return Err(format!("Unsafe cache directory: {}", ancestor.display()))
             }
             Ok(_) => (),
@@ -50,17 +59,73 @@ fn safe_ancestors(path: &Path, boundary: &Path) -> Result<(), String> {
     }
     Ok(())
 }
-// Refresh the update cache entry’s activity marker
-fn touch(path: &Path) -> Result<(), String> {
-    if regular(path) {
-        fs::OpenOptions::new()
-            .write(true)
-            .open(path)
-            .and_then(|f| f.set_times(fs::FileTimes::new().set_modified(SystemTime::now())))
-            .map_err(|e| e.to_string())?;
+// Do not remove directory links or Windows junctions even when their targets are empty
+fn plain_directory(info: &fs::Metadata) -> bool {
+    #[cfg(windows)]
+    {
+        use std::os::windows::fs::MetadataExt;
+        const FILE_ATTRIBUTE_REPARSE_POINT: u32 = 0x400;
+        if info.file_attributes() & FILE_ATTRIBUTE_REPARSE_POINT != 0 {
+            return false;
+        }
     }
-    Ok(())
+    info.is_dir() && !info.file_type().is_symlink()
 }
+
+// Remove only empty digest folders while holding the update-cache lease registry
+fn remove_empty_plugin_download_dirs(
+    root: &Path,
+    all: bool,
+    mut candidates: HashSet<PathBuf>,
+    leases: &HashMap<PathBuf, usize>,
+) -> Result<Vec<String>, String> {
+    let plugins = root.join("plugins");
+    match plugins.symlink_metadata() {
+        Ok(info) if plain_directory(&info) => {}
+        Ok(_) => return Ok(vec![]),
+        Err(error) if error.kind() == ErrorKind::NotFound => return Ok(vec![]),
+        Err(error) => return Err(format!("{}: {error}", plugins.display())),
+    }
+    let mut errors = Vec::new();
+    if all {
+        for entry in fs::read_dir(&plugins).map_err(|e| format!("{}: {e}", plugins.display()))? {
+            match entry {
+                Ok(entry) if valid_hash(&entry.file_name().to_string_lossy()) => {
+                    candidates.insert(entry.path());
+                }
+                Ok(_) => {}
+                Err(error) => errors.push(format!("{}: {error}", plugins.display())),
+            }
+        }
+    }
+    let active_parents: HashSet<_> = leases.keys().filter_map(|path| path.parent()).collect();
+    for directory in candidates {
+        if active_parents.contains(directory.as_path()) {
+            continue;
+        }
+        match directory.symlink_metadata() {
+            Ok(info) if plain_directory(&info) => {}
+            Ok(_) => continue,
+            Err(error) if error.kind() == ErrorKind::NotFound => continue,
+            Err(error) => {
+                errors.push(format!("{}: {error}", directory.display()));
+                continue;
+            }
+        }
+        // A nonrecursive removal preserves any archive, receipt, or unknown child
+        match fs::remove_dir(&directory) {
+            Ok(()) => {}
+            Err(error)
+                if matches!(
+                    error.kind(),
+                    ErrorKind::NotFound | ErrorKind::DirectoryNotEmpty
+                ) => {}
+            Err(error) => errors.push(format!("{}: {error}", directory.display())),
+        }
+    }
+    Ok(errors)
+}
+
 #[derive(Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
 struct Receipt {
@@ -120,10 +185,34 @@ impl UpdateService {
             {
                 return Err("Cache source is not a regular file".into());
             }
-            touch(path)?;
+        }
+        let indexed = self.indexed_path(path);
+        if let Some((table, key)) = &indexed {
+            if !table.touch(key, true)? {
+                // A released Manager may have written the file before the first import.
+                // Preserve this access time even if its legacy mtime is old.
+                if let Ok(info) = path.symlink_metadata() {
+                    let metadata = path.starts_with(self.root.join("cache"));
+                    if info.is_file() {
+                        if let Some(entry) = inspect(
+                            path.to_owned(),
+                            info,
+                            metadata,
+                            key.split('/').count() - 1,
+                            &mut Vec::new(),
+                        ) {
+                            let mut record = Record::file(key.clone(), entry.bytes);
+                            record.active = true;
+                            record.owned = !entry.protected;
+                            table.record(&record)?;
+                        }
+                    }
+                }
+            }
         }
         *leases.entry(path.to_owned()).or_default() += 1;
         Ok(UpdateCacheLease {
+            indexed,
             leases: self.cache_leases.clone(),
             path: path.to_owned(),
         })
@@ -140,24 +229,130 @@ impl UpdateService {
         }
         Ok((path, lease))
     }
+    fn indexed_path(&self, path: &Path) -> Option<(Table, String)> {
+        for (folder, table) in [
+            ("cache", &self.metadata_index),
+            ("downloads", &self.package_index),
+        ] {
+            if let Ok(rel) = path.strip_prefix(self.root.join(folder)) {
+                let key = rel.to_str()?.replace(std::path::MAIN_SEPARATOR, "/");
+                if cache_index::safe_relative(&key) {
+                    return Some((table.clone(), key));
+                }
+            }
+        }
+        None
+    }
+    pub(super) fn publish_metadata(
+        &self,
+        path: &Path,
+        value: &impl Serialize,
+    ) -> Result<(), String> {
+        let (table, key) = self.indexed_path(path).ok_or("Invalid metadata path")?;
+        let leases = self.cache_leases.lock().unwrap();
+        publish_json(path, value, |bytes| {
+            let mut r = Record::file(key, bytes);
+            r.active = leases.contains_key(path);
+            table.record(&r)
+        })
+    }
     // Record cached download
     pub(super) fn record_cached_download(&self, path: &Path) -> Result<(), String> {
         let receipt = receipt_path(path);
         if receipt.symlink_metadata().is_ok() && !regular(&receipt) {
             return Err("Unsafe download cache receipt".into());
         }
-        atomic_json(
-            &receipt,
-            &Receipt {
-                version: 1,
-                name: path
-                    .file_name()
-                    .ok_or("Missing archive name")?
-                    .to_string_lossy()
-                    .into(),
-                size: path.metadata().map_err(|e| e.to_string())?.len(),
-            },
-        )
+        let (table, key) = self
+            .indexed_path(path)
+            .ok_or("Invalid download cache path")?;
+        let leases = self.cache_leases.lock().unwrap();
+        let size = path.metadata().map_err(|e| e.to_string())?.len();
+        let receipt_data = Receipt {
+            version: 1,
+            name: path
+                .file_name()
+                .ok_or("Missing archive name")?
+                .to_string_lossy()
+                .into(),
+            size,
+        };
+        publish_json(&receipt, &receipt_data, |receipt_bytes| {
+            let mut r = Record::file(key, size + receipt_bytes);
+            r.owned = r.path.starts_with("plugins/");
+            r.active = leases.contains_key(path);
+            table.record(&r)
+        })
+    }
+    fn remove_cached_entry(
+        &self,
+        root: &Path,
+        metadata: bool,
+        key: &str,
+        leases: &HashMap<PathBuf, usize>,
+    ) -> Result<Removal, String> {
+        let parts: Vec<_> = key.split('/').collect();
+        if !(metadata && parts.len() == 1
+            || !metadata
+                && parts.len() == 3
+                && parts[0] == "plugins"
+                && valid_hash(parts[1])
+                && safe_name(parts[2]))
+        {
+            return Ok(Removal::Protected);
+        }
+        let path = root.join(key);
+        if leases.contains_key(&path) {
+            return Ok(Removal::Busy);
+        }
+        safe_ancestors(path.parent().ok_or("Missing parent")?, &self.root)?;
+        let info = match path.symlink_metadata() {
+            Ok(m) if m.is_file() && !m.file_type().is_symlink() => m,
+            Ok(_) => return Ok(Removal::Protected),
+            Err(e) if e.kind() == std::io::ErrorKind::NotFound => {
+                if !metadata {
+                    let sidecar = receipt_path(&path);
+                    if read_receipt(&sidecar).is_some_and(|r| r.version == 1 && r.name == parts[2])
+                    {
+                        fs::remove_file(sidecar).map_err(|e| e.to_string())?;
+                    }
+                }
+                return Ok(Removal::Missing);
+            }
+            Err(e) => return Err(e.to_string()),
+        };
+        let mut issues = vec![];
+        let Some(entry) = inspect(path.clone(), info, metadata, parts.len() - 1, &mut issues)
+        else {
+            return Ok(Removal::Protected);
+        };
+        if !issues.is_empty() {
+            return Err(issues.join("; "));
+        }
+        if entry.protected {
+            return Ok(Removal::Protected);
+        }
+        if entry.receipt.is_some() {
+            self.package_index.hint(key)?;
+        }
+        fs::remove_file(&path).map_err(|e| e.to_string())?;
+        for (job, _) in self.jobs.lock().unwrap().values_mut() {
+            if job.operation == "download"
+                && job.state == "complete"
+                && job
+                    .result
+                    .as_deref()
+                    .is_some_and(|p| Path::new(p) == entry.path)
+            {
+                job.state = "failed".into();
+                job.error = Some("Cached download expired or was cleared; download again".into());
+                job.result = None;
+                job.retry_available = Some(true);
+            }
+        }
+        if let Some(receipt) = entry.receipt {
+            fs::remove_file(&receipt).map_err(|e| e.to_string())?;
+        }
+        Ok(Removal::Removed)
     }
     // Cache folders
     pub(crate) fn cache_folders(
@@ -191,87 +386,86 @@ impl UpdateService {
             ),
         ] {
             let root = self.root.join(folder);
-            let mut entries = Vec::new();
-            if let Err(e) = safe_ancestors(&root, &self.root) {
-                errors.push(e);
+            let table = if folder == "cache" {
+                &self.metadata_index
             } else {
-                scan(
-                    &root,
-                    folder == "cache",
-                    0,
-                    &leases,
-                    &mut entries,
-                    &mut errors,
-                );
-            }
-            entries.sort_by_key(|e| (e.used, e.path.clone()));
-            let mut bytes: u64 = entries.iter().map(|e| e.bytes).sum();
-            let mut count = entries.len();
-            for entry in &entries {
-                if !entry.protected
-                    && clear.is_some()
-                    && (clear == Some(true)
-                        || now().saturating_sub(entry.used) >= max_age
-                        || bytes > max_bytes
-                        || count > max_entries)
-                {
-                    match fs::remove_file(&entry.path) {
-                        Ok(()) => {
-                            // Receipts are counted with their archive, not as separate entries
-                            let mut deleted_bytes = entry.bytes;
-                            if let Some(receipt) = &entry.receipt {
-                                if let Err(e) = fs::remove_file(receipt) {
-                                    deleted_bytes = entry.payload_bytes;
-                                    errors.push(format!("{}: {e}", receipt.display()));
-                                }
-                            }
-                            bytes = bytes.saturating_sub(deleted_bytes);
-                            count -= 1;
-                            for (job, _) in self.jobs.lock().unwrap().values_mut() {
-                                if job.operation == "download"
-                                    && job.state == "complete"
-                                    && job
-                                        .result
-                                        .as_deref()
-                                        .is_some_and(|p| Path::new(p) == entry.path)
-                                {
-                                    job.state = "failed".into();
-                                    job.error = Some(
-                                        "Cached download expired or was cleared; download again"
-                                            .into(),
-                                    );
-                                    job.result = None;
-                                    job.retry_available = Some(true);
-                                }
-                            }
-                            removed_entries += 1;
-                            removed_bytes += deleted_bytes;
+                &self.package_index
+            };
+            let result = (|| -> Result<cache_index::Report, String> {
+                safe_ancestors(&root, &self.root)?;
+                table.import_once(|| {
+                    let mut entries = vec![];
+                    scan(&root, folder == "cache", 0, &mut entries, &mut errors);
+                    let mut records = vec![];
+                    for entry in entries {
+                        if let Some((_, key)) = self.indexed_path(&entry.path) {
+                            let mut r = Record::file(key, entry.bytes);
+                            r.used = (entry.used * 1000) as i64;
+                            r.owned = !entry.protected;
+                            r.active = leases.contains_key(&entry.path);
+                            records.push(r);
                         }
-                        Err(e) => errors.push(format!("{}: {e}", entry.path.display())),
+                    }
+                    Ok(records)
+                })?;
+                table.recover_activity(|key| Ok(leases.contains_key(&root.join(key))))?;
+                let Some(clear) = clear else {
+                    return Ok(cache_index::Report {
+                        stats: table.stats()?,
+                        ..Default::default()
+                    });
+                };
+                let metadata = folder == "cache";
+                let mut emptied = HashSet::new();
+                let mut report = table.purge(
+                    Limits {
+                        bytes: max_bytes,
+                        entries: Some(max_entries),
+                        age: Some(Duration::from_secs(max_age)),
+                    },
+                    clear,
+                    |key| {
+                        let removal = self.remove_cached_entry(&root, metadata, key, &leases)?;
+                        if !metadata
+                            && !clear
+                            && matches!(removal, Removal::Removed | Removal::Missing)
+                        {
+                            // The removal callback only owns validated plugins/<digest>/<name>
+                            if let Some(parent) = root.join(key).parent() {
+                                emptied.insert(parent.to_owned());
+                            }
+                        }
+                        Ok(removal)
+                    },
+                )?;
+                if !metadata && (clear || !emptied.is_empty()) {
+                    // Explicit clear also picks up empty unindexed folders left by older builds
+                    match remove_empty_plugin_download_dirs(&root, clear, emptied, &leases) {
+                        Ok(issues) => report.errors.extend(issues),
+                        Err(error) => report.errors.push(error),
                     }
                 }
-            }
-            // Re-scan to report actual remaining usage, including failed deletions
-            let mut remaining = Vec::new();
-            if safe_ancestors(&root, &self.root).is_ok() {
-                scan(
-                    &root,
-                    folder == "cache",
-                    0,
-                    &leases,
-                    &mut remaining,
-                    &mut errors,
-                );
-            }
+                Ok(report)
+            })();
+            let report = match result {
+                Ok(r) => r,
+                Err(e) => {
+                    errors.push(e);
+                    continue;
+                }
+            };
+            removed_bytes += report.removed_bytes;
+            removed_entries += report.removed_entries;
+            errors.extend(report.errors);
             statuses.push(crate::cache::CacheFolderStatus {
                 id: format!("updates/{folder}"),
                 label: label.into(),
-                bytes: remaining.iter().map(|e| e.bytes).sum(),
-                entries: remaining.len(),
+                bytes: report.stats.bytes,
+                entries: report.stats.entries,
                 max_bytes,
                 max_entries,
                 max_age_seconds: max_age,
-                protected_entries: remaining.iter().filter(|e| e.protected).count(),
+                protected_entries: report.stats.protected + report.stats.active,
             });
         }
         (statuses, removed_entries, removed_bytes, errors)
@@ -281,7 +475,6 @@ struct Entry {
     path: PathBuf,
     receipt: Option<PathBuf>,
     bytes: u64,
-    payload_bytes: u64,
     used: u64,
     protected: bool,
 }
@@ -290,7 +483,6 @@ fn scan(
     root: &Path,
     metadata: bool,
     depth: usize,
-    leases: &MutexGuard<'_, HashMap<PathBuf, usize>>,
     entries: &mut Vec<Entry>,
     errors: &mut Vec<String>,
 ) {
@@ -325,89 +517,99 @@ fn scan(
             && ((depth == 0 && matches!(name.as_str(), "plugins" | "manager"))
                 || (depth == 1 && valid_hash(&name)))
         {
-            scan(&path, false, depth + 1, leases, entries, errors);
+            scan(&path, false, depth + 1, entries, errors);
             continue;
         }
-        if info.file_type().is_symlink() {
-            errors.push(format!(
-                "Symbolic link preserved; target usage is excluded: {}",
-                path.display()
-            ));
+        if let Some(entry) = inspect(path, info, metadata, depth, errors) {
+            entries.push(entry);
         }
-        let mut protected = true;
-        let mut receipt = None;
-        let mut bytes = if info.is_dir() && !info.file_type().is_symlink() {
-            protected_size(&path, errors)
-        } else {
-            info.len()
-        };
-        if info.is_file() && !info.file_type().is_symlink() {
-            if metadata {
-                let stem = name.strip_suffix(".json").unwrap_or("");
-                let asset = stem.strip_prefix("asset-");
-                if valid_hash(asset.unwrap_or(stem)) && info.len() <= 16 * 1024 * 1024 {
-                    match fs::read(&path) {
-                        Ok(b) => {
-                            if let Ok(v) = serde_json::from_slice::<serde_json::Value>(&b) {
-                                protected = !(v.as_object().is_some_and(|o| o.len() == 2)
-                                    && v["etag"].is_string()
-                                    && if asset.is_some() {
-                                        serde_json::from_value::<MetadataAssetCache>(v).is_ok()
-                                    } else {
-                                        v.get("data").is_some()
-                                    });
-                            }
+    }
+}
+fn inspect(
+    path: PathBuf,
+    info: fs::Metadata,
+    metadata: bool,
+    depth: usize,
+    errors: &mut Vec<String>,
+) -> Option<Entry> {
+    let root = path.parent()?;
+    let name = path.file_name()?.to_string_lossy().into_owned();
+    if info.file_type().is_symlink() {
+        errors.push(format!(
+            "Symbolic link preserved; target usage is excluded: {}",
+            path.display()
+        ));
+    }
+    let mut protected = true;
+    let mut receipt = None;
+    let mut bytes = if info.is_dir() && !info.file_type().is_symlink() {
+        protected_size(&path, errors)
+    } else {
+        info.len()
+    };
+    if info.is_file() && !info.file_type().is_symlink() {
+        if metadata {
+            let stem = name.strip_suffix(".json").unwrap_or("");
+            let asset = stem.strip_prefix("asset-");
+            if valid_hash(asset.unwrap_or(stem)) && info.len() <= 16 * 1024 * 1024 {
+                match fs::read(&path) {
+                    Ok(b) => {
+                        if let Ok(v) = serde_json::from_slice::<serde_json::Value>(&b) {
+                            protected = !(v.as_object().is_some_and(|o| o.len() == 2)
+                                && v["etag"].is_string()
+                                && if asset.is_some() {
+                                    serde_json::from_value::<MetadataAssetCache>(v).is_ok()
+                                } else {
+                                    v.get("data").is_some()
+                                });
                         }
-                        Err(e) => errors.push(format!("{}: {e}", path.display())),
                     }
+                    Err(e) => errors.push(format!("{}: {e}", path.display())),
                 }
-            } else if depth == 2 {
-                // Only the exact archive named by a valid receipt is owned
-                let receipt_file = receipt_path(&path);
-                if let Some(r) = read_receipt(&receipt_file) {
-                    if r.version == 1 && r.name == name && r.size == info.len() && safe_name(&name)
+            }
+        } else if depth == 2 {
+            // Only the exact archive named by a valid receipt is owned
+            let receipt_file = receipt_path(&path);
+            if let Some(r) = read_receipt(&receipt_file) {
+                if r.version == 1 && r.name == name && r.size == info.len() && safe_name(&name) {
+                    bytes += receipt_file
+                        .symlink_metadata()
+                        .map(|m| m.len())
+                        .unwrap_or(0);
+                    receipt = Some(receipt_file);
+                    protected = root
+                        .parent()
+                        .and_then(Path::file_name)
+                        .is_none_or(|p| p != "plugins");
+                }
+            }
+            if name.ends_with(".cache.json") {
+                if let Some(r) = read_receipt(&path) {
+                    let archive = root.join(&r.name);
+                    if r.version == 1
+                        && safe_name(&r.name)
+                        && receipt_path(&archive) == path
+                        && regular(&archive)
+                        && archive.metadata().is_ok_and(|m| m.len() == r.size)
                     {
-                        bytes += receipt_file
-                            .symlink_metadata()
-                            .map(|m| m.len())
-                            .unwrap_or(0);
-                        receipt = Some(receipt_file);
-                        protected = root
-                            .parent()
-                            .and_then(Path::file_name)
-                            .is_none_or(|p| p != "plugins");
-                    }
-                }
-                if name.ends_with(".cache.json") {
-                    if let Some(r) = read_receipt(&path) {
-                        let archive = root.join(&r.name);
-                        if r.version == 1
-                            && safe_name(&r.name)
-                            && receipt_path(&archive) == path
-                            && regular(&archive)
-                            && archive.metadata().is_ok_and(|m| m.len() == r.size)
-                        {
-                            continue;
-                        }
+                        return None;
                     }
                 }
             }
         }
-        protected |= leases.contains_key(&path);
-        entries.push(Entry {
-            path,
-            receipt,
-            bytes,
-            payload_bytes: info.len(),
-            used: info
-                .modified()
-                .ok()
-                .and_then(|t| t.duration_since(UNIX_EPOCH).ok())
-                .map(|d| d.as_secs())
-                .unwrap_or_else(now),
-            protected,
-        });
     }
+    Some(Entry {
+        path,
+        receipt,
+        bytes,
+        used: info
+            .modified()
+            .ok()
+            .and_then(|t| t.duration_since(UNIX_EPOCH).ok())
+            .map(|d| d.as_secs())
+            .unwrap_or_else(now),
+        protected,
+    })
 }
 // Include unknown directory contents in usage without following links or deleting them
 fn protected_size(path: &Path, errors: &mut Vec<String>) -> u64 {
@@ -467,16 +669,17 @@ mod tests {
     // Write a cached metadata test entry with the requested modification age
     fn metadata(service: &UpdateService, n: usize, age: u64) -> PathBuf {
         let path = service.root.join("cache").join(format!("{n:064x}.json"));
-        fs::write(&path, br#"{"etag":"fixture","data":[]}"#).unwrap();
-        fs::File::options()
-            .write(true)
-            .open(&path)
-            .unwrap()
-            .set_times(
-                fs::FileTimes::new().set_modified(UNIX_EPOCH + Duration::from_secs(now() - age)),
-            )
+        service
+            .publish_metadata(&path, &serde_json::json!({"etag":"fixture","data":[]}))
             .unwrap();
+        set_age(service, &path, age);
         path
+    }
+    fn set_age(service: &UpdateService, path: &Path, seconds: u64) {
+        let (table, key) = service.indexed_path(path).unwrap();
+        table
+            .set_used(&key, (now().saturating_sub(seconds) * 1000) as i64)
+            .unwrap();
     }
     // Construct the update cache archive
     fn archive(service: &UpdateService, product: &str) -> PathBuf {
@@ -505,7 +708,7 @@ mod tests {
                 stats[0].max_age_seconds,
                 stats[0].max_entries
             ),
-            (1_073_741_824, 86_400, 64)
+            (536_870_912, 86_400, 64)
         );
         assert_eq!(stats[1].id, "updates/downloads");
         assert_eq!(
@@ -526,19 +729,13 @@ mod tests {
         let file = fs::OpenOptions::new().write(true).open(&plugin).unwrap();
         file.set_len(1_073_741_825).unwrap();
         service.record_cached_download(&plugin).unwrap();
-        file.set_times(
-            fs::FileTimes::new().set_modified(UNIX_EPOCH + Duration::from_secs(now() - 86_400)),
-        )
-        .unwrap();
+        set_age(&service, &plugin, 86_400);
         let (_, count, _, errors) = service.cache_folders(Some(false));
         assert!(errors.is_empty(), "{errors:?}");
         assert_eq!(count, 1);
         assert!(!expired.exists());
         assert!(plugin.exists());
-        file.set_times(
-            fs::FileTimes::new().set_modified(UNIX_EPOCH + Duration::from_secs(now() - 172_800)),
-        )
-        .unwrap();
+        set_age(&service, &plugin, 172_800);
         assert_eq!(service.cache_folders(Some(false)).1, 1);
         assert!(!plugin.exists());
     }
@@ -550,14 +747,14 @@ mod tests {
         let unknown = service.root.join("cache/unknown.bin");
         fs::File::create(&unknown)
             .unwrap()
-            .set_len(1_073_741_824)
+            .set_len(536_870_912)
             .unwrap();
         let (stats, count, _, errors) = service.cache_folders(Some(false));
         assert!(errors.is_empty(), "{errors:?}");
         assert_eq!(count, 1);
         assert!(!owned.exists());
         assert!(unknown.exists());
-        assert_eq!(stats[0].bytes, 1_073_741_824);
+        assert_eq!(stats[0].bytes, 536_870_912);
         assert_eq!(stats[0].protected_entries, 1);
     }
     #[test]
@@ -622,10 +819,56 @@ mod tests {
         drop(lease);
         let (_, count, _, _) = service.cache_folders(Some(true));
         assert_eq!(count, 1);
-        assert!(!plugin.exists());
+        assert!(!plugin.parent().unwrap().exists());
         assert!(manager.exists());
         assert_eq!(service.cache_folders(Some(true)).1, 0);
     }
+    #[test]
+    // Verify that explicit clear sweeps only empty idle digest folders
+    fn clear_sweeps_old_empty_plugin_digest_folders() {
+        let (_root, service) = service();
+        let plugins = service.root.join("downloads/plugins");
+        let empty = plugins.join("1".repeat(64));
+        let active = plugins.join("2".repeat(64));
+        let populated = plugins.join("3".repeat(64));
+        let unknown = plugins.join("not-a-digest");
+        let manager = service.root.join("downloads/manager").join("4".repeat(64));
+        for dir in [&empty, &active, &populated, &unknown, &manager] {
+            fs::create_dir_all(dir).unwrap();
+        }
+        fs::write(populated.join("keep.txt"), b"unrecognized").unwrap();
+        let lease = service.cache_lease(&active.join("incoming.zip")).unwrap();
+
+        let (_, count, _, errors) = service.cache_folders(Some(true));
+        assert!(errors.is_empty(), "{errors:?}");
+        assert_eq!(count, 0);
+        assert!(!empty.exists());
+        assert!(active.is_dir());
+        assert!(populated.join("keep.txt").is_file());
+        assert!(unknown.is_dir());
+        assert!(manager.is_dir());
+
+        drop(lease);
+        assert!(service.cache_folders(Some(true)).3.is_empty());
+        assert!(!active.exists());
+    }
+
+    #[cfg(unix)]
+    #[test]
+    // Verify that clear does not remove or follow links named like cache digest folders
+    fn clear_preserves_linked_digest_folders() {
+        let (root, service) = service();
+        let outside = root.path().join("outside");
+        let plugins = service.root.join("downloads/plugins");
+        let link = plugins.join("d".repeat(64));
+        fs::create_dir_all(&outside).unwrap();
+        fs::create_dir_all(&plugins).unwrap();
+        std::os::unix::fs::symlink(&outside, &link).unwrap();
+        service.cache_folders(Some(true));
+        assert!(link.symlink_metadata().unwrap().file_type().is_symlink());
+        assert!(outside.is_dir());
+    }
+
     #[test]
     // Verify that legacy archives and malformed receipts remain protected
     fn legacy_archives_and_malformed_receipts_remain_protected() {
@@ -654,6 +897,7 @@ mod tests {
         assert!(errors.is_empty(), "{errors:?}");
         assert_eq!(count, 1);
         assert!(bytes > DOWNLOAD_MAX_BYTES);
+        assert!(!plugin.parent().unwrap().exists());
         let jobs = service.jobs.lock().unwrap();
         assert_eq!(jobs[&id].0.state, "failed");
         assert_eq!(jobs[&id].0.retry_available, Some(true));

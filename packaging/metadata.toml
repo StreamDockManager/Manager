@@ -5,8 +5,8 @@ publisher = "Stream Dock Manager contributors"
 copyright = "Stream Dock Manager contributors"
 website = "https://github.com/StreamDockManager/Manager"
 license = "GPL-3.0-or-later"
-# Release date (YYYY-MM-DD), not the build/installation time. Leave empty while unreleased
-last_updated = ""
+# Release date (YYYY-MM-DD), not the build/installation time. Leave empty when this build has no assigned release date
+last_updated = "2026-11-15"
 
 [desktop]
 name = "Stream Dock Manager"

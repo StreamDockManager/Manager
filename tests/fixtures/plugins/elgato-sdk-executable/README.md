@@ -32,9 +32,10 @@ npm --prefix tests/fixtures/plugins/elgato-sdk-executable ci --ignore-scripts --
 
 ### Run the older-manifest probe
 
-Build the legacy probe, then use an absolute Node.js 24 executable:
+Prepare native dependencies on a fresh checkout, build the probe, then use an absolute Node.js 24 executable:
 
 ```sh
+python3 scripts/prepare_patched_deps.py
 npm --prefix tests/fixtures/plugins/elgato-sdk-executable run build
 STREAM_DOCK_MANAGER_NODE=/absolute/path/to/node24 cargo test \
   -p stream-dock-manager-plugin-host --test node_protocol \
@@ -95,7 +96,7 @@ and real Runtime resource durability separately from host-only projections.
 `current-sdk-audit.json` maps every explicit 7.0/7.1 gate in this pinned SDK and the
 corresponding manifest changes to implementation, tests and remaining limitations.
 The production contract and independent implementation registry both declare 7.1
-as a subset. This is separate from Manager's unchanged 0.1.0 product version.
+as a subset. The vendor contract version is independent of the Manager release version.
 
 After installing dependencies above, build the current-mode probe and run the production check:
 
@@ -114,6 +115,9 @@ real profile, runtime download or user configuration is used. Without `--run`, i
 only records the audit snapshot. The historical candidate mode remains available
 only for a 6.9 source baseline and changes declarations in its isolated copy only.
 
+<details>
+<summary>What the host-stage check covers</summary>
+
 The genuine, unmodified SDK runs with its default configuration. The disposable
 manifest declares 7.1 and Node 24, and normal runtime selection must succeed
 without override acknowledgment. The suite exercises all four gated SDK
@@ -129,12 +133,17 @@ neither the runner nor test results automatically change the production declarat
 Manager key logic has a separately tested configurable tap/double/hold subset;
 exact vendor timing and event parity remain unqualified by these SDK transport tests.
 
+</details>
+
 Add `--runtime` to run the separate genuine SDK-to-Runtime durability stage:
 
 ```sh
 npm --prefix tests/fixtures/plugins/elgato-sdk-executable run build:profiles
 python3 scripts/qualify-current-sdk.py --production --run --runtime --node /absolute/path/to/node24
 ```
+
+<details>
+<summary>What the Runtime-stage check covers</summary>
 
 This uses the existing headless test support with a synthetic device and saved
 profile in disposable SQLite storage. Offline metadata is seeded before opening
@@ -167,6 +176,8 @@ observed single-page V2 format, not full V3 or arbitrary vendor-profile support.
 Results record host and runtime stages separately. Neither stage qualifies actual
 inspector browser/popup behavior, complete vendor profile V3, reference-host
 parity, physical hardware, untested native platforms or full release readiness.
+
+</details>
 
 ## Direct production 7.1 subset evidence
 

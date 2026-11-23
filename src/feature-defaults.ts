@@ -3,6 +3,8 @@ import type { Appearance } from '../generated/runtime';
 // Create an independent default action appearance
 export const defaultAppearance = (): Appearance => ({
     font: 'sans',
+    font_weight: 400,
+    font_italic: false,
     size: 18,
     foreground: '#ffffff',
     position: 'bottom',

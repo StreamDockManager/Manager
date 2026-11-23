@@ -1,0 +1,22 @@
+{
+  "version": 1,
+  "basePath": "..",
+  "components": {
+    "sd-application-data": {
+      "source": "components/sd-application-data.html",
+      "dependencies": [],
+      "options": {
+        "shadow": false,
+        "templateRevision": "sha256-WvpGRJ_rNy9iBDxyFIdYDwLIL8bqHXaKEdS2uTdYQ7s"
+      },
+      "metadata": {
+        "description": "Application data ownership, retention and recovery management."
+      }
+    }
+  },
+  "groups": {
+    "application-data": [
+      "sd-application-data"
+    ]
+  }
+}

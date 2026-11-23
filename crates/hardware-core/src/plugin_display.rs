@@ -94,6 +94,8 @@ pub struct ElementStyle {
     pub rect: [f64; 4],
     pub visible: bool,
     pub font: String,
+    pub font_weight: u16,
+    pub font_italic: bool,
     pub size: f64,
     pub foreground: String,
     pub align: String,
@@ -114,6 +116,8 @@ impl Default for ElementStyle {
             rect: [0., 0., 100., 100.],
             visible: true,
             font: "sans".into(),
+            font_weight: 400,
+            font_italic: false,
             size: 12.,
             foreground: "#ffffff".into(),
             align: "center".into(),
@@ -170,6 +174,7 @@ impl ElementStyle {
             || !self.size.is_finite()
             || !(1.0..=100.0).contains(&self.size)
             || !crate::fonts::valid(&self.font)
+            || !matches!(self.font_weight, 400 | 700)
             || !["left", "center", "right"].contains(&self.align.as_str())
             || !["top", "center", "bottom"].contains(&self.vertical_align.as_str())
             || crate::appearance::background_color(&self.foreground).is_none()
@@ -329,6 +334,22 @@ pub fn element_values(visual: &Value) -> Vec<(String, String, Value)> {
             )
         })
         .collect()
+}
+/// Only scalar fields in rendered semantic items may supply authored labels.
+pub fn scalar_field(visual: &Value, key: &str) -> Option<Value> {
+    items(visual)
+        .into_iter()
+        .find(|item| {
+            item["key"].as_str() == Some(key)
+                && matches!(
+                    item["type"].as_str(),
+                    Some("text" | "bar" | "gbar" | "gauge")
+                )
+        })
+        .and_then(|item| {
+            let v = &item["value"];
+            (v.is_boolean() || v.is_number() || v.is_string()).then(|| v.clone())
+        })
 }
 // Read the elements from the display layout
 pub fn elements(visual: &Value) -> Vec<DisplayElement> {
@@ -537,7 +558,14 @@ fn text_image_details(
     let db = crate::appearance::fonts(&style.font);
     let mut size = (f64::from(surface_height) * style.size / 100.).max(1.);
     let text: String = text.chars().take(4096).collect();
-    let mut advances = crate::fonts::advances(&style.font, &text, size, &db);
+    let mut advances = crate::fonts::styled_advances(
+        &style.font,
+        &text,
+        size,
+        &db,
+        style.font_weight,
+        style.font_italic,
+    );
     if fit {
         let longest = text
             .split('\n')
@@ -556,7 +584,14 @@ fn text_image_details(
         // the same font and allocating the same advance map a second time.
         if fitted_size != size {
             size = fitted_size;
-            advances = crate::fonts::advances(&style.font, &text, size, &db);
+            advances = crate::fonts::styled_advances(
+                &style.font,
+                &text,
+                size,
+                &db,
+                style.font_weight,
+                style.font_italic,
+            );
         }
     }
     let advance = |ch| advances.get(&ch).copied().unwrap_or(size * 0.6);
@@ -606,9 +641,19 @@ fn text_image_details(
         _ => (f64::from(width) / 2., "middle"),
     };
     let family = crate::fonts::svg_family(&style.font, &db);
+    let weight = if style.font_weight == 700 {
+        "bold"
+    } else {
+        "normal"
+    };
+    let slant = if style.font_italic {
+        "italic"
+    } else {
+        "normal"
+    };
     let mut body = String::new();
     for (i, line) in lines.iter().enumerate() {
-        body.push_str(&format!("<text x=\"{x}\" y=\"{}\" text-anchor=\"{anchor}\" font-family=\"{family}\" font-size=\"{size}\" fill=\"{}\">{}</text>",top+size+i as f64*line_height,style.foreground,line.replace('&', "&amp;").replace('<', "&lt;").replace('>', "&gt;").replace('"', "&quot;").replace('\'', "&apos;")));
+        body.push_str(&format!("<text x=\"{x}\" y=\"{}\" text-anchor=\"{anchor}\" font-family=\"{family}\" font-weight=\"{weight}\" font-style=\"{slant}\" font-size=\"{size}\" fill=\"{}\">{}</text>",top+size+i as f64*line_height,style.foreground,line.replace('&', "&amp;").replace('<', "&lt;").replace('>', "&gt;").replace('"', "&quot;").replace('\'', "&apos;")));
     }
     let options = resvg::usvg::Options {
         fontdb: db,
@@ -616,7 +661,9 @@ fn text_image_details(
     };
     #[cfg(target_os = "macos")]
     let mut options = options;
-    let source = format!("<svg xmlns=\"http://www.w3.org/2000/svg\" width=\"{width}\" height=\"{height}\">{body}</svg>");
+    let source = format!(
+        "<svg xmlns=\"http://www.w3.org/2000/svg\" width=\"{width}\" height=\"{height}\">{body}</svg>"
+    );
     #[cfg(target_os = "macos")]
     let (source, native_clipped) =
         crate::native_text::prepare_svg(&source, &style.font, &mut options)?;
@@ -634,14 +681,7 @@ fn text_image_details(
         resvg::tiny_skia::Transform::identity(),
         &mut pixmap.as_mut(),
     );
-    // tiny-skia stores premultiplied pixels; decode its PNG to obtain straight alpha.
-    image::load_from_memory(
-        &pixmap
-            .encode_png()
-            .map_err(|e| Error::Protocol(e.to_string()))?,
-    )
-    .map(|i| (i.to_rgba8(), clipped))
-    .map_err(|e| Error::Protocol(e.to_string()))
+    Ok((crate::render::pixmap_rgba(pixmap)?, clipped))
 }
 
 /// Advisory checks use the same wrapped glyph layout as composition output
@@ -675,44 +715,6 @@ pub fn text_checks(
         warnings.push(crate::appearance::contrast_warning(animated));
     }
     Ok(warnings)
-}
-
-// Fit the source inside the target bounds
-pub(crate) fn contained(bytes: &[u8], width: u16, height: u16) -> Result<Vec<u8>> {
-    let (source_width, source_height) =
-        if bytes.iter().find(|b| !b.is_ascii_whitespace()) == Some(&b'<') {
-            let mut options = resvg::usvg::Options::default();
-            options.image_href_resolver.resolve_string = Box::new(|_, _| None);
-            options.image_href_resolver.resolve_data = Box::new(|_, _, _| None);
-            let tree = resvg::usvg::Tree::from_data(bytes, &options)
-                .map_err(|e| Error::Protocol(e.to_string()))?;
-            (tree.size().width(), tree.size().height())
-        } else {
-            let reader = image::ImageReader::new(std::io::Cursor::new(bytes))
-                .with_guessed_format()
-                .map_err(|e| Error::Protocol(e.to_string()))?;
-            let (w, h) = reader
-                .into_dimensions()
-                .map_err(|e| Error::Protocol(e.to_string()))?;
-            (w as f32, h as f32)
-        };
-    let scale = (f32::from(width) / source_width).min(f32::from(height) / source_height);
-    let w = (source_width * scale).round().max(1.) as u16;
-    let h = (source_height * scale).round().max(1.) as u16;
-    let raster = crate::render::render(bytes, w, h, 0, "png")?;
-    let image = image::load_from_memory(&raster).map_err(|e| Error::Protocol(e.to_string()))?;
-    let mut canvas = image::RgbaImage::new(width.into(), height.into());
-    image::imageops::overlay(
-        &mut canvas,
-        &image,
-        i64::from(width.saturating_sub(w) / 2),
-        i64::from(height.saturating_sub(h) / 2),
-    );
-    let mut out = std::io::Cursor::new(Vec::new());
-    canvas
-        .write_to(&mut out, image::ImageFormat::Png)
-        .map_err(|e| Error::Protocol(e.to_string()))?;
-    Ok(out.into_inner())
 }
 
 #[cfg(test)]
@@ -756,7 +758,16 @@ mod tests {
     }
     // Resolve the asset value for this operation
     fn asset(id: &str, color: &str) -> IconAsset {
-        IconAsset {id:id.into(),svg:format!("<svg xmlns=\"http://www.w3.org/2000/svg\" viewBox=\"0 0 40 20\"><rect width=\"40\" height=\"20\" fill=\"{color}\"/></svg>"),collection:"Test".into(),author:"Test".into(),license:"MIT".into(),license_url:String::new()}
+        IconAsset {
+            id: id.into(),
+            svg: format!(
+                "<svg xmlns=\"http://www.w3.org/2000/svg\" viewBox=\"0 0 40 20\"><rect width=\"40\" height=\"20\" fill=\"{color}\"/></svg>"
+            ),
+            collection: "Test".into(),
+            author: "Test".into(),
+            license: "MIT".into(),
+            license_url: String::new(),
+        }
     }
     #[test]
     // Verify merges after feedback preserves source and updates
@@ -893,8 +904,7 @@ mod tests {
     // Verify custom icons keep aspect ratio and alpha
     fn custom_icons_keep_aspect_ratio_and_alpha() {
         let icon = asset("test:shape", "#ff0000");
-        let bytes = contained(icon.svg.as_bytes(), 80, 80).unwrap();
-        let image = image::load_from_memory(&bytes).unwrap().to_rgba8();
+        let image = crate::render::contained_pixels(icon.svg.as_bytes(), 80, 80).unwrap();
         assert_eq!(image.get_pixel(40, 0)[3], 0);
         assert_eq!(image.get_pixel(40, 40)[3], 255);
     }
@@ -977,6 +987,48 @@ mod adaptive_text_tests {
                     assert_eq!(style.size, 30.);
                 }
             }
+        }
+    }
+}
+
+#[cfg(test)]
+mod element_font_tests {
+    use super::*;
+    #[test]
+    // Load existing element styles and preserve the real native font faces through serialization
+    fn element_font_defaults_validation_and_pixels() {
+        let old = serde_json::json!({"layout":"fixture","key":"text"});
+        let defaults: ElementStyle = serde_json::from_value(old).unwrap();
+        assert_eq!(defaults.font_weight, 400);
+        assert!(!defaults.font_italic);
+        let mut outputs = std::collections::BTreeSet::new();
+        for weight in [400, 700] {
+            for italic in [false, true] {
+                let style = ElementStyle {
+                    font_weight: weight,
+                    font_italic: italic,
+                    size: 24.,
+                    ..defaults.clone()
+                };
+                style.validate().unwrap();
+                let value = serde_json::to_value(&style).unwrap();
+                let restored: ElementStyle = serde_json::from_value(value.clone()).unwrap();
+                assert_eq!(serde_json::to_value(&restored).unwrap(), value);
+                outputs.insert(
+                    text_image("Wide label", &restored, 112, 112, 112)
+                        .unwrap()
+                        .into_raw(),
+                );
+            }
+        }
+        assert_eq!(outputs.len(), 4);
+        for weight in [0, 100, 650, 900] {
+            assert!(ElementStyle {
+                font_weight: weight,
+                ..defaults.clone()
+            }
+            .validate()
+            .is_err());
         }
     }
 }

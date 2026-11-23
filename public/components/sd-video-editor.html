@@ -3,7 +3,7 @@
     @open-video-editor.window="open"
     @pointermove.window="moveCrop"
     @pointerup.window="endCrop"
-    @pointercancel.window="endCrop"
+    @pointercancel.window="cancelCrop"
 >
     <dialog
         x-ref="dialog"
@@ -81,7 +81,6 @@
                 <div class="video-editor-source-info">
                     <strong x-text="recording ? recording.name : 'Select a recording'"></strong>
                     <small x-text="sourceLabel"></small>
-                    <small x-show="preparedLabel" x-text="preparedLabel"></small>
                 </div>
                 <button
                     x-ref="choose"
@@ -103,50 +102,6 @@
                     prepared for playback.
                 </p>
             </div>
-            <details class="video-recording-storage">
-                <summary>Recording storage</summary>
-                <p class="field-help">
-                    Original recordings stay in managed storage for editing. Profile exports include
-                    prepared clips, without full recordings.
-                </p>
-                <button type="button" class="button" @click="reviewRecordings" :disabled="busy">
-                    Review unused recordings
-                </button>
-                <section
-                    x-show="cleanup && cleanup.recordings.length"
-                    aria-label="Unused recording cleanup review"
-                >
-                    <p
-                        x-text="cleanup ? 'Permanently delete ' + cleanup.recordings.length + ' unused recording(s), ' + (cleanup.bytes / 1024 / 1024).toFixed(1) + ' MiB?' : ''"
-                    ></p>
-                    <ul>
-                        <template
-                            x-for="source in cleanup ? cleanup.recordings : []"
-                            :key="source.id"
-                        >
-                            <li x-text="source.name"></li>
-                        </template>
-                    </ul>
-                    <div class="button-row">
-                        <button
-                            type="button"
-                            class="button"
-                            @click="discardCleanup"
-                            :disabled="busy"
-                        >
-                            Cancel cleanup
-                        </button>
-                        <button
-                            type="button"
-                            class="button danger"
-                            @click="cleanupRecordings"
-                            :disabled="busy"
-                        >
-                            Delete reviewed recordings
-                        </button>
-                    </div>
-                </section>
-            </details>
             <div class="video-editor-workspace" x-show="recording">
                 <section class="video-editor-stage" aria-label="Video preview and timeline">
                     <div class="video-editor-stage-toolbar">
@@ -181,7 +136,9 @@
                             :style="previewStyle"
                         >
                             <img
-                                :src="image"
+                                data-resource-role="media-preview"
+                                @load="measureCrop"
+                                :src="image || null"
                                 x-show="image"
                                 alt="Video frame at the editor playhead"
                             />
@@ -191,20 +148,91 @@
                                     :style="cropStyle"
                                     @pointerdown="startCrop"
                                     aria-label="Crop region"
+                                    role="group"
+                                    tabindex="0"
+                                    @keydown="cropKey"
+                                    aria-describedby="video-crop-help"
                                 >
-                                    <span aria-hidden="true">Drag to position crop</span>
                                     <button
                                         type="button"
                                         class="video-editor-crop-handle"
-                                        data-resize="true"
-                                        aria-label="Drag to resize crop; numeric controls available below"
-                                        data-tooltip="Resize crop"
-                                    >
-                                        ↘
-                                    </button>
+                                        data-crop-handle="nw"
+                                        aria-label="Resize crop top left"
+                                        :disabled="busy"
+                                    ></button>
+                                    <button
+                                        type="button"
+                                        class="video-editor-crop-handle"
+                                        data-crop-handle="ne"
+                                        aria-label="Resize crop top right"
+                                        :disabled="busy"
+                                    ></button>
+                                    <button
+                                        type="button"
+                                        class="video-editor-crop-handle"
+                                        data-crop-handle="sw"
+                                        aria-label="Resize crop bottom left"
+                                        :disabled="busy"
+                                    ></button>
+                                    <button
+                                        type="button"
+                                        class="video-editor-crop-handle"
+                                        data-crop-handle="se"
+                                        aria-label="Resize crop bottom right"
+                                        :disabled="busy"
+                                    ></button>
                                 </div>
                             </template>
+                            <template x-if="view === 'device' && image && previewView === 'device'">
+                                <div
+                                    class="video-device-pan"
+                                    role="group"
+                                    tabindex="0"
+                                    aria-label="Pan device preview"
+                                    aria-describedby="video-device-pan-help"
+                                    @pointerdown="startDevicePan"
+                                    @keydown="devicePanKey"
+                                ></div>
+                            </template>
                             <span class="field-help" x-show="!image">Preview appears here</span>
+                        </div>
+                    </div>
+                    <p id="video-crop-help" class="field-help" x-show="view === 'source'">
+                        Drag the crop or its corners. Arrow keys adjust; Shift moves faster.
+                    </p>
+                    <div class="video-device-framing" x-show="view === 'device'">
+                        <p id="video-device-pan-help" class="field-help">
+                            Drag to position. Use zoom to frame; arrow keys move the image.
+                        </p>
+                        <div class="button-row" role="group" aria-label="Device framing">
+                            <button
+                                type="button"
+                                class="button"
+                                data-zoom="0.8"
+                                @click="zoomDevice"
+                                :disabled="busy || !image"
+                                aria-label="Zoom out device preview"
+                            >
+                                −
+                            </button>
+                            <button
+                                type="button"
+                                class="button"
+                                data-zoom="1.25"
+                                @click="zoomDevice"
+                                :disabled="busy || !image"
+                                aria-label="Zoom in device preview"
+                            >
+                                +
+                            </button>
+                            <button
+                                type="button"
+                                class="text-button"
+                                @click="resetCrop"
+                                :disabled="busy || !image"
+                            >
+                                Reset framing
+                            </button>
                         </div>
                     </div>
                     <div class="video-editor-transport">
@@ -257,43 +285,96 @@
                             aria-label="Recording overview playhead"
                         />
                     </label>
-                    <div class="video-editor-timeline" aria-label="Clip timeline">
+                    <div
+                        class="video-editor-timeline"
+                        aria-label="Clip timeline"
+                        data-timeline="playhead"
+                        @pointerdown="startTimeline"
+                        @pointermove="moveTimeline"
+                        @pointerup="endTimeline"
+                        @pointercancel="cancelTimeline"
+                        @lostpointercapture="cancelTimeline"
+                    >
                         <div class="video-editor-filmstrip" aria-hidden="true">
-                            <template x-for="thumbnail in thumbnails" :key="thumbnail.position">
-                                <img :src="thumbnail.url" alt="" />
+                            <template x-for="(thumbnail, index) in thumbnails" :key="index">
+                                <img
+                                    data-resource-role="thumbnail"
+                                    :src="thumbnail.url || null"
+                                    alt=""
+                                />
                             </template>
                         </div>
                         <div
-                            class="video-editor-selection"
-                            :style="selectionStyle"
+                            class="video-editor-outside before"
+                            :style="timelineBeforeStyle"
                             aria-hidden="true"
                         ></div>
-                        <label class="video-editor-trim-in">
+                        <div
+                            class="video-editor-outside after"
+                            :style="timelineAfterStyle"
+                            aria-hidden="true"
+                        ></div>
+                        <button
+                            type="button"
+                            class="video-editor-selection"
+                            :style="selectionStyle"
+                            data-timeline="window"
+                            @pointerdown="startTimeline"
+                            @keydown="timelineKey"
+                            :disabled="busy"
+                            aria-label="Move selected clip"
+                            :aria-valuetext="durationLabel"
+                            title="Drag to move the selected interval. Arrow keys move one frame; Shift moves ten."
+                        ></button>
+                        <button
+                            type="button"
+                            role="slider"
+                            class="video-editor-timeline-handle in"
+                            :style="timelineInStyle"
+                            data-timeline="in"
+                            @pointerdown="startTimeline"
+                            @keydown="timelineKey"
+                            :disabled="busy"
+                            aria-label="Clip in handle"
+                            :aria-valuemin="availableStart"
+                            :aria-valuemax="clipEnd"
+                            :aria-valuenow="clipStart"
+                            :aria-valuetext="inTime"
+                        >
                             <span>In</span>
-                            <input
-                                type="range"
-                                :min="windowStart"
-                                :max="windowEnd"
-                                step="1"
-                                :value="clipStart"
-                                @input="rangeIn"
-                                :disabled="busy"
-                                aria-label="Clip in handle"
-                            />
-                        </label>
-                        <label class="video-editor-trim-out">
+                        </button>
+                        <button
+                            type="button"
+                            role="slider"
+                            class="video-editor-timeline-handle out"
+                            :style="timelineOutStyle"
+                            data-timeline="out"
+                            @pointerdown="startTimeline"
+                            @keydown="timelineKey"
+                            :disabled="busy"
+                            aria-label="Clip out handle"
+                            :aria-valuemin="clipStart"
+                            :aria-valuemax="availableEnd"
+                            :aria-valuenow="clipEnd"
+                            :aria-valuetext="outTime"
+                        >
                             <span>Out</span>
-                            <input
-                                type="range"
-                                :min="windowStart"
-                                :max="windowEnd"
-                                step="1"
-                                :value="clipEnd"
-                                @input="rangeOut"
-                                :disabled="busy"
-                                aria-label="Clip out handle"
-                            />
-                        </label>
+                        </button>
+                        <button
+                            type="button"
+                            role="slider"
+                            class="video-editor-timeline-cursor"
+                            :style="timelinePlayheadStyle"
+                            data-timeline="playhead"
+                            @pointerdown="startTimeline"
+                            @keydown="timelineKey"
+                            :disabled="busy"
+                            aria-label="Timeline scrubber"
+                            :aria-valuemin="windowStart"
+                            :aria-valuemax="windowEnd"
+                            :aria-valuenow="position"
+                            :aria-valuetext="currentTime"
+                        ></button>
                     </div>
                     <label class="video-editor-playhead-label">
                         Timeline playhead
@@ -308,6 +389,10 @@
                             aria-label="Timeline playhead"
                         />
                     </label>
+                    <p class="field-help">
+                        Drag In or Out to trim. Drag the outlined selection to move it; click the
+                        filmstrip to scrub. Arrow keys adjust one frame, Shift + Arrow ten.
+                    </p>
                     <div class="video-editor-timeline-tools">
                         <div class="button-row">
                             <button
@@ -650,6 +735,51 @@
                     </section>
                 </fieldset>
             </div>
+            <details class="video-recording-storage">
+                <summary>Recording details &amp; storage</summary>
+                <p x-show="preparedLabel" x-text="preparedLabel"></p>
+                <p class="field-help">
+                    Original recordings stay in managed storage for editing. Profile exports include
+                    prepared clips, without full recordings.
+                </p>
+                <button type="button" class="button" @click="reviewRecordings" :disabled="busy">
+                    Review unused recordings
+                </button>
+                <section
+                    x-show="cleanup && cleanup.recordings.length"
+                    aria-label="Unused recording cleanup review"
+                >
+                    <p
+                        x-text="cleanup ? 'Permanently delete ' + cleanup.recordings.length + ' unused recording(s), ' + (cleanup.bytes / 1024 / 1024).toFixed(1) + ' MiB?' : ''"
+                    ></p>
+                    <ul>
+                        <template
+                            x-for="source in cleanup ? cleanup.recordings : []"
+                            :key="source.id"
+                        >
+                            <li x-text="source.name"></li>
+                        </template>
+                    </ul>
+                    <div class="button-row">
+                        <button
+                            type="button"
+                            class="button"
+                            @click="discardCleanup"
+                            :disabled="busy"
+                        >
+                            Cancel cleanup
+                        </button>
+                        <button
+                            type="button"
+                            class="button danger"
+                            @click="cleanupRecordings"
+                            :disabled="busy"
+                        >
+                            Delete reviewed recordings
+                        </button>
+                    </div>
+                </section>
+            </details>
         </div>
         <footer class="feature-footer video-editor-footer">
             <p class="field-help">

@@ -1,0 +1,11 @@
+# Automatically generated - DO NOT EDIT!
+
+[[permission]]
+identifier = "allow-dismiss-input-trace"
+description = "Enables the dismiss_input_trace command without any pre-configured scope."
+commands.allow = ["dismiss_input_trace"]
+
+[[permission]]
+identifier = "deny-dismiss-input-trace"
+description = "Denies the dismiss_input_trace command without any pre-configured scope."
+commands.deny = ["dismiss_input_trace"]

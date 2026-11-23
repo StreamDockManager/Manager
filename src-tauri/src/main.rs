@@ -9,12 +9,20 @@ mod dev_restart;
 mod diagnostic_export;
 mod editor_lifecycle;
 mod location;
+#[cfg(target_os = "macos")]
+mod macos_notification;
 mod manager_log;
 mod manager_shortcut;
 mod media_drop;
+mod permission_windows;
+mod profile_reference;
 mod startup_args;
+mod startup_permission_gate;
 mod tray;
 mod uninstall_data;
+mod vault_commands;
+#[cfg(target_os = "macos")]
+mod vault_session_macos;
 #[cfg(target_os = "macos")]
 mod vendor_file_picker;
 mod vendor_inspectors;
@@ -138,6 +146,7 @@ fn handle_action_ui(handle: &tauri::AppHandle, event: &stream_dock_manager_runti
             .build()
             {
                 Ok(window) => {
+                    runtime.invalidate_resource_attribution();
                     window.on_window_event(move |event| {
                         if matches!(event, tauri::WindowEvent::Destroyed) {
                             let _ = runtime.builtin_state.reply_ui(&id, None);
@@ -157,7 +166,9 @@ fn handle_action_ui(handle: &tauri::AppHandle, event: &stream_dock_manager_runti
         }
     } else if event.kind == "action-show-manager" {
         editor_lifecycle::reveal(handle);
-    } else if event.kind == "action-notification" {
+    }
+    #[cfg(not(target_os = "macos"))]
+    if event.kind == "action-notification" {
         if let Some(data) = event
             .message
             .as_deref()
@@ -171,6 +182,28 @@ fn handle_action_ui(handle: &tauri::AppHandle, event: &stream_dock_manager_runti
                 .body(data["text"].as_str().unwrap_or(""))
                 .show();
         }
+    }
+}
+// Keep legacy macOS senders from changing the app's bundle identity process-wide
+fn send_background_notification(
+    _handle: &tauri::AppHandle,
+    title: &str,
+    text: &str,
+) -> Result<(), String> {
+    #[cfg(target_os = "macos")]
+    {
+        macos_notification::submit_without_prompt(title, text)
+    }
+    #[cfg(not(target_os = "macos"))]
+    {
+        use tauri_plugin_notification::NotificationExt;
+        _handle
+            .notification()
+            .builder()
+            .title(title)
+            .body(text)
+            .show()
+            .map_err(|error| error.to_string())
     }
 }
 // Handle the snapshot desktop command
@@ -355,6 +388,9 @@ fn open_plugin_view<R: tauri::Runtime>(
     let builder =
         builder.background_throttling(tauri::utils::config::BackgroundThrottlingPolicy::Disabled);
     builder.build().map_err(|e| e.to_string())?;
+    if let Some(runtime) = app.try_state::<Arc<Runtime>>() {
+        runtime.invalidate_resource_attribution();
+    }
     Ok(())
 }
 // Handle the reload plugins desktop command
@@ -697,54 +733,46 @@ async fn open_settings_panel(
         address,
         resources,
     } = request;
-    let (mut panel, managed) = {
+    let managed_panel = {
         let mut plugins = runtime.plugins.lock().unwrap();
-        let managed = plugins.managed_settings(&id)?;
-        if !managed && address.is_none() {
-            return Err("Save this action before opening its vendor inspector".into());
-        }
-        let panel = if setup == Some(true) {
-            if action.is_some() {
-                return Err("Setup tools require a plugin-wide settings panel".into());
-            }
-            plugins.setup_settings_panel(&id)
-        } else if settings.is_null() {
-            plugins.default_settings_panel(
-                &id,
-                action.as_deref().ok_or("Choose an action for defaults")?,
-            )
+        if !plugins.managed_settings(&id)? {
+            None
         } else {
-            plugins.settings_panel(&id, action.as_deref(), &settings)
-        }?;
-        (panel, managed)
+            Some(if setup == Some(true) {
+                if action.is_some() {
+                    return Err("Setup tools require a plugin-wide settings panel".into());
+                }
+                plugins.setup_settings_panel(&id)
+            } else if settings.is_null() {
+                plugins.default_settings_panel(
+                    &id,
+                    action.as_deref().ok_or("Choose an action for defaults")?,
+                )
+            } else {
+                plugins.settings_panel(&id, action.as_deref(), &settings)
+            }?)
+        }
     };
-    if let Some(resources) = resources.clone() {
-        if let Err(error) = runtime.initialize_panel_resources(&panel.token, resources) {
-            runtime
-                .plugins
-                .lock()
-                .unwrap()
-                .close_inspector(&panel.token);
-            return Err(error);
+    let managed = managed_panel.is_some();
+    let panel = if let Some(panel) = managed_panel {
+        if let Some(resources) = resources {
+            if let Err(error) = runtime.initialize_panel_resources(&panel.token, resources) {
+                runtime
+                    .plugins
+                    .lock()
+                    .unwrap()
+                    .close_inspector(&panel.token);
+                return Err(error);
+            }
         }
-    }
+        panel
+    } else {
+        let address = address.ok_or("Save this action before opening its vendor inspector")?;
+        runtime.open_vendor_inspector(&id, action.as_deref().ok_or("Action required")?, address)?
+    };
+    #[cfg(any(target_os = "macos", target_os = "linux"))]
+    let mut panel = panel;
     if !managed {
-        if let Err(error) = runtime.bind_vendor_inspector(
-            &panel.token,
-            &id,
-            action.as_deref().ok_or("Action required")?,
-            &settings,
-            &resources.unwrap_or_default(),
-            address.unwrap(),
-        ) {
-            runtime
-                .plugins
-                .lock()
-                .unwrap()
-                .close_inspector(&panel.token);
-            return Err(error);
-        }
-        panel.immediate = true;
         #[cfg(any(target_os = "macos", target_os = "linux"))]
         {
             let isolated = {
@@ -1016,41 +1044,51 @@ fn main() {
         .plugin(tauri_plugin_notification::init())
         .setup(|app| {
             let config_root = startup_args::configuration_root(std::env::args_os().skip(1));
+            use manager_log::StartupStage;
             if let Ok(root) = &config_root {
+                app.manage(manager_log::StartupLogs(manager_log::directory(root)));
                 manager_log::init(app.handle(), root);
+            }
+            #[cfg(target_os = "macos")]
+            if macos_notification::install_foreground_delegate().is_err() {
+                manager_log::failure("Could not configure native foreground notifications");
             }
             let linked_launch = catalog_link::init(app.handle());
             #[cfg(any(target_os = "macos", target_os = "windows"))]
             app.handle().plugin(tauri_plugin_autostart::init(
                 tauri_plugin_autostart::MacosLauncher::LaunchAgent,
                 Some(vec!["--autostart"]),
-            ))?;
+            )).inspect_err(|error| manager_log::startup_failed(StartupStage::AutostartIntegration, &error.to_string()))?;
             // Before an editor exists, the actual primary display is the desktop
             // application's startup display. The main window replaces this context.
             let registration_environment = stream_dock_manager_plugin_host::RegistrationEnvironment::new(
                 Some(stream_dock_manager_runtime::desktop::application_language()),
                 app.primary_monitor().ok().flatten().map(|monitor| monitor.scale_factor()),
-            );
+            ).map(|environment| environment.with_native_plugin_notifications());
             let recovery_root = config_root.as_ref().ok().cloned();
             let explicit_recovery = startup_args::recovery_mode(std::env::args_os().skip(1));
-            let runtime = match config_root.and_then(|root| {
-                if stream_dock_manager_runtime::configuration_recovery::startup_landing(&root, explicit_recovery)? {
-                    configuration_recovery::open_requested(app.handle(), root)?;
+            let runtime = match config_root.map_err(|error| (StartupStage::ConfigurationPath, error)).and_then(|root| {
+                if stream_dock_manager_runtime::configuration_recovery::startup_landing(&root, explicit_recovery)
+                    .map_err(|error| (StartupStage::RecoveryDiscovery, error))? {
+                    configuration_recovery::open_requested(app.handle(), root)
+                        .map_err(|error| (StartupStage::RecoveryWindow, error))?;
                     return Ok(None);
                 }
-                Runtime::new_recovery_with_registration_environment(root, explicit_recovery, registration_environment?).map(Some)
+                let environment = registration_environment
+                    .map_err(|error| (StartupStage::RegistrationEnvironment, error))?;
+                Runtime::new_recovery_with_registration_environment(root, explicit_recovery, environment)
+                    .map(Some).map_err(|error| (StartupStage::RuntimeInitialization, error))
             }) {
                 Ok(Some(runtime)) => runtime,
                 Ok(None) => return Ok(()),
-                Err(error) => {
+                Err((stage, error)) => {
                     use tauri_plugin_dialog::{DialogExt, MessageDialogKind};
-                    manager_log::startup_failed(&error);
-                    eprintln!("Stream Dock Manager could not start: {error}");
+                    manager_log::startup_failed(stage, &error);
                     if let Some(root) = recovery_root {
                         match configuration_recovery::open(app.handle(), root, error.clone()) {
                             Ok(()) => return Ok(()),
-                            Err(_recovery_error) => {
-                                manager_log::failure("Configuration recovery unavailable");
+                            Err(recovery_error) => {
+                                manager_log::startup_failed(StartupStage::RecoveryWindow, &recovery_error);
                             }
                         }
                     }
@@ -1066,7 +1104,15 @@ fn main() {
                 }
             };
             manager_log::stage(if runtime.recovery_status().active { manager_log::Stage::Recovery } else { manager_log::Stage::RuntimeReady });
+            // The native main loop survives closing the editor to the tray.
+            #[cfg(target_os = "macos")]
+            runtime.plugins.lock().unwrap().enable_native_appearance_notifications();
+            #[cfg(target_os = "macos")]
+            runtime
+                .builtin_state
+                .attach_notification_backend(macos_notification::submit);
             runtime.builtin_state.attach_desktop_host();
+            permission_windows::attach(app.handle(), &runtime);
             let permission_report = runtime.startup_permissions(false);
             if permission_report.ready { runtime.startup_permissions(true); }
             let permission_setup_needed = !permission_report.ready;
@@ -1091,10 +1137,12 @@ fn main() {
                 }
             }
             let receiver = runtime.subscribe();
+            #[cfg(target_os = "macos")]
+            vault_session_macos::start(&runtime.vault);
             app.manage(runtime);
             let hidden_plugin_link = vendor_links::init(app.handle());
-            editor_lifecycle::install_native_quit(app.handle()).inspect_err(|_| {
-                manager_log::failure("Could not install the native quit handler");
+            editor_lifecycle::install_native_quit(app.handle()).inspect_err(|error| {
+                manager_log::startup_failed(StartupStage::QuitIntegration, &error.to_string());
             })?;
             let tray_result = tray::install(app.handle());
             let tray_available = tray_result.is_ok();
@@ -1105,6 +1153,8 @@ fn main() {
                     .collect::<Vec<_>>(),
             ));
             editor_lifecycle::start(app.handle(), visible, tray_available);
+            #[cfg(all(debug_assertions, target_os = "macos"))]
+            dev_restart::start_native_watch(app.handle());
             manager_shortcut::init(app.handle());
             if let Err(error) = tray_result {
                 manager_log::failure("Could not create the system tray");
@@ -1162,18 +1212,14 @@ fn main() {
                             .and_then(|w| w.is_visible().ok())
                             .unwrap_or(false)
                     {
-                        use tauri_plugin_notification::NotificationExt;
-                        let _ = handle
-                            .notification()
-                            .builder()
-                            .title("Stream Dock Manager")
-                            .body(
-                                event
-                                    .message
-                                    .as_deref()
-                                    .unwrap_or("Connected device list changed"),
-                            )
-                            .show();
+                        let _ = send_background_notification(
+                            &handle,
+                            "Stream Dock Manager",
+                            event
+                                .message
+                                .as_deref()
+                                .unwrap_or("Connected device list changed"),
+                        );
                     }
                     let _ = handle.emit("runtime-event", event);
                 }
@@ -1182,8 +1228,11 @@ fn main() {
         })
         .on_window_event(|window, event| {
             if window.app_handle().try_state::<Arc<Runtime>>().is_none() {
-                configuration_recovery::close_requested(window, &event);
+                configuration_recovery::close_requested(window, event);
                 return;
+            }
+            if matches!(event, tauri::WindowEvent::Destroyed) {
+                window.app_handle().state::<Arc<Runtime>>().invalidate_resource_attribution();
             }
             if let tauri::WindowEvent::DragDrop(tauri::DragDropEvent::Drop { paths, .. }) = event {
                 archive_import::receive(window.app_handle(), paths);

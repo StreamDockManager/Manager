@@ -39,6 +39,7 @@ impl PreparationFailure {
 struct Entry {
     source: Weak<Value>,
     fingerprint: String,
+    size: [u16; 2],
     touched: Instant,
     prepared: Instant,
     control: String,
@@ -87,12 +88,15 @@ impl Registry {
             .collect()
     }
     // Report the prepare condition for vendor animation
+    #[allow(clippy::too_many_arguments)]
     pub fn prepare(
         &mut self,
         profiles: &ProfileStore,
         target: (&str, bool),
         contexts: &HashMap<String, String>,
         visuals: &mut HashMap<String, Arc<Value>>,
+        artwork: &HashMap<String, stream_dock_manager_plugin_host::artwork_cache::ArtworkFiles>,
+        sizes: &HashMap<String, [u16; 2]>,
         elapsed: Duration,
         cancelled: &dyn Fn() -> bool,
     ) -> Vec<(String, String)> {
@@ -115,22 +119,26 @@ impl Registry {
                     .unwrap_or_else(|| control.clone()),
             );
             live.insert(key.clone());
+            let size = sizes.get(control).copied().unwrap_or([512, 512]);
             let same_pointer = self
                 .entries
                 .get(&key)
                 .and_then(|entry| entry.source.upgrade())
                 .is_some_and(|source| Arc::ptr_eq(&source, visual));
+            let image_digest = || {
+                artwork
+                    .get(control)
+                    .and_then(|files| files.stored_digest(image))
+                    .unwrap_or_else(|| Sha256::digest(image.as_bytes()).into())
+            };
             let fingerprint = if same_pointer {
                 self.entries[&key].fingerprint.clone()
             } else {
-                format!(
-                    "{}:{}",
-                    hex::encode(Sha256::digest(image.as_bytes())),
-                    visual["state"]
-                )
+                format!("{}:{}", hex::encode(image_digest()), visual["state"])
             };
             let unchanged = self.entries.get(&key).is_some_and(|entry| {
                 entry.fingerprint == fingerprint
+                    && entry.size == size
                     && (!entry.retryable || entry.prepared.elapsed() < Duration::from_secs(1))
             });
             if !unchanged {
@@ -149,8 +157,10 @@ impl Registry {
                         ));
                     }
                     let asset = format!(
-                        "vendor-gif:{}",
-                        hex::encode(Sha256::digest(image.as_bytes()))
+                        "vendor-gif:{}:{}x{}",
+                        hex::encode(image_digest()),
+                        size[0],
+                        size[1]
                     );
                     let clip = self
                         .entries
@@ -159,7 +169,15 @@ impl Registry {
                         .find(|animation| animation.asset == asset)
                         .map(|animation| animation.clip.clone())
                         .map(Ok)
-                        .unwrap_or_else(|| profiles.vendor_gif(&asset, image, cancelled))?;
+                        .unwrap_or_else(|| {
+                            profiles.vendor_gif(
+                                &asset,
+                                image,
+                                artwork.get(control),
+                                size,
+                                cancelled,
+                            )
+                        })?;
                     let protected = profiles
                         .media_budget
                         .protect(clip.clone())
@@ -196,6 +214,7 @@ impl Registry {
                     Entry {
                         source: Arc::downgrade(visual),
                         fingerprint,
+                        size,
                         touched: Instant::now(),
                         prepared: Instant::now(),
                         control: control.clone(),
@@ -268,6 +287,8 @@ mod tests {
             ("device", software),
             &HashMap::from([("key".into(), "context".into())]),
             &mut visuals,
+            &HashMap::new(),
+            &HashMap::new(),
             Duration::from_millis(at),
             &|| false,
         );
@@ -395,6 +416,56 @@ mod tests {
 mod limits_tests {
     use super::*;
     #[test]
+    fn a_gif_prepares_distinct_frames_for_each_screen_size() {
+        let dir = tempfile::tempdir().unwrap();
+        let store = ProfileStore::open(dir.path().join("profiles")).unwrap();
+        let mut gif = Vec::new();
+        {
+            let mut encoder = image::codecs::gif::GifEncoder::new(&mut gif);
+            for color in [[225, 16, 64, 255], [20, 180, 32, 255]] {
+                encoder
+                    .encode_frame(image::Frame::from_parts(
+                        image::RgbaImage::from_pixel(256, 256, image::Rgba(color)),
+                        0,
+                        0,
+                        image::Delay::from_numer_denom_ms(100, 1),
+                    ))
+                    .unwrap();
+            }
+        }
+        let source = Arc::new(
+            serde_json::json!({"image": format!("data:image/gif;base64,{}", base64::engine::general_purpose::STANDARD.encode(gif))}),
+        );
+        let mut registry = Registry::default();
+        let mut asset = String::new();
+        for size in [[64, 64], [112, 96]] {
+            let sizes = HashMap::from([("key".into(), size)]);
+            let mut visuals = HashMap::from([("key".into(), source.clone())]);
+            assert!(registry
+                .prepare(
+                    &store,
+                    ("device", false),
+                    &HashMap::new(),
+                    &mut visuals,
+                    &HashMap::new(),
+                    &sizes,
+                    Duration::ZERO,
+                    &|| false
+                )
+                .is_empty());
+            let animation = registry.active("device", false).remove("key").unwrap();
+            assert_ne!(asset, animation.asset);
+            asset = animation.asset;
+            let frame = image::load_from_memory(&animation.clip.frames[0]).unwrap();
+            assert_eq!(
+                (frame.width(), frame.height()),
+                (u32::from(size[0]), u32::from(size[0]))
+            );
+            assert_eq!(animation.clip.delays_ms, [100, 100]);
+        }
+    }
+
+    #[test]
     // Verify that vendor decode cancels and does not wait behind other preparations
     fn vendor_decode_cancels_and_does_not_wait_behind_other_preparations() {
         let root = tempfile::tempdir().unwrap();
@@ -404,7 +475,7 @@ mod limits_tests {
             base64::engine::general_purpose::STANDARD.encode(crate::media::tests::sample_gif())
         );
         assert!(store
-            .vendor_gif("vendor-gif:cancelled", &uri, &|| true)
+            .vendor_gif("vendor-gif:cancelled", &uri, None, [112, 112], &|| true)
             .err()
             .unwrap()
             .message
@@ -412,7 +483,7 @@ mod limits_tests {
         let first = store.media_gate.lock().unwrap();
         let second = store.media_gate.lock().unwrap();
         assert!(store
-            .vendor_gif("vendor-gif:busy", &uri, &|| false)
+            .vendor_gif("vendor-gif:busy", &uri, None, [112, 112], &|| false)
             .err()
             .unwrap()
             .message
@@ -420,7 +491,7 @@ mod limits_tests {
         drop((first, second));
         assert_eq!(
             store
-                .vendor_gif("vendor-gif:ready", &uri, &|| false)
+                .vendor_gif("vendor-gif:ready", &uri, None, [112, 112], &|| false)
                 .ok()
                 .unwrap()
                 .frames

@@ -1,5 +1,5 @@
 FROM node:26-bookworm-slim AS node
-FROM ubuntu@sha256:78d4744ead1f5b19b04d0df558ab182a5300903900755e515b2ca4d10eb2044d AS build
+FROM ubuntu@sha256:73b999393d07f2bf65a40373778a44dc9a6d54ad7718d29247d8ff9413c4d6a8 AS build
 ARG PRODUCT=desktop
 RUN apt-get update && apt-get install -y --no-install-recommends \
     build-essential ca-certificates curl git python3 pkg-config libssl-dev libudev-dev \

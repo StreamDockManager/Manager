@@ -1,8 +1,15 @@
+import {
+    favoriteDevice,
+    availableDevice,
+    validFavoriteKey,
+    readBrowserFavorite,
+    writeBrowserFavorite,
+} from './favorite-device';
 import { isKeyboardNavigationControl } from './keyboard-navigation';
 import { cloneJson } from './json-clone';
 import type { Bridge, RetireSubscription } from './bridge';
 import { trackCloseRelease } from './close-releases';
-import { defaultMedia, defaultDeviceOutput } from './bridge';
+import { defaultMedia, defaultDeviceOutput, native } from './bridge';
 import { detachDraftMedia } from './media-removal';
 import { releaseDeletedMedia } from './media-leases';
 import type {
@@ -18,6 +25,7 @@ import type {
 import type { Edit, Draft, PreviewDelta } from '../generated/runtime';
 import { ToastState, type ToastLevel } from './toasts';
 import { bindingCompatibility, hasBindingContent } from './bindings';
+import { walkAction } from './builtin-actions';
 import { DEFAULT_BACKGROUND } from './background-color';
 import { reconcile } from './reconcile';
 import { workspaceSnapshot } from './workspace-stream';
@@ -45,6 +53,21 @@ function startupEventBytes(event: RuntimeEvent) {
                 (input?.kind === 'swipe' ? input.direction.length : 0))
     );
 }
+// Plugin settings are opaque runtime data, not the identity of a rendered binding.
+function bindingDisplaySignature(binding: Binding | undefined) {
+    if (!binding) return;
+    const plugins = new Set<Action>();
+    walkAction(binding.action, (action) => {
+        if (action.kind === 'plugin') plugins.add(action);
+    });
+    if (plugins.size)
+        return JSON.stringify(binding, function (key, value) {
+            // Only actual plugin nodes are ignored; color/media/other settings-named
+            // properties and the shape and identity of every nested action still matter.
+            return key === 'settings' && plugins.has(this) ? undefined : value;
+        });
+}
+
 let nextSubscriptionReleaseId = 0;
 
 export class AppState extends ToastState {
@@ -67,7 +90,8 @@ export class AppState extends ToastState {
     selectedControls: string[] = [];
     clipboard: (Binding | null)[] = [];
     draftStore: Partial<Record<string, Draft>> = {};
-    deletedMedia: Record<string, boolean> = {};
+    private draftReadEpoch = 0;
+    private pendingDraftRemovals: Set<string> | null = null;
     flushDrafts: ((fence?: WindowFence) => Promise<void>) | undefined;
     windowSuspended = false;
     bindingCleared: ((address: string) => void) | undefined;
@@ -127,6 +151,9 @@ export class AppState extends ToastState {
     private previewSequence = 0;
     private previewGeneration = '';
     private surfaceConfigurationRevision = 0;
+    // The newest workspace revision that may have invalidated the current scene.
+    // Settings-only revisions can advance faster than the native preview cadence.
+    private surfaceRevisionFloor?: number;
     private surfaceStarting = false;
     pendingAction: Action | null = null;
     pendingActionTitle = '';
@@ -244,6 +271,25 @@ export class AppState extends ToastState {
                 }),
         ]);
     }
+    // Non-binding inputs which may affect pixels even when an action is unchanged.
+    private surfaceInputs() {
+        const device = this.device;
+        const profile = this.profile;
+        return [
+            device?.manifest,
+            device?.connected,
+            device?.simulated,
+            device?.model_id,
+            device?.variant_id,
+            this.session?.output,
+            profile?.palette,
+            profile?.background_asset,
+            profile?.background_media,
+            profile?.parameters,
+            this.snapshot.saved_macros,
+            this.snapshot.styles,
+        ];
+    }
     // Start or pause surface streaming according to editor visibility and window lifetime
     async streamSurfaces() {
         if (this.bridge.surfaceRendering !== 'stream') return;
@@ -274,7 +320,6 @@ export class AppState extends ToastState {
                 // Complete the deferred state work using the current operation state
                 this.bridge.subscribeSurfaces!(this.deviceId, (frame: PreviewDelta) => {
                     if (generation !== this.surfaceGeneration || this.stopped) return;
-                    this.triggerDescriptions = frame.trigger_descriptions || {};
                     if (frame.reset) {
                         this.previewSequence = 0;
                         this.previewGeneration = frame.generation;
@@ -290,11 +335,16 @@ export class AppState extends ToastState {
                     this.previewSequence = frame.sequence;
                     if (
                         frame.configuration_revision !== undefined &&
-                        frame.configuration_revision < this.configurationRevision
+                        frame.configuration_revision <
+                            Math.max(
+                                this.surfaceRevisionFloor ?? this.configurationRevision,
+                                this.surfaceConfigurationRevision,
+                            )
                     )
                         return;
                     this.surfaceConfigurationRevision =
                         frame.configuration_revision ?? this.configurationRevision;
+                    this.triggerDescriptions = frame.trigger_descriptions || {};
                     if (frame.reset) {
                         this.surfaces = Object.fromEntries(
                             Object.entries(frame.surfaces).filter(
@@ -363,6 +413,8 @@ export class AppState extends ToastState {
     private powerIdentity = '';
     private powerEpoch = 0;
     private powerPending = '';
+    private powerRead?: Promise<void>;
+    private powerRefreshAgain = false;
     // Derive effective device output from the current state state
     get effectiveDeviceOutput() {
         return this.powerIdentity === this.deviceIdentity && this.powerStatus
@@ -393,6 +445,8 @@ export class AppState extends ToastState {
     private invalidatePower() {
         ++this.powerEpoch;
         this.powerPending = '';
+        this.powerRead = undefined;
+        this.powerRefreshAgain = false;
         this.powerIdentity = '';
         this.powerStatus = null;
         this.powerError = '';
@@ -405,26 +459,31 @@ export class AppState extends ToastState {
             (typeof document !== 'undefined' && document.hidden)
         )
             return;
-        if (force) {
-            ++this.powerEpoch;
-            this.powerPending = '';
-        }
         const identity = this.deviceIdentity;
-        if (this.powerPending === identity || !this.device?.connected || this.stopped) return;
+        if (this.powerPending === identity) {
+            if (force) this.powerRefreshAgain = true;
+            return this.powerRead;
+        }
+        if (!this.device?.connected || this.stopped) return;
         const epoch = ++this.powerEpoch;
         this.powerPending = identity;
+        return (this.powerRead = this.readPower(identity, epoch));
+    }
+    private async readPower(identity: string, epoch: number): Promise<void> {
         try {
             const status = await this.bridge.command('device_power_status', {
                 deviceId: this.deviceId,
             });
             if (
                 epoch === this.powerEpoch &&
+                !this.powerRefreshAgain &&
                 identity === this.deviceIdentity &&
                 !this.stopped &&
                 !this.windowSuspended
             ) {
                 this.powerIdentity = identity;
-                this.powerStatus = status;
+                if (JSON.stringify(this.powerStatus) !== JSON.stringify(status))
+                    this.powerStatus = status;
                 this.powerError = '';
             }
         } catch (error) {
@@ -434,7 +493,14 @@ export class AppState extends ToastState {
                 this.powerStatus = null;
             }
         } finally {
-            if (epoch === this.powerEpoch) this.powerPending = '';
+            if (epoch === this.powerEpoch) {
+                this.powerPending = '';
+                this.powerRead = undefined;
+                if (this.powerRefreshAgain) {
+                    this.powerRefreshAgain = false;
+                    await this.refreshPower();
+                }
+            }
         }
     }
     // Derive configuration revision from the current state state
@@ -786,6 +852,82 @@ export class AppState extends ToastState {
             );
         });
     }
+    favoriteDeviceKey: string | null = null;
+    favoriteDeviceLoaded = false;
+    favoriteDeviceSaving = false;
+    private favoriteDevicePending = true;
+    get isFavoriteDevice() {
+        return Boolean(
+            this.device &&
+            !this.device.simulated &&
+            this.favoriteDeviceKey === this.device.persistence_key,
+        );
+    }
+    get canFavoriteDevice() {
+        const device = this.device;
+        return (
+            this.isFavoriteDevice ||
+            Boolean(
+                device?.connected &&
+                !device.simulated &&
+                validFavoriteKey(device.persistence_key) &&
+                favoriteDevice(this.snapshot.devices, device.persistence_key)?.id === device.id,
+            )
+        );
+    }
+    async loadFavoriteDevice() {
+        try {
+            this.favoriteDeviceKey = native
+                ? validFavoriteKey(
+                      (await this.bridge.command('client_preferences')).favorite_device,
+                  )
+                : readBrowserFavorite();
+        } catch {
+            this.notify('Could not load the favorite device preference.', 'warning');
+        }
+        this.favoriteDeviceLoaded = true;
+        this.applyFavoriteDevice();
+    }
+    beginDeviceSession() {
+        this.favoriteDevicePending = true;
+        this.applyFavoriteDevice();
+    }
+    private applyFavoriteDevice() {
+        if (
+            !this.favoriteDeviceLoaded ||
+            !this.favoriteDevicePending ||
+            this.windowSuspended ||
+            windowWork.quiescing
+        )
+            return;
+        const favorite = favoriteDevice(this.snapshot.devices, this.favoriteDeviceKey);
+        if (favorite) {
+            this.favoriteDevicePending = false;
+            if (favorite.id !== this.deviceId) this.selectDeviceId(favorite.id, false);
+        }
+    }
+    async toggleFavoriteDevice() {
+        if (this.favoriteDeviceSaving || !this.canFavoriteDevice || !this.device) return;
+        const key = this.isFavoriteDevice ? null : this.device.persistence_key;
+        this.favoriteDeviceSaving = true;
+        try {
+            if (native)
+                await this.bridge.command('save_client_preference', {
+                    name: 'favorite_device',
+                    value: key,
+                });
+            else writeBrowserFavorite(key);
+            this.favoriteDeviceKey = key;
+            this.favoriteDevicePending = false;
+        } catch {
+            this.notify(
+                'Could not save the favorite device preference. Please try again.',
+                'error',
+            );
+        } finally {
+            this.favoriteDeviceSaving = false;
+        }
+    }
     deviceId = '';
     controlId = '';
     route = 'editor';
@@ -833,6 +975,7 @@ export class AppState extends ToastState {
             'transferBinding',
             'openDataFolder',
             'openDeviceEditor',
+            'toggleFavoriteDevice',
         ]);
     }
     // Open the data folder
@@ -868,8 +1011,9 @@ export class AppState extends ToastState {
         location.hash = '#/editor';
     }
     // Select the device id
-    selectDeviceId(id: string) {
+    selectDeviceId(id: string, manual = true) {
         if (this.windowSuspended || windowWork.quiescing) return;
+        if (manual) this.favoriteDevicePending = false;
         void this.flushDrafts?.().catch((error) => this.notify(String(error), 'error'));
         this.selectedControls = [];
         this.deviceId = id;
@@ -880,6 +1024,7 @@ export class AppState extends ToastState {
         this.triggerDescriptions = {};
         this.background = null;
         this.surfaceConfigurationRevision = 0;
+        this.surfaceRevisionFloor = this.configurationRevision;
         this.surfaceGeneration++;
         if (this.nativeRendering) this.requestSurfaces();
     }
@@ -1105,9 +1250,11 @@ export class AppState extends ToastState {
             const models = await wait(this.bridge.command('simulator_models'));
             check();
             this.models = models;
-            const drafts = await wait(this.bridge.command('drafts').catch(() => ({})));
+            await this.refreshDrafts(
+                () => wait(this.bridge.command('drafts').catch(() => ({}))),
+                check,
+            );
             check();
-            this.draftStore = drafts;
             this.loading = false;
             const buffered = this.buffered;
             this.buffered = [];
@@ -1133,34 +1280,69 @@ export class AppState extends ToastState {
             throw new Error('Workspace snapshot requires a valid configuration_revision');
         if (this.windowSuspended) return;
         if (snapshot.revision < this.snapshot.revision) return;
-        const removedPlugins = this.snapshot.plugins
-            .filter((plugin) => !snapshot.plugins.some((current) => current.id === plugin.id))
-            .map((plugin) => plugin.id);
+        const incomingIds =
+            snapshot.plugins === this.snapshot.plugins
+                ? null
+                : new Set(snapshot.plugins.map((plugin) => plugin.id));
+        const removedPlugins = incomingIds
+            ? this.snapshot.plugins
+                  .filter((plugin) => !incomingIds.has(plugin.id))
+                  .map((plugin) => plugin.id)
+            : [];
         const previousDevice = this.device?.id;
         const previousContext = JSON.stringify([previousDevice, this.profile?.id, this.page?.id]);
-        const previousBindings = Object.fromEntries(
-            (this.device?.manifest.controls || []).map((control) => [
-                control.id,
-                JSON.stringify(this.displayedBinding(control.id) || null),
-            ]),
-        );
+        const previousRevision = this.configurationRevision;
+        const previousFloor = this.surfaceRevisionFloor ?? previousRevision;
+        const compareBindings =
+            this.surfaceConfigurationRevision < snapshot.configuration_revision &&
+            (snapshot.profiles !== this.snapshot.profiles ||
+                snapshot.devices !== this.snapshot.devices ||
+                snapshot.sessions !== this.snapshot.sessions ||
+                snapshot.binding_overrides !== this.snapshot.binding_overrides ||
+                snapshot.active_profile !== this.snapshot.active_profile);
+        const previousBindings = compareBindings
+            ? new Map(
+                  (this.device?.manifest.controls || []).map((control) => {
+                      const binding = this.displayedBinding(control.id);
+                      return [control.id, { binding, display: bindingDisplaySignature(binding) }];
+                  }),
+              )
+            : null;
+        const previousSurfaceInputs = previousBindings ? this.surfaceInputs() : [];
+        // Reconcile reports every changed ancestor, including bindings mutated in place.
+        // A per-apply set cannot leak revisions across workspace/context resets, and full
+        // snapshots remain the correctness fallback without a per-control wire revision.
+        const dirtyObjects = new WeakSet<object>();
+        const wasMutated = (value: unknown) =>
+            value !== null && typeof value === 'object' && dirtyObjects.has(value);
         let changed = false;
         // Complete the deferred state work using the current operation state
-        reconcile(this.snapshot, snapshot, (key) => {
-            if (
-                [
-                    'configuration_revision',
-                    'devices',
-                    'profiles',
-                    'sessions',
-                    'active_profile',
-                    'binding_overrides',
-                ].includes(key)
-            )
-                changed = true;
-        });
-        if (!snapshot.devices.some((d) => d.id === this.deviceId))
-            this.deviceId = snapshot.devices[0]?.id || '';
+        reconcile(
+            this.snapshot,
+            snapshot,
+            (key) => {
+                if (
+                    [
+                        'configuration_revision',
+                        'devices',
+                        'profiles',
+                        'sessions',
+                        'active_profile',
+                        'binding_overrides',
+                    ].includes(key)
+                )
+                    changed = true;
+            },
+            (object) => dirtyObjects.add(object),
+        );
+        const favorite =
+            this.favoriteDeviceLoaded && this.favoriteDevicePending
+                ? favoriteDevice(snapshot.devices, this.favoriteDeviceKey)
+                : undefined;
+        if (favorite) {
+            this.deviceId = favorite.id;
+            this.favoriteDevicePending = false;
+        } else this.deviceId = availableDevice(snapshot.devices, this.deviceId)?.id || '';
         if (!this.device?.manifest.controls.some((c) => c.id === this.controlId))
             this.controlId = this.device?.manifest.controls[0]?.id || '';
         const selected = [...new Set(this.selectedControls)].filter((id) =>
@@ -1169,33 +1351,70 @@ export class AppState extends ToastState {
         if (JSON.stringify(selected) !== JSON.stringify(this.selectedControls))
             this.selectedControls = selected;
         const context = JSON.stringify([this.device?.id, this.profile?.id, this.page?.id]);
+        let settingsOnly = false;
         if (context !== previousContext) {
             this.surfaces = {};
             this.triggerDescriptions = {};
             this.background = null;
             this.surfaceConfigurationRevision = 0;
-        } else if (this.surfaceConfigurationRevision < snapshot.configuration_revision) {
+            this.surfaceRevisionFloor = snapshot.configuration_revision;
+        } else if (previousBindings) {
             let bindingChanged = false;
-            for (const control of this.device?.manifest.controls || [])
-                if (
-                    previousBindings[control.id] !==
-                    JSON.stringify(this.displayedBinding(control.id) || null)
-                ) {
-                    delete this.surfaces[control.id];
-                    bindingChanged = true;
+            let settingsChanged = false;
+            for (const control of this.device?.manifest.controls || []) {
+                const previous = previousBindings.get(control.id);
+                const binding = this.displayedBinding(control.id);
+                if (previous?.binding === binding) {
+                    if (!wasMutated(binding)) continue;
+                    if (
+                        previous?.display !== undefined &&
+                        previous.display === bindingDisplaySignature(binding)
+                    ) {
+                        settingsChanged = true;
+                        continue;
+                    }
                 }
-            // A stopped native stream otherwise looks active forever. Renew it
-            // for saved display edits without restarting on unrelated metadata
+                delete this.surfaces[control.id];
+                bindingChanged = true;
+            }
+            // Keep the current image and subscription for a runtime-only settings
+            // edit; replacing/unbinding the action or changing authored artwork
+            // still retires the affected pixels and renews the stream.
             if (bindingChanged) this.surfaceBindingRevision++;
+            settingsOnly =
+                settingsChanged &&
+                !bindingChanged &&
+                this.surfaceInputs().every(
+                    (value, index) => value === previousSurfaceInputs[index] && !wasMutated(value),
+                );
         }
+        if (previousRevision !== snapshot.configuration_revision)
+            this.surfaceRevisionFloor = settingsOnly
+                ? previousFloor
+                : snapshot.configuration_revision;
         if (removedPlugins.length && typeof window !== 'undefined')
             window.dispatchEvent(new CustomEvent('plugins-removed', { detail: removedPlugins }));
         if (changed && this.nativeRendering) this.requestSurfaces();
     }
+    async refreshDrafts(read = () => this.bridge.command('drafts'), check?: () => void) {
+        const epoch = ++this.draftReadEpoch;
+        const removed = new Set<string>();
+        this.pendingDraftRemovals = removed;
+        try {
+            const drafts = await read();
+            check?.();
+            if (epoch !== this.draftReadEpoch) return;
+            for (const asset of removed)
+                for (const draft of Object.values(drafts))
+                    if (draft) detachDraftMedia(draft, asset);
+            this.draftStore = drafts;
+        } finally {
+            if (epoch === this.draftReadEpoch) this.pendingDraftRemovals = null;
+        }
+    }
     // Detach deleted media from drafts, release its resources and notify affected views
     forgetMedia(asset: string) {
-        if (this.deletedMedia[asset]) return;
-        this.deletedMedia[asset] = true;
+        this.pendingDraftRemovals?.add(asset);
         for (const draft of Object.values(this.draftStore))
             if (draft) detachDraftMedia(draft, asset);
         void releaseDeletedMedia(this, asset);
@@ -1231,6 +1450,10 @@ export class AppState extends ToastState {
             this.bufferedBytes += bytes;
             return;
         }
+        if (event.kind === 'cache-maintenance' && typeof window !== 'undefined') {
+            window.dispatchEvent(new CustomEvent('cache-usage-changed'));
+            if (!event.message) return;
+        }
         if (event.kind === 'fonts-updated') {
             this.surfaceBindingRevision++;
             if (this.nativeRendering) this.requestSurfaces();
@@ -1238,6 +1461,17 @@ export class AppState extends ToastState {
         }
         if (event.kind === 'media-deleted' && event.message) {
             this.forgetMedia(event.message);
+            return;
+        }
+        if (event.kind === 'vault-presentation-changed') {
+            this.surfaceBindingRevision++;
+            window.dispatchEvent(new Event('vault-presentation-changed'));
+            window.dispatchEvent(new Event('live-preview-invalidated'));
+            if (this.nativeRendering && !this.stopSurfaces) this.requestSurfaces();
+            return;
+        }
+        if (event.kind === 'vault-session-ended') {
+            window.dispatchEvent(new Event('vault-session-ended'));
             return;
         }
         this.events = recordRuntimeEvent(this.events, event, ++this.nextEventLogId);
@@ -1293,12 +1527,16 @@ export class AppState extends ToastState {
             this.notify(event.message || event.kind, level);
         // Transient feedback refreshes native pixels; workspace updates own configuration
         if (
-            ['plugin-feedback', 'live-feedback', 'foreground', 'display-theme'].includes(
-                event.kind,
-            ) &&
-            this.nativeRendering
-        )
-            this.requestSurfaces();
+            ['plugin-feedback', 'live-feedback', 'foreground', 'display-theme'].includes(event.kind)
+        ) {
+            if (typeof window !== 'undefined')
+                window.dispatchEvent(
+                    new CustomEvent('live-preview-invalidated', { detail: event }),
+                );
+            // The native subscription already wakes on every plugin image change.
+            if (this.nativeRendering && (event.kind !== 'plugin-feedback' || !this.stopSurfaces))
+                this.requestSurfaces();
+        }
         if (event.kind === 'keyboard-device-settings')
             window.dispatchEvent(new CustomEvent('keyboard-device-settings', { detail: event }));
         if (event.kind === 'devices') this.invalidatePower();

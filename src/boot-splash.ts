@@ -1,5 +1,8 @@
 /** Lightweight startup UI, independent of Alpine and the editor module graph */
+import { invoke, isTauri } from '@tauri-apps/api/core';
+
 let stopWaiting = () => {};
+let detachedBoot: HTMLElement | null = null;
 const startedAt = performance.now();
 
 /** Local visual review only. Vite eliminates this branch from production builds */
@@ -48,20 +51,90 @@ export function startBootSplash() {
 export function finishBootSplash() {
     stopWaiting();
     document.getElementById('boot')?.remove();
+    detachedBoot = null;
 }
 
-/** Preserve branding while callers retain ownership of retry/cleanup behavior */
-export function failBootSplash(message: HTMLElement, retry: HTMLButtonElement) {
+// Keep the existing unlock modal backdrop, but retain the splash in case startup still fails
+export function suspendBootSplash() {
     stopWaiting();
-    const boot = document.getElementById('boot');
-    if (!boot) return;
+    detachedBoot = document.getElementById('boot');
+    detachedBoot?.remove();
+}
+
+/** Keep both startup failure paths usable before the editor command bridge is ready */
+export function failBootSplash({
+    retryReady,
+    logReady,
+}: {
+    retryReady?: Promise<boolean>;
+    logReady?: Promise<void>;
+} = {}) {
+    stopWaiting();
+    const boot = document.getElementById('boot') ?? detachedBoot;
+    if (boot === detachedBoot && boot) document.body.prepend(boot);
+    detachedBoot = null;
+    const status = boot?.querySelector('[data-boot-status]');
+    const details = boot?.querySelector('[data-boot-details]');
+    if (!boot || !status || !details) return;
     boot.dataset.state = 'error';
-    const status = boot.querySelector('[data-boot-status]');
-    if (status) {
-        status.classList.remove('boot-status-pending');
-        status.textContent = 'Unable to start';
+    status.classList.remove('boot-status-pending');
+    status.classList.add('boot-error');
+    status.setAttribute('role', 'alert');
+    status.textContent = 'Unable to start';
+
+    const buttons = document.createElement('div');
+    buttons.className = 'boot-actions';
+    const retry = document.createElement('button');
+    retry.type = 'button';
+    retry.className = 'button';
+    retry.textContent = 'Retry startup';
+    retry.disabled = !!retryReady || !!logReady;
+    retry.addEventListener('click', () => location.reload(), { once: true });
+    buttons.append(retry);
+
+    const feedback = document.createElement('p');
+    feedback.className = 'boot-action-status';
+    feedback.setAttribute('role', 'status');
+    feedback.hidden = true;
+    if (import.meta.env.MODE !== 'public-preview' && isTauri()) {
+        const logs = document.createElement('button');
+        logs.type = 'button';
+        logs.className = 'button';
+        logs.textContent = 'View logs';
+        logs.addEventListener('click', async () => {
+            logs.disabled = true;
+            feedback.hidden = true;
+            try {
+                await invoke('open_manager_logs');
+            } catch {
+                feedback.textContent = 'Could not open logs.';
+                feedback.hidden = false;
+            } finally {
+                logs.disabled = false;
+            }
+        });
+        buttons.append(logs);
     }
-    message.classList.add('boot-error');
-    message.setAttribute('role', 'alert');
-    boot.querySelector('[data-boot-details]')?.replaceChildren(message, retry);
+    details.replaceChildren(buttons, feedback);
+    if (retryReady || logReady) {
+        // Await the acknowledged fatal report without making a broken log bridge block recovery
+        const flush =
+            logReady &&
+            new Promise<void>((resolve) => {
+                const timer = window.setTimeout(resolve, 1500);
+                const done = () => {
+                    window.clearTimeout(timer);
+                    resolve();
+                };
+                void logReady.then(done, done);
+            });
+        const ready = (allowed: boolean) => {
+            if (allowed) retry.disabled = false;
+            else status.textContent = 'Restart Manager to retry';
+        };
+        void Promise.all([retryReady ?? true, flush]).then(
+            ([allowed]) => ready(allowed),
+            () => ready(false),
+        );
+    }
 }

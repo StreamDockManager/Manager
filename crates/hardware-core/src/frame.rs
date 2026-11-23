@@ -147,6 +147,10 @@ pub enum OutputStatus {
 }
 #[derive(Debug, Clone, Serialize, Deserialize, ts_rs::TS, schemars::JsonSchema)]
 pub struct OutputOutcome {
+    /// Process-local interval of the complete legal write group, including its commit.
+    #[serde(skip)]
+    #[ts(skip)]
+    pub write_interval: Option<(std::time::Instant, std::time::Instant)>,
     pub surface_id: String,
     #[ts(type = "number")]
     pub content_revision: u64,
@@ -180,4 +184,32 @@ pub struct OutputQueueStats {
     #[ts(type = "number")]
     pub outcomes_lost: u64,
     pub estimated_bytes_per_ms: f64,
+}
+
+/// Thread-local adapter counters. Reading a delta around a synchronous session call
+/// excludes other connections and needs no global lock or payload retention.
+#[derive(Clone, Copy, Default)]
+pub struct AdapterWork {
+    pub framing: std::time::Duration,
+    pub payload_bytes: u64,
+    pub jpeg_attempts: u64,
+}
+thread_local! {
+    static ADAPTER_WORK: std::cell::Cell<AdapterWork> = Default::default();
+}
+impl AdapterWork {
+    pub fn current() -> Self {
+        ADAPTER_WORK.get()
+    }
+    pub fn framed(started: std::time::Instant, payload: usize) {
+        let mut work = Self::current();
+        work.framing += started.elapsed();
+        work.payload_bytes = work.payload_bytes.wrapping_add(payload as u64);
+        ADAPTER_WORK.set(work);
+    }
+    pub fn jpeg_attempt() {
+        let mut work = Self::current();
+        work.jpeg_attempts = work.jpeg_attempts.wrapping_add(1);
+        ADAPTER_WORK.set(work);
+    }
 }

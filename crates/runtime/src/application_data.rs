@@ -54,8 +54,40 @@ pub(crate) const DIAGNOSTICS_RECORD: stream_dock_manager_storage::JsonRecord<boo
         max_bytes: 16,
         decode: crate::profile_database::decode_record,
     };
+pub(crate) const FIRMWARE_TEST_CATALOG_RECORD: stream_dock_manager_storage::JsonRecord<bool> =
+    stream_dock_manager_storage::JsonRecord {
+        domain: stream_dock_manager_storage::Domain::ManagerPreferences,
+        key: "firmware_test_catalog",
+        max_bytes: 16,
+        decode: crate::profile_database::decode_record,
+    };
+// Validate a local hardware identity without requiring the device to remain connected
+fn validate_favorite_device(value: &Option<String>) -> Result<(), String> {
+    if value.as_ref().is_some_and(|key| {
+        key.trim().is_empty() || key.len() > 1024 || key.chars().any(char::is_control)
+    }) {
+        return Err("Invalid favorite device preference".into());
+    }
+    Ok(())
+}
+
+// Decode the same bounded nullable identity accepted by the preference writer
+fn decode_favorite_device(text: &str) -> Result<Option<String>, String> {
+    let value = crate::profile_database::decode_record(text)?;
+    validate_favorite_device(&value)?;
+    Ok(value)
+}
+
+pub(crate) const FAVORITE_DEVICE_RECORD: stream_dock_manager_storage::JsonRecord<Option<String>> =
+    stream_dock_manager_storage::JsonRecord {
+        domain: stream_dock_manager_storage::Domain::ManagerPreferences,
+        key: "favorite_device",
+        max_bytes: 4096,
+        decode: decode_favorite_device,
+    };
 #[derive(Debug, Clone, Serialize, Deserialize, ts_rs::TS, schemars::JsonSchema)]
 pub struct ClientPreferences {
+    pub favorite_device: Option<String>,
     pub accessibility: AccessibilityPreferences,
     pub offline_icons: bool,
     pub diagnostics_sampling: bool,
@@ -158,11 +190,12 @@ impl Runtime {
     pub fn client_preferences(&self) -> Result<ClientPreferences, String> {
         self.profiles.storage.run(|connection| {
             Ok(ClientPreferences {
+                favorite_device: FAVORITE_DEVICE_RECORD.read_from(connection)?.flatten(),
                 accessibility: ACCESSIBILITY_RECORD
                     .read_from(connection)?
                     .unwrap_or_default(),
                 offline_icons: OFFLINE_ICONS_RECORD.read_from(connection)?.unwrap_or(false),
-                diagnostics_sampling: DIAGNOSTICS_RECORD.read_from(connection)?.unwrap_or(true),
+                diagnostics_sampling: DIAGNOSTICS_RECORD.read_from(connection)?.unwrap_or(false),
             })
         })
     }
@@ -173,6 +206,11 @@ impl Runtime {
         value: serde_json::Value,
     ) -> Result<(), String> {
         match name {
+            "favorite_device" => {
+                let key = serde_json::from_value::<Option<String>>(value.clone())
+                    .map_err(|_| "Invalid favorite device preference")?;
+                validate_favorite_device(&key)?;
+            }
             "accessibility" => {
                 serde_json::from_value::<AccessibilityPreferences>(value.clone())
                     .map_err(|_| "Invalid accessibility preferences")?;
@@ -189,30 +227,20 @@ impl Runtime {
     }
     // Summarize application storage and plugin-owned data
     pub fn application_data(&self) -> Result<ApplicationData, String> {
-        let stats = self.profiles.storage.stats()?;
-        let backups = self
-            .profiles
-            .storage
-            .backup_paths()?
+        let stats = self.profiles.storage.summary()?;
+        let backups = stats
+            .recovery_files
             .into_iter()
-            .map(|path| {
-                let metadata = path.metadata().map_err(|error| error.to_string())?;
-                Ok(RecoverySnapshot {
-                    name: path
-                        .file_name()
-                        .ok_or("Invalid recovery filename")?
-                        .to_string_lossy()
-                        .into(),
-                    bytes: metadata.len(),
-                    completed_ms: metadata
-                        .modified()
-                        .map_err(|error| error.to_string())?
-                        .duration_since(std::time::UNIX_EPOCH)
-                        .map_err(|error| error.to_string())?
-                        .as_millis() as u64,
-                })
+            .map(|file| RecoverySnapshot {
+                name: file.name,
+                bytes: file.bytes,
+                completed_ms: file.completed_ms,
             })
-            .collect::<Result<Vec<_>, String>>()?;
+            .collect();
+        let backup_error = match (stats.last_backup_error, stats.inventory_error) {
+            (Some(backup), Some(inventory)) => Some(format!("{backup}. {inventory}")),
+            (backup, inventory) => backup.or(inventory),
+        };
         let mut usage = std::collections::BTreeMap::<String, PluginDataUsage>::new();
         {
             let state = self.state.lock().unwrap();
@@ -249,7 +277,7 @@ impl Runtime {
             database_bytes: stats.database_bytes,
             reclaimable_bytes: stats.reclaimable_bytes,
             sqlite_version: stats.sqlite_version,
-            backup_error: stats.last_backup_error,
+            backup_error,
             backups,
             plugins,
             usage,
@@ -314,6 +342,36 @@ pub fn maintain(
     operation: &str,
     path: Option<PathBuf>,
 ) -> Result<serde_json::Value, String> {
+    maintain_transfer(root, operation, path, None)
+}
+pub fn maintain_transfer(
+    root: PathBuf,
+    operation: &str,
+    path: Option<PathBuf>,
+    password: Option<&str>,
+) -> Result<serde_json::Value, String> {
+    if let Some(pass) = password {
+        let path = path.ok_or("Choose an explicit encrypted transfer path")?;
+        return match operation {
+            "backup" => {
+                let storage =
+                    stream_dock_manager_storage::Storage::open_validated(root, validate_snapshot)?;
+                storage.backup_with_settings(&path, pass)?;
+                Ok(serde_json::json!({"path":path,"plugin_settings_included":true}))
+            }
+            "restore" => {
+                serde_json::to_value(stream_dock_manager_storage::Storage::recover_with_settings(
+                    root,
+                    &path,
+                    pass,
+                    validate_snapshot,
+                    reconcile_deletions,
+                )?)
+                .map_err(|e| e.to_string())
+            }
+            _ => Err("Choose backup or restore for an encrypted transfer".into()),
+        };
+    }
     if operation == "restore" {
         let report = stream_dock_manager_storage::Storage::recover(
             root,
@@ -355,6 +413,8 @@ pub(crate) fn validate_snapshot(
                 "accessibility",
                 "offline_icons",
                 "diagnostics_sampling",
+                "favorite_device",
+                FIRMWARE_TEST_CATALOG_RECORD.key,
             ][..],
         ),
         (
@@ -434,6 +494,19 @@ pub(crate) fn reconcile_deletions(
             )
         };
     };
+    let omission: bool = connection
+        .query_row(
+            "SELECT value='' FROM database_metadata WHERE key='settings_installation'",
+            [],
+            |r| r.get(0),
+        )
+        .map_err(|e| e.to_string())?;
+    if omission {
+        warnings.extend(crate::profiles::omitted_settings_warnings(
+            &data.profiles,
+            &data.saved_macros,
+        ));
+    }
     let tx = connection
         .unchecked_transaction()
         .map_err(|error| error.to_string())?;
@@ -466,6 +539,38 @@ pub(crate) fn reconcile_deletions(
 mod tests {
     use super::*;
     use stream_dock_manager_storage::Domain;
+
+    #[test]
+    fn inventory_warning_preserves_database_summary_and_plugin_errors() {
+        let root = tempfile::tempdir().unwrap();
+        let runtime = Runtime::build(root.path().into(), false).unwrap();
+        let storage = &runtime.profiles.storage;
+        let saved = storage.backup_recovery().unwrap();
+        let regular = runtime.application_data().unwrap();
+        assert!(regular.backup_error.is_none());
+        std::fs::create_dir(saved.path.parent().unwrap().join("unsafe.sqlite3")).unwrap();
+        let summary = runtime.application_data().unwrap();
+        assert_eq!(summary.database_bytes, regular.database_bytes);
+        assert_eq!(summary.backups.len(), regular.backups.len());
+        assert!(summary.backup_error.unwrap().contains("Recovery inventory"));
+        storage
+            .run(|c| {
+                c.execute_batch("CREATE TEMP VIEW plugin_globals AS SELECT * FROM missing_fixture")
+                    .map_err(|e| e.to_string())
+            })
+            .unwrap();
+        assert!(runtime
+            .application_data()
+            .unwrap_err()
+            .contains("missing_fixture"));
+        storage
+            .run(|c| {
+                c.execute_batch("DROP VIEW temp.plugin_globals")
+                    .map_err(|e| e.to_string())
+            })
+            .unwrap();
+        runtime.shutdown();
+    }
 
     #[test]
     // Verify that cold restore preserves permanent deletion and rejects invalid snapshot
@@ -526,6 +631,57 @@ mod tests {
     }
 
     #[test]
+    // Preserve a disconnected favorite across reopen and clear it without affecting other preferences
+    fn favorite_device_preference_is_bounded_nullable_and_durable() {
+        let root = tempfile::tempdir().unwrap();
+        let runtime = Runtime::build(root.path().into(), false).unwrap();
+        assert_eq!(runtime.client_preferences().unwrap().favorite_device, None);
+        runtime
+            .save_client_preference("offline_icons", serde_json::json!(true))
+            .unwrap();
+        runtime
+            .save_client_preference(
+                "favorite_device",
+                serde_json::json!("n4-pro:example-serial"),
+            )
+            .unwrap();
+        for invalid in [
+            serde_json::json!(""),
+            serde_json::json!("  "),
+            serde_json::json!("bad\nkey"),
+            serde_json::json!("x".repeat(1025)),
+            serde_json::json!(42),
+            serde_json::json!({}),
+        ] {
+            assert!(runtime
+                .save_client_preference("favorite_device", invalid)
+                .is_err());
+        }
+        runtime.shutdown();
+        drop(runtime);
+        let runtime = Runtime::build(root.path().into(), false).unwrap();
+        assert_eq!(
+            runtime
+                .client_preferences()
+                .unwrap()
+                .favorite_device
+                .as_deref(),
+            Some("n4-pro:example-serial")
+        );
+        runtime
+            .save_client_preference("favorite_device", serde_json::Value::Null)
+            .unwrap();
+        assert_eq!(runtime.client_preferences().unwrap().favorite_device, None);
+        assert!(runtime.client_preferences().unwrap().offline_icons);
+        assert!(decode_favorite_device("\"bad\\nkey\"").is_err());
+        runtime.shutdown();
+        drop(runtime);
+        let runtime = Runtime::build(root.path().into(), false).unwrap();
+        assert_eq!(runtime.client_preferences().unwrap().favorite_device, None);
+        runtime.shutdown();
+    }
+
+    #[test]
     // Verify that client preferences are typed independent records and fail without reset
     fn client_preferences_are_typed_independent_records_and_fail_without_reset() {
         let root = tempfile::tempdir().unwrap();
@@ -533,8 +689,9 @@ mod tests {
         runtime
             .save_client_preference("offline_icons", serde_json::json!(true))
             .unwrap();
+        assert!(!runtime.client_preferences().unwrap().diagnostics_sampling);
         runtime
-            .save_client_preference("diagnostics_sampling", serde_json::json!(false))
+            .save_client_preference("diagnostics_sampling", serde_json::json!(true))
             .unwrap();
         assert!(runtime
             .save_client_preference("offline_icons", serde_json::json!("false"))
@@ -543,11 +700,12 @@ mod tests {
             .save_client_preference("desktop", serde_json::json!({}))
             .is_err());
         assert!(runtime.client_preferences().unwrap().offline_icons);
-        assert!(!runtime.client_preferences().unwrap().diagnostics_sampling);
+        assert!(runtime.client_preferences().unwrap().diagnostics_sampling);
         runtime.shutdown();
         drop(runtime);
         let runtime = Runtime::build(root.path().into(), false).unwrap();
         assert!(runtime.client_preferences().unwrap().offline_icons);
+        assert!(runtime.client_preferences().unwrap().diagnostics_sampling);
         runtime
             .profiles
             .storage

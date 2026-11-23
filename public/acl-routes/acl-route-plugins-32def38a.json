@@ -1,0 +1,33 @@
+{
+  "version": 1,
+  "basePath": "..",
+  "components": {
+    "sd-plugin-action-group": {
+      "source": "components/sd-plugin-action-group.html",
+      "dependencies": [],
+      "options": {
+        "shadow": false,
+        "templateRevision": "sha256-G8CjDHVGMA4IT1WGQGPNEWHAhhajHR0qwx-8IMwsV7k"
+      }
+    },
+    "sd-plugins": {
+      "source": "components/sd-plugins.html",
+      "dependencies": [
+        "sd-plugin-action-group"
+      ],
+      "options": {
+        "shadow": false,
+        "templateRevision": "sha256-60l0936W_9Vie-_Z_YgN8AcR9FFTeZf_yzfoBPC2IP0"
+      },
+      "metadata": {
+        "description": "First-party sd-plugins component. Controllers are registered by the trusted application bootstrap."
+      }
+    }
+  },
+  "groups": {
+    "plugins": [
+      "sd-plugin-action-group",
+      "sd-plugins"
+    ]
+  }
+}

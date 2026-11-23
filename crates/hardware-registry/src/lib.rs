@@ -35,6 +35,44 @@ pub fn manifests() -> Vec<ModelManifest> {
         .collect();
     layouts
 }
+// Resolve reviewed variant guidance before the shared N4 guide without granting firmware compatibility
+pub fn firmware_instructions(model_id: &str, variant_id: &str) -> Option<(String, bool)> {
+    let modules = modules();
+    let manifest = modules
+        .iter()
+        .map(|module| module.manifest())
+        .find(|manifest| manifest.model_id == model_id)?;
+    let variant = manifest
+        .variants
+        .iter()
+        .find(|variant| variant.id == variant_id && variant.available)?;
+    if let Some(url) = variant
+        .firmware_instructions
+        .as_ref()
+        .filter(|url| approved_firmware_instructions(url))
+    {
+        return Some((url.clone(), variant.firmware_instructions_shared));
+    }
+    if let Some(url) = manifest
+        .firmware_instructions
+        .as_ref()
+        .filter(|url| approved_firmware_instructions(url))
+    {
+        return Some((url.clone(), manifest.firmware_instructions_shared));
+    }
+    // Future manifests without explicit guidance still use the canonical configured fallback
+    let canonical = modules
+        .iter()
+        .map(|module| module.manifest())
+        .find(|manifest| manifest.model_id == "n4-pro")?;
+    let url = canonical
+        .variants
+        .iter()
+        .find(|variant| variant.id == "vsdinside")?
+        .firmware_instructions
+        .as_ref()?;
+    approved_firmware_instructions(url).then(|| (url.clone(), true))
+}
 // Find the requested entry in this registry
 pub fn find(identity: &HidIdentity) -> Option<Box<dyn HardwareModule>> {
     modules().into_iter().find(|m| m.matches(identity))
@@ -505,5 +543,41 @@ mod tests {
             udev_rules().lines().filter(|l| l.contains("TAG+=")).count(),
             1
         );
+    }
+}
+
+#[cfg(test)]
+mod firmware_instruction_tests {
+    use super::*;
+    // Every recognized enabled variant resolves a reviewed override or explicitly shared guidance
+    #[test]
+    fn recognized_variants_resolve_without_inventing_unknown_support() {
+        let canonical = firmware_instructions("n4-pro", "vsdinside").unwrap();
+        assert!(!canonical.1);
+        let mirabox = firmware_instructions("n4-pro", "mirabox").unwrap();
+        assert!(!mirabox.1);
+        assert_ne!(mirabox.0, canonical.0);
+        let mirabox_e = firmware_instructions("n4-pro", "mirabox-e").unwrap();
+        assert!(mirabox_e.1);
+        assert!(mirabox_e.0.starts_with("https://mirabox.net/"));
+        assert_ne!(mirabox_e.0, mirabox.0);
+        for module in modules() {
+            let manifest = module.manifest();
+            assert!(manifest
+                .firmware_instructions
+                .as_deref()
+                .is_some_and(approved_firmware_instructions));
+            assert!(manifest.firmware_instructions_shared);
+            for variant in manifest.variants.iter().filter(|v| v.available) {
+                let result = firmware_instructions(&manifest.model_id, &variant.id).unwrap();
+                assert!(approved_firmware_instructions(&result.0));
+                if manifest.model_id == "k1-pro" {
+                    assert_eq!(result, (canonical.0.clone(), true));
+                }
+            }
+        }
+        assert!(firmware_instructions("unknown", "vsdinside").is_none());
+        assert!(firmware_instructions("n4-pro", "unknown").is_none());
+        assert!(firmware_instructions("simulator:n4-pro", "vsdinside").is_none());
     }
 }

@@ -1,0 +1,80 @@
+{
+  "version": 1,
+  "basePath": "..",
+  "components": {
+    "sd-media-options": {
+      "source": "components/sd-media-options.html",
+      "dependencies": [],
+      "options": {
+        "shadow": false,
+        "attributes": {
+          "asset": {
+            "type": "String",
+            "default": ""
+          },
+          "control": {
+            "type": "String",
+            "default": ""
+          },
+          "content": {
+            "type": "String",
+            "default": "{}",
+            "reflect": true
+          }
+        },
+        "templateRevision": "sha256-7LBwN1T_cxbrXKdF0CWWaff4DzoZC51wDN5ZBWgrof0"
+      },
+      "metadata": {
+        "description": "Non-destructive media transforms shared with Rust playback."
+      }
+    },
+    "sd-device-settings": {
+      "source": "components/sd-device-settings.html",
+      "dependencies": [],
+      "options": {
+        "shadow": false,
+        "templateRevision": "sha256-Cv8BM_FUL1V2_93AN2Gkj2nLZxXypeDrbfkt5rcNnmw"
+      },
+      "metadata": {
+        "description": "Tabbed device settings for display, lighting, behavior and firmware."
+      }
+    },
+    "sd-updates": {
+      "source": "components/sd-updates.html",
+      "dependencies": [],
+      "options": {
+        "shadow": false,
+        "templateRevision": "sha256-z1SETs0uu35fUS0BrhJGmOfu_SvgsMNiMOMnge7ndgM"
+      },
+      "metadata": {
+        "description": "First-party update management; plugin inspectors have no access."
+      }
+    },
+    "sd-settings": {
+      "source": "components/sd-settings.html",
+      "dependencies": [
+        "sd-device-settings",
+        "sd-updates"
+      ],
+      "options": {
+        "shadow": false,
+        "templateRevision": "sha256-n4esfCV7-DlFLD7TyZ-feYQUEZsGB0sPqMx0sSWlmHA"
+      },
+      "metadata": {
+        "description": "First-party sd-settings component. Controllers are registered by the trusted application bootstrap."
+      }
+    }
+  },
+  "groups": {
+    "editor": [
+      "sd-device-settings",
+      "sd-media-options"
+    ],
+    "settings": [
+      "sd-device-settings",
+      "sd-media-options",
+      "sd-settings",
+      "sd-updates"
+    ]
+  }
+}

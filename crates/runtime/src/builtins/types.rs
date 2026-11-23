@@ -60,6 +60,7 @@ pub enum BuiltinAction {
         template: bool,
     },
     RevealFile {
+        #[serde(deserialize_with = "vault_path")]
         path: String,
         template: bool,
     },
@@ -263,5 +264,27 @@ impl BuiltinAction {
             Self::Cooldown { children, .. } => children,
             _ => &mut [],
         }
+    }
+}
+
+// Normalize a whole typed path reference at the persistence boundary. The editor and
+// released profiles retain their existing string representation.
+fn vault_path<'de, D: serde::Deserializer<'de>>(input: D) -> Result<String, D::Error> {
+    use serde::de::Error;
+    match serde_json::Value::deserialize(input)? {
+        serde_json::Value::String(path) => Ok(path),
+        serde_json::Value::Object(mut fields) if fields.len() == 1 => {
+            match fields.remove("vault") {
+                Some(serde_json::Value::String(token))
+                    if token == "${vault.unlinked}"
+                        || (token.starts_with("${vault.")
+                            && crate::vault::is_whole_reference(&token)) =>
+                {
+                    Ok(token)
+                }
+                _ => Err(D::Error::custom("Invalid typed Vault path")),
+            }
+        }
+        _ => Err(D::Error::custom("Expected a path or whole Vault reference")),
     }
 }

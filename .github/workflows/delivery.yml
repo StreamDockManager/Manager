@@ -39,18 +39,12 @@ concurrency:
     cancel-in-progress: ${{ github.ref == 'refs/heads/package-build' && (inputs.operation == '' || inputs.operation == 'build') }}
 jobs:
     development:
-        if: github.ref == 'refs/heads/package-build' && (github.event_name == 'workflow_dispatch' || (github.event_name == 'push' && !github.event.created)) && (inputs.operation == '' || inputs.operation == 'build') && (inputs.build_product == '' || inputs.build_product == 'all' || inputs.build_product == 'desktop')
+        if: github.ref == 'refs/heads/package-build' && (github.event_name == 'workflow_dispatch' || (github.event_name == 'push' && !github.event.created)) && (inputs.operation == '' || inputs.operation == 'build') && (inputs.build_product == '' || inputs.build_product == 'all' || inputs.build_product == 'desktop' || inputs.build_product == 'cli')
         uses: ./.github/workflows/build-installers.yml
         with:
             commit: ${{ github.sha }}
             mode: build-only
-            targets: ${{ inputs.build_targets || 'all' }}
-    development_cli:
-        if: github.ref == 'refs/heads/package-build' && (github.event_name == 'workflow_dispatch' || (github.event_name == 'push' && !github.event.created)) && (inputs.operation == '' || inputs.operation == 'build') && (inputs.build_product == '' || inputs.build_product == 'all' || inputs.build_product == 'cli')
-        uses: ./.github/workflows/build-cli.yml
-        with:
-            commit: ${{ github.sha }}
-            mode: build-only
+            product: ${{ inputs.build_product || 'all' }}
             targets: ${{ inputs.build_targets || 'all' }}
     installer-qualification:
         if: github.ref == 'refs/heads/package-build' && github.event_name == 'workflow_dispatch' && (inputs.operation != '' && inputs.operation != 'build')

@@ -12,6 +12,18 @@
         "$ref": "#/$defs/Control"
       }
     },
+    "firmware_instructions": {
+      "description": "Reviewed model guidance, with variant-specific instructions taking precedence",
+      "type": [
+        "string",
+        "null"
+      ]
+    },
+    "firmware_instructions_shared": {
+      "description": "Shared guidance does not establish exact-model firmware compatibility",
+      "type": "boolean",
+      "default": false
+    },
     "layout": {
       "$ref": "#/$defs/Layout"
     },
@@ -652,6 +664,18 @@
         "available": {
           "type": "boolean",
           "default": true
+        },
+        "firmware_instructions": {
+          "description": "Reviewed vendor instructions for this exact variant, never a catalog artifact URL",
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "firmware_instructions_shared": {
+          "description": "General brand guidance must not be presented as exact-variant instructions",
+          "type": "boolean",
+          "default": false
         },
         "id": {
           "type": "string"

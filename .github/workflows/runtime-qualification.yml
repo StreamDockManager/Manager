@@ -3,20 +3,59 @@ on:
     push:
         branches: [runtime-qualification]
     workflow_dispatch:
+        inputs:
+            target:
+                description: Qualification checks to run
+                type: choice
+                options: [all, windows-settings]
+                default: all
+            macos_intel:
+                description: Also qualify native runtimes on Intel macOS
+                type: boolean
+                default: false
 permissions:
     contents: read
 concurrency:
-    group: manager-runtimes-${{ github.ref }}
+    group: manager-runtimes-${{ github.ref }}-${{ inputs.target || 'all' }}-${{ inputs.macos_intel || 'standard' }}
     cancel-in-progress: true
 jobs:
-    runtimes:
+    windows-settings:
         if: github.ref == 'refs/heads/runtime-qualification' && (github.event_name == 'workflow_dispatch' || (github.event_name == 'push' && !github.event.created))
+        runs-on: ${{ vars.WINDOWS_RUNNER_LABELS != '' && fromJSON(vars.WINDOWS_RUNNER_LABELS) || 'windows-2022' }}
+        timeout-minutes: 40
+        steps:
+            - uses: actions/checkout@v7.0.1
+              with:
+                  persist-credentials: false
+            - name: Identify native Windows environment
+              shell: pwsh
+              run: |
+                  Get-CimInstance Win32_OperatingSystem | Select-Object Caption, Version, BuildNumber, OSArchitecture
+                  rustc +stable -vV
+                  if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+                  if ($env:RUNNER_OS -ne 'Windows' -or $env:RUNNER_ARCH -ne 'X64') { throw 'Expected native Windows x64' }
+            - name: Prepare verified patched Rust dependencies
+              run: python scripts/prepare_patched_deps.py
+            - name: Verify Credential Manager and key-file permissions
+              shell: pwsh
+              run: |
+                  $tests = @(
+                      'installation_key::windows_tests::windows_key_file_requires_a_private_acl',
+                      'tests::native_installation_credentials_survive_restart_and_distinguish_fresh_installs'
+                  )
+                  cargo +stable test --locked -p stream-dock-manager-storage --lib --target x86_64-pc-windows-msvc -- --color never --test-threads=1 --include-ignored --exact @tests | Tee-Object -Variable results
+                  if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+                  foreach ($test in $tests) {
+                      if ($results -notcontains "test $test ... ok") { throw "Missing passing result for $test" }
+                  }
+    runtimes:
+        if: inputs.target != 'windows-settings' && github.ref == 'refs/heads/runtime-qualification' && (github.event_name == 'workflow_dispatch' || (github.event_name == 'push' && !github.event.created))
         strategy:
             fail-fast: false
             matrix:
                 platform: >-
                     ${{ fromJSON(
-                      vars.DEFER_MACOS_X64 == 'true' && '[{"os":"ubuntu-24.04","runner_variable":"LINUX_RUNNER_LABELS"},{"os":"windows-2022","runner_variable":"WINDOWS_RUNNER_LABELS"},{"os":"macos-15","runner_variable":"MACOS_ARM64_RUNNER_LABELS"}]' ||
+                      (!inputs.macos_intel || vars.DEFER_MACOS_X64 == 'true') && '[{"os":"ubuntu-24.04","runner_variable":"LINUX_RUNNER_LABELS"},{"os":"windows-2022","runner_variable":"WINDOWS_RUNNER_LABELS"},{"os":"macos-15","runner_variable":"MACOS_ARM64_RUNNER_LABELS"}]' ||
                       '[{"os":"ubuntu-24.04","runner_variable":"LINUX_RUNNER_LABELS"},{"os":"windows-2022","runner_variable":"WINDOWS_RUNNER_LABELS"},{"os":"macos-15","runner_variable":"MACOS_ARM64_RUNNER_LABELS"},{"os":"macos-15-intel","runner_variable":"MACOS_X64_RUNNER_LABELS"}]'
                     ) }}
                 runtime:
@@ -45,4 +84,4 @@ jobs:
             - uses: dtolnay/rust-toolchain@stable
             - name: Prepare verified patched Rust dependencies
               run: python scripts/prepare_patched_deps.py
-            - run: cargo test -p stream-dock-manager-plugin-host --locked --test runtime_protocol -- --ignored --nocapture
+            - run: python scripts/with_test_key.py cargo test -p stream-dock-manager-plugin-host --locked --test runtime_protocol -- --ignored --nocapture

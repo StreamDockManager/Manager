@@ -8,7 +8,7 @@
 use crate::media::{Clip, SharedBytes, WeakBytes};
 use std::{
     collections::{HashMap, HashSet, VecDeque},
-    sync::{Arc, Mutex, Weak},
+    sync::{Arc, Mutex, OnceLock, Weak},
     time::{Duration, Instant},
 };
 
@@ -194,6 +194,10 @@ struct State {
     pressure: bool,
 }
 impl State {
+    // Report whether media payloads or preparation reservations still need pressure observation
+    fn occupied(&self) -> bool {
+        !self.allocations.is_empty() || !self.reservations.is_empty()
+    }
     // Prune obsolete media budget entries
     fn prune(&mut self) {
         self.allocations.retain(|_, value| value.live());
@@ -375,6 +379,7 @@ impl State {
 pub(crate) struct MediaBudget {
     state: Mutex<State>,
     limits: Limits,
+    maintenance_waker: OnceLock<Box<dyn Fn() + Send + Sync>>,
 }
 impl Default for MediaBudget {
     // Construct the default media budget value
@@ -382,10 +387,21 @@ impl Default for MediaBudget {
         Self {
             state: Mutex::new(State::default()),
             limits: Limits::default(),
+            maintenance_waker: OnceLock::new(),
         }
     }
 }
 impl MediaBudget {
+    // The device coordinator is the single maintenance owner for this budget
+    pub(crate) fn set_maintenance_waker(&self, wake: impl Fn() + Send + Sync + 'static) {
+        let _ = self.maintenance_waker.set(Box::new(wake));
+    }
+    // Notify only after releasing the budget lock
+    fn wake_maintenance(&self) {
+        if let Some(wake) = self.maintenance_waker.get() {
+            wake();
+        }
+    }
     // Tighten cache eviction targets when memory pressure is active
     fn limits(&self, state: &State) -> Limits {
         if state.pressure {
@@ -418,6 +434,7 @@ impl MediaBudget {
             .collect::<HashSet<_>>()
             .into_iter()
             .collect();
+        let first = !state.occupied();
         state.track(allocations);
         state.entries.push_back(Entry {
             id,
@@ -425,6 +442,10 @@ impl MediaBudget {
             keys,
             used: Instant::now(),
         });
+        drop(state);
+        if first {
+            self.wake_maintenance();
+        }
         Ok(slot)
     }
     // Refresh the media budget entry’s activity marker
@@ -447,8 +468,13 @@ impl MediaBudget {
         let id = state.sequence;
         let limits = self.limits(&state);
         state.make_room(limits, &[], Some((id, bytes)), false, 0)?;
+        let first = !state.occupied();
         state.reservations.insert(id, bytes);
         state.peak = state.peak.max(state.live_bytes() + state.reserved_bytes());
+        drop(state);
+        if first {
+            self.wake_maintenance();
+        }
         Ok(Reservation {
             budget: self.clone(),
             id,
@@ -461,9 +487,14 @@ impl MediaBudget {
         let limits = self.limits(&state);
         state.make_room(limits, &allocations, None, false, 0)?;
         let keys: HashSet<_> = allocations.iter().map(Allocation::key).collect();
+        let first = !state.occupied();
         state.track(allocations);
         for key in &keys {
             *state.protected.entry(*key).or_default() += 1;
+        }
+        drop(state);
+        if first {
+            self.wake_maintenance();
         }
         Ok(ProtectedClip {
             clip,
@@ -481,11 +512,31 @@ impl MediaBudget {
     pub(crate) fn trim_pressure(&self) {
         self.trim(true, None);
     }
-    // Maintain the media budget background state
-    pub(crate) fn maintain(&self) {
-        if let Some(cutoff) = Instant::now().checked_sub(IDLE_AGE) {
-            self.trim(false, Some(cutoff));
+    // Retire expired disposable data and find the next meaningful idle eviction deadline
+    fn maintain(&self, now: Instant) -> (bool, Option<Instant>) {
+        let mut state = self.state.lock().unwrap();
+        state.prune();
+        let target = self.limits(&state).idle;
+        let mut next_idle = None;
+        while !state.entries.is_empty() && state.disposable_bytes() > target {
+            let Some(entry) = state.entries.iter().find(|entry| {
+                entry
+                    .keys
+                    .iter()
+                    .any(|key| !state.protected.contains_key(key))
+            }) else {
+                break;
+            };
+            let expiry = entry.used + IDLE_AGE;
+            if expiry > now {
+                next_idle = Some(expiry);
+                break;
+            }
+            if !state.evict_one(now.checked_sub(IDLE_AGE)) {
+                break;
+            }
         }
+        (state.occupied(), next_idle)
     }
     /// Available-memory watermarks are deliberately hysteretic. This is a
     /// cross-platform pressure hint, not a claim about process RSS or OS jetsam
@@ -592,8 +643,13 @@ impl Drop for Reservation {
     // Release this media budget owner when it leaves scope
     fn drop(&mut self) {
         let mut state = self.budget.state.lock().unwrap();
-        state.reservations.remove(&self.id);
+        let removed = state.reservations.remove(&self.id).is_some();
         state.prune();
+        let empty = !state.occupied();
+        drop(state);
+        if removed && empty {
+            self.budget.wake_maintenance();
+        }
     }
 }
 pub(crate) struct ProtectedClip {
@@ -608,15 +664,72 @@ impl Drop for Protection {
     // Release this media budget owner when it leaves scope
     fn drop(&mut self) {
         let mut state = self.budget.state.lock().unwrap();
+        let mut unprotected = false;
         for key in &self.keys {
             if let Some(count) = state.protected.get_mut(key) {
                 *count -= 1;
                 if *count == 0 {
                     state.protected.remove(key);
+                    unprotected = true;
                 }
             }
         }
         state.prune();
+        let replan = !state.occupied() || (unprotected && !state.entries.is_empty());
+        drop(state);
+        if replan {
+            self.budget.wake_maintenance();
+        }
+    }
+}
+
+const PRESSURE_INTERVAL: Duration = Duration::from_secs(5);
+
+#[derive(Default)]
+pub(crate) struct Maintenance {
+    pressure: Option<Instant>,
+    idle: Option<Instant>,
+}
+impl Maintenance {
+    // Return no deadline when the media budget is empty
+    pub(crate) fn deadline(&self) -> Option<Instant> {
+        match (self.pressure, self.idle) {
+            (Some(pressure), Some(idle)) => Some(pressure.min(idle)),
+            (pressure, idle) => pressure.or(idle),
+        }
+    }
+    // Replan only on a budget notification or when actual maintenance comes due
+    pub(crate) fn service(
+        &mut self,
+        budget: &MediaBudget,
+        now: Instant,
+        notified: bool,
+        sample: impl FnOnce(),
+    ) {
+        if !notified && self.deadline().is_none_or(|deadline| deadline > now) {
+            return;
+        }
+        let pressure_due = self.pressure.is_none_or(|deadline| deadline <= now);
+        if pressure_due {
+            crate::media::prune_shared_frames();
+            let occupied = {
+                let mut state = budget.state.lock().unwrap();
+                state.prune();
+                state.occupied()
+            };
+            if occupied {
+                sample();
+                self.pressure = Some(now + PRESSURE_INTERVAL);
+            }
+        }
+        let (occupied, idle) = budget.maintain(now);
+        if !occupied {
+            self.pressure = None;
+        } else if self.pressure.is_none_or(|deadline| deadline <= now) {
+            // A first allocation may have arrived after the pressure check
+            self.pressure = Some(now);
+        }
+        self.idle = idle;
     }
 }
 
@@ -627,6 +740,7 @@ mod tests {
     fn budget(hard: usize, high: usize, low: usize, idle: usize) -> Arc<MediaBudget> {
         Arc::new(MediaBudget {
             state: Mutex::new(State::default()),
+            maintenance_waker: OnceLock::new(),
             limits: Limits {
                 hard,
                 high,
@@ -643,6 +757,82 @@ mod tests {
     fn number(budget: &MediaBudget, key: &str) -> usize {
         budget.stats()[key].as_u64().unwrap() as usize
     }
+    #[test]
+    // Empty budgets park and the first reservation or payload re-arms pressure sampling
+    fn maintenance_parks_until_budget_demand() {
+        use std::sync::atomic::{AtomicUsize, Ordering::Relaxed};
+        let budget = budget(1024, 512, 256, 32);
+        let wakes = Arc::new(AtomicUsize::new(0));
+        let observed = wakes.clone();
+        budget.set_maintenance_waker(move || {
+            observed.fetch_add(1, Relaxed);
+        });
+        let now = Instant::now();
+        let mut worker = Maintenance::default();
+        worker.service(&budget, now, true, || panic!("empty budget sampled"));
+        assert_eq!(worker.deadline(), None);
+        let reservation = budget.reserve(64).unwrap();
+        assert_eq!(wakes.load(Relaxed), 1);
+        let mut samples = 0;
+        worker.service(&budget, now, true, || samples += 1);
+        assert_eq!(worker.deadline(), Some(now + PRESSURE_INTERVAL));
+        let last = now + PRESSURE_INTERVAL;
+        worker.service(&budget, last, false, || samples += 1);
+        assert_eq!(samples, 2);
+        drop(reservation);
+        assert_eq!(wakes.load(Relaxed), 2);
+        worker.service(&budget, last, true, || panic!("released budget sampled"));
+        assert_eq!(worker.deadline(), None);
+        let retained = budget
+            .admit(Value::Frame(Arc::new(vec![1; 64].into_boxed_slice())))
+            .unwrap();
+        assert_eq!(wakes.load(Relaxed), 3);
+        worker.service(&budget, last, true, || samples += 1);
+        assert_eq!(samples, 3);
+        drop(retained);
+        worker.service(&budget, last + PRESSURE_INTERVAL, false, || {
+            panic!("expired weak allocations sampled")
+        });
+        assert_eq!(worker.deadline(), None);
+    }
+
+    #[test]
+    // Idle expiry is serviced at its deadline and protection release wakes earlier work
+    fn maintenance_honors_idle_deadline_and_protection() {
+        use std::sync::atomic::{AtomicUsize, Ordering::Relaxed};
+        let budget = budget(4 * MIB, 3 * MIB, 2 * MIB, 0);
+        let wakes = Arc::new(AtomicUsize::new(0));
+        let observed = wakes.clone();
+        budget.set_maintenance_waker(move || {
+            observed.fetch_add(1, Relaxed);
+        });
+        let protected = budget.protect(clip(47, MIB / 4)).unwrap();
+        let active = budget.admit(Value::Clip(protected.clip.clone())).unwrap();
+        let idle = budget
+            .admit(Value::Frame(Arc::new(vec![48; 64].into_boxed_slice())))
+            .unwrap();
+        let now = Instant::now();
+        for entry in &mut budget.state.lock().unwrap().entries {
+            entry.used = now - IDLE_AGE + Duration::from_secs(1);
+        }
+        let mut worker = Maintenance::default();
+        worker.service(&budget, now, true, || {});
+        assert_eq!(worker.deadline(), Some(now + Duration::from_secs(1)));
+        worker.service(&budget, now + Duration::from_secs(1), false, || {
+            panic!("idle deadline is not a pressure deadline")
+        });
+        assert!(active.live());
+        assert!(!idle.live());
+        assert_eq!(wakes.load(Relaxed), 1);
+        drop(protected);
+        assert_eq!(wakes.load(Relaxed), 2);
+        worker.service(&budget, now + Duration::from_secs(1), true, || {
+            panic!("protection release does not force a redundant pressure sample")
+        });
+        assert!(!active.live());
+        assert_eq!(worker.deadline(), None);
+    }
+
     #[test]
     // Verify that shared allocations protected playback and in flight frames have distinct owners
     fn shared_allocations_protected_playback_and_in_flight_frames_have_distinct_owners() {
@@ -756,12 +946,12 @@ mod tests {
                 vec![158; MIB / 2].into_boxed_slice(),
             )))
             .unwrap();
-        budget.maintain();
+        budget.maintain(Instant::now());
         assert!(recent.frame().is_some());
         for entry in &mut budget.state.lock().unwrap().entries {
             entry.used = Instant::now() - Duration::from_secs(31);
         }
-        budget.maintain();
+        budget.maintain(Instant::now());
         assert!(recent.frame().is_none());
         let other = budget
             .admit(Value::Frame(Arc::new(

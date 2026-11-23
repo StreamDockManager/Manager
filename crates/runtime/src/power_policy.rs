@@ -13,6 +13,11 @@ pub use controller::{DevicePowerCapabilities, DevicePowerSettings};
 pub use native::PowerPlatformCapabilities;
 pub(crate) use preferences::validate_storage_snapshot;
 
+#[cfg(any(target_os = "windows", target_os = "linux"))]
+pub(crate) fn session_locked() -> Option<bool> {
+    native::sample(false, true).locked
+}
+
 const IDLE: u8 = 1;
 const LOCK: u8 = 2;
 const SCHEDULE: u8 = 4;

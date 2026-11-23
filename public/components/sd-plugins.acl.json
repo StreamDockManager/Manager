@@ -7,5 +7,5 @@
     "metadata": {
         "description": "First-party sd-plugins component. Controllers are registered by the trusted application bootstrap."
     },
-    "dependencies": ["sd-updates"]
+    "dependencies": ["sd-plugin-action-group"]
 }

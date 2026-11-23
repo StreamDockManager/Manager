@@ -7,6 +7,8 @@ use std::sync::Arc;
 #[serde(default, deny_unknown_fields)]
 pub struct Appearance {
     pub font: String,
+    pub font_weight: u16,
+    pub font_italic: bool,
     /// Font size as a percentage of surface height
     pub size: u8,
     pub foreground: String,
@@ -29,6 +31,8 @@ impl Default for Appearance {
     fn default() -> Self {
         Self {
             font: "sans".into(),
+            font_weight: 400,
+            font_italic: false,
             size: 18,
             foreground: "#ffffff".into(),
             position: "bottom".into(),
@@ -319,6 +323,7 @@ impl Appearance {
     // Validate for the current operation
     pub fn validate(&self) -> std::result::Result<(), String> {
         if !crate::fonts::valid(&self.font)
+            || !matches!(self.font_weight, 400 | 700)
             || !(6..=60).contains(&self.size)
             || !(10..=90).contains(&self.icon_size)
             || !color(&self.foreground)
@@ -407,7 +412,14 @@ fn title_markup(
     let padding = (w * 0.08).max(4.0).min(w / 4.0);
     let db = fonts(&appearance.font);
     let title: String = title.chars().take(160).collect();
-    let advances = crate::fonts::advances(&appearance.font, &title, requested_size, &db);
+    let advances = crate::fonts::styled_advances(
+        &appearance.font,
+        &title,
+        requested_size,
+        &db,
+        appearance.font_weight,
+        appearance.font_italic,
+    );
     let lines: Vec<_> = title.split('\n').collect();
     let longest = lines
         .iter()
@@ -448,9 +460,19 @@ fn title_markup(
         _ => (w / 2.0, "middle"),
     };
     let family = crate::fonts::svg_family(&appearance.font, &db);
+    let weight = if appearance.font_weight == 700 {
+        "bold"
+    } else {
+        "normal"
+    };
+    let slant = if appearance.font_italic {
+        "italic"
+    } else {
+        "normal"
+    };
     lines.iter().enumerate().map(|(index, line)| {
         let y = top + size + index as f64 * size * 1.2;
-        format!("<text x=\"{x}\" y=\"{y}\" text-anchor=\"{anchor}\" font-family=\"{family}\" font-size=\"{size}\" fill=\"{}\">{}</text>", appearance.foreground, escape(line))
+        format!("<text x=\"{x}\" y=\"{y}\" text-anchor=\"{anchor}\" font-family=\"{family}\" font-weight=\"{weight}\" font-style=\"{slant}\" font-size=\"{size}\" fill=\"{}\">{}</text>", appearance.foreground, escape(line))
     }).collect()
 }
 
@@ -474,7 +496,9 @@ pub fn text_warnings(
     };
     #[cfg(target_os = "macos")]
     let mut options = options;
-    let source = format!("<svg xmlns=\"http://www.w3.org/2000/svg\" width=\"{width}\" height=\"{height}\">{body}</svg>");
+    let source = format!(
+        "<svg xmlns=\"http://www.w3.org/2000/svg\" width=\"{width}\" height=\"{height}\">{body}</svg>"
+    );
     #[cfg(target_os = "macos")]
     let (source, native_clipped) =
         crate::native_text::prepare_svg(&source, &appearance.font, &mut options)?;
@@ -589,6 +613,16 @@ pub fn compose_pixels(
     let size = (h * f64::from(appearance.size) / 100.0).max(6.0);
     let db = fonts(&appearance.font);
     let family = crate::fonts::svg_family(&appearance.font, &db);
+    let weight = if appearance.font_weight == 700 {
+        "bold"
+    } else {
+        "normal"
+    };
+    let slant = if appearance.font_italic {
+        "italic"
+    } else {
+        "normal"
+    };
     let mut body = String::new();
     if let Some((_, icon)) = ICONS.iter().find(|(id, _)| *id == appearance.icon) {
         let s = w.min(h) * f64::from(appearance.icon_size) / 100.0;
@@ -613,14 +647,21 @@ pub fn compose_pixels(
         if base_image.pixels().all(|pixel| pixel[3] == 255) {
             body.push_str(&format!("<rect x=\"0\" y=\"{}\" width=\"{w}\" height=\"{}\" fill=\"#000000\" fill-opacity=\"0.8\"/>", h-size-8.0, size+8.0));
         }
-        let advances = crate::fonts::advances(&appearance.font, feedback, size, &db);
+        let advances = crate::fonts::styled_advances(
+            &appearance.font,
+            feedback,
+            size,
+            &db,
+            appearance.font_weight,
+            appearance.font_italic,
+        );
         let length: f64 = feedback
             .chars()
             .take(160)
             .map(|ch| advances.get(&ch).copied().unwrap_or(size * 0.6))
             .sum();
         let size = size * (w * 0.84 / length.max(1.)).min(1.);
-        body.push_str(&format!("<text x=\"{}\" y=\"{}\" text-anchor=\"middle\" font-family=\"{family}\" font-size=\"{size}\" fill=\"{}\">{}</text>", w/2.0, h-4.0, appearance.foreground, escape(feedback)));
+        body.push_str(&format!("<text x=\"{}\" y=\"{}\" text-anchor=\"middle\" font-family=\"{family}\" font-weight=\"{weight}\" font-style=\"{slant}\" font-size=\"{size}\" fill=\"{}\">{}</text>", w/2.0, h-4.0, appearance.foreground, escape(feedback)));
     }
     let mut options = resvg::usvg::Options {
         fontdb: db,
@@ -666,11 +707,7 @@ pub fn compose_pixels(
         resvg::tiny_skia::Transform::identity(),
         &mut pixmap.as_mut(),
     );
-    // This is precisely tiny-skia's PNG conversion, including alpha rounding,
-    // consuming its existing allocation instead of encoding and decoding it.
-    let overlay =
-        image::RgbaImage::from_raw(width.into(), height.into(), pixmap.take_demultiplied())
-            .ok_or_else(|| Error::Protocol("Invalid overlay dimensions".into()))?;
+    let overlay = crate::render::pixmap_rgba(pixmap)?;
     let mut image = image::DynamicImage::ImageRgba8(base_image);
     image::imageops::overlay(&mut image, &overlay, 0, 0);
     let image = match rotation {
@@ -1023,5 +1060,83 @@ mod adaptive_title_tests {
         let appearance = Appearance::default();
         let source = title_markup(100, 100, "Hi", &appearance, "");
         assert!(source.contains("font-size=\"18\""));
+    }
+}
+
+#[cfg(test)]
+mod primary_font_tests {
+    use super::*;
+
+    #[test]
+    // Preserve old bindings while accepting only native regular and bold primary label faces
+    fn primary_label_style_defaults_validation_and_roundtrip() {
+        let old: Appearance = serde_json::from_str("{}").unwrap();
+        assert_eq!(old.font_weight, 400);
+        assert!(!old.font_italic);
+        for weight in [400, 700] {
+            for italic in [false, true] {
+                let style = Appearance {
+                    font: "system:Custom Family".into(),
+                    font_weight: weight,
+                    font_italic: italic,
+                    ..old.clone()
+                };
+                style.validate().unwrap();
+                let value = serde_json::to_value(&style).unwrap();
+                let restored: Appearance = serde_json::from_value(value.clone()).unwrap();
+                assert_eq!(serde_json::to_value(restored).unwrap(), value);
+            }
+        }
+        for weight in [0, 100, 399, 401, 650, 701, 900] {
+            assert!(Appearance {
+                font_weight: weight,
+                ..old.clone()
+            }
+            .validate()
+            .is_err());
+        }
+    }
+
+    #[test]
+    // Render four distinct real label faces and use their matching metrics for bounded fitting
+    fn primary_label_styles_change_pixels_and_measure_selected_faces() {
+        let mut rendered = std::collections::BTreeSet::new();
+        let db = fonts("sans");
+        let regular = crate::fonts::styled_advances("sans", "Wide label", 24., &db, 400, false);
+        let bold = crate::fonts::styled_advances("sans", "Wide label", 24., &db, 700, false);
+        assert_ne!(regular, bold);
+        for weight in [400, 700] {
+            for italic in [false, true] {
+                let style = Appearance {
+                    font_weight: weight,
+                    font_italic: italic,
+                    size: 24,
+                    ..Default::default()
+                };
+                let source = title_markup(112, 112, "Wide label", &style, "Live");
+                assert!(source.contains(if weight == 700 {
+                    "font-weight=\"bold\""
+                } else {
+                    "font-weight=\"normal\""
+                }));
+                assert!(source.contains(if italic {
+                    "font-style=\"italic\""
+                } else {
+                    "font-style=\"normal\""
+                }));
+                let pixels = compose_pixels(
+                    image::RgbaImage::new(112, 112),
+                    112,
+                    112,
+                    "Wide label",
+                    &style,
+                    "Live",
+                    0,
+                )
+                .unwrap();
+                rendered.insert(pixels.to_rgba8().into_raw());
+            }
+        }
+        assert_eq!(rendered.len(), 4);
     }
 }

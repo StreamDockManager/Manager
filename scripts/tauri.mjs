@@ -1,5 +1,6 @@
 import { spawn, execFileSync } from 'node:child_process';
-import { mkdtemp, readFile, rm, unlink } from 'node:fs/promises';
+import { mkdtemp, readFile, rm } from 'node:fs/promises';
+import { runDevCycles } from './dev-native-cycle.mjs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { createRequire } from 'node:module';
@@ -51,7 +52,13 @@ function invokeCLI(args, env) {
 // Apply packaging safeguards or manage the shared Vite server for Tauri development
 export async function runTauri(
     args,
-    { createDevServer, runCLI = invokeCLI, platform = process.platform, env = process.env } = {},
+    {
+        createDevServer,
+        runCLI = invokeCLI,
+        platform = process.platform,
+        env = process.env,
+        nativeWatch = false,
+    } = {},
 ) {
     const separator = args.indexOf('--');
     const end = separator < 0 ? args.length : separator;
@@ -59,6 +66,17 @@ export async function runTauri(
     const command = options.find((arg) => !arg.startsWith('-'));
     if (options.some((arg) => ['--help', '-h', '--version', '-V'].includes(arg)))
         return runCLI(args, env);
+
+    if (['dev', 'build', 'bundle'].includes(command)) {
+        const defaults = JSON.parse(
+            execFileSync(
+                env.PYTHON ?? (process.platform === 'win32' ? 'python' : 'python3'),
+                ['scripts/public_build_defaults.py'],
+                { cwd: root, env, encoding: 'utf8' },
+            ),
+        );
+        env = { ...env, ...defaults };
+    }
 
     if (command === 'build' || command === 'bundle') {
         let target;
@@ -151,23 +169,16 @@ export async function runTauri(
             ...args.slice(end),
         ];
         restartDirectory = await mkdtemp(join(tmpdir(), 'stream-dock-manager-dev-'));
-        const restartFile = join(restartDirectory, 'restart');
-        const devEnv = { ...env, STREAM_DOCK_MANAGER_DEV_RESTART_FILE: restartFile };
-        for (;;) {
-            const code = await runCLI(cliArgs, devEnv);
-            if (code === 130 || code === 143) return code;
-            let requested;
-            try {
-                requested = (await readFile(restartFile, 'utf8')) === 'restart';
-            } catch (error) {
-                if (error.code !== 'ENOENT') throw error;
-            }
-            if (!requested) return code;
-            await unlink(restartFile);
-            // The native app has completed its normal quit handshake. Relaunch it
-            // under the same CLI and live Vite server instead of orphaning a child
-            // whose devUrl disappears when this launcher exits
-        }
+        const watchNativeSources = nativeWatch
+            ? (await import('./dev-native-watch.mjs')).watchNativeSources
+            : undefined;
+        return await runDevCycles(cliArgs, env, {
+            runCLI,
+            directory: restartDirectory,
+            ...(nativeWatch
+                ? { watch: (change, error) => watchNativeSources(root, change, error) }
+                : {}),
+        });
     } finally {
         try {
             await server.close();

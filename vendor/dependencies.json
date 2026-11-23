@@ -21,23 +21,46 @@
         },
         {
             "name": "wry",
-            "version": "0.57.2",
-            "sha256": "a490119196d02a51d0871df7b9119a1f3e46d75b7e90053a801454d5c6b3491c",
-            "tree_sha256": "30ddee666dab73c223f6e6c536ff4a2e8db3a5d37deeddeebc225147b7d99966",
+            "version": "0.57.3",
+            "sha256": "ceb43f824178e8110e3181bfd478359c43b041452a9560d321bd8d121e468f86",
+            "tree_sha256": "b718364cfc407028b0cf0fddb4baaa8986d87cededfd4a0542df3bd4a0741b39",
             "patches": [
                 {
-                    "file": "patches/wry-0.57.2-ipc-weak-reference.patch",
-                    "sha256": "3b11a1969fff05cb8342824ed31415f1953fe3de69a44f1f60cf16f66e128a23",
-                    "strip": 1
-                },
-                {
-                    "file": "patches/wry-0.57.2-check-cfg.patch",
+                    "file": "patches/wry-0.57.3-check-cfg.patch",
                     "sha256": "6fa3c5de5ebd771d8067ab943210692f1ce9e0faddbd109ebb721f57b30e12a8",
                     "strip": 1
                 },
                 {
-                    "file": "patches/wry-0.57.2-platform-warnings.patch",
-                    "sha256": "de820a35fcd42d730eec9603e0472972b3645d2c80e816372e3973c86be0b9ce",
+                    "file": "patches/wry-0.57.3-platform-warnings.patch",
+                    "sha256": "a04d819aed8d45cf95976aeca708a815874f1a5d5cfb3145480a305ddcc51abe",
+                    "strip": 1
+                }
+            ]
+        },
+        {
+            "name": "hidapi",
+            "version": "2.6.7",
+            "sha256": "818c0e1d27887aaf76fe737042e27a66b796a7b099e6d2e1a72d106c2dff3fa6",
+            "tree_sha256": "5a673cf9431380b11f79316d36cdca0c3c789da100ee34730a0a350714beadc4",
+            "patches": [
+                {
+                    "file": "patches/hidapi-2.6.7-macos-input-ready.patch",
+                    "sha256": "06d0abee77a438c772c75be2d07635f86ef16b22fc62d956cb6fe09892137c74",
+                    "strip": 1
+                },
+                {
+                    "file": "patches/hidapi-2.6.7-windows-input-ready.patch",
+                    "sha256": "1156376a12dd17dea48cd8401f7816fa0a7e5e5d3c008c6b3d053c5b4132d74e",
+                    "strip": 1
+                },
+                {
+                    "file": "patches/hidapi-2.6.7-linux-input-ready.patch",
+                    "sha256": "25ecaee036cc964c1e848d8a7f5d5af39f22ad9f554fb507e65385753602f8d3",
+                    "strip": 1
+                },
+                {
+                    "file": "patches/hidapi-2.6.7-linux-readiness-facade.patch",
+                    "sha256": "7e12168816a50dea7208d07aec063c7abd02448d40973be190937557c23ab1c4",
                     "strip": 1
                 }
             ]

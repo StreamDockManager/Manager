@@ -4,8 +4,11 @@ use base64::Engine;
 use sha2::{Digest, Sha256};
 use stream_dock_manager_storage::{
     rusqlite::{params, Connection, OptionalExtension},
-    Domain, Storage,
+    Storage,
 };
+
+#[cfg(test)]
+use stream_dock_manager_storage::Domain;
 
 const MAX_ENVELOPE: usize = 512 * 1024;
 const MAX_VALUE: usize = 256 * 1024;
@@ -114,39 +117,65 @@ fn now() -> i64 {
         .min(i64::MAX as u128) as i64
 }
 
-/// A decimal, opaque generation includes the database restore epoch and a durable plugin purge counter
-pub(super) fn generation(conn: &Connection, owner: &str) -> Result<String, String> {
+/// Read the owner-specific purge counter from the encrypted SDK store.
+pub fn plugin_storage_purge_generation(conn: &Connection, owner: &str) -> Result<u64, String> {
+    read_purge_generation(conn, owner).map(|value| value as u64)
+}
+
+fn read_purge_generation(conn: &Connection, owner: &str) -> Result<i64, String> {
+    if !safe_id(owner) {
+        return Err("Invalid plugin identity".into());
+    }
+    let value: Option<i64> = sql(conn
+        .query_row(
+            "SELECT generation FROM settings_vault.plugin_storage_generations WHERE plugin_id=?1",
+            [owner],
+            |row| row.get(0),
+        )
+        .optional())?;
+    match value {
+        Some(value) if value > 0 => Ok(value),
+        None => Ok(0),
+        _ => Err("Invalid durable plugin generation".into()),
+    }
+}
+
+/// The opaque generation binds both restore epochs and the durable owner purge counter
+pub fn plugin_storage_generation(conn: &Connection, owner: &str) -> Result<String, String> {
     let epoch: String = sql(conn.query_row(
-        "SELECT value FROM database_metadata WHERE key='storage_generation'",
+        "SELECT value FROM main.database_metadata WHERE key='storage_generation'",
         [],
         |r| r.get(0),
     ))?;
-    let counter: u64 = stream_dock_manager_storage::read_json(
-        conn,
-        Domain::PluginMetadata,
-        &format!("storage-generation:{owner}"),
-        128,
-    )?
-    .unwrap_or(0);
-    let digest = Sha256::digest(format!("{epoch}\0{owner}\0{counter}").as_bytes());
+    let private_epoch = read_private_epoch(conn)?;
+    let counter = plugin_storage_purge_generation(conn, owner)?;
+    let digest = Sha256::digest(format!("{epoch}\0{private_epoch}\0{owner}\0{counter}").as_bytes());
     let bytes: [u8; 16] = digest[..16].try_into().unwrap();
     Ok(u128::from_be_bytes(bytes).to_string())
 }
-// Return the current revision identifier
-fn revision(
-    conn: &Connection,
-    owner: &str,
-    namespace: &str,
-    generation: &str,
-) -> Result<String, String> {
-    let row: Option<(String,String)> = sql(conn.query_row("SELECT generation,revision FROM plugin_storage_namespaces WHERE plugin_id=?1 AND namespace=?2",params![owner,namespace],|r|Ok((r.get(0)?,r.get(1)?))).optional())?;
-    match row {
-        None => Ok("0".into()),
-        Some((_, rev)) if decimal(&rev) && rev.parse::<u64>().is_ok() => {
-            // Restoring the whole database changes its epoch, retaining values and revisions
-            let _ = generation;
-            Ok(rev)
-        }
+// Read the authenticated attachment's restore epoch
+fn read_private_epoch(conn: &Connection) -> Result<String, String> {
+    let epoch: String = sql(conn.query_row(
+        "SELECT epoch FROM settings_vault.plugin_storage_epoch WHERE singleton=1",
+        [],
+        |row| row.get(0),
+    ))?;
+    if !uuid(&epoch) {
+        return Err("Invalid private storage restore epoch".into());
+    }
+    Ok(epoch)
+}
+
+// Return the current revision identifier; zero represents no persisted revision
+fn revision(conn: &Connection, owner: &str, namespace: &str) -> Result<u64, String> {
+    let row: Option<[u8; 8]> = sql(conn.query_row(
+        "SELECT revision FROM settings_vault.plugin_storage_namespaces WHERE plugin_id=?1 AND namespace=?2",
+        params![owner, namespace],
+        |row| row.get(0),
+    ).optional())?;
+    match row.map(u64::from_be_bytes) {
+        None => Ok(0),
+        Some(n) if n > 0 => Ok(n),
         _ => Err("storage_failure".into()),
     }
 }
@@ -334,11 +363,12 @@ pub(super) fn dispatch(
 // Execute the requested storage operation
 fn execute(conn: &Connection, owner: &str, method: &str, payload: &Value) -> Result<Value, String> {
     let namespace = text(payload, "namespace")?;
-    let current_generation = generation(conn, owner)?;
-    let current_revision = revision(conn, owner, namespace, &current_generation)?;
+    let current_generation = plugin_storage_generation(conn, owner)?;
+    let current_revision_value = revision(conn, owner, namespace)?;
+    let current_revision = current_revision_value.to_string();
     match method {
         "get" => {
-            let value:Option<(i64,String)>=sql(conn.query_row("SELECT encoded_bytes,value FROM plugin_storage_records WHERE plugin_id=?1 AND namespace=?2 AND key=?3",params![owner,namespace,text(payload,"key")?],|r|Ok((r.get(0)?,r.get(1)?))).optional())?;
+            let value:Option<(i64,String)>=sql(conn.query_row("SELECT encoded_bytes,value FROM settings_vault.plugin_storage_records WHERE plugin_id=?1 AND namespace=?2 AND key=?3",params![owner,namespace,text(payload,"key")?],|r|Ok((r.get(0)?,r.get(1)?))).optional())?;
             let mut result = json!({"found":value.is_some(),"generation":current_generation,"revision":current_revision});
             if let Some((bytes, value)) = value {
                 if bytes > MAX_VALUE as i64 + 256 {
@@ -363,7 +393,7 @@ fn execute(conn: &Connection, owner: &str, method: &str, payload: &Value) -> Res
             } else {
                 0
             };
-            let mut stmt=sql(conn.prepare("SELECT key FROM plugin_storage_records WHERE plugin_id=?1 AND namespace=?2 ORDER BY key COLLATE BINARY LIMIT 129 OFFSET ?3"))?;
+            let mut stmt=sql(conn.prepare("SELECT key FROM settings_vault.plugin_storage_records WHERE plugin_id=?1 AND namespace=?2 ORDER BY key COLLATE BINARY LIMIT 129 OFFSET ?3"))?;
             let mut keys =
                 sql(stmt.query_map(params![owner, namespace, offset], |r| r.get::<_, String>(0)))?
                     .collect::<Result<Vec<_>, _>>()
@@ -393,11 +423,11 @@ fn execute(conn: &Connection, owner: &str, method: &str, payload: &Value) -> Res
                 return Err("conflict".into());
             }
             let operation = text(payload, "operation_id")?;
-            let receipt:Option<(String,String)>=sql(conn.query_row("SELECT digest,revision FROM plugin_storage_receipts WHERE plugin_id=?1 AND namespace=?2 AND operation_id=?3 AND created_ms>=?4 AND generation=?5",params![owner,namespace,operation,now()-RECEIPT_AGE,current_generation],|r|Ok((r.get(0)?,r.get(1)?))).optional())?;
+            let receipt:Option<(String,[u8; 8])>=sql(conn.query_row("SELECT digest,revision FROM settings_vault.plugin_storage_receipts WHERE plugin_id=?1 AND namespace=?2 AND operation_id=?3 AND created_ms>=?4 AND generation=?5",params![owner,namespace,operation,now()-RECEIPT_AGE,current_generation],|r|Ok((r.get(0)?,r.get(1)?))).optional())?;
             if method == "receipt" {
                 let mut result = json!({"found":receipt.is_some(),"generation":current_generation,"operation_id":operation});
                 if let Some((_, revision)) = receipt {
-                    result["revision"] = json!(revision);
+                    result["revision"] = json!(u64::from_be_bytes(revision).to_string());
                     result["committed"] = json!(true);
                 }
                 return Ok(result);
@@ -409,53 +439,49 @@ fn execute(conn: &Connection, owner: &str, method: &str, payload: &Value) -> Res
                     return Err("conflict".into());
                 }
                 return Ok(
-                    json!({"generation":current_generation,"revision":revision,"operation_id":operation,"committed":true}),
+                    json!({"generation":current_generation,"revision":u64::from_be_bytes(revision).to_string(),"operation_id":operation,"committed":true}),
                 );
             }
             if text(payload, "expected_revision")? != current_revision {
                 return Err("conflict".into());
             }
-            let next = current_revision
-                .parse::<u64>()
-                .ok()
-                .and_then(|v| v.checked_add(1))
-                .ok_or("quota")?
-                .to_string();
+            let next = current_revision_value.checked_add(1).ok_or("quota")?;
+            let next_blob = next.to_be_bytes();
             let namespaces: i64 = sql(conn.query_row(
-                "SELECT count(*) FROM plugin_storage_namespaces WHERE plugin_id=?1",
+                "SELECT count(*) FROM settings_vault.plugin_storage_namespaces WHERE plugin_id=?1",
                 [owner],
                 |r| r.get(0),
             ))?;
-            if current_revision == "0" && namespaces >= 64 {
+            if current_revision_value == 0 && namespaces >= 64 {
                 return Err("quota".into());
             }
-            sql(conn.execute("INSERT INTO plugin_storage_namespaces(plugin_id,namespace,generation,revision) VALUES(?1,?2,?3,?4) ON CONFLICT(plugin_id,namespace) DO UPDATE SET generation=excluded.generation,revision=excluded.revision",params![owner,namespace,current_generation,next]))?;
+            sql(conn.execute("INSERT INTO settings_vault.plugin_storage_namespaces(plugin_id,namespace,generation,revision) VALUES(?1,?2,?3,?4) ON CONFLICT(plugin_id,namespace) DO UPDATE SET generation=excluded.generation,revision=excluded.revision",params![owner,namespace,current_generation,next_blob]))?;
             for mutation in payload["mutations"].as_array().ok_or("invalid_request")? {
                 let key = text(mutation, "key")?;
                 if mutation["op"] == "put" {
                     let value = mutation["value"].to_string();
-                    sql(conn.execute("INSERT INTO plugin_storage_records(plugin_id,namespace,key,value,encoded_bytes) VALUES(?1,?2,?3,?4,?5) ON CONFLICT(plugin_id,namespace,key) DO UPDATE SET value=excluded.value,encoded_bytes=excluded.encoded_bytes",params![owner,namespace,key,value,(key.len()+value.len()) as i64]))?;
+                    sql(conn.execute("INSERT INTO settings_vault.plugin_storage_records(plugin_id,namespace,key,value,encoded_bytes) VALUES(?1,?2,?3,?4,?5) ON CONFLICT(plugin_id,namespace,key) DO UPDATE SET value=excluded.value,encoded_bytes=excluded.encoded_bytes",params![owner,namespace,key,value,(key.len()+value.len()) as i64]))?;
                 } else {
-                    sql(conn.execute("DELETE FROM plugin_storage_records WHERE plugin_id=?1 AND namespace=?2 AND key=?3",params![owner,namespace,key]))?;
+                    sql(conn.execute("DELETE FROM settings_vault.plugin_storage_records WHERE plugin_id=?1 AND namespace=?2 AND key=?3",params![owner,namespace,key]))?;
                 }
             }
             // Logical quota = UTF-8 key bytes + compact JSON value bytes, plus each namespace once
-            let (keys,bytes):(i64,i64)=sql(conn.query_row("SELECT count(*),coalesce(sum(encoded_bytes),0) FROM plugin_storage_records WHERE plugin_id=?1",[owner],|r|Ok((r.get(0)?,r.get(1)?))))?;
-            let namespace_bytes:i64=sql(conn.query_row("SELECT coalesce(sum(length(CAST(namespace AS BLOB))),0) FROM plugin_storage_namespaces WHERE plugin_id=?1",[owner],|r|r.get(0)))?;
+            let (keys,bytes):(i64,i64)=sql(conn.query_row("SELECT count(*),coalesce(sum(encoded_bytes),0) FROM settings_vault.plugin_storage_records WHERE plugin_id=?1",[owner],|r|Ok((r.get(0)?,r.get(1)?))))?;
+            let namespace_bytes:i64=sql(conn.query_row("SELECT coalesce(sum(length(CAST(namespace AS BLOB))),0) FROM settings_vault.plugin_storage_namespaces WHERE plugin_id=?1",[owner],|r|r.get(0)))?;
             if keys > 4096 || bytes + namespace_bytes > LOGICAL_LIMIT {
                 return Err("quota".into());
             }
             sql(conn.execute(
-                "DELETE FROM plugin_storage_receipts WHERE plugin_id=?1 AND created_ms<?2",
+                "DELETE FROM settings_vault.plugin_storage_receipts WHERE plugin_id=?1 AND created_ms<?2",
                 params![owner, now() - RECEIPT_AGE],
             ))?;
             stored_data::mark_updated(conn, owner)?;
-            // Metadata only: outcome is fixed, result JSON is bounded and contains no user values
-            sql(conn.execute("INSERT OR REPLACE INTO plugin_storage_receipts(plugin_id,namespace,operation_id,digest,generation,revision,result,created_ms) VALUES(?1,?2,?3,?4,?5,?6,'{\"committed\":true}',?7)",params![owner,namespace,operation,digest,current_generation,next,now()]))?;
+            // A durable receipt implies the commit succeeded; no result payload is stored
+            sql(conn.execute("INSERT OR REPLACE INTO settings_vault.plugin_storage_receipts(plugin_id,namespace,operation_id,digest,generation,revision,created_ms) VALUES(?1,?2,?3,?4,?5,?6,?7)",params![owner,namespace,operation,digest,current_generation,next_blob,now()]))?;
             // Every receipt's bounded metadata fits 256 bytes; 1,024 entries fit 256 KiB
-            sql(conn.execute("DELETE FROM plugin_storage_receipts WHERE rowid IN (SELECT rowid FROM plugin_storage_receipts WHERE plugin_id=?1 ORDER BY created_ms DESC,rowid DESC LIMIT -1 OFFSET 1024)",[owner]))?;
+            sql(conn.execute("DELETE FROM settings_vault.plugin_storage_receipts WHERE rowid IN (SELECT rowid FROM settings_vault.plugin_storage_receipts WHERE plugin_id=?1 ORDER BY created_ms DESC,rowid DESC LIMIT -1 OFFSET 1024)",[owner]))?;
             Ok(
-                json!({"generation":current_generation,"revision":next,"operation_id":operation,"committed":true}),
+                json!({"generation":current_generation,"revision":next.to_string(),"operation_id":operation,"committed":true}),
             )
         }
         _ => Err("unsupported".into()),
@@ -464,21 +490,16 @@ fn execute(conn: &Connection, owner: &str, method: &str, payload: &Value) -> Res
 
 // Remove the selected stored data
 pub(super) fn purge(conn: &Connection, owner: &str) -> Result<(), String> {
-    let key = format!("storage-generation:{owner}");
-    let counter: u64 =
-        stream_dock_manager_storage::read_json(conn, Domain::PluginMetadata, &key, 128)?
-            .unwrap_or(0);
-    stream_dock_manager_storage::write_json(
-        conn,
-        Domain::PluginMetadata,
-        &key,
-        &counter
-            .checked_add(1)
-            .ok_or("Storage generation exhausted")?,
-        128,
-    )?;
+    let counter = read_purge_generation(conn, owner)?
+        .checked_add(1)
+        .ok_or("Storage generation exhausted")?;
     sql(conn.execute(
-        "DELETE FROM plugin_storage_namespaces WHERE plugin_id=?1",
+        "INSERT INTO settings_vault.plugin_storage_generations(plugin_id,generation) VALUES(?1,?2)
+         ON CONFLICT(plugin_id) DO UPDATE SET generation=excluded.generation",
+        params![owner, counter],
+    ))?;
+    sql(conn.execute(
+        "DELETE FROM settings_vault.plugin_storage_namespaces WHERE plugin_id=?1",
         [owner],
     ))?;
     Ok(())
@@ -529,9 +550,11 @@ mod tests {
         assert_eq!(missing["revision"], "0");
         let rows = storage
             .run(|c| {
-                c.query_row("SELECT count(*) FROM plugin_storage_namespaces", [], |r| {
-                    r.get::<_, i64>(0)
-                })
+                c.query_row(
+                    "SELECT count(*) FROM settings_vault.plugin_storage_namespaces",
+                    [],
+                    |r| r.get::<_, i64>(0),
+                )
                 .map_err(|e| e.to_string())
             })
             .unwrap();
@@ -620,7 +643,11 @@ mod tests {
             1
         );
         let before = read(&storage, "owner", "n", "k");
-        storage.run(|c|c.execute_batch("CREATE TRIGGER reject_receipt BEFORE INSERT ON plugin_storage_receipts BEGIN SELECT RAISE(FAIL,'fixture'); END;").map_err(|e|e.to_string())).unwrap();
+        // This timestamp lives in main, unlike the value and receipt in the encrypted file.
+        storage
+            .write_json(Domain::PluginMetadata, "storage-updated:owner", &1_u64, 128)
+            .unwrap();
+        storage.run(|c|c.execute_batch("CREATE TRIGGER settings_vault.reject_receipt BEFORE INSERT ON settings_vault.plugin_storage_receipts BEGIN SELECT RAISE(FAIL,'fixture'); END;").map_err(|e|e.to_string())).unwrap();
         let payload = commit_payload(
             &before,
             "n",
@@ -632,6 +659,13 @@ mod tests {
         );
         assert_eq!(read(&storage, "owner", "n", "k"), before);
         assert_eq!(read(&storage, "owner", "n", "new")["found"], false);
+        assert_eq!(
+            storage
+                .read_json::<u64>(Domain::PluginMetadata, "storage-updated:owner", 128)
+                .unwrap(),
+            Some(1),
+            "receipt failure must also roll back the Manager metadata update",
+        );
     }
     #[test]
     // Verify commit stage failure never fabricates success and can be reconciled
@@ -639,7 +673,7 @@ mod tests {
         let root = tempfile::tempdir().unwrap();
         let storage = Storage::open(root.path().into()).unwrap();
         let before = read(&storage, "owner", "n", "trigger");
-        storage.run(|connection|connection.execute_batch("CREATE TRIGGER fail_at_commit AFTER INSERT ON plugin_storage_records WHEN new.key='trigger' BEGIN INSERT INTO plugin_storage_records(plugin_id,namespace,key,value,encoded_bytes) VALUES('owner','missing-parent','x','null',5); END; PRAGMA defer_foreign_keys=ON;").map_err(|error|error.to_string())).unwrap();
+        storage.run(|connection|connection.execute_batch("CREATE TRIGGER settings_vault.fail_at_commit AFTER INSERT ON settings_vault.plugin_storage_records WHEN new.key='trigger' BEGIN INSERT INTO plugin_storage_records(plugin_id,namespace,key,value,encoded_bytes) VALUES('owner','missing-parent','x','null',5); END; PRAGMA defer_foreign_keys=ON;").map_err(|error|error.to_string())).unwrap();
         let payload = commit_payload(
             &before,
             "n",
@@ -787,19 +821,36 @@ mod tests {
 
 // Validate snapshot
 pub(super) fn validate_snapshot(conn: &Connection) -> Result<(), String> {
-    let malformed: i64 = sql(conn.query_row("SELECT (SELECT count(*) FROM plugin_storage_namespaces WHERE length(CAST(plugin_id AS BLOB)) NOT BETWEEN 1 AND 159 OR length(CAST(namespace AS BLOB)) NOT BETWEEN 1 AND 128 OR length(generation)>39 OR length(revision)>20) + (SELECT count(*) FROM plugin_storage_receipts WHERE length(operation_id)!=36 OR length(digest)!=64 OR length(generation)>39 OR length(revision)>20 OR length(result)>32)", [], |row|row.get(0)))?;
+    // Portable redacted Manager snapshots have no encrypted attachment to validate.
+    if !stream_dock_manager_storage::plugin_storage_attached(conn)? {
+        return Ok(());
+    }
+    read_private_epoch(conn)?;
+    let mut statement = sql(conn.prepare(
+        "SELECT plugin_id,generation FROM settings_vault.plugin_storage_generations LIMIT 16385",
+    ))?;
+    let counters = sql(statement.query_map([], |row| {
+        Ok((row.get::<_, String>(0)?, row.get::<_, i64>(1)?))
+    }))?;
+    for (index, row) in counters.enumerate() {
+        let (owner, counter) = sql(row)?;
+        if index >= 16384 || !safe_id(&owner) || counter <= 0 {
+            return Err("Invalid durable plugin generation".into());
+        }
+    }
+    let malformed: i64 = sql(conn.query_row("SELECT (SELECT count(*) FROM settings_vault.plugin_storage_namespaces WHERE length(CAST(plugin_id AS BLOB)) NOT BETWEEN 1 AND 159 OR length(CAST(namespace AS BLOB)) NOT BETWEEN 1 AND 128 OR length(generation)>39 OR length(revision)!=8) + (SELECT count(*) FROM settings_vault.plugin_storage_receipts WHERE length(operation_id)!=36 OR length(digest)!=64 OR length(generation)>39 OR length(revision)!=8)", [], |row|row.get(0)))?;
     if malformed != 0 {
         return Err("Private storage metadata exceeds bounds".into());
     }
     let mut owners = HashSet::new();
     let mut statement = sql(conn
-        .prepare("SELECT plugin_id,namespace,generation,revision FROM plugin_storage_namespaces"))?;
+        .prepare("SELECT plugin_id,namespace,generation,revision FROM settings_vault.plugin_storage_namespaces"))?;
     let rows = sql(statement.query_map([], |r| {
         Ok((
             r.get::<_, String>(0)?,
             r.get::<_, String>(1)?,
             r.get::<_, String>(2)?,
-            r.get::<_, String>(3)?,
+            r.get::<_, [u8; 8]>(3)?,
         ))
     }))?;
     let mut namespaces: HashMap<String, usize> = HashMap::new();
@@ -808,8 +859,7 @@ pub(super) fn validate_snapshot(conn: &Connection) -> Result<(), String> {
         if !safe_id(&owner)
             || !name(&namespace, 128)
             || !decimal(&generation)
-            || revision.parse::<u64>().ok().is_none_or(|v| v == 0)
-            || !decimal(&revision)
+            || u64::from_be_bytes(revision) == 0
         {
             return Err("Invalid private storage namespace".into());
         }
@@ -819,15 +869,15 @@ pub(super) fn validate_snapshot(conn: &Connection) -> Result<(), String> {
             return Err("Private storage namespace quota exceeded".into());
         }
     }
-    let bad:i64=sql(conn.query_row("SELECT count(*) FROM plugin_storage_records WHERE length(CAST(key AS BLOB)) NOT BETWEEN 1 AND 256 OR length(CAST(value AS BLOB))>262144 OR instr(key,char(0))>0 OR encoded_bytes != length(CAST(key AS BLOB))+length(CAST(value AS BLOB))",[],|r|r.get(0)))?;
+    let bad:i64=sql(conn.query_row("SELECT count(*) FROM settings_vault.plugin_storage_records WHERE length(CAST(key AS BLOB)) NOT BETWEEN 1 AND 256 OR length(CAST(value AS BLOB))>262144 OR instr(key,char(0))>0 OR encoded_bytes != length(CAST(key AS BLOB))+length(CAST(value AS BLOB))",[],|r|r.get(0)))?;
     if bad != 0 {
         return Err("Private storage record bounds or accounting are invalid".into());
     }
     for owner in owners {
-        let (keys,bytes):(i64,i64)=sql(conn.query_row("SELECT count(*),coalesce(sum(encoded_bytes),0) FROM plugin_storage_records WHERE plugin_id=?1",[&owner],|r|Ok((r.get(0)?,r.get(1)?))))?;
-        let namespace_bytes:i64=sql(conn.query_row("SELECT coalesce(sum(length(CAST(namespace AS BLOB))),0) FROM plugin_storage_namespaces WHERE plugin_id=?1",[&owner],|r|r.get(0)))?;
+        let (keys,bytes):(i64,i64)=sql(conn.query_row("SELECT count(*),coalesce(sum(encoded_bytes),0) FROM settings_vault.plugin_storage_records WHERE plugin_id=?1",[&owner],|r|Ok((r.get(0)?,r.get(1)?))))?;
+        let namespace_bytes:i64=sql(conn.query_row("SELECT coalesce(sum(length(CAST(namespace AS BLOB))),0) FROM settings_vault.plugin_storage_namespaces WHERE plugin_id=?1",[&owner],|r|r.get(0)))?;
         let receipts: i64 = sql(conn.query_row(
-            "SELECT count(*) FROM plugin_storage_receipts WHERE plugin_id=?1",
+            "SELECT count(*) FROM settings_vault.plugin_storage_receipts WHERE plugin_id=?1",
             [&owner],
             |r| r.get(0),
         ))?;
@@ -835,26 +885,23 @@ pub(super) fn validate_snapshot(conn: &Connection) -> Result<(), String> {
             return Err("Private storage quota exceeded".into());
         }
     }
-    let mut statement=sql(conn.prepare("SELECT operation_id,digest,generation,revision,result,created_ms FROM plugin_storage_receipts"))?;
+    let mut statement=sql(conn.prepare("SELECT operation_id,digest,generation,revision,created_ms FROM settings_vault.plugin_storage_receipts"))?;
     let rows = sql(statement.query_map([], |r| {
         Ok((
             r.get::<_, String>(0)?,
             r.get::<_, String>(1)?,
             r.get::<_, String>(2)?,
-            r.get::<_, String>(3)?,
-            r.get::<_, String>(4)?,
-            r.get::<_, i64>(5)?,
+            r.get::<_, [u8; 8]>(3)?,
+            r.get::<_, i64>(4)?,
         ))
     }))?;
     for row in rows {
-        let (id, digest, generation, revision, result, time) = sql(row)?;
+        let (id, digest, generation, revision, time) = sql(row)?;
         if !uuid(&id)
             || digest.len() != 64
             || !digest.bytes().all(|b| b.is_ascii_hexdigit())
             || !decimal(&generation)
-            || !decimal(&revision)
-            || revision.parse::<u64>().ok().is_none_or(|v| v == 0)
-            || result != "{\"committed\":true}"
+            || u64::from_be_bytes(revision) == 0
             || time < 0
         {
             return Err("Invalid private storage receipt".into());
@@ -901,7 +948,7 @@ mod bound_tests {
             put(&storage, &committed, "k", json!("x".repeat(MAX_VALUE - 1)))["error"]["code"],
             "quota"
         );
-        storage.transaction(|tx| {for number in 0..4095 {let key=format!("key-{number}");sql(tx.execute("INSERT INTO plugin_storage_records(plugin_id,namespace,key,value,encoded_bytes) VALUES('fixture','n',?1,'0',?2)",params![key,key.len() as i64+1]))?;} Ok(())}).unwrap();
+        storage.transaction(|tx| {for number in 0..4095 {let key=format!("key-{number}");sql(tx.execute("INSERT INTO settings_vault.plugin_storage_records(plugin_id,namespace,key,value,encoded_bytes) VALUES('fixture','n',?1,'0',?2)",params![key,key.len() as i64+1]))?;} Ok(())}).unwrap();
         assert_eq!(
             put(&storage, &committed, "new", json!(0))["error"]["code"],
             "quota"
@@ -912,6 +959,41 @@ mod bound_tests {
             json!({"namespace":"n","generation":committed["generation"],"expected_revision":"1","operation_id":uuid::Uuid::new_v4().to_string(),"mutations":[{"op":"delete","key":"key-0"},{"op":"put","key":"new","value":0}]}),
         );
         assert_eq!(result["result"]["revision"], "2");
+        storage.run(|conn| validate_snapshot(conn)).unwrap();
+    }
+    #[test]
+    // Verify typed database revisions retain the full unsigned range on the wire
+    fn typed_revision_preserves_unsigned_wire_range_and_receipts() {
+        let root = tempfile::tempdir().unwrap();
+        let storage = Storage::open(root.path().into()).unwrap();
+        storage
+            .transaction(|conn| {
+                sql(conn.execute(
+                "INSERT INTO settings_vault.plugin_storage_namespaces VALUES('fixture','n','0',?1)",
+                [(u64::MAX - 1).to_be_bytes()],
+            ))?;
+                Ok(())
+            })
+            .unwrap();
+        let before = call(&storage, "get", json!({"namespace":"n","key":"k"}))["result"].clone();
+        assert_eq!(before["revision"], (u64::MAX - 1).to_string());
+        let last = put(&storage, &before, "k", json!(1))["result"].clone();
+        assert_eq!(last["revision"], u64::MAX.to_string());
+        let receipt = call(
+            &storage,
+            "receipt",
+            json!({"namespace":"n","generation":last["generation"],"operation_id":last["operation_id"]}),
+        );
+        assert_eq!(receipt["result"]["revision"], u64::MAX.to_string());
+        assert_eq!(receipt["result"]["committed"], true);
+        assert_eq!(
+            put(&storage, &last, "k", json!(2))["error"]["code"],
+            "quota"
+        );
+        assert_eq!(
+            call(&storage, "get", json!({"namespace":"n","key":"k"}))["result"]["value"],
+            1
+        );
         storage.run(|conn| validate_snapshot(conn)).unwrap();
     }
     #[test]
@@ -944,10 +1026,33 @@ mod bound_tests {
             json!({"namespace":"n","generation":after["generation"],"operation_id":result["operation_id"]}),
         );
         assert_eq!(receipt["result"]["found"], false);
+        let second = put(&storage, &after, "k", json!("new epoch"))["result"].clone();
+        assert_eq!(second["revision"], "2");
+        // A datastore-only restore keeps the Manager epoch and can restore the same revision.
+        storage
+            .run(|conn| {
+                sql(conn.execute(
+                    "UPDATE settings_vault.plugin_storage_epoch SET epoch=?1 WHERE singleton=1",
+                    [uuid::Uuid::new_v4().to_string()],
+                ))?;
+                Ok(())
+            })
+            .unwrap();
+        let final_state =
+            call(&storage, "get", json!({"namespace":"n","key":"k"}))["result"].clone();
+        assert_eq!(final_state["value"], "new epoch");
+        assert_eq!(final_state["revision"], second["revision"]);
+        assert_ne!(final_state["generation"], second["generation"]);
         assert_eq!(
-            put(&storage, &after, "k", json!("new epoch"))["result"]["revision"],
-            "2"
+            put(&storage, &second, "k", json!("stale"))["error"]["code"],
+            "conflict"
         );
+        let receipt = call(
+            &storage,
+            "receipt",
+            json!({"namespace":"n","generation":final_state["generation"],"operation_id":second["operation_id"]}),
+        );
+        assert_eq!(receipt["result"]["found"], false);
     }
 }
 

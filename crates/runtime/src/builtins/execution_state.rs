@@ -1,4 +1,4 @@
-use super::{Runtime, State};
+use super::{ActivationTicket, Runtime, State};
 use std::{
     collections::VecDeque,
     sync::{Arc, Mutex, Weak},
@@ -6,7 +6,7 @@ use std::{
 
 impl State {
     // Reuse a live FIFO execution lane and discard expired lane references
-    pub(super) fn lane(&self, key: String) -> Arc<Mutex<VecDeque<String>>> {
+    pub(super) fn lane(&self, key: String) -> Arc<Mutex<VecDeque<ActivationTicket>>> {
         let mut lanes = self.lanes.lock().unwrap();
         if let Some(lane) = lanes.get(&key).and_then(Weak::upgrade) {
             return lane;

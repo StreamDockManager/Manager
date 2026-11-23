@@ -13,20 +13,24 @@ fn named_vendor_root_live_debug_matches_saved_run_without_shifting_debug_paths()
     )
     .unwrap();
     std::fs::write(package.join("icon.svg"), r##"<svg xmlns="http://www.w3.org/2000/svg" width="72" height="72"><rect width="72" height="72" fill="#ffffff"/></svg>"##).unwrap();
-    std::fs::write(package.join("manifest.json"), json!({
+    let mut manifest = json!({
         "UUID":"fixture.desired", "Name":"Desired state fixture", "Version":"0.1.0.0", "SDKVersion":2,
         "Author":"Manager test suite", "Description":"Disposable desired-state contract fixture", "Icon":"icon",
         "OS":[{"Platform":"mac","MinimumVersion":"12"},{"Platform":"windows","MinimumVersion":"10"}],
         "Software":{"MinimumVersion":"6.9"}, "CodePath":"runtime.html",
         "Actions":[{"UUID":"fixture.desired.action", "Name":"State", "Icon":"icon", "Controllers":["Keypad"], "States":[{"Name":"Off","Image":"icon"},{"Name":"On","Image":"icon"}]}]
-    }).to_string()).unwrap();
+    });
+    // Run the same live-debug context assertions on Linux with portable VSD HTML;
+    // the explicit desired-state event is specific to Elgato on supported hosts
+    crate::test_plugin::use_portable_vendor_on_linux(&mut manifest);
+    std::fs::write(package.join("manifest.json"), manifest.to_string()).unwrap();
     let mut run = tests::fixture(root.path());
     let desired = Action::Plugin {
         plugin_id: "fixture.desired".into(),
         action_id: "fixture.desired.action".into(),
         settings: json!({}),
         resources: Default::default(),
-        user_desired_state: Some(1),
+        user_desired_state: (!cfg!(target_os = "linux")).then_some(1),
     };
     // Demand must come from saved workspace state. A one-off host demand is
     // replaced by the simulator's normal reconciliation and cannot authorize runs

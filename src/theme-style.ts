@@ -12,6 +12,8 @@ export const defaultStyle: UiThemeStyle = {
     lightPalette: 'default',
     darkPalette: 'default',
     font: 'default',
+    fontWeight: 400,
+    fontItalic: false,
     textScale: 100,
 };
 
@@ -98,6 +100,13 @@ export function normalizeStyle(
             (font === 'sans' || font === 'mono' || font === 'system:' + fontFamily(font))
                 ? font
                 : 'default',
+        fontWeight:
+            Number.isInteger(style?.fontWeight) &&
+            style!.fontWeight! >= 100 &&
+            style!.fontWeight! <= 900
+                ? style!.fontWeight!
+                : 400,
+        fontItalic: style?.fontItalic === true,
         textScale:
             typeof scale === 'number' && scale >= 90 && scale <= 150 && scale % 5 === 0
                 ? scale
@@ -134,6 +143,8 @@ export function applyTheme(
     root.dataset.theme = resolved;
     root.dataset.palette = id;
     root.style?.setProperty('--ui-text-scale', String(style.textScale / 100));
+    root.style?.setProperty('--ui-font-weight', String(style.fontWeight));
+    root.style?.setProperty('--ui-font-style', style.fontItalic ? 'italic' : 'normal');
     if (style.font === 'default') root.style?.removeProperty('--ui-font');
     else root.style?.setProperty('--ui-font', cssFontFamily(style.font));
     for (const token of appliedColors) root.style.removeProperty(token);

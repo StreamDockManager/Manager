@@ -32,7 +32,7 @@ def artifact(executable):
 
 class ConnectionContractGateTests(unittest.TestCase):
     # Exercise the connection-contract selector against an isolated test harness
-    def exercise(self, registry=None, available=NAMES, ignored=(), binaries=('/fixture/test-binary',), fail=None):
+    def exercise(self, registry=None, available=NAMES, ignored=(), binaries=('/fixture/test-binary',), fail=None, workspace=False):
         registry = copy.deepcopy(REGISTRY if registry is None else registry)
         calls = []
 
@@ -41,7 +41,14 @@ class ConnectionContractGateTests(unittest.TestCase):
             self.assertIs(kwargs['check'], True)
             calls.append(command)
             if command[0] == 'cargo':
-                return subprocess.CompletedProcess(command, 0, stdout='\n'.join(map(artifact, binaries)))
+                if '--no-run' in command:
+                    return subprocess.CompletedProcess(command, 0, stdout='\n'.join(map(artifact, binaries)))
+                self.assertTrue(workspace)
+                self.assertEqual(command, ['cargo', 'test', '--locked', '--offline', '--workspace'])
+                self.assertIn('STREAM_DOCK_MANAGER_INSTALLATION_KEY_FILE', kwargs['env'])
+                if fail:
+                    raise subprocess.CalledProcessError(1, command)
+                return subprocess.CompletedProcess(command, 0)
             if '--list' in command:
                 names = ignored if '--ignored' in command else available
                 return subprocess.CompletedProcess(command, 0, stdout='\n'.join(name + ': test' for name in names))
@@ -54,7 +61,7 @@ class ConnectionContractGateTests(unittest.TestCase):
             host = Path(directory)
             (host / 'connection-implementations.v1.json').write_text(json.dumps(registry))
             with patch.object(GATE, 'HOST', host), patch.object(GATE.subprocess, 'run', side_effect=run):
-                GATE.run_conformance()
+                GATE.run_conformance(workspace=workspace)
         return calls
 
     # Verify valid selection executes each exact test once
@@ -64,6 +71,23 @@ class ConnectionContractGateTests(unittest.TestCase):
         self.assertEqual(len(execution), len(NAMES))
         self.assertEqual({call[2] for call in execution}, NAMES)
         self.assertTrue(all(call[1:] == ['--exact', call[2], '--nocapture'] for call in execution))
+
+    def test_workspace_compiles_once_and_validates_before_unfiltered_execution(self):
+        calls = self.exercise(workspace=True)
+        self.assertEqual([call[0] for call in calls],
+                         ['cargo', '/fixture/test-binary', '/fixture/test-binary', 'cargo'])
+        self.assertEqual(calls[0][:-2], calls[-1])
+        self.assertIn('--no-run', calls[0])
+        self.assertTrue(all('--list' in call for call in calls[1:3]))
+        self.assertFalse(any('--exact' in call for call in calls))
+
+    def test_workspace_checks_missing_or_ignored_tests_and_propagates_execution_failure(self):
+        with self.assertRaisesRegex(ValueError, 'do not exist'):
+            self.exercise(workspace=True, available=NAMES - {'vendor::subset'})
+        with self.assertRaisesRegex(ValueError, 'ignored probes'):
+            self.exercise(workspace=True, ignored=['vendor::subset'])
+        with self.assertRaises(subprocess.CalledProcessError):
+            self.exercise(workspace=True, fail=True)
 
     # Verify missing selector fails instead of running zero tests
     def test_missing_selector_fails_instead_of_running_zero_tests(self):

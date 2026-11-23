@@ -17,22 +17,43 @@ def bootstrap(name):
 
 class ContainerBootstrapTests(unittest.TestCase):
     def test_both_native_workflows_use_same_valid_bootstrap(self):
-        cli = bootstrap('build-cli.yml')
-        self.assertEqual(cli, bootstrap('build-installers.yml'))
-        subprocess.run(['bash', '-n'], input=cli, text=True, check=True)
-        self.assertLess(cli.index('zz-manager-manpages'), cli.index('apt-get update'))
-        self.assertNotIn('RUSTUP_INIT_SKIP_SUDO_CHECK', cli)
-        self.assertNotIn('2>/dev/null', cli)
+        shared = bootstrap('build-installers.yml')
+        cli = (ROOT / '.github/workflows/build-cli.yml').read_text()
+        self.assertIn('uses: ./.github/workflows/build-installers.yml', cli)
+        self.assertIn('product: cli', cli)
+        subprocess.run(['bash', '-n'], input=shared, text=True, check=True)
+        self.assertLess(shared.index('zz-manager-manpages'), shared.index('apt-get update'))
+        self.assertNotIn('RUSTUP_INIT_SKIP_SUDO_CHECK', shared)
+        self.assertNotIn('2>/dev/null', shared)
 
     def test_dependency_installs_do_not_request_a_terminal(self):
-        for name in ['build-cli.yml', 'build-installers.yml']:
-            text = (ROOT / '.github/workflows' / name).read_text()
-            self.assertIn('sudo env DEBIAN_FRONTEND=noninteractive apt-get install -y', text)
+        text = (ROOT / '.github/workflows/build-installers.yml').read_text()
+        self.assertIn('sudo env DEBIAN_FRONTEND=noninteractive apt-get install -y', text)
+        self.assertEqual(text.count('apt-get update'), 1)
+
+    def test_linux_system_packages_match_selected_products(self):
+        source = (ROOT / '.github/workflows/build-installers.yml').read_text()
+        start = source.index('- name: Install dependencies for the selected Linux packages')
+        step = source[start:].split('            - id:', 1)[0]
+        body = textwrap.dedent(step.split('run: |\n', 1)[1])
+        desktop = {'libwebkit2gtk-4.1-dev', 'libappindicator3-dev', 'librsvg2-dev', 'patchelf', 'ffmpeg'}
+        cli = {'dpkg-dev', 'rpm'}
+        common = {'libssl-dev', 'libudev-dev', 'libxdo-dev', 'libdbus-1-dev'}
+        for product, expected in [('desktop', common | desktop), ('cli', common | cli),
+                                  ('all', common | desktop | cli)]:
+            with self.subTest(product=product):
+                result = subprocess.check_output(
+                    ['bash', '-e', '-c', "sudo() { printf '%s\\n' \"$@\"; }\n" + body],
+                    env=dict(os.environ, BUILD_PRODUCT=product), text=True,
+                )
+                arguments = result.splitlines()
+                self.assertEqual(arguments[:5], ['env', 'DEBIAN_FRONTEND=noninteractive', 'apt-get', 'install', '-y'])
+                self.assertEqual(set(arguments[5:]), expected)
 
     def exercise_account_home(self, home):
         with tempfile.TemporaryDirectory() as temporary:
             root = Path(temporary)
-            body = bootstrap('build-cli.yml')
+            body = bootstrap('build-installers.yml')
             # Run the actual new shell block; only remap its system configuration
             # destination into a disposable fixture. Account lookup is mocked.
             body = body[body.index('container_home='):body.index('apt-get update')]

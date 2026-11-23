@@ -401,6 +401,41 @@
           ]
         },
         {
+          "description": "A control-level assignment with fixed independent paths for each physical or interpreted event",
+          "type": "object",
+          "properties": {
+            "actions": {
+              "type": "array",
+              "items": {
+                "$ref": "#/$defs/Action"
+              }
+            },
+            "hold_ms": {
+              "type": "integer",
+              "format": "uint16",
+              "maximum": 65535,
+              "minimum": 0
+            },
+            "kind": {
+              "type": "string",
+              "const": "events"
+            },
+            "multi_press_ms": {
+              "type": "integer",
+              "format": "uint16",
+              "maximum": 65535,
+              "minimum": 0
+            }
+          },
+          "additionalProperties": false,
+          "required": [
+            "kind",
+            "actions",
+            "multi_press_ms",
+            "hold_ms"
+          ]
+        },
+        {
           "type": "object",
           "properties": {
             "kind": {
@@ -535,7 +570,9 @@
       "enum": [
         "queue",
         "ignore_busy",
-        "replace_pending"
+        "replace_pending",
+        "restart",
+        "cancel"
       ]
     },
     "AppRule": {
@@ -598,6 +635,17 @@
         "font": {
           "type": "string",
           "default": "sans"
+        },
+        "font_italic": {
+          "type": "boolean",
+          "default": false
+        },
+        "font_weight": {
+          "type": "integer",
+          "format": "uint16",
+          "default": 400,
+          "maximum": 65535,
+          "minimum": 0
         },
         "foreground": {
           "type": "string",
@@ -799,6 +847,12 @@
             "string",
             "null"
           ]
+        },
+        "live_label": {
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/LabelSegment"
+          }
         },
         "media": {
           "$ref": "#/$defs/MediaOptions",
@@ -2159,6 +2213,17 @@
           "type": "string",
           "default": "sans"
         },
+        "font_italic": {
+          "type": "boolean",
+          "default": false
+        },
+        "font_weight": {
+          "type": "integer",
+          "format": "uint16",
+          "default": 400,
+          "maximum": 65535,
+          "minimum": 0
+        },
         "foreground": {
           "type": "string",
           "default": "#ffffff"
@@ -2432,6 +2497,102 @@
           "type": "string",
           "const": "system"
         }
+      ]
+    },
+    "LabelSegment": {
+      "oneOf": [
+        {
+          "type": "object",
+          "properties": {
+            "kind": {
+              "type": "string",
+              "const": "literal"
+            },
+            "text": {
+              "type": "string"
+            }
+          },
+          "additionalProperties": false,
+          "required": [
+            "kind",
+            "text"
+          ]
+        },
+        {
+          "type": "object",
+          "properties": {
+            "fallback": {
+              "type": "string"
+            },
+            "kind": {
+              "type": "string",
+              "const": "parameter"
+            },
+            "name": {
+              "type": "string"
+            }
+          },
+          "additionalProperties": false,
+          "required": [
+            "kind",
+            "name",
+            "fallback"
+          ]
+        },
+        {
+          "type": "object",
+          "properties": {
+            "fallback": {
+              "type": "string"
+            },
+            "kind": {
+              "type": "string",
+              "const": "macro_state"
+            }
+          },
+          "additionalProperties": false,
+          "required": [
+            "kind",
+            "fallback"
+          ]
+        },
+        {
+          "type": "object",
+          "properties": {
+            "fallback": {
+              "type": "string"
+            },
+            "key": {
+              "type": "string"
+            },
+            "kind": {
+              "type": "string",
+              "const": "display"
+            }
+          },
+          "additionalProperties": false,
+          "required": [
+            "kind",
+            "key",
+            "fallback"
+          ]
+        }
+      ]
+    },
+    "LinkMember": {
+      "type": "object",
+      "properties": {
+        "control_id": {
+          "type": "string"
+        },
+        "page_id": {
+          "type": "string"
+        }
+      },
+      "additionalProperties": false,
+      "required": [
+        "page_id",
+        "control_id"
       ]
     },
     "MacroArgument": {
@@ -2866,6 +3027,15 @@
         },
         "id": {
           "type": "string"
+        },
+        "linked_controls": {
+          "type": "object",
+          "additionalProperties": {
+            "type": "array",
+            "items": {
+              "$ref": "#/$defs/LinkMember"
+            }
+          }
         },
         "model_id": {
           "type": "string"

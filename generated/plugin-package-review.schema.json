@@ -21,6 +21,9 @@
     "compatible": {
       "type": "boolean"
     },
+    "force_reinstall_available": {
+      "type": "boolean"
+    },
     "id": {
       "type": "string"
     },
@@ -36,11 +39,42 @@
     "package": {
       "$ref": "#/$defs/PackageCandidate"
     },
+    "permission_diff": {
+      "anyOf": [
+        {
+          "$ref": "#/$defs/PermissionDiff"
+        },
+        {
+          "type": "null"
+        }
+      ]
+    },
     "reason": {
       "type": [
         "string",
         "null"
       ]
+    },
+    "retained_services": {
+      "type": "array",
+      "items": {
+        "$ref": "#/$defs/ActionScope"
+      }
+    },
+    "retained_slots": {
+      "type": "array",
+      "items": {
+        "$ref": "#/$defs/VaultSetupSlot"
+      }
+    },
+    "reviewable_services": {
+      "type": [
+        "array",
+        "null"
+      ],
+      "items": {
+        "$ref": "#/$defs/ActionScope"
+      }
     },
     "source": {
       "$ref": "#/$defs/PackageSource"
@@ -73,6 +107,7 @@
     "channel",
     "channel_change",
     "compatible",
+    "force_reinstall_available",
     "manifest",
     "source",
     "compatibility",
@@ -80,6 +115,51 @@
     "can_run"
   ],
   "$defs": {
+    "ActionPermissions": {
+      "type": "object",
+      "properties": {
+        "optional": {
+          "type": "array",
+          "default": [],
+          "items": {
+            "$ref": "#/$defs/PermissionScope"
+          }
+        },
+        "purpose": {
+          "type": "string"
+        },
+        "required": {
+          "type": "array",
+          "default": [],
+          "items": {
+            "$ref": "#/$defs/PermissionScope"
+          }
+        }
+      },
+      "additionalProperties": false,
+      "required": [
+        "purpose"
+      ]
+    },
+    "ActionScope": {
+      "type": "object",
+      "properties": {
+        "action": {
+          "type": "string"
+        },
+        "required": {
+          "type": "boolean"
+        },
+        "scope": {
+          "$ref": "#/$defs/PermissionScope"
+        }
+      },
+      "required": [
+        "action",
+        "required",
+        "scope"
+      ]
+    },
     "CompatibilityCheck": {
       "type": "object",
       "properties": {
@@ -129,6 +209,16 @@
         "name": {
           "type": "string"
         },
+        "permissions": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/PermissionDeclaration"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
         "platforms": {
           "type": "array",
           "items": {
@@ -143,6 +233,15 @@
         },
         "runtime_kind": {
           "type": "string"
+        },
+        "setup_slots": {
+          "type": [
+            "array",
+            "null"
+          ],
+          "items": {
+            "$ref": "#/$defs/VaultSetupSlot"
+          }
         },
         "version": {
           "type": "string"
@@ -235,6 +334,303 @@
         "format",
         "filename",
         "sha256"
+      ]
+    },
+    "PermissionDeclaration": {
+      "type": "object",
+      "properties": {
+        "actions": {
+          "type": "object",
+          "additionalProperties": {
+            "$ref": "#/$defs/ActionPermissions"
+          }
+        },
+        "version": {
+          "type": "integer",
+          "format": "uint8",
+          "maximum": 255,
+          "minimum": 0
+        }
+      },
+      "additionalProperties": false,
+      "required": [
+        "version",
+        "actions"
+      ]
+    },
+    "PermissionDiff": {
+      "type": "object",
+      "properties": {
+        "added": {
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/ActionScope"
+          }
+        },
+        "removed": {
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/ActionScope"
+          }
+        },
+        "unchanged": {
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/ActionScope"
+          }
+        }
+      },
+      "required": [
+        "added",
+        "removed",
+        "unchanged"
+      ]
+    },
+    "PermissionScope": {
+      "oneOf": [
+        {
+          "type": "object",
+          "properties": {
+            "id": {
+              "type": "string",
+              "const": "ui.popup"
+            },
+            "mode": {
+              "type": "string"
+            }
+          },
+          "additionalProperties": false,
+          "required": [
+            "id",
+            "mode"
+          ]
+        },
+        {
+          "type": "object",
+          "properties": {
+            "id": {
+              "type": "string",
+              "const": "ui.notification"
+            },
+            "mode": {
+              "type": "string"
+            }
+          },
+          "additionalProperties": false,
+          "required": [
+            "id",
+            "mode"
+          ]
+        },
+        {
+          "type": "object",
+          "properties": {
+            "id": {
+              "type": "string",
+              "const": "notifications.create"
+            },
+            "mode": {
+              "type": "string"
+            }
+          },
+          "additionalProperties": false,
+          "required": [
+            "id",
+            "mode"
+          ]
+        },
+        {
+          "type": "object",
+          "properties": {
+            "id": {
+              "type": "string",
+              "const": "clipboard.read-text"
+            },
+            "mode": {
+              "type": "string"
+            }
+          },
+          "additionalProperties": false,
+          "required": [
+            "id",
+            "mode"
+          ]
+        },
+        {
+          "type": "object",
+          "properties": {
+            "id": {
+              "type": "string",
+              "const": "clipboard.write-text"
+            },
+            "mode": {
+              "type": "string"
+            }
+          },
+          "additionalProperties": false,
+          "required": [
+            "id",
+            "mode"
+          ]
+        },
+        {
+          "type": "object",
+          "properties": {
+            "data_class": {
+              "type": "string"
+            },
+            "id": {
+              "type": "string",
+              "const": "network.https"
+            },
+            "origin": {
+              "type": "string"
+            },
+            "recipe": {
+              "type": "string"
+            }
+          },
+          "additionalProperties": false,
+          "required": [
+            "id",
+            "origin",
+            "recipe",
+            "data_class"
+          ]
+        },
+        {
+          "type": "object",
+          "properties": {
+            "data_class": {
+              "type": "string"
+            },
+            "id": {
+              "type": "string",
+              "const": "network.http"
+            },
+            "origin": {
+              "type": "string"
+            },
+            "recipe": {
+              "type": "string"
+            }
+          },
+          "additionalProperties": false,
+          "required": [
+            "id",
+            "origin",
+            "recipe",
+            "data_class"
+          ]
+        },
+        {
+          "type": "object",
+          "properties": {
+            "entry_kind": {
+              "type": "string"
+            },
+            "field": {
+              "type": "string"
+            },
+            "id": {
+              "type": "string",
+              "const": "vault.read-location"
+            },
+            "purpose": {
+              "type": "string"
+            }
+          },
+          "additionalProperties": false,
+          "required": [
+            "id",
+            "field",
+            "entry_kind",
+            "purpose"
+          ]
+        },
+        {
+          "type": "object",
+          "properties": {
+            "entry_kind": {
+              "type": "string"
+            },
+            "field": {
+              "type": "string"
+            },
+            "id": {
+              "type": "string",
+              "const": "vault.read-secret"
+            },
+            "purpose": {
+              "type": "string"
+            }
+          },
+          "additionalProperties": false,
+          "required": [
+            "id",
+            "field",
+            "entry_kind",
+            "purpose"
+          ]
+        },
+        {
+          "type": "object",
+          "properties": {
+            "entry_kind": {
+              "type": "string"
+            },
+            "field": {
+              "type": "string"
+            },
+            "id": {
+              "type": "string",
+              "const": "vault.write-secret"
+            },
+            "purpose": {
+              "type": "string"
+            }
+          },
+          "additionalProperties": false,
+          "required": [
+            "id",
+            "field",
+            "entry_kind",
+            "purpose"
+          ]
+        },
+        {
+          "type": "object",
+          "properties": {
+            "field": {
+              "type": "string"
+            },
+            "id": {
+              "type": "string",
+              "const": "vault.access"
+            },
+            "mode": {
+              "type": "string"
+            },
+            "operation": {
+              "type": "string"
+            },
+            "origin": {
+              "type": "string"
+            },
+            "recipe": {
+              "type": "string"
+            }
+          },
+          "additionalProperties": false,
+          "required": [
+            "id",
+            "mode",
+            "field",
+            "operation",
+            "recipe",
+            "origin"
+          ]
+        }
       ]
     },
     "PluginPreflight": {
@@ -482,6 +878,85 @@
         "state",
         "message",
         "overridden"
+      ]
+    },
+    "VaultSetupSlot": {
+      "type": "object",
+      "properties": {
+        "action": {
+          "type": "string"
+        },
+        "entry_kind": {
+          "type": "string"
+        },
+        "field": {
+          "type": "string"
+        },
+        "fields": {
+          "type": [
+            "array",
+            "null"
+          ],
+          "items": {
+            "type": "string"
+          }
+        },
+        "id": {
+          "type": "string"
+        },
+        "kind": {
+          "type": "string"
+        },
+        "mode": {
+          "type": "string"
+        },
+        "operation": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "origin": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "precision": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "purpose": {
+          "type": "string"
+        },
+        "recipe": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "recipient": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "required": {
+          "type": "boolean"
+        }
+      },
+      "additionalProperties": false,
+      "required": [
+        "id",
+        "kind",
+        "entry_kind",
+        "mode",
+        "required",
+        "purpose",
+        "field",
+        "action"
       ]
     }
   }

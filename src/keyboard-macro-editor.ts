@@ -1,3 +1,4 @@
+import { ensureDialog } from './dialog-loader';
 import type AlpineType from '@alpinejs/csp';
 import type { Bridge } from './bridge';
 import { native } from './bridge';
@@ -29,11 +30,13 @@ let openEditor:
       ) => Promise<KeyboardMacroAction | null>)
     | undefined;
 // Request editing of the selected keyboard macro action
-export function editKeyboardMacro(
+export async function editKeyboardMacro(
     value: KeyboardMacroAction,
     opener: HTMLElement,
     signal: AbortSignal,
 ) {
+    if (!openEditor) await ensureDialog('keyboard-macro-editor');
+    if (signal.aborted) return null;
     if (!openEditor) return Promise.reject(Error('The keyboard editor is not ready.'));
     return openEditor(value, opener, signal);
 }

@@ -13,6 +13,12 @@ pub struct NormalizedManifest {
     pub platforms: Vec<String>,
     pub action_count: usize,
     pub control_types: Vec<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    #[ts(optional)]
+    pub permissions: Option<super::permissions::PermissionDeclaration>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    #[ts(optional)]
+    pub setup_slots: Option<Vec<super::vault_rpc::VaultSetupSlot>>,
 }
 
 /// Vendor versions are deliberately independent of the official catalog SemVer schema
@@ -252,9 +258,12 @@ pub(super) fn normalize_with_identity(
     let kind = requirement
         .as_ref()
         .map(|r| r.kind.name())
-        .unwrap_or_else(|| match entry_file.extension().and_then(|s| s.to_str()) {
-            Some("html" | "htm") => "browser",
-            _ => "native",
+        .unwrap_or_else(|| {
+            if browser::is_html(&entry_file) {
+                "browser"
+            } else {
+                "native"
+            }
         });
     let actions = manifest["Actions"]
         .as_array()
@@ -344,6 +353,7 @@ pub(super) fn normalize_with_identity(
             }
         }
     }
+    let slots = super::vault_rpc::setup_slots(manifest)?;
     Ok(NormalizedManifest {
         id: id.into(),
         name: name.into(),
@@ -362,6 +372,8 @@ pub(super) fn normalize_with_identity(
             .unwrap_or_default(),
         action_count: actions.len(),
         control_types: controls.into_iter().collect(),
+        permissions: super::permissions::declarations(manifest)?,
+        setup_slots: (!slots.is_empty()).then_some(slots),
     })
 }
 

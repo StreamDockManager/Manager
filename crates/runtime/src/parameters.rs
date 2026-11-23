@@ -296,7 +296,63 @@ impl crate::Runtime {
                 }
             }
         }
-        self.profiles.write_parameter_overrides(&value)
+        let previous = self.stored_parameter_overrides()?;
+        if previous.installation == value.installation && previous.devices == value.devices {
+            return Ok(());
+        }
+        self.profiles.write_parameter_overrides(&value)?;
+        self.label_overrides.lock().unwrap().take();
+        let mut changed = false;
+        for device in state.devices.iter().filter(|d| d.connected) {
+            let session = state.session(&device.id);
+            let Some(profile) = state.profiles.iter().find(|p| p.id == session.profile_id) else {
+                continue;
+            };
+            let (_, layers) = self.builtin_state.device_overrides(&state, &device.id);
+            let preview = self.hardware_preview(&device.id);
+            let draft = preview.as_ref().map(|(_, d)| d);
+            let page = profile.pages.iter().find(|p| p.id == session.page_id);
+            let affects = device
+                .manifest
+                .controls
+                .iter()
+                .filter(|c| c.image_slot.is_some() || c.feedback_surface.is_some())
+                .any(|c| {
+                    let active = if let Some(binding) = draft.and_then(|d| d.bindings.get(&c.id)) {
+                        Some((profile, binding))
+                    } else if let Some(layer) = layers.get(&c.id) {
+                        state
+                            .profiles
+                            .iter()
+                            .find(|p| p.id == layer.profile_id)
+                            .map(|p| (p, &layer.binding))
+                    } else {
+                        page.and_then(|p| p.bindings.get(&c.id))
+                            .map(|b| (profile, b))
+                    };
+                    active.is_some_and(|(profile, b)| {
+                        b.live_label.iter().any(|s| {
+                            let crate::live_label::LabelSegment::Parameter { name, .. } = s else {
+                                return false;
+                            };
+                            crate::live_label::parameter(profile, &previous, &device.id, name)
+                                != crate::live_label::parameter(profile, &value, &device.id, name)
+                        })
+                    })
+                });
+            if affects {
+                self.emit("live-feedback", Some(device.id.clone()), None, None);
+                changed = true;
+            }
+        }
+        if changed
+            && !self
+                .device_wake_pending
+                .swap(true, std::sync::atomic::Ordering::SeqCst)
+        {
+            let _ = self.device_commands.send(crate::devices::Request::Wake);
+        }
+        Ok(())
     }
     // Resolve parameters
     pub(crate) fn resolve_parameters(
@@ -619,7 +675,9 @@ mod tests {
     fn accepted_runs_freeze_definitions_and_ordinary_overrides() {
         let root = tempfile::tempdir().unwrap();
         let runtime = crate::Runtime::build(root.path().into(), false).unwrap();
-        runtime.state.lock().unwrap().profiles[0].parameters = vec![ProfileParameter {
+        let snapshot = runtime.snapshot();
+        let mut profile = snapshot.profiles[0].clone();
+        profile.parameters = vec![ProfileParameter {
             name: "site".into(),
             label: "Site".into(),
             r#type: "string".into(),
@@ -627,6 +685,9 @@ mod tests {
             default: Some(json!("https://before.example")),
             sensitive: false,
         }];
+        runtime
+            .save_profile(profile, snapshot.configuration_revision)
+            .unwrap();
         let mut overrides = ParameterOverrides::default();
         overrides.installation.insert(
             "default".into(),

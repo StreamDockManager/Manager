@@ -41,6 +41,7 @@ fn node_package_registers_receives_input_and_returns_scoped_feedback() {
     let info = host.install(&archive).unwrap();
     assert!(!info.enabled);
     support::runtime(&host, &info.id, false).unwrap();
+    host.set_sleep_when_hidden(&info.id, false).unwrap();
     host.enable(&info.id, true).unwrap();
     support::demand(&mut host, &info.id, "device-a");
     host.dispatch(
@@ -73,8 +74,15 @@ fn node_package_registers_receives_input_and_returns_scoped_feedback() {
     let added = root.join("plugins/new-browser");
     std::fs::create_dir(&added).unwrap();
     std::fs::write(added.join("runtime.html"), "<!doctype html>").unwrap();
+    std::fs::write(
+        added.join("icon.svg"),
+        include_bytes!("../../../tests/fixtures/plugins/browser/icon.svg"),
+    )
+    .unwrap();
     std::fs::write(added.join("manifest.json"), serde_json::to_vec(&serde_json::json!({
-        "UUID": "fixture.new-browser", "Name": "New browser", "Version": "1.0", "CodePath": "runtime.html", "Actions": []
+        "UUID": "fixture.new-browser", "Name": "New browser", "Version": "1.0", "CodePath": "runtime.html",
+        "Author":"Fixture", "Icon":"icon.svg", "OS":[{"Platform":"mac"},{"Platform":"windows"},{"Platform":"linux"}],
+        "Actions": [{"UUID":"fixture.new-browser.action","Name":"Action","Icon":"icon.svg","States":[{"Image":"icon.svg"}]}]
     })).unwrap()).unwrap();
     assert_eq!(host.reload().unwrap().added, 1);
     assert!(
@@ -190,6 +198,7 @@ fn official_elgato_sdk_executes_legacy_and_rejects_older_manifest_in_default_mod
         assert!(runtime.overridden);
         assert_eq!(runtime.selected.as_ref().unwrap().line, "24");
         assert_eq!(runtime.state, "ready");
+        host.set_sleep_when_hidden(&info.id, false).unwrap();
         host.enable(&info.id, true).unwrap();
         support::demand(&mut host, &info.id, "device-a");
         let result_path = host

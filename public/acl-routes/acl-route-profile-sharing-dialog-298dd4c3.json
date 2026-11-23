@@ -1,0 +1,19 @@
+{
+  "version": 1,
+  "basePath": "..",
+  "components": {
+    "sd-profile-sharing-dialog": {
+      "source": "components/sd-profile-sharing-dialog.html",
+      "dependencies": [],
+      "options": {
+        "shadow": false,
+        "templateRevision": "sha256-8g4iQzHtQfgWTH5aL-IjVcDeREozGKbmkSf-gdVIiQc"
+      }
+    }
+  },
+  "groups": {
+    "profile-sharing-dialog": [
+      "sd-profile-sharing-dialog"
+    ]
+  }
+}

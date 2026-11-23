@@ -7,6 +7,7 @@ use std::{
     path::{Path, PathBuf},
     time::{Duration, Instant, SystemTime, UNIX_EPOCH},
 };
+use stream_dock_manager_storage::cache_index::{self, Kind, Limits, Record, Removal, Table};
 // Read the current time for this subsystem
 fn now() -> u64 {
     SystemTime::now()
@@ -188,6 +189,12 @@ pub(super) struct Entry {
     pub meta_path: PathBuf,
     pub meta: Metadata,
     _lease: File,
+    index: Table,
+}
+impl Drop for Entry {
+    fn drop(&mut self) {
+        let _ = self.index.touch(&self.meta.key, false);
+    }
 }
 impl Entry {
     // Write metadata
@@ -198,8 +205,15 @@ impl Entry {
             .prefix(".checkpoint-")
             .tempfile_in(parent)
             .map_err(|e| e.to_string())?;
-        file.write_all(&serde_json::to_vec(&self.meta).map_err(|e| e.to_string())?)
-            .map_err(|e| e.to_string())?;
+        let bytes = serde_json::to_vec(&self.meta).map_err(|e| e.to_string())?;
+        let mut record = Record::file(
+            self.meta.key.clone(),
+            self.body.metadata().map_err(|e| e.to_string())?.len() + bytes.len() as u64,
+        );
+        record.scope = self.meta.scope.clone();
+        record.active = true;
+        self.index.record(&record)?;
+        file.write_all(&bytes).map_err(|e| e.to_string())?;
         file.as_file().sync_all().map_err(|e| e.to_string())?;
         file.persist(&self.meta_path).map_err(|e| e.to_string())?;
         Ok(())
@@ -222,7 +236,13 @@ impl Entry {
     }
     // Discard for the current operation
     pub fn discard(&self) -> Result<(), String> {
-        erase(self.body.parent().ok_or("Invalid download cache")?)
+        self.index.hint(&self.meta.key)?;
+        erase(self.body.parent().ok_or("Invalid download cache")?)?;
+        let mut record = Record::file(self.meta.key.clone(), 0);
+        record.scope = self.meta.scope.clone();
+        record.hint = true;
+        record.active = true;
+        self.index.record(&record)
     }
     // Check control
     pub fn check_control(&self, control: Control) -> Result<(), String> {
@@ -239,19 +259,23 @@ impl Entry {
 #[cfg(test)]
 // Acquire for the current operation
 pub(super) fn acquire(root: &Path, spec: &ArtifactSpec) -> Result<Entry, String> {
-    acquire_with_limits(root, spec, CacheLimits::default())
+    acquire_indexed(root, spec, &table(root))
 }
-// Acquire with limits
-pub(super) fn acquire_with_limits(
+pub(super) fn table(root: &Path) -> Table {
+    let db_root = if root.file_name().is_some_and(|n| n == "download-cache") {
+        root.parent().unwrap_or(root)
+    } else {
+        root
+    };
+    Table::new(db_root, Kind::Transfers)
+}
+pub(super) fn acquire_indexed(
     root: &Path,
     spec: &ArtifactSpec,
-    limits: CacheLimits,
+    index: &Table,
 ) -> Result<Entry, String> {
     let _registry = registry(root)?;
-    let entry = acquire_locked(root, spec)?;
-    // Holding the new entry lease protects it while idle neighbors are pruned
-    prune_locked(root, limits, false)?;
-    Ok(entry)
+    acquire_locked(root, spec, index)
 }
 // Acquire the cache registry lock before inspecting or changing entries
 fn registry(root: &Path) -> Result<File, String> {
@@ -275,7 +299,7 @@ fn registry(root: &Path) -> Result<File, String> {
     Ok(registry)
 }
 // Acquire locked
-fn acquire_locked(root: &Path, spec: &ArtifactSpec) -> Result<Entry, String> {
+fn acquire_locked(root: &Path, spec: &ArtifactSpec, index: &Table) -> Result<Entry, String> {
     let key = spec.key();
     let dir = root.join(&key);
     directory(&dir)?;
@@ -287,12 +311,13 @@ fn acquire_locked(root: &Path, spec: &ArtifactSpec) -> Result<Entry, String> {
     clear_checkpoints(&dir)?;
     let meta_path = dir.join("meta.json");
     let meta = metadata(&meta_path).ok().filter(|m| m.matches(spec));
-    let fresh = meta.is_none();
+    let fresh = meta.is_none() || index.hinted(&key)?;
     let mut result = Entry {
         body: dir.join("body.part"),
         meta_path,
         meta: meta.unwrap_or_else(|| Metadata::new(spec)),
         _lease: lease,
+        index: index.clone(),
     };
     let mut file = private_file(&result.body)?;
     if fresh {
@@ -303,54 +328,18 @@ fn acquire_locked(root: &Path, spec: &ArtifactSpec) -> Result<Entry, String> {
     Ok(result)
 }
 // Discard identity
-pub(super) fn discard_identity(root: &Path, identity: &str) -> Result<(), String> {
+pub(super) fn discard_identity(root: &Path, index: &Table, identity: &str) -> Result<(), String> {
     if identity.is_empty() || identity.len() > 4096 {
         return Err("Invalid artifact identity".into());
     }
     let _registry = registry(root)?;
-    let scope = hex::encode(Sha256::digest(identity.as_bytes()));
-    for (i, entry) in std::fs::read_dir(root)
-        .map_err(|e| e.to_string())?
-        .enumerate()
-    {
-        if i >= 256 {
-            return Err("Download cache inventory exceeds its bound".into());
+    import(root, index)?;
+    for key in index.scope_keys(&hex::encode(Sha256::digest(identity.as_bytes())))? {
+        if key_valid(&key) && !is_leased(&root.join(&key))? {
+            index.hint(&key)?;
         }
-        let entry = entry.map_err(|e| e.to_string())?;
-        if !entry.file_name().to_str().is_some_and(key_valid) {
-            continue;
-        }
-        let path = entry.path();
-        directory(&path)?;
-        let Ok(meta) = metadata(&path.join("meta.json")) else {
-            continue;
-        };
-        if !meta.valid()
-            || meta.scope != scope
-            || entry.file_name().to_str() != Some(meta.key.as_str())
-        {
-            continue;
-        }
-        let lease = private_file(&path.join("lease.lock"))?;
-        if lease.try_lock().is_err() {
-            continue;
-        }
-        erase(&path)?;
-        drop(lease);
-        std::fs::remove_file(path.join("lease.lock")).map_err(|e| e.to_string())?;
-        std::fs::remove_dir(path).map_err(|e| e.to_string())?;
     }
     Ok(())
-}
-
-struct InventoryEntry {
-    path: PathBuf,
-    touched: u64,
-    bytes: u64,
-    empty: bool,
-    // Keep every acquired lease until maintenance finishes, preventing mutation
-    // of its metadata/body. Acquisition holds the same cross-process registry.
-    lease: Option<File>,
 }
 // Measure only immediate regular files. Nested/linked/unreadable content stays
 // untouched and marks the total as incomplete rather than pretending it is zero.
@@ -383,156 +372,174 @@ fn measured_bytes(path: &Path) -> (u64, bool) {
     }
     (bytes, incomplete)
 }
-// Collect the files and identity data for this inventory
-fn inventory(root: &Path) -> Result<(Vec<InventoryEntry>, CacheStats), String> {
-    let mut entries = Vec::new();
-    let mut stats = CacheStats::default();
-    for item in std::fs::read_dir(root).map_err(|e| e.to_string())? {
-        let item = item.map_err(|e| e.to_string())?;
-        let name = item.file_name();
-        if name == "registry.lock" {
-            continue;
-        }
-        let path = item.path();
-        let (bytes, incomplete) = measured_bytes(&path);
-        stats.bytes = stats.bytes.saturating_add(bytes);
-        stats.usage_incomplete |= incomplete;
-        stats.entries += 1;
-        if !name.to_str().is_some_and(key_valid)
-            || !item.file_type().map_err(|e| e.to_string())?.is_dir()
-        {
-            stats.skipped_entries += 1;
-            continue;
-        }
-        // Refuse unknown files, symlinks, and malformed ownership metadata
-        // No recursive deletes and no paths from metadata are used
-        let mut lock_error = None;
-        let mut inspect = || -> Result<InventoryEntry, String> {
-            owned_files(&path)?;
-            let lease_path = path.join("lease.lock");
-            regular(&lease_path)?;
-            let lease = private_file(&lease_path)?;
-            let lease = match lease.try_lock() {
-                Ok(()) => Some(lease),
-                Err(std::fs::TryLockError::WouldBlock) => None,
-                Err(std::fs::TryLockError::Error(error)) => {
-                    lock_error = Some(error.to_string());
-                    return Err(error.to_string());
-                }
-            };
-            // Explicit discard removes body and metadata but retains the lease
-            // inode until its owner releases it. Recognize only that exact empty
-            // shape, never orphan bodies, checkpoints, or malformed metadata.
-            let mut files = std::fs::read_dir(&path).map_err(|e| e.to_string())?;
-            let empty = files
-                .next()
-                .transpose()
-                .map_err(|e| e.to_string())?
-                .is_some_and(|file| file.file_name() == "lease.lock")
-                && files.next().is_none()
-                && lease_path.metadata().map_err(|e| e.to_string())?.len() == 0;
-            if empty {
-                return Ok(InventoryEntry {
-                    path: path.clone(),
-                    touched: 0,
-                    bytes: 0,
-                    empty: true,
-                    lease,
-                });
-            }
-            let meta = metadata(&path.join("meta.json"))?;
-            if !meta.valid() || name.to_str() != Some(meta.key.as_str()) {
-                return Err("Invalid cache ownership metadata".into());
-            }
-            let mut bytes = 0u64;
-            for file in std::fs::read_dir(&path).map_err(|e| e.to_string())? {
-                let file = file.map_err(|e| e.to_string())?;
-                let meta = file.path().symlink_metadata().map_err(|e| e.to_string())?;
-                if !meta.is_file() || meta.file_type().is_symlink() {
-                    return Err("Unsafe cache file".into());
-                }
-                bytes = bytes.saturating_add(meta.len());
-            }
-            Ok(InventoryEntry {
-                path: path.clone(),
-                touched: meta.touched,
-                bytes,
-                empty: false,
-                lease,
-            })
-        };
-        match inspect() {
-            Ok(entry) => {
-                stats.active_entries += usize::from(entry.lease.is_none());
-                entries.push(entry);
-            }
-            Err(_) => {
-                if let Some(error) = lock_error {
-                    return Err(format!("Unable to lock download cache entry: {error}"));
-                }
-                stats.skipped_entries += 1;
-            }
-        }
+// A missing lease file has no live owner. Never follow cached directory aliases.
+fn is_leased(path: &Path) -> Result<bool, String> {
+    match path.symlink_metadata() {
+        Ok(m) if m.is_dir() && !m.file_type().is_symlink() => (),
+        Ok(_) => return Ok(false),
+        Err(e) if e.kind() == std::io::ErrorKind::NotFound => return Ok(false),
+        Err(e) => return Err(e.to_string()),
     }
-    Ok((entries, stats))
+    let lease = path.join("lease.lock");
+    match lease.symlink_metadata() {
+        Ok(m) if m.is_file() && !m.file_type().is_symlink() => (),
+        Ok(_) => return Ok(false),
+        Err(e) if e.kind() == std::io::ErrorKind::NotFound => return Ok(false),
+        Err(e) => return Err(e.to_string()),
+    }
+    let file = OpenOptions::new()
+        .read(true)
+        .write(true)
+        .open(lease)
+        .map_err(|e| e.to_string())?;
+    match file.try_lock() {
+        Ok(()) => Ok(false),
+        Err(std::fs::TryLockError::WouldBlock) => Ok(true),
+        Err(e) => Err(e.to_string()),
+    }
 }
-// Read the current subsystem statistics
-pub(super) fn stats(root: &Path) -> Result<CacheStats, String> {
+// Inspect a single legacy entry or an eviction candidate under the registry lock.
+fn inspect(path: &Path, key: &str) -> Result<(Option<File>, Option<Metadata>), String> {
+    if !key_valid(key)
+        || !path
+            .symlink_metadata()
+            .is_ok_and(|m| m.is_dir() && !m.file_type().is_symlink())
+    {
+        return Err("Unrecognized transfer directory".into());
+    }
+    let lease_path = path.join("lease.lock");
+    regular(&lease_path)?;
+    let lease = private_file(&lease_path)?;
+    let lease = match lease.try_lock() {
+        Ok(()) => Some(lease),
+        Err(std::fs::TryLockError::WouldBlock) => None,
+        Err(e) => return Err(e.to_string()),
+    };
+    if lease.is_none() {
+        return Ok((None, None));
+    }
+    owned_files(path)?;
+    if lease_path.metadata().map_err(|e| e.to_string())?.len() == 0
+        && std::fs::read_dir(path).map_err(|e| e.to_string())?.count() == 1
+    {
+        return Ok((lease, None));
+    }
+    let meta = metadata(&path.join("meta.json"))?;
+    if !meta.valid() || meta.key != key {
+        return Err("Invalid transfer ownership metadata".into());
+    }
+    Ok((lease, Some(meta)))
+}
+fn import(root: &Path, index: &Table) -> Result<(), String> {
+    index.import_once(|| {
+        let mut records = vec![];
+        for item in std::fs::read_dir(root).map_err(|e| e.to_string())? {
+            let path = item.map_err(|e| e.to_string())?.path();
+            let Some(key) = path.file_name().and_then(|n| n.to_str()) else {
+                continue;
+            };
+            if matches!(
+                key,
+                "registry.lock"
+                    | "databases"
+                    | "cache.sqlite3"
+                    | "cache.sqlite3-wal"
+                    | "cache.sqlite3-shm"
+                    | "cache.sqlite3-journal"
+            ) || !cache_index::safe_relative(key)
+            {
+                continue;
+            }
+            let (bytes, incomplete) = measured_bytes(&path);
+            let mut record = Record::file(key.into(), bytes);
+            record.incomplete = incomplete;
+            match inspect(&path, key) {
+                Ok((lease, meta)) => {
+                    record.active = lease.is_none();
+                    if let Some(meta) = meta {
+                        record.used =
+                            (meta.touched.saturating_mul(1000)).min(i64::MAX as u64) as i64;
+                        record.scope = meta.scope;
+                    } else if !record.active {
+                        record.hint = true;
+                    }
+                }
+                Err(_) => record.owned = false,
+            }
+            records.push(record);
+        }
+        Ok(records)
+    })?;
+    index.recover_activity(|key| {
+        if key_valid(key) {
+            is_leased(&root.join(key))
+        } else {
+            Ok(false)
+        }
+    })
+}
+fn cache_stats(stats: cache_index::Stats) -> CacheStats {
+    CacheStats {
+        bytes: stats.bytes,
+        entries: stats.entries,
+        active_entries: stats.active,
+        skipped_entries: stats.protected,
+        usage_incomplete: stats.incomplete,
+    }
+}
+pub(super) fn stats(root: &Path, index: &Table) -> Result<CacheStats, String> {
     let _registry = registry(root)?;
-    Ok(inventory(root)?.1)
+    import(root, index)?;
+    Ok(cache_stats(index.stats()?))
 }
-// Prune for the current operation
-pub(super) fn prune(root: &Path, limits: CacheLimits, clear: bool) -> Result<PruneReport, String> {
+pub(super) fn prune(
+    root: &Path,
+    index: &Table,
+    limits: CacheLimits,
+    clear: bool,
+) -> Result<PruneReport, String> {
     let _registry = registry(root)?;
-    prune_locked(root, limits, clear)
-}
-// Prune locked
-fn prune_locked(root: &Path, limits: CacheLimits, clear: bool) -> Result<PruneReport, String> {
-    let (mut entries, mut stats) = inventory(root)?;
-    let mut report = PruneReport {
+    import(root, index)?;
+    let report = index.purge(
+        Limits {
+            bytes: limits.max_bytes,
+            entries: Some(limits.max_entries),
+            age: Some(limits.max_age),
+        },
+        clear,
+        |key| {
+            if !key_valid(key) {
+                return Ok(Removal::Protected);
+            }
+            let path = root.join(key);
+            if path
+                .symlink_metadata()
+                .is_err_and(|e| e.kind() == std::io::ErrorKind::NotFound)
+            {
+                return Ok(Removal::Missing);
+            }
+            let Ok((lease, _)) = inspect(&path, key) else {
+                return Ok(Removal::Protected);
+            };
+            let Some(lease) = lease else {
+                return Ok(Removal::Busy);
+            };
+            index.hint(key)?;
+            erase(&path)?;
+            drop(lease);
+            std::fs::remove_file(path.join("lease.lock"))
+                .and_then(|_| std::fs::remove_dir(&path))
+                .map_err(|e| e.to_string())?;
+            Ok(Removal::Removed)
+        },
+    )?;
+    let stats = cache_stats(report.stats);
+    Ok(PruneReport {
         active_entries: stats.active_entries,
         skipped_entries: stats.skipped_entries,
-        ..PruneReport::default()
-    };
-    entries.sort_by(|a, b| {
-        b.empty
-            .cmp(&a.empty)
-            .then_with(|| a.touched.cmp(&b.touched))
-            .then_with(|| a.path.cmp(&b.path))
-    });
-    let current = now();
-    for entry in entries {
-        if entry.lease.is_none() {
-            continue;
-        }
-        if !clear
-            && !entry.empty
-            && stats.entries <= limits.max_entries
-            && stats.bytes <= limits.max_bytes
-            && current.saturating_sub(entry.touched) < limits.max_age.as_secs()
-        {
-            continue;
-        }
-        let remove = || -> Result<(), String> {
-            erase(&entry.path)?;
-            // No acquirer can reopen this lease inode while the registry is held
-            drop(entry.lease);
-            std::fs::remove_file(entry.path.join("lease.lock")).map_err(|e| e.to_string())?;
-            std::fs::remove_dir(&entry.path).map_err(|e| e.to_string())
-        };
-        match remove() {
-            Ok(()) => {
-                report.removed_entries += 1;
-                report.removed_bytes = report.removed_bytes.saturating_add(entry.bytes);
-                stats.entries = stats.entries.saturating_sub(1);
-                stats.bytes = stats.bytes.saturating_sub(entry.bytes);
-            }
-            Err(error) => report
-                .errors
-                .push(format!("Unable to remove cache entry: {error}")),
-        }
-    }
-    // Rescan after partial failures and concurrent writes by protected owners
-    report.stats = inventory(root)?.1;
-    Ok(report)
+        stats,
+        removed_entries: report.removed_entries,
+        removed_bytes: report.removed_bytes,
+        errors: report.errors,
+    })
 }

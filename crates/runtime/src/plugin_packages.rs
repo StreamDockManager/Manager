@@ -1,5 +1,8 @@
 //! Individual package reviews share validated staging and recoverable replacement
-use crate::updates::{compatible, stable_version, verify_file, CatalogSelection, PackageCandidate};
+use crate::{
+    updates::{compatible, stable_version, verify_file, CatalogSelection, PackageCandidate},
+    vault::{VaultAssignment, VaultEntry, VaultEntryInput, VaultSetupSelection},
+};
 use serde::{Deserialize, Serialize};
 use std::path::{Path, PathBuf};
 use stream_dock_manager_plugin_host::{PluginHost, PreparedPlugin};
@@ -26,6 +29,18 @@ pub struct PluginSelectionReview {
 
 #[derive(Debug, Clone, Serialize, Deserialize, ts_rs::TS, schemars::JsonSchema)]
 pub struct PluginPackageReview {
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    #[ts(optional=nullable,as="Option<Vec<stream_dock_manager_plugin_host::vault_rpc::VaultSetupSlot>>")]
+    pub retained_slots: Vec<stream_dock_manager_plugin_host::vault_rpc::VaultSetupSlot>,
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    #[ts(optional=nullable,as="Option<Vec<stream_dock_manager_plugin_host::permissions::ActionScope>>")]
+    pub retained_services: Vec<stream_dock_manager_plugin_host::permissions::ActionScope>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    #[ts(optional = nullable)]
+    pub reviewable_services: Option<Vec<stream_dock_manager_plugin_host::permissions::ActionScope>>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    #[ts(optional)]
+    pub permission_diff: Option<stream_dock_manager_plugin_host::permissions::PermissionDiff>,
     #[serde(default)]
     #[ts(optional)]
     pub suggested_profiles: Option<crate::plugin_profiles::PluginProfileCatalog>,
@@ -36,6 +51,7 @@ pub struct PluginPackageReview {
     pub channel: String,
     pub channel_change: bool,
     pub compatible: bool,
+    pub force_reinstall_available: bool,
     pub reason: Option<String>,
     pub manifest: stream_dock_manager_plugin_host::manifest::NormalizedManifest,
     pub source: stream_dock_manager_plugin_host::PackageSource,
@@ -44,11 +60,45 @@ pub struct PluginPackageReview {
     pub can_run: bool,
     pub version_change: Option<String>,
 }
+#[derive(Serialize, ts_rs::TS)]
+pub struct VaultSetupChoices {
+    pub ticket: String,
+    pub entries: Vec<VaultEntry>,
+}
+
+struct StagedPicker {
+    ticket: String,
+    slot: String,
+    action: String,
+    epoch: uuid::Uuid,
+    opened: std::time::Instant,
+}
+
+// Require confirmation for an older version or the same version from the same channel
+fn catalog_requires_reinstall(
+    version: &str,
+    installed: &str,
+    channel_change: bool,
+) -> Result<bool, String> {
+    Ok(stable_version(version)? < stable_version(installed)?
+        || version == installed && !channel_change)
+}
+
 pub struct StagedPackage {
+    service_review: stream_dock_manager_plugin_host::permission_rpc::InstallReview,
+    publisher: Option<String>,
+    continuity: Option<crate::vault::Continuity>,
+    picker: Option<StagedPicker>,
     pub review: PluginPackageReview,
     prepared: Option<PreparedPlugin>,
     selection: Option<CatalogSelection>,
     created: std::time::Instant,
+    vault_expected_installation: Option<String>,
+    force_reinstall_origin: Option<serde_json::Value>,
+    vault_editor: Option<u64>,
+    vault_selections: std::collections::BTreeMap<(String, String), VaultAssignment>,
+    direct_read_opt_ins: std::collections::BTreeMap<(String, String), uuid::Uuid>,
+    vault_created_values: std::collections::BTreeSet<(String, String)>,
 }
 impl crate::review_store::ReviewSession for StagedPackage {
     const LIMIT: usize = 4;
@@ -131,9 +181,15 @@ impl crate::Runtime {
         package: PackageCandidate,
         selection: Option<CatalogSelection>,
     ) -> Result<PluginPackageReview, String> {
+        let manifest = PluginHost::prepared_manifest(&prepared);
+        let publisher = selection
+            .as_ref()
+            .filter(|_| manifest.permissions.is_some() || manifest.setup_slots.is_some())
+            .and_then(|s| self.updates.scoped_publisher(s));
         let host = self.plugins.lock().unwrap();
         let installed = host.list().into_iter().find(|p| p.id == package.id);
         let provenance = host.provenance(&package.id);
+        let vault_expected_installation = host.current_vault_installation_token(&package.id);
         let channel = selection
             .as_ref()
             .map(|s| s.channel.clone())
@@ -151,18 +207,36 @@ impl crate::Runtime {
         } else {
             None
         };
+        let mut catalog_reinstall = false;
         if let (Some(old), Some(selection)) = (&installed, &selection) {
             if provenance
                 .as_ref()
                 .is_none_or(|p| p["repository"] != selection.repository)
             {
                 reason = Some("Installed package is manually managed. Import a local ZIP to replace it explicitly.".into());
-            } else if stable_version(&package.version)? < stable_version(&old.version)?
-                || package.version == old.version && !channel_change
-            {
-                reason = Some("Already installed or downgrade blocked".into());
+            } else {
+                catalog_reinstall =
+                    catalog_requires_reinstall(&package.version, &old.version, channel_change)?;
             }
         }
+        let reviewable_services = host.reviewable_services(&prepared);
+        let service_review = host.service_review(&package.id)?;
+        if PluginHost::prepared_manifest(&prepared).missing_required_services(&reviewable_services)
+        {
+            reason.get_or_insert_with(|| "A required Manager permission is unavailable".into());
+        }
+        let uses_vault_references = installed.as_ref().and_then(|p|p.permissions.as_ref()).is_some_and(|d|
+            d.actions.values().any(|g| g.required.iter().chain(&g.optional).any(|s| matches!(s, stream_dock_manager_plugin_host::permissions::PermissionScope::Access{..}))));
+        let prior_vault = publisher.as_ref().and_then(|_| {
+            host.verified_vault_installation(&package.id).or_else(|| {
+                uses_vault_references
+                    .then(|| host.reviewed_vault_owner(&package.id))
+                    .flatten()
+            })
+        });
+        let prior_decisions = publisher
+            .as_ref()
+            .and_then(|_| host.installed_permissions(&package.id).ok());
         drop(host);
         let version_change = installed
             .as_ref()
@@ -188,12 +262,117 @@ impl crate::Runtime {
                 }
                 .into()
             });
+        let manifest = PluginHost::prepared_manifest(&prepared);
+        let permission_diff = stream_dock_manager_plugin_host::permissions::scope_diff(
+            installed.as_ref().and_then(|p| p.permissions.as_ref()),
+            manifest.permissions.as_ref(),
+        );
+        let continuous = publisher
+            .as_ref()
+            .zip(provenance.as_ref())
+            .zip(selection.as_ref())
+            .is_some_and(|((proof, old), current)| {
+                old["verified_publisher"].as_str() == Some(proof)
+                    && old["repository"] == current.repository
+                    && old["catalog_url"] == serde_json::json!(current.catalog_url)
+                    && !channel_change
+                    && version_change.as_deref() == Some("upgrade")
+            });
+        let mut retained_services: Vec<_> = if continuous {
+            permission_diff
+                .as_ref()
+                .into_iter()
+                .flat_map(|d| &d.unchanged)
+                .filter(|item| {
+                    let prior = installed
+                        .as_ref()
+                        .and_then(|i| i.permissions.as_ref())
+                        .and_then(|d| d.actions.get(&item.action));
+                    let next = manifest
+                        .permissions
+                        .as_ref()
+                        .and_then(|d| d.actions.get(&item.action));
+                    prior.zip(next).is_some_and(|(a, b)| a.purpose == b.purpose)
+                        && reviewable_services.contains(item)
+                        && prior_decisions
+                            .as_ref()
+                            .and_then(|v| v["scopes"].as_array())
+                            .is_some_and(|rows| {
+                                rows.iter().any(|r| {
+                                    r["action"] == item.action
+                                        && r["scope"] == serde_json::json!(item.scope)
+                                        && r["granted"] == true
+                                        && r["available"] == true
+                                })
+                            })
+                })
+                .cloned()
+                .collect()
+        } else {
+            Vec::new()
+        };
+        let continuity = if continuous {
+            prior_vault.and_then(|prior| {
+                let same_purpose = |action: &str| {
+                    let old = installed
+                        .as_ref()
+                        .and_then(|p| p.permissions.as_ref())
+                        .and_then(|d| d.actions.get(action));
+                    let new = manifest
+                        .permissions
+                        .as_ref()
+                        .and_then(|d| d.actions.get(action));
+                    old.map(|g| &g.purpose) == new.map(|g| &g.purpose)
+                };
+                let unchanged: Vec<_> = permission_diff
+                    .as_ref()
+                    .into_iter()
+                    .flat_map(|d| &d.unchanged)
+                    .filter(|i| same_purpose(&i.action))
+                    .cloned()
+                    .collect();
+                let slots: Vec<_> = manifest
+                    .setup_slots
+                    .iter()
+                    .flatten()
+                    .filter(|s| {
+                        same_purpose(&s.action)
+                            && (!s.requires_direct_approval()
+                                || unchanged.iter().any(|a| {
+                                    a.action == s.action && a.scope.matches_direct_slot(s)
+                                }))
+                    })
+                    .cloned()
+                    .collect();
+                let revision = prior_decisions.as_ref().and_then(|d|d["revision"].as_str()).and_then(|rev|rev.parse().ok());
+                match self.vault.review_continuity(prior, &slots, &unchanged, revision) {
+                    Ok(review) => Some(review),
+                    Err(_) if matches!(self.vault.status().state, crate::vault::VaultState::Uninitialized) => None,
+                    Err(_) => {
+                        reason = Some("Unlock Vault and review the update again to verify its existing access.".into());
+                        None
+                    }
+                }
+            })
+        } else {
+            None
+        };
+        if let Some(c) = &continuity {
+            retained_services.extend(c.writers.iter().cloned())
+        }
         let review = PluginPackageReview {
+            retained_slots: continuity
+                .as_ref()
+                .map(|c| c.slots.clone())
+                .unwrap_or_default(),
+            retained_services,
+            reviewable_services: (!reviewable_services.is_empty()).then_some(reviewable_services),
+            permission_diff,
             suggested_profiles: Some(crate::plugin_profiles::discover(
                 PluginHost::prepared_directory(&prepared),
                 &PluginHost::prepared_info(&prepared)?,
             )),
-            manifest: PluginHost::prepared_manifest(&prepared),
+            manifest,
             source: PluginHost::prepared_source(&prepared),
             can_import: reason.is_none(),
             can_run: compatibility.can_enable,
@@ -206,6 +385,7 @@ impl crate::Runtime {
             channel,
             channel_change,
             compatible: reason.is_none(),
+            force_reinstall_available: catalog_reinstall && reason.is_none(),
             reason,
         };
         let mut reviews = self.plugin_packages.lock().unwrap();
@@ -213,15 +393,168 @@ impl crate::Runtime {
         reviews.insert(
             review.id.clone(),
             StagedPackage {
+                publisher,
+                continuity,
+                service_review,
+                picker: None,
                 review: review.clone(),
                 prepared: Some(prepared),
                 selection,
                 created: std::time::Instant::now(),
+                vault_expected_installation,
+                force_reinstall_origin: provenance.filter(|_| review.force_reinstall_available),
+                vault_editor: None,
+                vault_selections: Default::default(),
+                direct_read_opt_ins: Default::default(),
+                vault_created_values: Default::default(),
             },
         )?;
         Ok(review)
     }
-    // Cancel plugin package
+    /// A trusted package review can opt in to a single action's direct read.
+    /// Turning it off also retires any staged entry approval for that action.
+    pub fn vault_setup_permission(
+        &self,
+        id: &str,
+        slot_id: &str,
+        action: &str,
+        editor: u64,
+        allow: bool,
+    ) -> Result<(), String> {
+        let mut reviews = self.plugin_packages.lock().unwrap();
+        let stage = reviews.get_mut(id).ok_or("Package review expired")?;
+        let slot = setup_slot(stage, slot_id, action, editor)?;
+        if !slot.requires_direct_approval() {
+            return Err("not_declared".into());
+        }
+        let key = (slot.action, slot.id);
+        if allow {
+            self.check_setup_candidate(stage)?;
+            let epoch = self.vault.session_epoch()?;
+            stage.direct_read_opt_ins.insert(key, epoch);
+        } else {
+            stage.direct_read_opt_ins.remove(&key);
+            stage.vault_selections.remove(&key);
+        }
+        Ok(())
+    }
+
+    // Preview only compatible Vault entry metadata for a staged package
+    pub fn vault_setup_slot_entries(
+        &self,
+        id: &str,
+        slot_id: &str,
+        action: &str,
+        editor: u64,
+    ) -> Result<VaultSetupChoices, String> {
+        let mut reviews = self.plugin_packages.lock().unwrap();
+        let stage = reviews.get_mut(id).ok_or("Package review expired")?;
+        let slot = setup_slot(stage, slot_id, action, editor)?;
+        self.check_setup_candidate(stage)?;
+        let (epoch, entries) = self.vault.setup_entries(&slot)?;
+        let ticket = crate::review_store::new_id();
+        stage.picker = Some(StagedPicker {
+            ticket: ticket.clone(),
+            action: slot.action,
+            slot: slot.id,
+            epoch,
+            opened: std::time::Instant::now(),
+        });
+        Ok(VaultSetupChoices { ticket, entries })
+    }
+
+    fn check_setup_candidate(&self, stage: &StagedPackage) -> Result<(), String> {
+        if stage.vault_expected_installation
+            != self
+                .plugins
+                .lock()
+                .unwrap()
+                .current_vault_installation_token(&stage.review.package.id)
+        {
+            return Err("Vault setup review expired".into());
+        }
+        let prepared = stage
+            .prepared
+            .as_ref()
+            .ok_or("Vault setup review expired")?;
+        PluginHost::verify_prepared_files(prepared, &stage.review.package.files)
+    }
+
+    pub fn cancel_vault_picker(&self, id: &str, editor: u64, ticket: &str) {
+        let mut reviews = self.plugin_packages.lock().unwrap();
+        if let Some(stage) = reviews.get_mut(id) {
+            if stage.vault_editor == Some(editor)
+                && stage.picker.as_ref().is_some_and(|p| p.ticket == ticket)
+            {
+                stage.picker = None;
+            }
+        }
+    }
+
+    // Select an exact eligible entry after the user approves the disclosed use
+    #[expect(
+        clippy::too_many_arguments,
+        reason = "Keep the installation, logical slot and reviewed Vault identity explicit"
+    )]
+    pub fn vault_setup_select(
+        &self,
+        id: &str,
+        slot_id: &str,
+        action: &str,
+        editor: u64,
+        ticket: &str,
+        entry_id: &str,
+        revision: &str,
+        allow_direct_read: bool,
+    ) -> Result<VaultSetupSelection, String> {
+        let mut reviews = self.plugin_packages.lock().unwrap();
+        let stage = reviews.get_mut(id).ok_or("Package review expired")?;
+        let slot = setup_slot(stage, slot_id, action, editor)?;
+        let epoch = picker_epoch(stage, &slot, ticket)?;
+        stage.picker = None;
+        self.check_setup_candidate(stage)?;
+        let key = (slot.action.clone(), slot.id.clone());
+        if slot.requires_direct_approval() && stage.direct_read_opt_ins.get(&key) != Some(&epoch) {
+            return Err("explicit_package_permission_required".into());
+        }
+        let (selected, mut assignment) =
+            self.vault
+                .setup_selection(&slot, entry_id, revision, allow_direct_read)?;
+        if assignment.epoch != epoch {
+            return Err("vault_setup_expired".into());
+        }
+        assignment.make_private = stage
+            .vault_created_values
+            .contains(&(slot.id.clone(), entry_id.into()));
+        stage.vault_selections.insert(key, assignment);
+        Ok(selected)
+    }
+
+    // Create a compatible user-owned entry without authorizing the staged plugin
+    pub fn vault_setup_create_entry(
+        &self,
+        id: &str,
+        slot_id: &str,
+        action: &str,
+        editor: u64,
+        ticket: &str,
+        input: VaultEntryInput,
+    ) -> Result<VaultEntry, String> {
+        let mut reviews = self.plugin_packages.lock().unwrap();
+        let stage = reviews.get_mut(id).ok_or("Package review expired")?;
+        let slot = setup_slot(stage, slot_id, action, editor)?;
+        let epoch = picker_epoch(stage, &slot, ticket)?;
+        self.check_setup_candidate(stage)?;
+        let entry = self.vault.setup_create(&slot, epoch, input)?;
+        if slot.kind == "value" {
+            stage
+                .vault_created_values
+                .insert((slot.id, entry.id.clone()));
+        }
+        Ok(entry)
+    }
+
+    // Discard the staged review without discarding any verified catalog archive
     pub fn cancel_plugin_package(&self, id: &str) {
         self.plugin_packages.lock().unwrap().remove(id);
     }
@@ -231,6 +564,47 @@ impl crate::Runtime {
         id: &str,
         allow_channel_change: bool,
         replace: bool,
+    ) -> Result<crate::Snapshot, String> {
+        self.commit_plugin_package_from_editor(id, allow_channel_change, replace, None)
+    }
+
+    // Commit an exact package review while carrying the trusted editor owner
+    pub fn commit_plugin_package_from_editor(
+        &self,
+        id: &str,
+        allow_channel_change: bool,
+        replace: bool,
+        editor: Option<u64>,
+    ) -> Result<crate::Snapshot, String> {
+        self.commit_plugin_package_permissions(id, allow_channel_change, replace, editor, &[])
+    }
+    pub fn commit_plugin_package_permissions(
+        &self,
+        id: &str,
+        allow_channel_change: bool,
+        replace: bool,
+        editor: Option<u64>,
+        approvals: &[stream_dock_manager_plugin_host::permissions::ActionScope],
+    ) -> Result<crate::Snapshot, String> {
+        self.commit_reviewed_plugin_package(
+            id,
+            allow_channel_change,
+            replace,
+            editor,
+            approvals,
+            false,
+        )
+    }
+
+    // Commit a reviewed package with a separate opt-in for a catalog downgrade or reinstall
+    pub fn commit_reviewed_plugin_package(
+        &self,
+        id: &str,
+        allow_channel_change: bool,
+        replace: bool,
+        editor: Option<u64>,
+        approvals: &[stream_dock_manager_plugin_host::permissions::ActionScope],
+        force_reinstall: bool,
     ) -> Result<crate::Snapshot, String> {
         let mut reviews = self.plugin_packages.lock().unwrap();
         let stage = reviews.get_mut(id).ok_or("Package review expired")?;
@@ -244,10 +618,31 @@ impl crate::Runtime {
         if stage.selection.is_some() {
             compatible(&review.package)?;
         }
+        if let Some(proof) = &stage.publisher {
+            let selection = stage
+                .selection
+                .as_ref()
+                .ok_or("Package source changed during review")?;
+            if self.updates.scoped_publisher(selection).as_ref() != Some(proof) {
+                return Err(
+                    "Publisher evidence changed during review. Review the package again.".into(),
+                );
+            }
+        }
         let mut host = self.plugins.lock().unwrap();
         let old = host.list().into_iter().find(|p| p.id == review.package.id);
         if let Some(selection) = &stage.selection {
             self.updates.selection_current(selection)?;
+            if force_reinstall
+                && (!review.force_reinstall_available
+                    || old.as_ref().map(|old| old.version.as_str())
+                        != review.installed_version.as_deref()
+                    || host.provenance(&review.package.id) != stage.force_reinstall_origin
+                    || host.current_vault_installation_token(&review.package.id)
+                        != stage.vault_expected_installation)
+            {
+                return Err("Installed package changed; review this package again".into());
+            }
             if let Some(old) = &old {
                 let provenance = host
                     .provenance(&old.id)
@@ -258,9 +653,11 @@ impl crate::Runtime {
                 if provenance["channel"] != selection.channel && !allow_channel_change {
                     return Err("Acknowledge the channel change".into());
                 }
-                if stable_version(&review.package.version)? < stable_version(&old.version)?
-                    || review.package.version == old.version
-                        && provenance["channel"] == selection.channel
+                if catalog_requires_reinstall(
+                    &review.package.version,
+                    &old.version,
+                    provenance["channel"] != selection.channel,
+                )? && !force_reinstall
                 {
                     return Err("Already installed or downgrade blocked".into());
                 }
@@ -271,6 +668,50 @@ impl crate::Runtime {
         if let Some(prepared) = &stage.prepared {
             PluginHost::verify_prepared_files(prepared, &review.package.files)?;
         }
+        let writers:Vec<_>=approvals.iter().filter(|s|matches!(s.scope,stream_dock_manager_plugin_host::permissions::PermissionScope::WriteSecret{..})).cloned().collect();
+        let approved_vault_access = approvals.iter().any(|v| {
+            matches!(
+                v.scope,
+                stream_dock_manager_plugin_host::permissions::PermissionScope::Access { .. }
+            )
+        });
+        let write_epoch = (!writers.is_empty() || approved_vault_access)
+            .then(|| self.vault.session_epoch())
+            .transpose()?;
+        let scoped = review.manifest.permissions.is_some();
+        if !approvals.is_empty()
+            && (editor.is_none() || stage.created.elapsed() >= VAULT_REVIEW_AGE)
+        {
+            return Err("Package permission review expired".into());
+        }
+        if scoped || !approvals.is_empty() {
+            host.stage_service_grants(
+                stage.prepared.as_mut().ok_or("Prepare the package again")?,
+                &stage.service_review,
+                approvals,
+            )?;
+        }
+        let slots = review.manifest.setup_slots.as_deref().unwrap_or_default();
+        let managed = !stage.vault_selections.is_empty()
+            || !review.retained_slots.is_empty()
+            || slots.iter().any(|slot| slot.required);
+        if managed
+            && (editor.is_none()
+                || (!stage.vault_selections.is_empty() && stage.vault_editor != editor)
+                || stage.created.elapsed() >= VAULT_REVIEW_AGE
+                || slots.iter().any(|slot| {
+                    slot.required
+                        && !review.retained_slots.contains(slot)
+                        && !stage
+                            .vault_selections
+                            .contains_key(&(slot.action.clone(), slot.id.clone()))
+                })
+                || stage.vault_expected_installation
+                    != host.current_vault_installation_token(&review.package.id))
+        {
+            return Err("Vault setup needs an active reviewed selection for this package".into());
+        }
+
         let replacement = old
             .as_ref()
             .map(|old| host.reserve_replacement(&old.id))
@@ -301,12 +742,15 @@ impl crate::Runtime {
             .prepared
             .take()
             .ok_or("Prepare the package again before retrying")?;
+        if scoped {
+            host.stage_service_grants(&mut prepared, &stage.service_review, approvals)?;
+        }
         if let Some(selection) = &stage.selection {
             self.updates.selection_current(selection)?;
             PluginHost::write_prepared_metadata(
                 &mut prepared,
                 ".stream-dock-manager-provenance.json",
-                &serde_json::json!({"catalog_url":selection.catalog_url,"repository":selection.repository,"release_tag":selection.artifact.release_tag,"channel":selection.channel,"version":selection.plugin.version,"build":selection.artifact.release_tag,"package_hash":selection.artifact.sha256,"artifact":selection.artifact}),
+                &serde_json::json!({"verified_publisher":stage.publisher,"catalog_url":selection.catalog_url,"repository":selection.repository,"release_tag":selection.artifact.release_tag,"channel":selection.channel,"version":selection.plugin.version,"build":selection.artifact.release_tag,"package_hash":selection.artifact.sha256,"artifact":selection.artifact}),
             )?;
         }
         if stage.selection.is_none() {
@@ -317,7 +761,26 @@ impl crate::Runtime {
             )?;
         }
         let installed_id = review.package.id.clone();
-        let result = host.replace_prepared(prepared);
+        let result = if managed || write_epoch.is_some() || stage.continuity.is_some() {
+            if stage.created.elapsed() >= VAULT_REVIEW_AGE
+                || stage.vault_expected_installation
+                    != host.current_vault_installation_token(&installed_id)
+            {
+                return Err("Vault setup review expired".into());
+            }
+            let owner = host.prepared_vault_installation(&prepared)?;
+            self.vault.grant_setup_with_writers(
+                &owner,
+                slots,
+                &stage.vault_selections,
+                &writers,
+                write_epoch,
+                stage.continuity.as_ref(),
+                || host.replace_prepared_with_vault(prepared, &owner),
+            )
+        } else {
+            host.replace_prepared(prepared)
+        };
         drop(host);
         reviews.remove(id);
         drop(reviews);
@@ -328,6 +791,56 @@ impl crate::Runtime {
         }
         result.map(|_| snapshot)
     }
+}
+
+const VAULT_REVIEW_AGE: std::time::Duration = std::time::Duration::from_secs(15 * 60);
+
+fn picker_epoch(
+    stage: &StagedPackage,
+    slot: &stream_dock_manager_plugin_host::vault_rpc::VaultSetupSlot,
+    ticket: &str,
+) -> Result<uuid::Uuid, String> {
+    stage
+        .picker
+        .as_ref()
+        .filter(|p| {
+            p.ticket == ticket
+                && p.slot == slot.id
+                && p.action == slot.action
+                && p.opened.elapsed() < std::time::Duration::from_secs(300)
+        })
+        .map(|p| p.epoch)
+        .ok_or_else(|| "vault_setup_expired".into())
+}
+
+// Bind setup to one live editor document and one immutable native staged review
+fn setup_slot(
+    stage: &mut StagedPackage,
+    slot_id: &str,
+    action: &str,
+    editor: u64,
+) -> Result<stream_dock_manager_plugin_host::vault_rpc::VaultSetupSlot, String> {
+    if !stage.review.can_import
+        || stage.prepared.is_none()
+        || stage.created.elapsed() >= VAULT_REVIEW_AGE
+        || stage
+            .vault_editor
+            .is_some_and(|generation| generation != editor)
+    {
+        return Err("Vault setup review expired".into());
+    }
+    let slot = stage
+        .review
+        .manifest
+        .setup_slots
+        .as_ref()
+        .into_iter()
+        .flatten()
+        .find(|slot| slot.id == slot_id && slot.action == action)
+        .ok_or("Vault setup slot is not declared")?
+        .clone();
+    stage.vault_editor = Some(editor);
+    Ok(slot)
 }
 
 /// Explicit local development installs preserve enablement without starting plugins

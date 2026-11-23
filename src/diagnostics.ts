@@ -4,6 +4,7 @@ import type { Diagnostic } from './types';
 import type { ManagerResourceReport, Metric } from '../generated/runtime';
 import { native } from './bridge';
 import { resourceGraphs } from './resource-graphs';
+import { memoryAccountingView } from './memory-accounting';
 import { eventTime } from './event-time';
 import { runtimeEventDescription } from './runtime-events';
 
@@ -17,10 +18,10 @@ export function createDiagnostics(
     visibility: Visibility = document,
     preferences?: Preferences,
 ) {
-    let resourceUsageEnabled = true;
+    let resourceUsageEnabled = false;
     try {
         if (!native) preferences ??= globalThis.localStorage;
-        resourceUsageEnabled = preferences?.getItem(resourceUsageKey) !== 'false';
+        resourceUsageEnabled = preferences?.getItem(resourceUsageKey) === 'true';
     } catch {}
     return {
         report: { metrics: [], cache: { bytes: 0, hits: 0, misses: 0 } } as {
@@ -108,6 +109,18 @@ export function createDiagnostics(
                 this.sampleFailed,
             );
         },
+        memoryView: {} as ReturnType<typeof memoryAccountingView>,
+        updateMemoryView() {
+            this.memoryView = this.memoryAccounting;
+        },
+        get memoryAccounting() {
+            return memoryAccountingView(
+                this.report[this.resourceScope]?.memory,
+                this.resourceScope,
+                this.sampledAt,
+                this.sampleFailed,
+            );
+        },
         // Explain limitations of the selected resource accounting scope
         get resourceNote() {
             return this.resourceScope === 'manager'
@@ -160,6 +173,55 @@ export function createDiagnostics(
         // Format a diagnostic measurement or its unavailable state
         format(value: number | null) {
             return value === null ? '—' : value.toFixed(2);
+        },
+        traceDevice: '',
+        trace: null as import('../generated/runtime').InputTrace | null,
+        traceEpoch: 0,
+        traceTimer: undefined as ReturnType<typeof setTimeout> | undefined,
+        get physicalDevices() {
+            return app().snapshot.devices.filter((d) => d.connected && !d.simulated);
+        },
+        async armTrace() {
+            this.dismissTrace();
+            const epoch = this.traceEpoch;
+            const deviceId = this.traceDevice || this.physicalDevices[0]?.id;
+            if (!deviceId) return;
+            try {
+                let view = await app().bridge.command('arm_input_trace', { deviceId });
+                if (epoch !== this.traceEpoch) {
+                    await app().bridge.command('dismiss_input_trace', { token: view.token });
+                    return;
+                }
+                this.trace = view;
+                const poll = async () => {
+                    if (epoch !== this.traceEpoch) return;
+                    try {
+                        view = await app().bridge.command('read_input_trace', {
+                            token: view.token,
+                        });
+                        if (epoch !== this.traceEpoch) return;
+                        this.trace = view;
+                        if (!view.outcome) this.traceTimer = setTimeout(poll, 250);
+                    } catch (error) {
+                        if (epoch === this.traceEpoch) {
+                            this.dismissTrace();
+                            app().notify(String(error), 'error');
+                        }
+                    }
+                };
+                await poll();
+            } catch (error) {
+                if (epoch === this.traceEpoch) app().notify(String(error), 'error');
+            }
+        },
+        dismissTrace() {
+            this.traceEpoch++;
+            clearTimeout(this.traceTimer);
+            if (this.trace)
+                void app()
+                    .bridge.command('dismiss_input_trace', { token: this.trace.token })
+                    .catch(() => {});
+            this.trace = null;
         },
         exportPreview: '',
         exportId: '',
@@ -228,6 +290,7 @@ export function createDiagnostics(
         // Stop polling and release prepared report resources
         destroy() {
             this.active = false;
+            this.dismissTrace();
             this.cancelExport();
             this.stopSampling();
             if (this.visibilityListener)
@@ -259,6 +322,7 @@ export function createDiagnostics(
             // Stop sampling while the editor window is closing
             this.closingListener = () => {
                 this.windowClosing = true;
+                this.dismissTrace();
                 this.stopSampling();
             };
             // Resume sampling after the editor window becomes active

@@ -7,6 +7,13 @@ import { pluginChoiceGroups } from './plugin-choice-groups';
 import { nextTab } from './tab-navigation';
 import { registerInstalledPackageExport } from './installed-package-export';
 import { openPluginManagement } from './plugin-management';
+import {
+    asInstalledServices,
+    hasPluginPermissions,
+    openPluginPermissions,
+    requiredPluginPermissionCount,
+    requiredPluginPermissionSources,
+} from './plugin-permissions';
 import { resourceAlertDraft } from './resource-alerts';
 import { getLibraryOrganization } from './library-organization';
 import Alpine from '@alpinejs/csp';
@@ -68,6 +75,104 @@ export function register() {
             const id = (event.currentTarget as HTMLElement).dataset.id;
             if (id) openPluginManagement(id);
         },
+        // Open the Vault panel for the plugin without granting or revealing access
+        openPluginVault(event: Event) {
+            const id = (event.currentTarget as HTMLElement).dataset.id;
+            if (id) location.hash = '#/vault?tab=plugins&plugin=' + encodeURIComponent(id);
+        },
+        hasPluginPermissions,
+        permissionReviewCounts: {} as Record<string, number>,
+        permissionBadgeGeneration: 0,
+        permissionBadgeReads: {} as Record<string, number>,
+        permissionBadgeSubscription: null as Promise<() => void> | null,
+        get permissionBadgeScope() {
+            return JSON.stringify(
+                this.pluginPage.items.map(({ id, version, permissions }) => [
+                    id,
+                    version,
+                    permissions,
+                ]),
+            );
+        },
+        // Open the permissions view filtered to this plugin
+        openCardPermissions(event: Event) {
+            const id = (event.currentTarget as HTMLElement).dataset.id;
+            if (id) openPluginPermissions(id);
+        },
+        cardPermissionLabel(plugin: Plugin) {
+            const count = this.permissionReviewCounts[plugin.id] ?? 0;
+            return (
+                'Permissions for ' +
+                plugin.name +
+                (count ? ' (' + count + ' required to review)' : '')
+            );
+        },
+        // Query authoritative status only for visible cards that have required declarations
+        async refreshPermissionBadges(onlyPlugin?: string) {
+            if (!native || this.disposed) return;
+            if (!onlyPlugin) {
+                ++this.permissionBadgeGeneration;
+                this.permissionBadgeReads = {};
+                this.permissionReviewCounts = {};
+            }
+            const generation = this.permissionBadgeGeneration;
+            const targets = this.pluginPage.items
+                .filter((plugin) => !onlyPlugin || plugin.id === onlyPlugin)
+                .map((plugin) => ({ plugin, ...requiredPluginPermissionSources(plugin) }))
+                .filter(({ service, vault }) => service || vault)
+                .map((target) => {
+                    const id = target.plugin.id;
+                    const read = (this.permissionBadgeReads[id] ?? 0) + 1;
+                    this.permissionBadgeReads[id] = read;
+                    return { ...target, read };
+                });
+            const backend = app().bridge;
+            const vaultState = targets.some((target) => target.vault)
+                ? backend
+                      .command('vault_status')
+                      .then(async ({ state }) => ({
+                          state,
+                          activity:
+                              state === 'unlocked'
+                                  ? await backend.command('vault_permission_activity')
+                                  : [],
+                      }))
+                      .catch(() => undefined)
+                : undefined;
+            for (const { plugin, service, vault, read } of targets) {
+                if (this.disposed || generation !== this.permissionBadgeGeneration) return;
+                if (read !== this.permissionBadgeReads[plugin.id]) continue;
+                const status = service
+                    ? await backend
+                          .command('installed_service_permissions', {
+                              pluginId: plugin.id,
+                          })
+                          .catch(() => null)
+                    : undefined;
+                const count = requiredPluginPermissionCount(
+                    plugin,
+                    asInstalledServices(status),
+                    vault ? await vaultState : undefined,
+                );
+                if (
+                    !this.disposed &&
+                    generation === this.permissionBadgeGeneration &&
+                    read === this.permissionBadgeReads[plugin.id]
+                )
+                    this.permissionReviewCounts[plugin.id] = count;
+            }
+        },
+        watchPermissionBadges() {
+            if (!native || this.permissionBadgeSubscription) return;
+            this.permissionBadgeSubscription = listen<string>(
+                'plugin-permission-status',
+                ({ payload }) => {
+                    void this.refreshPermissionBadges(payload);
+                },
+            );
+            void this.permissionBadgeSubscription.catch(() => {});
+            void this.refreshPermissionBadges();
+        },
         favoritesOnly: false,
         // Derive organization from the current plugins state
         get organization() {
@@ -114,7 +219,9 @@ export function register() {
             if (!plugin.enabled) return 'Disabled';
             if ((Alpine.store('recovery') as { status: RecoveryStatus }).status.active)
                 return 'Paused · recovery';
-            const state = this.runtimeFor(plugin).state;
+            const { state, reason } = this.runtimeFor(plugin);
+            if (reason === 'vault_setup_required') return 'Paused · Vault setup required';
+            if (reason === 'vault_locked') return 'Paused · Vault locked';
             if (state === 'idle' && this.runtimeFor(plugin).reason === 'no_visible_actions')
                 return 'Sleeping';
             return state[0].toUpperCase() + state.slice(1);
@@ -127,6 +234,9 @@ export function register() {
             )
                 return 'Enabled for the next normal launch';
             const runtime = this.runtimeFor(plugin);
+            if (runtime.reason === 'vault_setup_required')
+                return 'Review the required entries in Plugin Permissions';
+            if (runtime.reason === 'vault_locked') return 'Unlock Vault to start this plugin';
             if (
                 plugin.enabled &&
                 runtime.state === 'idle' &&
@@ -733,7 +843,7 @@ export function register() {
             this.cancelStyleReset();
             try {
                 app().apply(await app().command('reset_plugin_styles', { id: target.id }));
-                app().draftStore = await app().bridge.command('drafts');
+                await app().refreshDrafts();
                 app().notify(`Reset styles for “${target.name}”.`, 'success');
             } catch {}
         },
@@ -770,7 +880,7 @@ export function register() {
                         keepData: this.keepPluginData,
                     }),
                 );
-                app().draftStore = await app().bridge.command('drafts');
+                await app().refreshDrafts();
                 this.expanded = this.expanded.filter((id) => id !== target.id);
                 app().notify(`Deleted plugin “${target.name}”.`, 'success');
             } catch {}
@@ -790,7 +900,13 @@ export function register() {
         },
         actionGroupHint: 'Select a matching control in the device editor to use these actions.',
         // Filter and paginate plugin action groups using the current search and organization
+        groupIndex: new Map<string, ReturnType<typeof pluginChoiceGroups>>(),
+        filteredPlugins: [] as Plugin[],
+        pluginPage: paginate<Plugin>([], 1, 12),
         groupsFor(plugin: Plugin) {
+            return this.groupIndex.get(plugin.id) || [];
+        },
+        projectGroups(plugin: Plugin) {
             return pluginChoiceGroups(
                 plugin,
                 this.matchesMetadata(plugin) ? '' : this.query,
@@ -801,8 +917,8 @@ export function register() {
             );
         },
         // Derive plugin page from the current plugins state
-        get pluginPage() {
-            return paginate(this.filteredPlugins, this.page, Number(this.pageSize));
+        updatePluginPage() {
+            this.pluginPage = paginate(this.filteredPlugins, this.page, Number(this.pageSize));
         },
         // Change the page
         changePage(event: Event) {
@@ -841,7 +957,13 @@ export function register() {
                 .includes(this.query.trim().toLowerCase());
         },
         // Derive filtered plugins from the current plugins state
-        get filteredPlugins() {
+        updatePluginResults() {
+            this.groupIndex = new Map(
+                app().snapshot.plugins.map((plugin) => [plugin.id, this.projectGroups(plugin)]),
+            );
+            this.filteredPlugins = this.filterPlugins();
+        },
+        filterPlugins() {
             const query = this.query.trim().toLowerCase();
             // Keep entries that satisfy the plugins selection criteria
             return app().snapshot.plugins.filter((plugin) => {
@@ -905,8 +1027,14 @@ export function register() {
             });
             this.monitorId = crypto.randomUUID();
             this.disposed = false;
+            if (native)
+                this.$watch('permissionBadgeScope', () => void this.refreshPermissionBadges());
             this.startMonitoring();
-            this.resumeListener = () => this.startMonitoring();
+            this.watchPermissionBadges();
+            this.resumeListener = () => {
+                this.startMonitoring();
+                this.watchPermissionBadges();
+            };
             window.addEventListener('editor-window-resumed', this.resumeListener);
             // Watch a boolean, not the full plugin/health/resource history. Filters,
             // pagination and lifecycle changes can hide the last running card
@@ -1029,6 +1157,14 @@ export function register() {
         // Release the close resources
         async releaseCloseResources() {
             this.disposed = true;
+            ++this.permissionBadgeGeneration;
+            const permissionBadgeSubscription = this.permissionBadgeSubscription;
+            this.permissionBadgeSubscription = null;
+            if (permissionBadgeSubscription)
+                void trackCloseRelease(`plugin-permission-badges:${this.monitorId}`, async () => {
+                    const stop = await permissionBadgeSubscription.catch(() => null);
+                    await stop?.();
+                }).catch(() => {});
             window.clearInterval(this.uptimeTimer);
             this.uptimeTimer = 0;
             if (this.visibilityListener)

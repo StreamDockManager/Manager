@@ -73,6 +73,7 @@ pub(crate) fn resolve(
             }
             let page = uuid::Uuid::new_v4().to_string();
             let profile = Profile {
+                linked_controls: Default::default(),
                 id: uuid::Uuid::new_v4().to_string(),
                 name: DEFAULT_PROFILE_NAME.into(),
                 model_id: device.model_id.clone(),

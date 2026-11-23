@@ -83,6 +83,55 @@ fn plugin_settings(data: &[SavedMacro]) -> Vec<serde_json::Value> {
 }
 
 #[test]
+fn portable_vault_tokens_require_relinking_even_on_the_original_installation() {
+    let root = tempfile::tempdir().unwrap();
+    let store = profiles::ProfileStore::open(root.path().join("local")).unwrap();
+    let vault = uuid::Uuid::new_v4();
+    let entry = uuid::Uuid::new_v4();
+    let token = format!("${{vault.{vault}.{entry}}}");
+    let text = format!("before {token} and {token} after ${{run.answer}}");
+    let action = Action::Builtin {
+        action: Box::new(BuiltinAction::TypeText {
+            text: text.clone(),
+            template: true,
+        }),
+    };
+    let mut original = ProfileData::default();
+    original.profiles[0].pages[0]
+        .bindings
+        .get_mut("key-1")
+        .unwrap()
+        .action = action.clone();
+    original.saved_macros.push(saved("portable", action));
+    store.save(&original).unwrap();
+    let path = root.path().join("portable.zip");
+    store.export(&path).unwrap();
+    let (_, document) = profiles::open_archive(&path, "profiles.json").unwrap();
+    let placeholder = "before ${vault.unlinked} and ${vault.unlinked} after ${run.answer}";
+    assert!(document.contains(placeholder));
+    assert!(!document.contains(&vault.to_string()));
+    assert!(!document.contains(&entry.to_string()));
+    assert!(value(&store.load().unwrap()).to_string().contains(&text));
+
+    // Even an archive written outside Manager is detached at import.
+    archive(&path, &original);
+    let imported = store.import_for_repair(&path).unwrap();
+    assert!(!value(&imported).to_string().contains(&token));
+    assert!(value(&imported.saved_macros)
+        .to_string()
+        .contains(placeholder));
+    let runtime = Runtime::build(root.path().join("independent"), false).unwrap();
+    let review = runtime.prepare_macro_import(&path).unwrap();
+    let snapshot = runtime
+        .commit_macro_import(&review.id, review.expected_revision, false)
+        .unwrap();
+    assert!(value(&snapshot.saved_macros)
+        .to_string()
+        .contains(placeholder));
+    runtime.shutdown();
+}
+
+#[test]
 #[ignore = "Requires local loopback sockets, never HID"]
 // Verify that export is macro only includes dependencies and redacts nested settings by default
 fn export_is_macro_only_includes_dependencies_and_redacts_nested_settings_by_default() {
@@ -101,9 +150,20 @@ fn export_is_macro_only_includes_dependencies_and_redacts_nested_settings_by_def
             })
             .unwrap();
         runtime
-            .write_export_review(&review.id, review.revision, &review.archive_sha256, &path)
+            .write_export_transfer(
+                &review.id,
+                review.revision,
+                &review.archive_sha256,
+                &path,
+                include.then_some("macro transfer password"),
+            )
             .unwrap();
-        let (_, document) = profiles::open_archive(&path, "profiles.json").unwrap();
+        let (mut zip, document) = crate::importing::read_transfer(
+            &path,
+            include.then_some("macro transfer password"),
+            |p| profiles::open_archive(p, "profiles.json"),
+        )
+        .unwrap();
         let data = profiles::parse_data(serde_json::from_str(&document).unwrap()).unwrap();
         assert_eq!(
             data.saved_macros
@@ -130,7 +190,6 @@ fn export_is_macro_only_includes_dependencies_and_redacts_nested_settings_by_def
                 vec![json!({"value":"${parameter.name}"})]
             );
         }
-        let mut zip = zip::ZipArchive::new(std::fs::File::open(&path).unwrap()).unwrap();
         assert_eq!(zip.len(), 3); // document, privacy notice and portability report
         let mut notice = String::new();
         zip.by_name("export-notes.txt")

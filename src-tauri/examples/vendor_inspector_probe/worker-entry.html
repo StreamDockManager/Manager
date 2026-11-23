@@ -1,0 +1,32 @@
+<!doctype html>
+<html lang="en">
+    <head>
+        <meta charset="utf-8" />
+        <title>Disposable WebKit Worker probe</title>
+    </head>
+    <body>
+        <h1>Disposable WebKit Worker probe</h1>
+        <script>
+            const timer = new Worker('interval.js');
+            let socket;
+            function registerRuntime() {
+                if (window.probeRole !== 'runtime' || !window.workerReply || socket) return;
+                const [port, uuid, event] = window.runtimeArgs;
+                socket = new WebSocket('ws://127.0.0.1:' + port);
+                socket.addEventListener('open', () => socket.send(JSON.stringify({ event, uuid })));
+            }
+            timer.addEventListener('message', (event) => {
+                window.workerReply = event.data === 'relative-package-worker';
+                timer.terminate();
+                registerRuntime();
+            });
+            window.connectSocket = (port, uuid, event, info, actionInfo) => {
+                window.probeRole = actionInfo ? 'inspector' : 'runtime';
+                if (window.probeRole === 'runtime' && event === 'registerPlugin') {
+                    window.runtimeArgs = [port, uuid, event];
+                    registerRuntime();
+                }
+            };
+        </script>
+    </body>
+</html>

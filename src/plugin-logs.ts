@@ -58,10 +58,12 @@ export class PluginLogs {
     readings: Record<string, Reading> = {};
     epoch = 0;
     metadataEpoch = 0;
+    private preferenceEpoch = 0;
+    private windowStarted = false;
     timer = 0;
     pollTimer = 0;
     trigger: HTMLElement | null = null;
-    position = '';
+    position: Record<string, string> = {};
     seenErrors = new Map<string, string>();
     windowVisible = true;
     readerStarting = false;
@@ -180,7 +182,8 @@ export class PluginLogs {
     }
     // Start the window
     startWindow() {
-        if (this.timer) return;
+        if (this.windowStarted) return;
+        this.windowStarted = true;
         this.onNavigate = () => {
             if (!this.detached) this.close(false);
         };
@@ -194,26 +197,37 @@ export class PluginLogs {
         this.onVisibility = () => {
             if (this.detached) this.updateReaderVisibility();
             else if (document.hidden) this.close(false);
-            if (!document.hidden) void this.refresh();
+            if (!document.hidden) {
+                void this.refresh();
+                if (this.visible) void this.refreshPreferences();
+            }
+            this.scheduleMetadata();
         };
         void this.refresh();
-        void this.refreshPreferences();
-        // Refresh plugin logs state on the scheduled interval
-        this.timer = window.setInterval(() => {
-            if (!document.hidden && this.windowVisible) {
-                void this.refresh();
-                void this.refreshPreferences();
-            }
-        }, 2000);
+        this.scheduleMetadata();
         window.addEventListener('hashchange', this.onNavigate);
         window.addEventListener('blur', this.onBlur);
         window.addEventListener('resize', this.onResize);
         document.addEventListener('visibilitychange', this.onVisibility);
     }
+    private scheduleMetadata() {
+        clearTimeout(this.timer);
+        this.timer = 0;
+        if (!this.windowStarted || !this.windowVisible || document.hidden) return;
+        this.timer = window.setTimeout(
+            () => {
+                void this.refresh();
+                if (this.visible) void this.refreshPreferences();
+                this.scheduleMetadata();
+            },
+            this.visible ? 2000 : 15000,
+        );
+    }
     // Stop the window
     stopWindow() {
+        this.windowStarted = false;
         this.close(false);
-        clearInterval(this.timer);
+        clearTimeout(this.timer);
         this.timer = 0;
         window.removeEventListener('hashchange', this.onNavigate);
         window.removeEventListener('blur', this.onBlur);
@@ -261,15 +275,19 @@ export class PluginLogs {
     };
     // Refresh the preferences
     async refreshPreferences() {
+        const epoch = ++this.preferenceEpoch;
         try {
-            this.preferences = await this.bridge.command('plugin_log_preferences');
+            const preferences = await this.bridge.command('plugin_log_preferences');
+            if (epoch === this.preferenceEpoch) this.preferences = preferences;
         } catch (error) {
-            this.error = String(error);
+            if (epoch === this.preferenceEpoch) this.error = String(error);
         }
     }
     // Set the window visible
     setWindowVisible(visible: boolean) {
         this.windowVisible = visible;
+        this.scheduleMetadata();
+        if (visible && this.visible) void this.refreshPreferences();
         this.updateReaderVisibility();
     }
     // Update the reader visibility
@@ -283,10 +301,12 @@ export class PluginLogs {
     }
     // Show the captures
     showCaptures() {
+        void this.refreshPreferences();
         this.release();
         this.selected = '';
         this.requestedPlugin = '';
         this.visible = true;
+        this.scheduleMetadata();
         this.confirmingClear = false;
     }
     // Refresh plugin logs data while keeping the view synchronized
@@ -325,7 +345,7 @@ export class PluginLogs {
     // Fit the attached log popover within the current viewport
     place() {
         if (this.detached) {
-            this.position = '';
+            this.position = {};
             return;
         }
         const r = this.trigger?.isConnected
@@ -343,7 +363,12 @@ export class PluginLogs {
                           window.innerHeight - Math.min(440, window.innerHeight - 24) - 12,
                       ),
                   );
-        this.position = `left:${left}px;top:${top}px;width:${width}px;max-height:${window.innerHeight - top - 12}px`;
+        this.position = {
+            left: `${left}px`,
+            top: `${top}px`,
+            width: `${width}px`,
+            maxHeight: `${window.innerHeight - top - 12}px`,
+        };
     }
     // Open the for
     async openFor(event: Event) {
@@ -366,6 +391,7 @@ export class PluginLogs {
         } catch (e) {
             if (epoch === this.epoch) {
                 this.visible = true;
+                this.scheduleMetadata();
                 this.error = String(e);
                 this.focus();
             }
@@ -375,11 +401,13 @@ export class PluginLogs {
     }
     // Open the capture overview and clear the previous log selection
     overview(event: Event) {
+        void this.refreshPreferences();
         this.close(false);
         this.requestedPlugin = '';
         this.anchor(event);
         this.selected = '';
         this.visible = true;
+        this.scheduleMetadata();
         this.focus();
     }
     // Open the capture identified by the clicked element
@@ -389,11 +417,13 @@ export class PluginLogs {
     }
     // Subscribe to the selected capture and release leases returned after the view changes
     async view(id: string) {
+        void this.refreshPreferences();
         this.release();
         const epoch = this.epoch;
         this.selected = id;
         this.requestedPlugin = this.capture?.plugin_id || this.requestedPlugin;
         this.visible = true;
+        this.scheduleMetadata();
         this.error = '';
         this.confirmingClear = false;
         if (!this.windowVisible || (typeof document !== 'undefined' && document.hidden)) return;
@@ -513,12 +543,14 @@ export class PluginLogs {
     close(returnFocus = true) {
         if (this.visible && this.selected) this.reading.scroll = this.body()?.scrollTop || 0;
         this.visible = false;
+        this.scheduleMetadata();
         this.release();
         this.confirmingClear = false;
         if (this.detached && returnFocus && this.options.closeWindow) {
             // Handle a failed plugin logs operation without retaining stale work
             void this.options.closeWindow().catch((error) => {
                 this.visible = true;
+                this.scheduleMetadata();
                 this.error = String(error);
                 this.app().notify(String(error), 'error');
             });
@@ -527,7 +559,7 @@ export class PluginLogs {
     }
     // Dismiss the plugin logs operation
     dismiss(event: Event) {
-        if (this.detached) return;
+        if (this.detached || !this.visible) return;
         if (
             !event
                 .composedPath()
@@ -796,6 +828,7 @@ export class PluginLogs {
         }
         try {
             await this.bridge.command('save_plugin_log_preferences', { value });
+            this.preferenceEpoch++;
             this.preferences = value;
             await this.refresh();
         } catch (e) {
@@ -827,6 +860,11 @@ export function registerPluginLogs(
         ]);
     Alpine.store('pluginLogs', logs);
     Alpine.data('pluginLogReader', () => ({
+        displayedEntries: [] as PluginLogs['entries'],
+        updateEntries() {
+            this.displayedEntries =
+                this.logs.visible && this.logs.selected ? this.logs.entries : [];
+        },
         // Derive logs from the current plugin logs state
         get logs() {
             return Alpine.store('pluginLogs') as PluginLogs;

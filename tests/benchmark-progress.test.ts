@@ -339,3 +339,25 @@ it('live monitor labels unavailable latency and never claims display FPS', () =>
     store.accept(progress(2));
     expect(monitor.liveSummary).toBe('');
 });
+
+it('bounds idle polls and discovers an externally started run on the next fallback', async () => {
+    vi.useFakeTimers();
+    let running = false;
+    const store = new BenchmarkProgressStore(
+        bridge(async () =>
+            running ? progress(2, { run_id: 'external', running: true }) : progress(1),
+        ),
+        true,
+    );
+    store.startWindow();
+    await flush();
+    await vi.advanceTimersByTimeAsync(4250);
+    expect(store.counts.progressRequests).toBe(2);
+    await vi.advanceTimersByTimeAsync(30000);
+    expect(store.cadence).toBe(15000);
+    running = true;
+    await vi.advanceTimersByTimeAsync(15000);
+    expect(store.progress.run_id).toBe('external');
+    expect(store.cadence).toBe(500);
+    store.stopWindow();
+});

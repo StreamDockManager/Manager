@@ -1,0 +1,22 @@
+{
+  "version": 1,
+  "basePath": "..",
+  "components": {
+    "sd-export-review": {
+      "source": "components/sd-export-review.html",
+      "dependencies": [],
+      "options": {
+        "shadow": false,
+        "templateRevision": "sha256-FYap3k7cwygc7XBfK9T6_sjCdQjkbt7Wc1n7i3J1Fks"
+      },
+      "metadata": {
+        "description": "Immutable profile and macro export review with draft field changes."
+      }
+    }
+  },
+  "groups": {
+    "export-review": [
+      "sd-export-review"
+    ]
+  }
+}
